@@ -24,6 +24,7 @@ import time
 import unicodedata
 
 from lib import bundle_contract
+from lib.architecture import ARCHITECTURE
 from lib.paths import ROOT
 
 APPLICATION = "WallpaperMachine.app"
@@ -56,7 +57,7 @@ class DiskImageError(Exception):
 
 def image_name(version):
     """The published asset: what `scripts/package.py` writes and the in-app updater selects."""
-    return f"WallpaperMachine-{version}-arm64.dmg"
+    return f"WallpaperMachine-{version}-{ARCHITECTURE}.dmg"
 
 
 def volume_name(version):

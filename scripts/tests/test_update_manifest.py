@@ -14,6 +14,9 @@ from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
+
+from lib import dmg
+
 SPEC = importlib.util.spec_from_file_location("update_manifest", SCRIPTS / "update_manifest.py")
 update_manifest = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -24,7 +27,7 @@ class UpdateManifestTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
-        self.image = self.root / "WallpaperMachine-1.4.0-arm64.dmg"
+        self.image = self.root / dmg.image_name("1.4.0")
         self.image.write_bytes(b"disk image bytes" * 1000)
         self.notes = self.root / "notes.md"
         self.notes.write_text("### Fixed\n\n- 更新检查不再用完 GitHub 额度\n", encoding="utf-8")
@@ -48,14 +51,15 @@ class UpdateManifestTests(unittest.TestCase):
         [asset] = content["assets"]
         self.assertEqual(asset["name"], self.image.name)
         self.assertEqual(asset["browser_download_url"],
-                         "https://github.com/owner/app/releases/download/v1.4.0/WallpaperMachine-1.4.0-arm64.dmg")
+                         f"https://github.com/owner/app/releases/download/v1.4.0/{dmg.image_name('1.4.0')}")
         self.assertEqual(asset["size"], self.image.stat().st_size)
         self.assertEqual(asset["digest"], "sha256:" + hashlib.sha256(self.image.read_bytes()).hexdigest())
 
     def test_image_of_another_version_is_refused(self):
-        other = self.root / "WallpaperMachine-1.3.9-arm64.dmg"
+        other = self.root / dmg.image_name("1.3.9")
         other.write_bytes(b"older")
-        with self.assertRaisesRegex(update_manifest.ManifestError, "WallpaperMachine-1.4.0-arm64.dmg"):
+        with self.assertRaisesRegex(update_manifest.ManifestError,
+                                    dmg.image_name("1.4.0").replace(".", r"\.")):
             update_manifest.manifest("v1.4.0", "owner/app", self.notes, other)
 
     def test_malformed_tag_and_repository_are_refused(self):

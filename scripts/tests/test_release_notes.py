@@ -20,6 +20,8 @@ release_notes = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(release_notes)
 
+from lib import dmg
+
 REPOSITORY = "owner/repo"
 
 
@@ -108,8 +110,9 @@ class RenderTests(unittest.TestCase):
     def test_the_install_footer_names_the_image_the_updater_selects(self):
         footer = release_notes.install_footer("0.6.0", "26.0")
         self.assertLess(footer.index(release_notes.NOTES_END), footer.index("### Install"))
-        self.assertIn("`WallpaperMachine-0.6.0-arm64.dmg`", footer)
-        self.assertIn("shasum -a 256 -c WallpaperMachine-0.6.0-arm64.dmg.sha256", footer)
+        image = dmg.image_name("0.6.0")
+        self.assertIn(f"`{image}`", footer)
+        self.assertIn(f"shasum -a 256 -c {image}.sha256", footer)
         self.assertIn("macOS 26.0 or later", footer)
 
 
@@ -470,7 +473,7 @@ class ModelRangeTests(unittest.TestCase):
         self.assertNotIn("### 简体中文", notes)
         self.assertNotIn("图层保持原位", notes)
         self.assertIn(f"https://github.com/{REPOSITORY}/compare/v0.1.0...v0.2.0", notes)
-        self.assertIn("WallpaperMachine-0.2.0-arm64.dmg", page)
+        self.assertIn(dmg.image_name("0.2.0"), page)
         self.assertIn("abc1234", page)
         self.assertNotIn("docs(testing): record a run", body)
         self.assertNotIn("fix(scene): keep layers in place", body)

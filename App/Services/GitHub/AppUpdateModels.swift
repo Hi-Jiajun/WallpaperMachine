@@ -7,10 +7,21 @@ enum AppUpdateConfiguration {
     static let applicationName = productName + ".app"
     static let maximumDownloadBytes: Int64 = 1_073_741_824
 
+    /// The architecture this build runs as. An image carries the architecture of the Mac that
+    /// built it, because the renderer is compiled for the build host, so this is also the only
+    /// image the updater may install.
+    static let architecture: String = {
+        #if arch(arm64)
+        "arm64"
+        #else
+        "x86_64"
+        #endif
+    }()
+
     /// The drag-to-install disk image `scripts/package.py` produces and the Build workflow
     /// publishes. Renaming the product moves both sides of this contract at once.
     static func assetName(for version: SemanticVersion) -> String {
-        "\(productName)-\(version.display)-arm64.dmg"
+        "\(productName)-\(version.display)-\(architecture).dmg"
     }
 
     static var repositoryURL: URL {
@@ -298,7 +309,7 @@ enum GitHubReleaseParser {
             asset.isDiskImage && asset.name.lowercased().contains(AppUpdateConfiguration.productName.lowercased())
         }
         return candidates.first { $0.name.lowercased() == expected }
-            ?? candidates.first { $0.name.lowercased().contains("arm64") }
+            ?? candidates.first { $0.name.lowercased().contains(AppUpdateConfiguration.architecture) }
             ?? candidates.first
     }
 

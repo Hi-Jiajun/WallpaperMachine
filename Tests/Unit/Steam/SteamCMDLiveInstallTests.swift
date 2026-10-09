@@ -34,7 +34,7 @@ final class SteamCMDLiveInstallTests: XCTestCase {
         await downloader.shutdown()
         XCTAssertEqual(store.state, .ready, "Live install must pass real signature, Gatekeeper and native smoke checks")
         let executable = try XCTUnwrap(store.selectedRuntime?.executableURL)
-        // resolve refuses executables with no arm64 slice.
+        // resolve refuses executables with no slice of this host's architecture.
         XCTAssertEqual(try service.resolve(executable: executable).executableURL, executable)
         let smokePassed = await runner.smokePassed
         XCTAssertTrue(smokePassed, "Native Steam API initialization must succeed")

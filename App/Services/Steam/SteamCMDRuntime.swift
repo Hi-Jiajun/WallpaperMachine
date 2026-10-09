@@ -24,16 +24,30 @@ protocol SteamCMDRuntimeApproving: Sendable {
     func approve(_ candidate: SteamCMDApprovalCandidate) async throws
 }
 
-/// SteamCMD runs only as Apple silicon code: Rosetta is not part of macOS 28's general app
-/// support, so every launch and every validated image must carry an arm64 slice.
+/// SteamCMD runs only as native code for the Mac it is installed on: a process that macOS
+/// would have to translate is not something this app can validate or support, so every
+/// launch and every validated image must carry the build host's own architecture slice.
 enum SteamCMDArchitecture {
     static let arm64: UInt32 = 0x0100_000c
     static let x86_64: UInt32 = 0x0100_0007
 
-    /// Selects only arm64 slices; an image without one fails with EBADARCH instead of being
-    /// translated. Subtype ANY keeps arm64e system tools such as tar and codesign launchable.
+    /// The architecture this build of the app runs as, and so the only architecture a
+    /// SteamCMD runtime may provide.
+    static let host: UInt32 = {
+        #if arch(arm64)
+        arm64
+        #else
+        x86_64
+        #endif
+    }()
+
+    /// The architecture a runtime may not be limited to.
+    static let foreign = host == arm64 ? x86_64 : arm64
+
+    /// Selects only the host's slices; an image without one fails with EBADARCH instead of
+    /// being translated. Subtype ANY keeps arm64e system tools such as tar and codesign launchable.
     static func requireNative(_ attributes: inout posix_spawnattr_t?) -> Int32 {
-        var types = [cpu_type_t(bitPattern: arm64)]
+        var types = [cpu_type_t(bitPattern: host)]
         var subtypes = [cpu_subtype_t(-1)]  // CPU_SUBTYPE_ANY
         var count = 0
         return posix_spawnattr_setarchpref_np(&attributes, 1, &types, &subtypes, &count)
@@ -295,8 +309,8 @@ struct SteamCMDRuntimeService: SteamCMDRuntimeProviding, SteamCMDRuntimeApprovin
               FileManager.default.isExecutableFile(atPath: binary.path) else {
             throw issue(.invalidSelection, "\(binary.path) is not a macOS Mach-O SteamCMD executable.")
         }
-        guard images.contains(where: { $0.cpu == SteamCMDArchitecture.arm64 }) else {
-            throw appleSiliconIssue(binary)
+        guard images.contains(where: { $0.cpu == SteamCMDArchitecture.host }) else {
+            throw foreignArchitectureIssue(binary)
         }
         return SteamCMDRuntime(rootURL: root, executableURL: binary)
     }
@@ -378,12 +392,12 @@ struct SteamCMDRuntimeService: SteamCMDRuntimeProviding, SteamCMDRuntimeApprovin
                 throw issue(.incompleteRuntime, "\(name) is not a valid Mach-O runtime component.")
             }
         }
-        // Any image without arm64 code could only ever run translated, so the whole copy is
-        // treated as an Intel build that a native reinstall replaces.
-        if let intel = binaries.keys.sorted(by: { $0.path < $1.path }).first(where: { binary in
-            !(binaries[binary] ?? []).contains { $0.cpu == SteamCMDArchitecture.arm64 }
+        // Any image without the host's code could only ever run translated, so the whole copy
+        // is treated as a build for another Mac that a native reinstall replaces.
+        if let foreign = binaries.keys.sorted(by: { $0.path < $1.path }).first(where: { binary in
+            !(binaries[binary] ?? []).contains { $0.cpu == SteamCMDArchitecture.host }
         }) {
-            throw appleSiliconIssue(intel)
+            throw foreignArchitectureIssue(foreign)
         }
         let frameworkBinary = canonicalURL(framework.appendingPathComponent("Breakpad"))
         guard let frameworkImages = binaries[frameworkBinary] else { throw issue(.incompleteRuntime, "Breakpad.framework has no valid Mach-O binary.") }
@@ -425,8 +439,14 @@ struct SteamCMDRuntimeService: SteamCMDRuntimeProviding, SteamCMDRuntimeApprovin
         try Task.checkCancellation()
     }
 
-    private func appleSiliconIssue(_ image: URL) -> SteamCMDSetupIssue {
-        issue(.appleSiliconRequired, "This SteamCMD copy is built for Intel Macs only (\(image.lastPathComponent)). Reinstall SteamCMD to get Valve’s Apple silicon version.")
+    /// A copy built for the other architecture is refused in two wordings, so each host reads
+    /// a sentence about the copy it was offered rather than about itself.
+    private func foreignArchitectureIssue(_ image: URL) -> SteamCMDSetupIssue {
+        let name = image.lastPathComponent
+        if SteamCMDArchitecture.foreign == SteamCMDArchitecture.x86_64 {
+            return issue(.architectureRequired, "This SteamCMD copy is built for Intel Macs only (\(name)). Reinstall SteamCMD to get Valve’s Apple silicon version.")
+        }
+        return issue(.architectureRequired, "This SteamCMD copy is built for Apple silicon only (\(name)). Reinstall SteamCMD to get Valve’s Intel version.")
     }
 
     private func validateDependencies(_ binaries: [URL: [MachO.Image]], runtime: SteamCMDRuntime) throws {

@@ -8,7 +8,7 @@ Authoritative build document. Everything here is driven by `scripts/build.py` an
 
 | Requirement | Detail |
 |---|---|
-| Hardware | Apple Silicon only. `project.yml` sets `ARCHS: arm64`, and release disk images are named `-arm64`. |
+| Hardware | Any Mac that satisfies the macOS row. `project.yml` sets `ARCHS` and `HOMEBREW_PREFIX`; `scripts/build.py` refuses to build when `ARCHS` disagrees with the machine, because cargo builds the renderer for the build host and the app links that build. Release disk images are named after the same architecture (`-arm64`, `-x86_64`). |
 | macOS | The app runs on macOS 15 or later (`project.yml` pins `deploymentTarget.macOS` and `MACOSX_DEPLOYMENT_TARGET` to `15.0`; `scripts/build.py` passes the same value to the renderer as `OWE_MACOSX_DEPLOYMENT_TARGET`); building needs Xcode 26, so macOS 15.6 or later. Bundled Homebrew dylibs keep the release they were built on, so a package made on a newer macOS requires that newer release (see [packaging](#packaging-and-installing)); CI builds the published image on a `macos-15` runner for that reason. The lock-screen extension stays off below macOS 26. |
 | Xcode | A full Xcode selected with `xcode-select`. The build reads `xcode-select -p` for the toolchain and `xcrun --sdk macosx --show-sdk-path` for the SDK. Command Line Tools alone are not enough. |
 | Homebrew | Provides every renderer dependency; `brew --prefix` is queried at build time. |
@@ -48,8 +48,8 @@ file or the installed receipt differs from it; `--check` only reports.
 build (see [Packaging and installing](#packaging-and-installing)).
 
 `mwe-ffmpeg` is keg-only and reached through `pkg-config`, but Homebrew links
-any FFmpeg formula that is not keg-only into the shared `/opt/homebrew/include`,
-and several other dependencies put that prefix on the include path. Different
+whichever FFmpeg formula is not keg-only into the shared `$(brew --prefix)/include`
+— and several other dependencies put that prefix on the include path. Different
 majors' `AVFrame` and `AVCodecContext` differ by removed members, so compiling
 against one and linking the other is accepted by the compiler and then reads
 frame metadata at the wrong offsets at runtime. The renderer's CMake therefore
@@ -344,7 +344,7 @@ whole tree, which is how tests stay isolated from your real library.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `cargo`/CMake stops with a missing header, library or `.pc` file | One of the Homebrew packages above is not installed, so its `opt/<package>` root contributed nothing to `CMAKE_PREFIX_PATH`/`PKG_CONFIG_PATH` | Install the package list, then rebuild. |
-| `cargo`/CMake configure fails once, immediately after the environment changed, and an unmodified retry succeeds | The renderer's CMake configure step is not robust to a changed `CMAKE_PREFIX_PATH`/`PKG_CONFIG_PATH` on its first run in a directory | Retry the same command once before investigating. Do not hand-set `LIBRARY_PATH=/opt/homebrew/lib` to work around it: that puts the non-keg-only FFmpeg back on the link line and reproduces the ABI mismatch above. Running `cargo` with a bare shell environment fails outright for the same reason |
+| `cargo`/CMake configure fails once, immediately after the environment changed, and an unmodified retry succeeds | The renderer's CMake configure step is not robust to a changed `CMAKE_PREFIX_PATH`/`PKG_CONFIG_PATH` on its first run in a directory | Retry the same command once before investigating. Do not hand-set `LIBRARY_PATH=$(brew --prefix)/lib` to work around it: that puts the non-keg-only FFmpeg back on the link line and reproduces the ABI mismatch above. Running `cargo` with a bare shell environment fails outright for the same reason |
 | `brew: command not found` or `xcode-select` failure during startup | `build_environment()` shells out to `brew --prefix`, `xcode-select -p` and `xcrun` before any stage runs | Install Homebrew; select a full Xcode with `sudo xcode-select -s /Applications/Xcode.app`. |
 | Linker reports `library 'wallpaper_bridge' not found`, or Swift cannot find the generated bridge module | `--swift-only` was used without an earlier full build, so `upstream/renderer/target/release` and `App/Bridge/Generated` are empty | Run `python3 scripts/build.py` once without `--swift-only`. |
 | `xcodegen: command not found` | XcodeGen missing; both `scripts/build.py` and `scripts/test.py` regenerate the project | `brew install xcodegen`. |

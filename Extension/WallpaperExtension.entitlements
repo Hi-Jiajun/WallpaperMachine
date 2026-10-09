@@ -8,6 +8,8 @@
     <true/>
     <key>com.apple.security.temporary-exception.files.absolute-path.read-only</key>
     <array>
+        <!-- Intel Homebrew's prefix; Apple silicon's is /opt/homebrew. -->
+        <string>/usr/local/</string>
         <string>/opt/homebrew/</string>
     </array>
     <key>com.apple.security.temporary-exception.files.home-relative-path.read-write</key>

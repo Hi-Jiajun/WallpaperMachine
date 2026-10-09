@@ -5,7 +5,8 @@ Nothing in the bundle is touched until the preflight passes: the FFmpeg librarie
 the binaries actually link must be an LGPL build (Formula/mwe-ffmpeg.rb), never a
 `--enable-gpl` / `--enable-version3` / `--enable-nonfree` one, and every bundled
 Homebrew keg must carry license files to ship. The signed bundle then goes into
-`WallpaperMachine-<version>-arm64.dmg`, the drag-to-install image laid out by
+`WallpaperMachine-<version>-<architecture>.dmg` for the build host's architecture, the
+drag-to-install image laid out by
 scripts/lib/dmg.py, which is mounted and verified before its `.sha256` sidecar is
 written. The image is for local use; LICENSING.md records why it is not cleared for
 distribution.

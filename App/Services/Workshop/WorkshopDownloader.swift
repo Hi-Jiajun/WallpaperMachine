@@ -717,7 +717,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         }
         catch {
             try? child.close()
-            throw WorkshopFailure(message: String(localized: "Cannot launch SteamCMD: \(error.localizedDescription). Reinstall SteamCMD in Settings → Library & Steam to get Valve’s Apple silicon version."))
+            throw WorkshopFailure(message: String(localized: "Cannot launch SteamCMD: \(error.localizedDescription). Reinstall SteamCMD in Settings → Library & Steam to get a version built for this Mac."))
         }
         try? child.close()
         phase = .connecting

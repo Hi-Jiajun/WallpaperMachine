@@ -49,6 +49,7 @@ import urllib.error
 import urllib.request
 
 from lib import dmg
+from lib.architecture import display_name
 from lib.glyphs import markers
 from lib.paths import PROJECT_YML, ROOT
 
@@ -168,7 +169,7 @@ LANGUAGE_BLOCKS = (("english", "English"), ("chinese", "简体中文"))
 CJK = re.compile(r"[\u4e00-\u9fff]")
 LATIN = re.compile(r"[A-Za-z]")
 SYSTEM_PROMPT = """\
-You are the release editor for WallpaperMachine, a native macOS app for Apple silicon \
+You are the release editor for WallpaperMachine, a native macOS app \
 that plays Wallpaper Engine scene, video and web wallpapers on the desktop and, \
 experimentally, the lock screen. Its control panel manages the wallpaper library, \
 browses and downloads Steam Workshop items and holds the settings. The panel ships \
@@ -431,7 +432,8 @@ def install_footer(version, target=None, built_from=None):
     """
     image = dmg.image_name(display_version(version))
     tag = f"v{display_version(version)}"
-    requirement = f"Apple silicon (arm64), macOS {target} or later." if target else "Apple silicon (arm64)."
+    requirement = (f"{display_name()}, macOS {target} or later." if target
+                   else f"{display_name()}.")
     lines = [
         NOTES_END,
         "",

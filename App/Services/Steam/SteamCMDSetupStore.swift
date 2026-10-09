@@ -4,7 +4,7 @@ import Observation
 
 struct SteamCMDSetupIssue: LocalizedError, Equatable, Sendable {
     enum Kind: Equatable, Sendable {
-        case invalidSelection, incompleteRuntime, network, invalidArchive, appleSiliconRequired
+        case invalidSelection, incompleteRuntime, network, invalidArchive, architectureRequired
         case securityApprovalRequired, invalidSignature, updateFailed, timedOut, fileSystem
     }
     let kind: Kind
@@ -236,9 +236,9 @@ final class SteamCMDSetupStore {
                               URL(fileURLWithPath: "/opt/homebrew/bin/steamcmd"),
                               URL(fileURLWithPath: "/usr/local/bin/steamcmd"),
                               FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Steam/steamcmd.sh")]
-            // An Intel-only copy is not usable, but saying so beats reporting nothing installed:
-            // its reinstall offer is what moves the user to a native copy.
-            var intelOnly: SteamCMDSetupIssue?
+            // A copy built for another Mac is not usable, but saying so beats reporting nothing
+            // installed: its reinstall offer is what moves the user to a native copy.
+            var foreignArchitecture: SteamCMDSetupIssue?
             for candidate in candidates {
                 try store.check(token)
                 do {
@@ -248,13 +248,13 @@ final class SteamCMDSetupStore {
                     store.state = .ready
                     return
                 } catch is CancellationError { throw CancellationError() }
-                catch let issue as SteamCMDSetupIssue where issue.kind == .appleSiliconRequired {
-                    if intelOnly == nil { intelOnly = issue }
+                catch let issue as SteamCMDSetupIssue where issue.kind == .architectureRequired {
+                    if foreignArchitecture == nil { foreignArchitecture = issue }
                 } catch { continue }
             }
             try store.check(token)
             store.selectedRuntime = nil
-            if let intelOnly { throw intelOnly }
+            if let foreignArchitecture { throw foreignArchitecture }
             store.state = .idle
         }
         await operation?.value

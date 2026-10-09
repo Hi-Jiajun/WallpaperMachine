@@ -234,13 +234,13 @@ final class WallpaperMachineExtension: NSObject, AppExtension {
       try WallpaperRuntime.load()
       if ProcessInfo.processInfo.environment["VK_ICD_FILENAMES"] == nil {
         // Packaged apps provide this resource. Local Homebrew builds use the same
-        // installed ICD as scripts/build.py without relying on shell environment.
+        // installed ICD as scripts/build.py without relying on shell environment; the
+        // prefix differs between Intel (/usr/local) and Apple silicon (/opt/homebrew).
         let bundled = Bundle.main.url(forResource: "MoltenVK_icd", withExtension: "json")
-        let homebrew = URL(
-          fileURLWithPath: "/opt/homebrew/opt/molten-vk/etc/vulkan/icd.d/MoltenVK_icd.json")
-        if let url = bundled
-          ?? (FileManager.default.isReadableFile(atPath: homebrew.path) ? homebrew : nil)
-        {
+        let installed = ["/usr/local", "/opt/homebrew"].lazy
+          .map { URL(fileURLWithPath: $0 + "/opt/molten-vk/etc/vulkan/icd.d/MoltenVK_icd.json") }
+          .first { FileManager.default.isReadableFile(atPath: $0.path) }
+        if let url = bundled ?? installed {
           setenv("VK_ICD_FILENAMES", url.path, 1)
         }
       }

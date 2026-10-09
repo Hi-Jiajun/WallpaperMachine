@@ -23,7 +23,8 @@ import subprocess
 import sys
 
 from lib.glyphs import markers
-from lib.paths import APP, BUILD, BUILD_ARTIFACTS, GENERATED_BRIDGE, PRODUCTS, RENDERER, ROOT, XCODEPROJ, app_bundle
+from lib.architecture import ARCHITECTURE
+from lib.paths import APP, BUILD, BUILD_ARTIFACTS, GENERATED_BRIDGE, PRODUCTS, PROJECT_YML, RENDERER, ROOT, XCODEPROJ, app_bundle
 from lib.xcode import run_quiet
 
 MARK = markers()
@@ -60,18 +61,49 @@ def repository_commit(root=ROOT):
     return subprocess.check_output(["git", "-C", str(root), "rev-parse", "--short", "HEAD"], text=True).strip()
 
 
+def homebrew_prefix():
+    """Homebrew's prefix, which differs between Intel (/usr/local) and Apple silicon."""
+    return Path(subprocess.check_output(["brew", "--prefix"], text=True).strip())
+
+
+def libclang_directory():
+    """The directory holding `libclang.dylib` for bindgen and uniffi.
+
+    A full Xcode keeps it in the default toolchain; a Command Line Tools installation
+    keeps it in its own `usr/lib` and has no toolchain directory at all.
+    """
+    developer = Path(subprocess.check_output(["xcode-select", "-p"], text=True).strip())
+    for candidate in (developer / "Toolchains/XcodeDefault.xctoolchain/usr/lib",
+                      Path("/Library/Developer/CommandLineTools/usr/lib")):
+        if (candidate / "libclang.dylib").is_file():
+            return candidate
+    raise SystemExit(f"No libclang.dylib under either {developer} or /Library/Developer/CommandLineTools.")
+
+
+def check_architecture():
+    """Refuse to build an app whose ARCHS disagrees with the renderer cargo is about to build.
+
+    Cargo builds the renderer for the host and the app links it, so an ARCHS for another
+    architecture produces an app that cannot link or, worse, one that links a foreign
+    archive. Catch it here rather than in a linker error.
+    """
+    if f"ARCHS: {ARCHITECTURE}" not in PROJECT_YML.read_text():
+        raise SystemExit(f"project.yml must set `ARCHS: {ARCHITECTURE}`: the renderer is built for this Mac ({ARCHITECTURE}).")
+
+
 def build_environment():
+    check_architecture()
     result = os.environ.copy()
-    prefix = subprocess.check_output(["brew", "--prefix"], text=True).strip()
+    prefix = homebrew_prefix()
     if not (Path(prefix) / "opt/mwe-ffmpeg/lib/pkgconfig/libavcodec.pc").is_file():
         raise SystemExit("Missing LGPL FFmpeg: run python3 scripts/install_ffmpeg.py; Homebrew ffmpeg is not a compatible substitute.")
     packages = ["quickjs-ng", "glslang", "mwe-ffmpeg", "freetype", "lz4", "vulkan-loader", "vulkan-headers", "molten-vk", "eigen", "nlohmann-json", "argparse", "shaderc", "spirv-tools", "glm"]
     roots = [str(Path(prefix) / "opt" / name) for name in packages]
     result["PATH"] = f"{prefix}/bin:" + result.get("PATH", "")
-    result["CMAKE_PREFIX_PATH"] = ";".join(roots + [prefix])
+    result["CMAKE_PREFIX_PATH"] = ";".join(roots + [str(prefix)])
     result["PKG_CONFIG_PATH"] = ":".join(str(Path(p) / "lib/pkgconfig") for p in roots)
     result["OWE_NIX_LIBRARY_PATH"] = ":".join(str(Path(p) / "lib") for p in roots) + f":{prefix}/lib"
-    result["LIBCLANG_PATH"] = subprocess.check_output(["xcode-select", "-p"], text=True).strip() + "/Toolchains/XcodeDefault.xctoolchain/usr/lib"
+    result["LIBCLANG_PATH"] = str(libclang_directory())
     result["SDKROOT"] = subprocess.check_output(["xcrun", "--sdk", "macosx", "--show-sdk-path"], text=True).strip()
     result["CC"] = "/usr/bin/clang"
     result["CXX"] = "/usr/bin/clang++"
@@ -166,11 +198,13 @@ def main():
     # `--use-cache` skips rewriting the project when `project.yml` has not changed,
     # which keeps Xcode's incremental build state (and `scripts/test.py` agrees).
     run(["xcodegen", "generate", "--use-cache", "--quiet"], env=env, stage="xcodegen")
-    settings = []
+    # The renderer's dependencies are found through this prefix, and where Homebrew keeps
+    # them differs between Intel (/usr/local) and Apple silicon (/opt/homebrew).
+    settings = [f"HOMEBREW_PREFIX={homebrew_prefix()}"]
     if compiled_icon:
         # The asset catalog is still compiled; only the .icon is left out, and with it
         # the app-icon name actool would otherwise look for in the catalog.
-        settings = [f"EXCLUDED_SOURCE_FILE_NAMES={APP_ICON.name}", "ASSETCATALOG_COMPILER_APPICON_NAME="]
+        settings += [f"EXCLUDED_SOURCE_FILE_NAMES={APP_ICON.name}", "ASSETCATALOG_COMPILER_APPICON_NAME="]
     settings += args.xcode_setting
     run(["xcodebuild", "-project", XCODEPROJ.name, "-scheme", "WallpaperMachine", "-configuration", args.configuration, "-derivedDataPath", BUILD, "build", *settings], env=env, stage=f"xcodebuild-{args.configuration}")
     if compiled_icon:

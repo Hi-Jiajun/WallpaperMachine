@@ -1,6 +1,11 @@
 # Agent rules
 
+<<<<<<< HEAD
 WallpaperMachine: macOS/arm64; AppKit shell, SwiftUI control panel, Rust/C++ renderer,
+=======
+WallpaperMachine: macOS, one architecture per build (see `project.yml`'s `ARCHS` and
+`scripts/lib/architecture.py`); AppKit/SwiftUI, WKWebView panel, Rust/C++ renderer,
+>>>>>>> 2ea21a6e (build: support building for Intel Macs)
 sandboxed ExtensionKit lock screen. `CLAUDE.md` must stay a relative symlink to `AGENTS.md`.
 
 ## Read on demand

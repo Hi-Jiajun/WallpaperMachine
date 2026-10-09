@@ -14,10 +14,11 @@ derived from the tag, the notes file that becomes the release body and the image
 the name is `AppUpdateConfiguration.manifestName` in the app.
 
     python3 scripts/update_manifest.py --tag v1.0.3 --repository owner/name --notes notes.md \\
-        WallpaperMachine-1.0.3-arm64.dmg
+        WallpaperMachine-1.0.3-<architecture>.dmg
 
 Called by .github/workflows/build.yml before publishing; writes the manifest beside the
-image and prints its path.
+image and prints its path. The architecture in the name is the build host's: a renderer
+is built for the Mac that builds it, so an image carries exactly one.
 """
 from __future__ import annotations
 

@@ -26,6 +26,7 @@ import sys
 from lib.glyphs import markers
 from lib.paths import BUILD, ROOT, TEST_ARTIFACTS, XCODEPROJ
 from lib.xcode import run_quiet, test_summary
+from lib.architecture import ARCHITECTURE
 
 MARK = markers()
 SCRIPT_TESTS = sorted((ROOT / "scripts/tests").glob("test_*.py"))
@@ -76,7 +77,10 @@ def xcodebuild_command(scheme, target, result, only=None, parallel=True):
     command = [
         "xcodebuild", "-project", XCODEPROJ.name,
         "-scheme", scheme, "-configuration", "Debug", "-derivedDataPath", str(BUILD),
-        "-destination", "platform=macOS,arch=arm64", "-resultBundlePath", str(result),
+        "-destination", f"platform=macOS,arch={ARCHITECTURE}", "-resultBundlePath", str(result),
+        # The app target is what links the renderer, and where Homebrew keeps its
+        # dependencies differs between Intel (/usr/local) and Apple silicon (/opt/homebrew).
+        f"HOMEBREW_PREFIX={homebrew_prefix()}",
     ]
     command += ["-only-testing:" + identifier for identifier in test_identifiers(target, only)]
     # Test classes run in parallel worker processes. Every suite already isolates its
@@ -90,6 +94,17 @@ def xcodebuild_command(scheme, target, result, only=None, parallel=True):
     allowance = "660" if os.environ.get("WALLPAPER_MACHINE_NETWORK_TESTS") == "1" else "90"
     command += ["-maximum-test-execution-time-allowance", allowance, "-test-timeouts-enabled", "YES", "test"]
     return command
+
+
+def homebrew_prefix():
+    """Homebrew's prefix, as `project.yml` expects it (see `scripts/build.py`).
+
+    Without Homebrew the build fails on its own later; here the platform default keeps
+    this from turning into a missing-executable error in a caller that only needs a value.
+    """
+    if shutil.which("brew"):
+        return subprocess.check_output(["brew", "--prefix"], text=True).strip()
+    return "/opt/homebrew" if ARCHITECTURE == "arm64" else "/usr/local"
 
 
 def prune_result_bundles(keep=KEPT_RESULT_BUNDLES, directory=TEST_ARTIFACTS):
