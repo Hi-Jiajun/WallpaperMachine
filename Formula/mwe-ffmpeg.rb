@@ -20,6 +20,9 @@ class MweFfmpeg < Formula
   keg_only "it is a project-specific FFmpeg build and must not shadow Homebrew's ffmpeg"
 
   depends_on "pkgconf" => :build
+  # FFmpeg's x86 assembly is built with nasm, and configure refuses to guess at it.
+  # Apple silicon uses its own assembler and does not need this.
+  depends_on "nasm" => :build if Hardware::CPU.intel?
   depends_on "dav1d"
   depends_on :macos
 
