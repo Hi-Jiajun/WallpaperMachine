@@ -3206,6 +3206,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     const bool isCompose = (wpimgobj.image == "models/util/composelayer.json");
 
     // coloBlendMode load passthrough manaully
+    bool color_blend_passthrough = false;
     if (wpimgobj.colorBlendMode != 0) {
         wpscene::WPImageEffect colorEffect;
         wpscene::WPMaterial    colorMat;
@@ -3219,6 +3220,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         colorMat.blending            = "disabled";
         colorEffect.materials.push_back(colorMat);
         wpimgobj.effects.push_back(colorEffect);
+        color_blend_passthrough = true;
     }
 
     int32_t count_eff = 0;
@@ -3440,6 +3442,14 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                     puppet_mat             = wpimgobj.material;
                     puppet_mat.textures[0] = "";
                     WPMdlParser::AddPuppetMatInfo(puppet_mat, *puppet);
+                    // The skinned pass is the one drawn on screen, so it blends
+                    // with the screen itself. The passthrough appended above
+                    // would run before it, over the texture sheet, and sample
+                    // the whole screen squeezed into the layer's bounds.
+                    if (color_blend_passthrough) {
+                        wpimgobj.effects.pop_back();
+                        puppet_mat.combos["BLENDMODE"] = wpimgobj.colorBlendMode;
+                    }
                     puppet_effect.materials.push_back(puppet_mat);
                     wpimgobj.effects.push_back(puppet_effect);
                 }

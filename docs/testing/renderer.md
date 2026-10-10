@@ -906,6 +906,16 @@ projection policies, hierarchy, depth and reflection.
   removes shader work without adding passes or targets. The original pixel test
   `PuppetEffectsApplyLightingOnceAfterAssembly` covers all eight combinations
   of puppet/card, effects/direct and lit/unlit over repeated draws.
+- A layer's `colorBlendMode` mixes it with the screen behind it, so only the
+  pass that draws onto the screen may sample it. On a puppet with bones that is
+  the final skinned pass, which takes `BLENDMODE` itself; the separate
+  passthrough that cards and mesh-only puppets end with would otherwise run
+  before it, over the texture sheet, and paint a shrunken copy of the whole
+  wallpaper inside the layer (with opaque mesh-shaped blocks where a multiply
+  shadow belongs). The passthrough is dropped, not added to.
+  `RenderGraph.puppetColorBlendModeSamplesTheScreenOnlyWhereItDrawsOnScreen`
+  parses a one-bone puppet and requires the only screen-sampling pass to be
+  the one writing the scene.
 - Legacy four-light shaders pack the fourth light's RGB into the `w` lanes of
   three color uniforms. `FourLightColorsRoundTripThroughPackedUniforms` checks
   zero through five lights, channel order, radius/intensity premultiplication,

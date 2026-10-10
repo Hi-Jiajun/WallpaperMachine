@@ -168,6 +168,31 @@ std::string BuildMaskedPuppetMdlFixture() {
     return b.TakeString();
 }
 
+// One triangle skinned to a single root bone, with no animations.
+std::string BuildBonedPuppetMdlFixture() {
+    Bytes b;
+    b.Stamp("MDL", 21);
+    b.U32(kSkinUvFlag);
+    b.U32(1);
+    b.U32(1);
+    WritePuppetMesh(b, "mat/head.json", 10);
+    b.Stamp("MDLS", 1);
+    b.U32(0);
+    b.U16(1);
+    b.U16(0);
+    b.Str("root");
+    b.U32(0);
+    b.U32(0xFFFFFFFFu);
+    b.U32(64);
+    for (int col = 0; col < 4; ++col) {
+        for (int row = 0; row < 4; ++row) b.F32(row == col ? 1.0f : 0.0f);
+    }
+    b.Str("{}");
+    b.Stamp("MDLA", 0);
+    b.U8(0);
+    return b.TakeString();
+}
+
 std::string PuppetMaterialJson(std::string_view                        shader,
                                std::initializer_list<std::string_view> textures) {
     std::string texture_json;
@@ -180,7 +205,8 @@ std::string PuppetMaterialJson(std::string_view                        shader,
            std::string(shader) + R"(","textures":[)" + texture_json + R"(]}]})";
 }
 
-std::string BasicSceneJson(std::string_view image) {
+// `extra_fields` are further members of the image object, each followed by a comma.
+std::string BasicSceneJson(std::string_view image, std::string_view extra_fields = {}) {
     return std::string(R"({
       "camera": {"center":[0,0,0], "eye":[0,0,1], "up":[0,1,0]},
       "general": {
@@ -192,8 +218,8 @@ std::string BasicSceneJson(std::string_view image) {
       },
       "objects": [
         {"id":300,"name":"masked puppet image","image":")") +
-           std::string(image) +
-           R"(","origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true}
+           std::string(image) + R"(",)" + std::string(extra_fields) +
+           R"("origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true}
       ]
     })";
 }
@@ -708,6 +734,81 @@ void main() {
     REQUIRE(clipped_pass->desc().material_slot == 2);
     REQUIRE(clipped_pass->desc().textures.size() == 9);
     REQUIRE(clipped_pass->desc().textures[8] == "_rt_puppet_mask");
+}
+
+// A layer's colour blend mode mixes it with the screen behind it, so the screen
+// may only be sampled by the pass that draws onto it. On a puppet with bones
+// that is the skinned pass; a pass before it renders the texture sheet, where
+// the screen comes out squeezed into the layer's bounds.
+TEST(RenderGraph, puppetColorBlendModeSamplesTheScreenOnlyWhereItDrawsOnScreen) {
+    const std::string blend_vert = R"(attribute vec3 a_Position;
+attribute vec2 a_TexCoord;
+#if SKINNING
+attribute uvec4 a_BlendIndices;
+attribute vec4 a_BlendWeights;
+uniform mat4x3 g_Bones[BONECOUNT];
+#endif
+varying vec2 v_TexCoord;
+void main() {
+  gl_Position = vec4(a_Position, 1.0);
+  v_TexCoord = a_TexCoord;
+}
+)";
+    const std::string blend_frag = R"(uniform sampler2D g_Texture0;
+#if BLENDMODE
+uniform sampler2D g_Texture4; // {"hidden":true,"default":"_rt_FullFrameBuffer"}
+#endif
+varying vec2 v_TexCoord;
+void main() {
+  vec4 color = texture(g_Texture0, v_TexCoord);
+#if BLENDMODE
+  color.rgb *= texture(g_Texture4, v_TexCoord).rgb;
+#endif
+  gl_FragColor = color;
+}
+)";
+    wallpaper::fs::VFS vfs;
+    auto files = std::map<std::string, std::string> {
+        { "/puppet_image.json",
+          R"({"width":64,"height":32,"material":"mat/base.json","puppet":"puppet.mdl"})" },
+        { "/puppet.mdl", BuildBonedPuppetMdlFixture() },
+        { "/mat/base.json", PuppetMaterialJson("puppetblend", { "base.tex" }) },
+        { "/mat/head.json", PuppetMaterialJson("puppetblend", { "base.tex" }) },
+        { "/materials/util/effectpassthrough.json",
+          R"({"passes":[{"shader":"genericimage3","blending":"normal","depthtest":"disabled",)"
+          R"("depthwrite":"disabled","cullmode":"nocull"}]})" },
+        { "/shaders/puppetblend.vert", blend_vert },
+        { "/shaders/puppetblend.frag", blend_frag },
+        { "/shaders/genericimage3.vert", blend_vert },
+        { "/shaders/genericimage3.frag", blend_frag },
+        { "/materials/base.tex.tex", "" },
+    };
+    REQUIRE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+
+    wallpaper::audio::SoundManager sound_manager(wallpaper::audio::SoundManager::OutputBackend::Null);
+    wallpaper::WPSceneParser       parser;
+    auto parsed = parser.Parse("parsed-blended-puppet",
+                               BasicSceneJson("puppet_image.json", R"("colorBlendMode":2,)"),
+                               vfs,
+                               sound_manager);
+    REQUIRE(parsed != nullptr);
+
+    const auto graph  = wallpaper::sceneToRenderGraph(*parsed);
+    const auto passes = graphPasses(*graph);
+
+    std::size_t screen_readers = 0;
+    for (const auto& pass : passes) {
+        if (pass.custom == nullptr) continue;
+        const auto& textures = pass.custom->desc().textures;
+        const bool  samples_screen =
+            std::any_of(textures.begin(), textures.end(), [](const std::string& texture) {
+                return texture.starts_with(SpecTex_Default);
+            });
+        if (! samples_screen) continue;
+        ++screen_readers;
+        REQUIRE(pass.custom->desc().output == SpecTex_Default);
+    }
+    REQUIRE(screen_readers == 1);
 }
 
 TEST(RenderGraph, skippedBasePassStillEmitsEffectPasses) {
