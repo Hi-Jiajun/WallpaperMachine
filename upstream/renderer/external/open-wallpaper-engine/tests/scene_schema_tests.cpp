@@ -5893,3 +5893,87 @@ export function cursorUp(event) { held = false; }
         << "the button shrank out from under the cursor and never heard its own release";
     EXPECT_EQ(runtime.scriptErrorCount(), 0u);
 }
+
+// A script imported from the Workshop declares the item it came from and names
+// that item's model as `models/bar.json`, while the editor stored it under the
+// item's workshop folder. The scene's own copy of the layer is hidden and never
+// parsed, so the layer is made from the bare model: it has to find that folder,
+// be as large as the model's picture rather than zero, and show.
+TEST(SceneSchema, ALayerCreatedFromAWorkshopModelIsSizedByItsPictureAndShows) {
+    Bytes tex;
+    tex.Stamp("TEXV", 5);
+    tex.Stamp("TEXI", 1);
+    tex.I32(0);  // RGBA8888
+    tex.U32(0);  // flags
+    tex.I32(16); // texture
+    tex.I32(8);
+    tex.I32(12); // picture
+    tex.I32(6);
+    tex.I32(0);
+    tex.Stamp("TEXB", 3);
+    tex.I32(1);
+    tex.I32(static_cast<int32_t>(ImageType::UNKNOWN));
+    tex.I32(1);  // mipmaps
+    tex.I32(16);
+    tex.I32(8);
+    tex.I32(0);  // not LZ4
+    tex.I32(16 * 8 * 4);
+    tex.I32(16 * 8 * 4);
+    for (int texel = 0; texel < 16 * 8; ++texel) tex.U32(0xffffffffu);
+
+    fs::VFS vfs;
+    MountSceneFiles(vfs);
+    ASSERT_TRUE(vfs.Mount(
+        "/assets",
+        std::make_unique<MemoryFs>(std::map<std::string, std::string> {
+            { "/models/workshop/123/bar.json",
+              R"({"autosize":true,"material":"materials/workshop/123/bar.json"})" },
+            { "/materials/workshop/123/bar.json",
+              R"({"passes":[{"blending":"translucent","shader":"genericimage",)"
+              R"("textures":["workshop/123/bar"]}]})" },
+            { "/materials/workshop/123/bar.tex", tex.TakeString() },
+        })));
+    const nlohmann::json source {
+        { "camera", { { "center", { 0, 0, -1 } }, { "eye", { 0, 0, 0 } }, { "up", { 0, 1, 0 } } } },
+        { "general",
+          { { "ambientcolor", { 0, 0, 0 } },
+            { "skylightcolor", { 0, 0, 0 } },
+            { "clearcolor", { 0, 0, 0 } },
+            { "cameraparallax", false },
+            { "orthogonalprojection", { { "width", 640 }, { "height", 360 } } } } },
+        { "objects",
+          nlohmann::json::array({
+              { { "id", 1 }, { "name", "source" }, { "image", "models/workshop/123/bar.json" },
+                { "origin", { 320, 180, 0 } }, { "size", { 12, 6 } }, { "visible", false } },
+              { { "id", 2 }, { "name", "owner" }, { "image", "image.json" },
+                { "origin", { 320, 180, 0 } },
+                { "visible",
+                  { { "value", true },
+                    { "script",
+                      "export let __workshopId = '123';\n"
+                      "export function init() { thisScene.createLayer('models/bar.json'); }\n"
+                      "export function update(value) { return value; }\n" } } } },
+          }) },
+    };
+
+    audio::SoundManager sound_manager;
+    WPSceneParser       parser;
+    ProjectProperties   properties;
+    auto scene = parser.Parse(SceneParseRequest {
+        .scene_id = "workshop-created-layer", .project_properties = &properties,
+    }, source.dump(), vfs, sound_manager);
+    ASSERT_NE(scene, nullptr);
+    ASSERT_NE(scene->runtime, nullptr);
+    scene->runtime->Tick(1.0 / 60.0);
+    scene->runtime->Tick(1.0 / 60.0);
+
+    std::shared_ptr<SceneNode> created;
+    for (const auto& child : scene->sceneGraph->GetChildren()) {
+        if (child->Name().starts_with("__generated_layer_")) created = child;
+    }
+    ASSERT_NE(created, nullptr);
+    EXPECT_NE(created->Mesh(), nullptr);
+    EXPECT_TRUE(created->Visible());
+    EXPECT_TRUE(scene->runtime->NodeSize(created->Name()).isApprox(Eigen::Vector2f(12, 6)));
+    EXPECT_EQ(scene->runtime->scriptErrorCount(), 0u);
+}

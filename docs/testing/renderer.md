@@ -803,6 +803,26 @@ from the scene JSON. Versioned model fixtures cover MDLV13–23 attribute layout
 SceneScript creation regressions cover independent cloned layers, owner-local
 cached factories, bounded authored pools and lazy template loading.
 
+A script imported from the Workshop declares `export let __workshopId = '<id>'`
+and keeps naming its assets as in its own project (`models/bar.json`), while the
+editor stored them under `models/workshop/<id>/`. Its `thisScene.createLayer`
+passes that id on, and the runtime tries the workshop folder only after the
+path as written, the owner's own workshop folder and the lazy loader have all
+found nothing, so a path that resolves without it keeps its template. Those
+source layers are usually hidden and never parsed, so the lazy loader builds
+the template from the bare model: visible, because the copies start as copies
+of it, and as large as the model's picture when the model states no size. A
+zero-sized hidden template had made every lazily created layer invisible, which
+silenced audio visualizers built from imported bar assets.
+`ScriptRuntimeCompat.CreateLayerFindsTheAssetsOfTheWorkshopItemItsScriptDeclares`,
+`.CreateLayerPrefersThePathAsWrittenOverTheDeclaredWorkshopItem` and
+`.CreateLayerLooksInAWorkshopFolderOnlyForANumericDeclaredItem` cover the
+lookup; `SceneSchema.ALayerCreatedFromAWorkshopModelIsSizedByItsPictureAndShows`
+covers the parsed template. `offscreen_scene_probe` builds its render graph once,
+after its warm-up ticks, so it draws layers a script creates during `init` but
+not ones created later; `metal_scene_draw_smoke` rebuilds on every graph
+mutation, as production does.
+
 The local-project Metal probe consumes runtime graph mutations like production.
 Local-asset probe sound managers use the null backend: not calling `Play()` alone
 does not prevent `MountStream()` from initializing a system audio device.

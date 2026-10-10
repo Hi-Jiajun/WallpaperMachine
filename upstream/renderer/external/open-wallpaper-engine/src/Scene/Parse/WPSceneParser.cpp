@@ -4992,10 +4992,31 @@ std::shared_ptr<Scene> WPSceneParser::Parse(const SceneParseRequest& request,
              uses_models = context.uses_models](std::string_view path) {
                 auto scene = weak_scene.lock();
                 if (scene == nullptr) return false;
+                // The runtime asks for more than one spelling of a path, so a
+                // miss is an answer, not an error to log.
+                if (! vfs.Contains("/assets/" + std::string(path))) return false;
+                // Visible, because every layer created from it starts as a copy
+                // of it and a new layer shows until its script says otherwise.
+                // The template itself never joins the scene graph (below).
                 wpscene::WPImageObject image;
-                if (! image.FromJson({ { "image", path }, { "visible", false },
+                if (! image.FromJson({ { "image", path }, { "visible", true },
                                       { "name", "__template:" + std::string(path) } }, vfs))
                     return false;
+                // A scene layer carries the size the editor gave it; a layer
+                // made from a bare model has none unless the model states it,
+                // and a zero-sized card draws nothing. Such a model is as large
+                // as its picture, as when the editor first places it.
+                if (! image.fullscreen && (image.size[0] <= 0.0f || image.size[1] <= 0.0f) &&
+                    scene->imageParser != nullptr && ! image.material.textures.empty() &&
+                    ! image.material.textures.front().empty() &&
+                    ! IsSpecTex(image.material.textures.front())) {
+                    const ImageHeader header =
+                        scene->imageParser->ParseHeader(image.material.textures.front());
+                    if (header.mapWidth > 0 && header.mapHeight > 0) {
+                        image.size = { static_cast<float>(header.mapWidth),
+                                       static_cast<float>(header.mapHeight) };
+                    }
+                }
                 ParseContext lazy {};
                 lazy.scene = scene;
                 lazy.vfs = &vfs;

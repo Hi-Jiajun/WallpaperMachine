@@ -972,6 +972,21 @@ void AppendScriptPropertiesBuilder(std::ostringstream& wrapper) {
             << "  }\n";
 }
 
+// The script's own scene view. Its `createLayer` passes on the `__workshopId`
+// the editor writes into a script imported from the Workshop, which is how the
+// runtime finds that item's assets. Read when called, from the script's own
+// scope; `typeof` throws before the declaration has run, hence the guard.
+void AppendThisScene(std::ostringstream& wrapper) {
+    wrapper << "  function __declaredWorkshopId() {\n"
+            << "    try { return typeof __workshopId === 'undefined' ? '' : String(__workshopId); }\n"
+            << "    catch (error) { return ''; }\n"
+            << "  }\n"
+            << "  const thisScene = Object.create(globalThis.scene);\n"
+            << "  Object.defineProperty(thisScene, 'createLayer', { value: function(configuration) { return "
+               "globalThis.scene.__createLayerFor(__scriptContext.layerName, configuration, "
+               "__declaredWorkshopId()); } });\n";
+}
+
 void AppendCommonHostBootstrap(std::ostringstream& wrapper) {
     const auto started = std::chrono::steady_clock::now();
     wrapper
@@ -1422,10 +1437,11 @@ void AppendCommonHostBootstrap(std::ostringstream& wrapper) {
         << "    var parts = value.trim().split(/\\s+/).map(Number);\n"
         << "    return new Vec3(parts[0], parts[1], parts[2]);\n"
         << "  }\n"
-        << "  __sceneBase.__createLayerFor = function(currentLayerName, configuration) {\n"
+        << "  __sceneBase.__createLayerFor = function(currentLayerName, configuration, workshopId) {\n"
         << "    var options = typeof configuration === 'object' && configuration !== null ? configuration : null;\n"
         << "    var templateName = options ? String(options.image || '') : String(configuration || '');\n"
-        << "    var generatedName = __layerCreate(templateName, String(currentLayerName || ''));\n"
+        << "    var generatedName = __layerCreate(templateName, String(currentLayerName || ''), "
+           "String(workshopId || ''));\n"
         << "    if (!generatedName) throw new Error('Unable to create layer: ' + templateName);\n"
         << "    var generated = __createLayer(generatedName);\n"
         << "    generated.template = templateName;\n"
@@ -2123,13 +2139,17 @@ JSValue JsLayerCreate(JSContext* context, JSValueConst, int argc, JSValueConst* 
 
     const char* template_name      = JS_ToCString(context, argv[0]);
     const char* current_layer_name = JS_ToCString(context, argv[1]);
+    const char* workshop_id        = argc >= 3 ? JS_ToCString(context, argv[2]) : nullptr;
     std::string generated_name;
     if (template_name != nullptr) {
         generated_name = bridge->runtime->CreateLayerFromTemplate(
-            template_name, current_layer_name != nullptr ? current_layer_name : "");
+            template_name,
+            current_layer_name != nullptr ? current_layer_name : "",
+            workshop_id != nullptr ? workshop_id : "");
     }
     if (template_name != nullptr) JS_FreeCString(context, template_name);
     if (current_layer_name != nullptr) JS_FreeCString(context, current_layer_name);
+    if (workshop_id != nullptr) JS_FreeCString(context, workshop_id);
     return JS_NewString(context, generated_name.c_str());
 }
 
@@ -2607,10 +2627,8 @@ std::string BuildPropertyScriptFactorySource(const ScriptFrontEndResult& front_e
     wrapper << "(function(__scriptContext) {\n"
             << "  var __props = globalThis[__scriptContext.propsName];\n";
     AppendScriptPropertiesBuilder(wrapper);
-    wrapper << "  const thisScene = Object.create(globalThis.scene);\n"
-            << "  Object.defineProperty(thisScene, 'createLayer', { value: function(configuration) { return "
-               "globalThis.scene.__createLayerFor(__scriptContext.layerName, configuration); } });\n"
-            << "  let thisLayer = __scriptContext.layerName ? "
+    AppendThisScene(wrapper);
+    wrapper << "  let thisLayer = __scriptContext.layerName ? "
                "globalThis.scene.getLayer(__scriptContext.layerName) : undefined;\n"
             << "  let thisObject = thisLayer;\n"
             << front_end.transformed_body << "\n"
@@ -2651,10 +2669,8 @@ std::string BuildSceneScriptFactorySource(const ScriptFrontEndResult& front_end)
     wrapper << "(function(__scriptContext) {\n"
             << "  var __props = globalThis.__scriptProps || {};\n";
     AppendScriptPropertiesBuilder(wrapper);
-    wrapper << "  const thisScene = Object.create(globalThis.scene);\n"
-            << "  Object.defineProperty(thisScene, 'createLayer', { value: function(configuration) { return "
-               "globalThis.scene.__createLayerFor(__scriptContext.layerName, configuration); } });\n"
-            << "  let thisLayer = __scriptContext.layerName ? "
+    AppendThisScene(wrapper);
+    wrapper << "  let thisLayer = __scriptContext.layerName ? "
                "globalThis.scene.getLayer(__scriptContext.layerName) : undefined;\n"
             << "  let thisObject = thisLayer;\n"
             << front_end.transformed_body << "\n"

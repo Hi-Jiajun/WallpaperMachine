@@ -46,6 +46,26 @@ std::string MakeWorkshopLocalAlias(std::string_view canonical_path) {
     return std::string("models/") + normalized.substr(slash + 1);
 }
 
+// Where the editor puts an asset imported from the Workshop: `models/bar.json`
+// of item 123 lands at `models/workshop/123/bar.json`. Empty for anything that
+// is not a numeric item id or already names a workshop folder.
+std::string MakeWorkshopAssetPath(std::string_view asset_path, std::string_view workshop_id) {
+    if (workshop_id.empty() ||
+        ! std::all_of(workshop_id.begin(), workshop_id.end(), [](char c) {
+            return c >= '0' && c <= '9';
+        }))
+        return {};
+
+    const std::string normalized = NormalizeTemplatePath(asset_path);
+    const std::size_t slash      = normalized.find('/');
+    if (slash == std::string::npos || slash == 0 || slash + 1 >= normalized.size()) return {};
+
+    const std::string folder = normalized.substr(0, slash + 1);
+    const std::string rest   = normalized.substr(slash + 1);
+    if (rest.starts_with("workshop/")) return {};
+    return folder + "workshop/" + std::string(workshop_id) + "/" + rest;
+}
+
 bool SetRuntimeTextTexture(Scene& scene, const TextLayerState& state, uint32_t width,
                            uint32_t height, const std::vector<uint8_t>& rgba) {
     if (state.layer_key.empty() || scene.imageParser == nullptr) return false;
@@ -1774,7 +1794,8 @@ int SceneRuntimeContext::NodeSiblingIndex(std::string_view name) const {
 }
 
 std::string SceneRuntimeContext::CreateLayerFromTemplate(std::string_view requested_template_path,
-                                                         std::string_view current_layer_name) {
+                                                         std::string_view current_layer_name,
+                                                         std::string_view script_workshop_id) {
     if (m_scene == nullptr || m_scene->sceneGraph == nullptr) return {};
 
     const std::string requested_path = NormalizeTemplatePath(requested_template_path);
@@ -1804,27 +1825,55 @@ std::string SceneRuntimeContext::CreateLayerFromTemplate(std::string_view reques
     }
     const auto& resolved_path = loading_path.empty() ? requested_path : loading_path;
 
-    if (template_iterator == m_layer_templates.end()) {
-        if (m_failed_layer_templates.contains(resolved_path) ||
-            m_loading_layer_templates.contains(resolved_path)) return {};
+    // A path the scene never registered is loaded on demand, once: one that
+    // failed stays failed until the loader is replaced.
+    bool       newly_failed  = false;
+    const auto load_template = [&](const std::string& path) {
+        if (m_failed_layer_templates.contains(path) || m_loading_layer_templates.contains(path))
+            return m_layer_templates.end();
+        auto loaded_iterator = m_layer_templates.end();
         if (m_layer_template_loader) {
-            m_loading_layer_templates.insert(resolved_path);
+            m_loading_layer_templates.insert(path);
             struct LoadingGuard {
                 std::unordered_set<std::string>& paths;
                 const std::string& path;
                 ~LoadingGuard() { paths.erase(path); }
-            } loading_guard { m_loading_layer_templates, resolved_path };
-            const bool loaded = m_layer_template_loader(resolved_path);
-            template_iterator = loaded ? m_layer_templates.find(resolved_path)
-                                       : m_layer_templates.end();
+            } loading_guard { m_loading_layer_templates, path };
+            if (m_layer_template_loader(path)) loaded_iterator = m_layer_templates.find(path);
+        }
+        if (loaded_iterator == m_layer_templates.end()) {
+            m_failed_layer_templates.insert(path);
+            newly_failed = true;
+        }
+        return loaded_iterator;
+    };
+
+    if (template_iterator == m_layer_templates.end()) {
+        template_iterator = load_template(resolved_path);
+    }
+
+    // A script imported from the Workshop declares `__workshopId` and keeps
+    // naming its assets as they were in its own project (`models/bar.json`),
+    // while the editor stored them under that item's workshop folder. Tried
+    // only after everything above, so a path that resolves without it resolves
+    // to the same template as before.
+    if (template_iterator == m_layer_templates.end()) {
+        if (const auto workshop_path = MakeWorkshopAssetPath(requested_path, script_workshop_id);
+            ! workshop_path.empty() && workshop_path != resolved_path) {
+            template_iterator = m_layer_templates.find(workshop_path);
+            if (template_iterator == m_layer_templates.end()) {
+                template_iterator = load_template(workshop_path);
+            }
         }
     }
 
     if (template_iterator == m_layer_templates.end()) {
-        m_failed_layer_templates.insert(resolved_path);
-        LOG_INFO("scene runtime createLayer template not found: current=\"%s\" template=\"%s\"",
-                 std::string(current_layer_name).c_str(),
-                 requested_path.c_str());
+        if (newly_failed) {
+            LOG_INFO(
+                "scene runtime createLayer template not found: current=\"%s\" template=\"%s\"",
+                std::string(current_layer_name).c_str(),
+                requested_path.c_str());
+        }
         return {};
     }
 

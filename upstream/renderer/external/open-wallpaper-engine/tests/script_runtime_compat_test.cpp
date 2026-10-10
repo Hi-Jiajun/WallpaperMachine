@@ -1361,6 +1361,106 @@ TEST(ScriptRuntimeCompat, RecursiveTemplateLoadsAreGuardedAndMissingAssetsAreNot
     EXPECT_EQ(loads, 2);
 }
 
+// The editor stores an asset imported from the Workshop under
+// `models/workshop/<item>/` and writes `__workshopId` into its script, which
+// still names the files as they were in the asset's own project. The source
+// layers are often hidden, so nothing registers them before the script asks.
+namespace
+{
+struct WorkshopTemplateScene {
+    Scene                                scene;
+    std::unique_ptr<SceneRuntimeContext> runtime = MakeRuntimeWithScene(scene);
+    std::shared_ptr<SceneNode>           owner   = std::make_shared<SceneNode>(
+        Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "owner");
+    std::vector<std::string> requested;
+
+    explicit WorkshopTemplateScene(std::vector<std::string> loadable) {
+        scene.sceneGraph->AppendChild(owner);
+        runtime->RegisterNode("owner", owner.get());
+        runtime->SetLayerTemplateLoader([this, loadable](std::string_view path) {
+            requested.emplace_back(path);
+            if (std::find(loadable.begin(), loadable.end(), path) == loadable.end()) return false;
+            auto source = std::make_shared<SceneNode>();
+            auto mesh   = std::make_shared<SceneMesh>();
+            mesh->AddMaterial(SceneMaterial {});
+            source->AddMesh(mesh);
+            runtime->RegisterLayerTemplate(std::string(path), source, Eigen::Vector2f(8, 8));
+            return true;
+        });
+    }
+
+    std::size_t CreatedLayers() const { return scene.sceneGraph->GetChildren().size() - 1u; }
+};
+
+std::string BarScript(std::string_view declaration) {
+    return std::string(declaration) + R"JS(
+var bars = [];
+export function init() {
+  for (var i = 0; i < 3; ++i) bars.push(thisScene.createLayer('models/bar.json'));
+}
+export function update(value) {
+  bars[2].origin = new Vec3(1, 2, 0);
+  return value;
+}
+)JS";
+}
+} // namespace
+
+TEST(ScriptRuntimeCompat, CreateLayerFindsTheAssetsOfTheWorkshopItemItsScriptDeclares) {
+    for (const bool property_script : { false, true }) {
+        SCOPED_TRACE(property_script ? "property script" : "scene script");
+        WorkshopTemplateScene fixture({ "models/workshop/2398102478/bar.json" });
+        auto& runtime = *fixture.runtime;
+        const auto script = BarScript("export let __workshopId = '2398102478';");
+        if (property_script) {
+            runtime.RegisterNodeVisibility(
+                "owner",
+                fixture.owner.get(),
+                ResolveBoolSetting(runtime,
+                                   nlohmann::json { { "script", script }, { "value", true } },
+                                   "owner"));
+        } else {
+            runtime.RegisterSceneScript(script, "owner");
+        }
+
+        runtime.Tick(1.0 / 60.0);
+        runtime.Tick(1.0 / 60.0);
+
+        EXPECT_EQ(fixture.CreatedLayers(), 3u);
+        EXPECT_EQ(runtime.scriptErrorCount(), 0u);
+        // Each spelling is looked up once, not once per layer.
+        EXPECT_EQ(fixture.requested,
+                  (std::vector<std::string> { "models/bar.json",
+                                              "models/workshop/2398102478/bar.json" }));
+    }
+}
+
+TEST(ScriptRuntimeCompat, CreateLayerPrefersThePathAsWrittenOverTheDeclaredWorkshopItem) {
+    WorkshopTemplateScene fixture(
+        { "models/bar.json", "models/workshop/2398102478/bar.json" });
+    fixture.runtime->RegisterSceneScript(
+        BarScript("export let __workshopId = '2398102478';"), "owner");
+
+    fixture.runtime->Tick(1.0 / 60.0);
+
+    EXPECT_EQ(fixture.CreatedLayers(), 3u);
+    EXPECT_EQ(fixture.requested, (std::vector<std::string> { "models/bar.json" }));
+}
+
+TEST(ScriptRuntimeCompat, CreateLayerLooksInAWorkshopFolderOnlyForANumericDeclaredItem) {
+    for (const std::string declaration :
+         { "", "export let __workshopId = '';", "export let __workshopId = '../2398102478';" }) {
+        SCOPED_TRACE(declaration);
+        WorkshopTemplateScene fixture({ "models/workshop/2398102478/bar.json" });
+        fixture.runtime->RegisterSceneScript(BarScript(declaration), "owner");
+
+        fixture.runtime->Tick(1.0 / 60.0);
+
+        EXPECT_EQ(fixture.CreatedLayers(), 0u);
+        EXPECT_EQ(fixture.requested, (std::vector<std::string> { "models/bar.json" }));
+    }
+}
+
 TEST(ScriptRuntimeCompat, CachedFactoriesCreateLayersBesideTheirOwnOwner) {
     Scene scene;
     auto runtime = MakeRuntimeWithScene(scene);

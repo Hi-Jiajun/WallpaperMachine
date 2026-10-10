@@ -247,8 +247,11 @@ public:
     bool            SetSoundLayerMuted(std::string_view name, bool muted);
     bool            SoundLayerMuted(std::string_view name) const;
     int             NodeSiblingIndex(std::string_view name) const;
+    // `script_workshop_id` is the `__workshopId` the calling script declares,
+    // if any; it locates that item's assets once the plain path finds nothing.
     std::string     CreateLayerFromTemplate(std::string_view requested_template_path,
-                                            std::string_view current_layer_name);
+                                            std::string_view current_layer_name,
+                                            std::string_view script_workshop_id = {});
     Eigen::Vector3f NodeColor(std::string_view name) const;
     bool            SetNodeColor(std::string_view name, const Eigen::Vector3f& color);
     bool            SortNode(std::string_view name, int index);
