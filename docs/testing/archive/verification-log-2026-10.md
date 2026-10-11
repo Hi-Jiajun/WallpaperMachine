@@ -9,6 +9,17 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-09 — Release recovery after hosted test timing failures
+
+- v1.3.0 was tagged but not published: attempt 1 failed an onboarding test that counted incoming snapshots as requests; attempt 2 failed ThreadTimerTest.RequestsAfterALongWaitStillRespectTheCeiling on a host whose timer probe returned 77.
+- Test-only welcome replay fix `5ff25f1` now checks outgoing actions and injects an unrelated snapshot. Application code remains unchanged.
+- Added the omitted 50 ms cadence test to the existing exact-name CI fallback, only after the compiled timer probe reports imprecise timers. Default local runs still execute it; other failures remain failures.
+- Version workflow accepts optional notes_from, passed as release_notes.py --previous, so a new patch after an unpublished failed tag can include all changes since the last public release. Tags and live releases are not rewritten.
+- Python renderer/version/release-notes suites: 106 passed. Workflow shell arguments verified for default and explicit previous tag; developer preview includes the unpublished feature commits from v1.2.6.
+- Full local gate: 268 Python and 1,312 native passed, 0 failed, 14 skipped; artifacts/tests/Tests-20261009-012014-576231.xcresult (disposable).
+- First local renderer pass hit the time-sensitive UnchangedPresent frame-order assertion. Separate rerun python3 scripts/check_renderer.py --skip-build passed, with realtime_checks_executed=true, 12 equal pixel comparisons and 8 x 2 reloads; four asset checks skipped. Evidence artifacts/renderer/adaptive-20261009-012147 (disposable).
+- No runtime implementation, desktop interaction, installation, first-launch or manual-smoke changes. Recovery publication is tracked separately and must still pass the CI gate.
+
 ## 2026-10-09 — Integrate Mission Control refreshes with Space-scoped posters
 
 - Integrated upstream `dc6b764` (Mission Control refresh/settling, injected-clock downloader tests and Supporter list) with feature commit `81eb112`; preserved both histories without rebase or force.

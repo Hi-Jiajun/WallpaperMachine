@@ -14,6 +14,8 @@
 #include "Utils/Algorism.h"
 #include "WPSoundParser.hpp"
 
+#include <Eigen/Geometry>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -427,6 +429,15 @@ bool AlignmentContains(std::string_view alignment, std::string_view part) {
     return alignment.find(part) != std::string_view::npos;
 }
 
+// The rotation `SceneNode::GetLocalTrans` applies to the layer's geometry:
+// x first, then y, then z.
+Eigen::Matrix3f NodeRotationMatrix(const Eigen::Vector3f& angles) {
+    return (Eigen::AngleAxisf(angles.z(), Eigen::Vector3f::UnitZ()) *
+            Eigen::AngleAxisf(angles.y(), Eigen::Vector3f::UnitY()) *
+            Eigen::AngleAxisf(angles.x(), Eigen::Vector3f::UnitX()))
+        .toRotationMatrix();
+}
+
 void SyncEffectFinalNode(SceneNode& source, SceneImageEffectLayer& layer) {
     source.UpdateTrans();
     const auto matrix = source.ModelTrans();
@@ -543,8 +554,14 @@ void SceneRuntimeContext::Tick(double frame_time) {
     }
     for (auto& [name, binding] : m_node_rotation) {
         (void)name;
-        if (binding.node != nullptr && binding.value != nullptr) {
-            binding.node->SetRotation(binding.value->getVec3());
+        if (binding.node == nullptr || binding.value == nullptr) continue;
+        binding.node->SetRotation(binding.value->getVec3());
+        // Turning an anchored layer moves its centre, so the translate written
+        // above from the previous rotation is re-derived.
+        if (binding.alignment != nullptr && ! binding.alignment->alignment.empty() &&
+            binding.transform_node != nullptr) {
+            ApplyNodeTransform(*binding.transform_node, *binding.alignment,
+                               binding.size != nullptr ? *binding.size : Eigen::Vector2f::Zero());
         }
     }
     for (auto& binding : m_text_values) {
@@ -1311,6 +1328,7 @@ void SceneRuntimeContext::RegisterNodeRotation(std::string name, SceneNode* node
         .value = raw,
     };
     RefreshNodeTransformBindings(name);
+    ApplyAnchoredNodeTransform(name);
 }
 
 void SceneRuntimeContext::RegisterTextLayer(std::string name, TextLayerState state) {
@@ -2113,6 +2131,7 @@ bool SceneRuntimeContext::SetNodeRotation(std::string_view name, const Eigen::Ve
     const auto iterator = m_nodes.find(std::string(name));
     if (iterator == m_nodes.end() || iterator->second == nullptr) return false;
     iterator->second->SetRotation(value);
+    ApplyAnchoredNodeTransform(name);
     return true;
 }
 
@@ -2392,37 +2411,49 @@ void SceneRuntimeContext::ApplyNodeTransform(std::string_view name) {
     ApplyNodeTransform(*node_iterator->second, m_node_alignment[std::string(name)], NodeSize(name));
 }
 
+// Only an anchored node's translate depends on its rotation; the others keep
+// whatever translate they were given.
+void SceneRuntimeContext::ApplyAnchoredNodeTransform(std::string_view name) {
+    const auto alignment = m_node_alignment.find(std::string(name));
+    if (alignment == m_node_alignment.end() || alignment->second.alignment.empty()) return;
+    ApplyNodeTransform(name);
+}
+
 void SceneRuntimeContext::ApplyNodeTransform(SceneNode& node, NodeAlignmentBinding& binding,
                                              const Eigen::Vector2f& size) {
-    if (binding.transform_dirty) {
-        Eigen::Vector3f translate = binding.origin;
-
-    if (binding.size_anchor) {
-        if (AlignmentContains(binding.alignment, "bottom")) {
-            translate.y() += size.y() * binding.scale.y() * 0.5f;
-        } else if (AlignmentContains(binding.alignment, "top")) {
-            translate.y() -= size.y() * binding.scale.y() * 0.5f;
-        }
-
-        if (AlignmentContains(binding.alignment, "left")) {
-            translate.x() += size.x() * binding.scale.x() * 0.5f;
-        } else if (AlignmentContains(binding.alignment, "right")) {
-            translate.x() -= size.x() * binding.scale.x() * 0.5f;
-        }
-    } else {
-        if (AlignmentContains(binding.alignment, "bottom")) {
-            translate.y() += size.y() * (binding.scale.y() - 1.0f) * 0.5f;
-        } else if (AlignmentContains(binding.alignment, "top")) {
-            translate.y() -= size.y() * (binding.scale.y() - 1.0f) * 0.5f;
-        }
-
-        if (AlignmentContains(binding.alignment, "left")) {
-            translate.x() += size.x() * (binding.scale.x() - 1.0f) * 0.5f;
-        } else if (AlignmentContains(binding.alignment, "right")) {
-            translate.x() -= size.x() * (binding.scale.x() - 1.0f) * 0.5f;
-        }
+    if (! (binding.rotation.array() == node.Rotation().array()).all()) {
+        binding.rotation        = node.Rotation();
+        binding.transform_dirty = true;
     }
-        binding.cached_translate = translate;
+    if (binding.transform_dirty) {
+        // Offset from the anchor to the layer centre along the layer's own axes.
+        // An axis without a named edge keeps -0, which adds to the origin
+        // without changing a single bit of it.
+        const auto half = [&](int axis) {
+            const float scale = binding.scale[axis];
+            return size[axis] * (binding.size_anchor ? scale : scale - 1.0f) * 0.5f;
+        };
+        Eigen::Vector3f offset = Eigen::Vector3f::Constant(-0.0f);
+        bool            anchored = false;
+        if (AlignmentContains(binding.alignment, "bottom")) {
+            offset.y() = half(1);
+            anchored   = true;
+        } else if (AlignmentContains(binding.alignment, "top")) {
+            offset.y() = -half(1);
+            anchored   = true;
+        }
+        if (AlignmentContains(binding.alignment, "left")) {
+            offset.x() = half(0);
+            anchored   = true;
+        } else if (AlignmentContains(binding.alignment, "right")) {
+            offset.x() = -half(0);
+            anchored   = true;
+        }
+        // The layer turns about its anchor, so the offset turns with it.
+        if (anchored && ! binding.rotation.isZero(0.0f)) {
+            offset = NodeRotationMatrix(binding.rotation) * offset;
+        }
+        binding.cached_translate = binding.origin + offset;
         binding.transform_dirty = false;
     }
     node.SetScale(binding.scale);

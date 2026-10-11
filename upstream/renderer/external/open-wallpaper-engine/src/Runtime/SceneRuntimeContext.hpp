@@ -359,6 +359,9 @@ private:
         bool            size_anchor { false };
         bool transform_dirty { true };
         Eigen::Vector3f cached_translate { Eigen::Vector3f::Zero() };
+        /// Node rotation `cached_translate` was derived for; the anchor sits
+        /// in the layer's own axes, so turning the layer moves the offset.
+        Eigen::Vector3f rotation { Eigen::Vector3f::Zero() };
     };
     struct NodeVec3Binding {
         SceneNode*    node { nullptr };
@@ -456,6 +459,7 @@ private:
     std::shared_ptr<WPSoundStream> LockSoundLayer(std::string_view name) const;
     void DispatchMediaPlaybackChanged(std::string_view name, bool playing);
     void ApplyNodeTransform(std::string_view name);
+    void ApplyAnchoredNodeTransform(std::string_view name);
     void RefreshNodeTransformBindings(const std::string& name);
     void ApplyNodeTransform(SceneNode& node, NodeAlignmentBinding& binding, const Eigen::Vector2f& size);
     void ApplyMaterialConstantBinding(MaterialConstantBinding& binding);

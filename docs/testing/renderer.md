@@ -281,7 +281,7 @@ backend, would hold only the pipeline row's share.
 | Module syntax in scene scripts | `ScriptRuntimeCompat.ExportFollowedByUnicodeWhitespaceStillCompiles`, `.AnUpdateSeparatedByUnicodeWhitespaceStillDrivesItsProperty` and `ScriptModuleSyntax.*` in `script_runtime_compat_test`. `Scripting/ScriptModuleSyntax` is the one matcher for `export` and `export function update`: ECMAScript whitespace between the tokens counts, including the U+00A0 that text pasted from a rich-text editor carries and U+FEFF, which is not Unicode White_Space, and only where a statement can start, so `reexport` and `module.export` are not the keyword. Only the pure `ScriptModuleSyntax` test uses the rarer separators; the two that compile JavaScript through the linked QuickJS use U+00A0. The module rewrite and both update detections (`HasUpdateScript` in the parser, `wrap_script_if_needed` in the resolver) use it. The rewrite erases only the keyword, so a comment ending in the word keeps its line break. |
 | Property-script feedback / hover easing | `ScriptRuntimeCompat.HoverScaleInterpolatesAcrossFramesAndReversesWithoutSnapping` and `ScriptRuntimeCompat.PropertyFeedbackResumesFromExplicitUserValueChanges` in `script_runtime_compat_test` |
 | Script-driven layer visibility | `SceneSchema.HiddenByDefaultVisibilityScriptDrivesVisibilityAndOrigin` in `scene_schema_tests`. The authored `visible.value` is the script's initial value, never a permission to run it (see below). |
-| Alignment anchors under dynamic transforms | `SceneSchema.ImageAlignmentAnchorSurvivesScriptedOriginAndScale` in `scene_schema_tests`, plus `nodes.txt` translate diffs from `offscreen_scene_probe` |
+| Alignment anchors under dynamic transforms | `SceneSchema.ImageAlignmentAnchorSurvivesScriptedOriginAndScale` in `scene_schema_tests`, `ScriptRuntimeCompat.RotatedAnchoredLayerTurnsAboutItsAnchor` and `.ScriptedRingBarsHangOutwardFromTheirCircle` in `script_runtime_compat_test` (the anchor turns with the layer), plus `nodes.txt` translate diffs from `offscreen_scene_probe` |
 | SceneScript writes from `update()` | `ScriptRuntimeCompat.UpdateSideEffectWritesSurviveWhenUpdateReturnsUndefined` in `script_runtime_compat_test`: a `thisLayer.visible = …` written during `update()` survives the next reevaluation even when `update()` returns nothing (see below). |
 | Video-controlled visibility and music scripts | `scenescript_media_event_smoke`: `getVideoTexture().isPlaying()` reflects shared runtime pause/play state, so scripts that hide a layer during init can reveal it during update; `Vec*.mix` and `MediaPlaybackEvent` constants are available. |
 | Legacy effect shader interfaces | Shader `pipeline` tests: array varyings reserve all element locations; unambiguous user function parameters narrow wider vector arguments; a whole vector variable assigned to a narrower one keeps its leading components (`pipeline_narrows_whole_vector_identifier_assigned_to_narrower_target`, the shipped `cloudmotion` effect's `v_NoiseCoord = v_TexCoord`); custom scalar/vector uniforms across stages share a vector block with stage-local prefix views. Engine `g_*` uniform type conflicts remain errors. |
@@ -522,10 +522,31 @@ hidden helper layer cannot be revealed by accident.
 
 Alignment is an anchor, not a one-off offset. `SceneRuntimeContext` owns the
 anchor for image and text layers and re-derives `origin + size * scale * 0.5`
-for the named edges whenever the origin, scale or size changes. Baking the
-offset into the node translate loses it as soon as a scripted or user-bound
+for the named edges whenever the origin, scale, size or rotation changes. Baking
+the offset into the node translate loses it as soon as a scripted or user-bound
 origin writes the translate, and ignores scale. Center-aligned image layers
-carry no offset and keep the direct path.
+carry no offset and keep the direct path. An alignment a script sets on a layer
+that had none (`bar.alignment = 'top'` on a centre-aligned bar) offsets by the
+scale delta, `size * (scale - 1) * 0.5`, so the unscaled layer stays where it
+was authored and grows away from that edge. Wallpaper Engine's SceneScript
+reference does not document `alignment`, so this rule is the renderer's own
+convention; on the 8-unit bars seen so far it differs from a full offset by
+4 units, too little to settle against a Workshop preview.
+
+The anchor is the layer's pivot in its own axes. The offset is turned by the
+node's rotation, in the x, y, z order `SceneNode::GetLocalTrans` applies, so a
+turned layer keeps its named edge on the origin; perspective layers turned
+about x or y keep it there in 3D. Every rotation write re-derives the anchor:
+`SetNodeRotation` (`layer.angles`), `RegisterNodeRotation`, and the bound-angles
+pass of `Tick`, which runs after the translate pass and so would otherwise leave
+a frame placed for the previous angle. Unrotated layers go through the same
+arithmetic as before, bit for bit. `ScriptRuntimeCompat.RotatedAnchoredLayerTurnsAboutItsAnchor`
+and `.ScriptedRingBarsHangOutwardFromTheirCircle` in `script_runtime_compat_test`
+cover z and x/y/z turns, a bound rotation within one tick, an exact return to
+the unrotated placement, and the scripted ring. With the offset left on the
+scene's axes, every bar of Workshop 2850003448's ring visualizer slid the same
+way down the screen, over the planet it should surround, instead of hanging
+outward from the circle; 'bottom'-aligned clock hands turned about their centre.
 
 The anchor origin must survive re-registration. `RegisterNodeVisibility`,
 `RegisterNodeTranslate`, `RegisterNodeScale` and `RegisterNodeRotation` each

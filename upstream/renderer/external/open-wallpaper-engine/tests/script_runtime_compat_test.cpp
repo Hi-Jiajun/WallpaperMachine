@@ -3421,6 +3421,101 @@ TEST(ScriptRuntimeCompat, TextReflowInvalidatesAnchoredTranslationWithoutSourceC
     EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(10 + size.x() * 0.5f, 20 - size.y() * 0.5f, 0)));
 }
 
+Eigen::Vector3f NodePointInScene(SceneNode& node, float x, float y) {
+    node.UpdateTrans();
+    return (node.ModelTrans() * Eigen::Vector4d(x, y, 0.0, 1.0)).head<3>().cast<float>();
+}
+
+// Alignment names the layer's pivot in its own axes: a turned layer keeps the
+// named edge on its origin instead of sliding along the scene's axes.
+TEST(ScriptRuntimeCompat, RotatedAnchoredLayerTurnsAboutItsAnchor) {
+    constexpr float quarter_turn = 1.5707963267948966f;
+    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
+    auto node = std::make_shared<SceneNode>();
+    node->SetScale(Eigen::Vector3f(1, 4, 1));
+    node->SetRotation(Eigen::Vector3f(0, 0, quarter_turn));
+    runtime->RegisterNode("hand", node.get());
+    runtime->RegisterNodeSize("hand", Eigen::Vector2f(20, 10));
+    runtime->SetNodeAnchorAlignment("hand", "top", Eigen::Vector3f(100, 50, 0));
+    // The 40-unit hand hangs from its top edge, a quarter turn from straight down.
+    EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(120, 50, 0)));
+    EXPECT_TRUE(NodePointInScene(*node, 0, 5).isApprox(Eigen::Vector3f(100, 50, 0)));
+
+    // Perspective layers also turn about x and y; the anchor still stays put.
+    runtime->SetNodeAnchorAlignment("hand", "bottom right", Eigen::Vector3f(100, 50, 0));
+    ASSERT_TRUE(runtime->SetNodeRotation("hand", Eigen::Vector3f(0.4f, -0.3f, 1.1f)));
+    EXPECT_TRUE(NodePointInScene(*node, 10, -5).isApprox(Eigen::Vector3f(100, 50, 0)));
+
+    // Turned back, the layer lands exactly where an unrotated one is placed.
+    ASSERT_TRUE(runtime->SetNodeRotation("hand", Eigen::Vector3f::Zero()));
+    EXPECT_EQ(node->Translate(), Eigen::Vector3f(90, 70, 0));
+
+    // A bound rotation re-derives the anchor in the same tick, after the
+    // translate binding has already been applied.
+    runtime->RegisterNodeTranslate("hand", node.get(),
+        std::make_unique<DynamicValue>(Eigen::Vector3f(100, 50, 0)));
+    auto angles = std::make_unique<DynamicValue>(Eigen::Vector3f(0, 0, 0));
+    auto* bound_angles = angles.get();
+    runtime->RegisterNodeRotation("hand", node.get(), std::move(angles));
+    runtime->Tick(0.0);
+    EXPECT_EQ(node->Translate(), Eigen::Vector3f(90, 70, 0));
+    bound_angles->update(Eigen::Vector3f(0, 0, quarter_turn * 2));
+    runtime->Tick(0.0);
+    EXPECT_TRUE(NodePointInScene(*node, 10, -5).isApprox(Eigen::Vector3f(100, 50, 0)));
+    EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(110, 30, 0)));
+}
+
+// Workshop 2850003448 builds a ring visualizer: every bar is aligned 'top',
+// placed on a circle and turned to face outward, then scaled by audio. Each
+// bar must hang outward from the circle; with the anchor offset left on the
+// scene's axes the whole ring slid down over the planet it surrounds.
+TEST(ScriptRuntimeCompat, ScriptedRingBarsHangOutwardFromTheirCircle) {
+    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
+    std::vector<std::shared_ptr<SceneNode>> bars;
+    for (int index = 0; index < 4; ++index) {
+        auto bar = std::make_shared<SceneNode>();
+        bar->SetTranslate(Eigen::Vector3f(1280, 720, 0));
+        const auto name = "bar" + std::to_string(index);
+        runtime->RegisterNode(name, bar.get());
+        runtime->RegisterNodeSize(name, Eigen::Vector2f(8, 8));
+        bars.push_back(bar);
+    }
+    runtime->RegisterSceneScript(R"JS(
+import * as WEVector from 'WEVector';
+export function init() {
+    let center = thisLayer.origin;
+    for (var i = 0; i < 4; ++i) {
+        let bar = thisScene.getLayer('bar' + i);
+        let angle = 90 * i + 30;
+        bar.alignment = 'top';
+        bar.origin = center.add(new Vec3(WEVector.angleVector2(angle)).multiply(90));
+        bar.angles = new Vec3(0, 0, angle + 90);
+    }
+}
+export function update() {
+    for (var i = 0; i < 4; ++i) {
+        let bar = thisScene.getLayer('bar' + i);
+        bar.alignment = 'top';
+        bar.scale = new Vec3(10, 6, 1);
+    }
+}
+)JS", "bar0");
+    runtime->Tick(1.0 / 60.0);
+    runtime->Tick(1.0 / 60.0);
+    ASSERT_EQ(runtime->scriptErrorCount(), 0u);
+
+    const Eigen::Vector3f center(1280, 720, 0);
+    for (int index = 0; index < 4; ++index) {
+        SCOPED_TRACE(index);
+        const float radians = (90.0f * index + 30.0f) * 3.14159265f / 180.0f;
+        const Eigen::Vector3f outward(std::cos(radians), std::sin(radians), 0);
+        // The top edge stays where the unscaled bar's edge sat, just inside the
+        // circle, and the 48-unit bar reaches straight out from there.
+        EXPECT_TRUE(NodePointInScene(*bars[index], 0, 4).isApprox(center + outward * 86.0f));
+        EXPECT_TRUE(NodePointInScene(*bars[index], 0, -4).isApprox(center + outward * 134.0f));
+    }
+}
+
 TEST(ScriptRuntimeCompat, EffectFinalRepairUsesCurrentParentAttachmentAndResolvedTarget) {
     auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
     auto parent = std::make_shared<SceneNode>();
