@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Audio/AudioResponseService.h"
 #include "Interface/IShaderValueUpdater.h"
 #include "Presentation/WallpaperScaling.hpp"
 #include "Runtime/SceneRuntimeContext.hpp"
@@ -8,6 +9,7 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <nlohmann/json.hpp>
@@ -50,16 +52,31 @@ public:
                 amplitude_ < 0.0f || amplitude_ > 1.0f)
                 throw std::runtime_error("WE_TEST_AUDIO_AMPLITUDE must be 0..1");
         }
+        if (const char* path = std::getenv("WE_TEST_AUDIO_FILE")) {
+            std::ifstream file(path, std::ios::binary);
+            const std::vector<char> bytes((std::istreambuf_iterator<char>(file)), {});
+            if (bytes.size() < sizeof(float) || bytes.size() % sizeof(float) != 0)
+                throw std::runtime_error("WE_TEST_AUDIO_FILE must be raw float32 mono PCM");
+            audio_file_.resize(bytes.size() / sizeof(float));
+            std::memcpy(audio_file_.data(), bytes.data(), bytes.size());
+        }
     }
 
     bool sample(uint32_t frame) const { return samples_.contains(frame); }
     bool hasInput() const { return !steps_.empty(); }
+    // A file plays on from where the previous frame stopped, looping.
     float audioSample(std::size_t index, double hz) {
+        if (!audio_file_.empty()) {
+            const float sample = audio_file_[audio_file_position_];
+            audio_file_position_ = (audio_file_position_ + 1u) % audio_file_.size();
+            return sample;
+        }
         if (noise_) {
             noise_state_ = noise_state_ * 1664525u + 1013904223u;
             return amplitude_ * static_cast<float>(2.0 * noise_state_ / 4294967295.0 - 1.0);
         }
-        return amplitude_ * std::sin(2.0 * 3.141592653589793 * hz * index / 12000.0);
+        return amplitude_ * std::sin(2.0 * 3.141592653589793 * hz * index /
+                                     audio::kAudioResponseSampleRate);
     }
 
     void input(Scene& scene, uint32_t frame, const WallpaperCursorMapping& mapping) {
@@ -168,6 +185,8 @@ private:
     float amplitude_ {0.025f};
     bool noise_ {std::getenv("WE_TEST_AUDIO_NOISE") != nullptr};
     uint32_t noise_state_ {17};
+    std::vector<float> audio_file_;
+    std::size_t audio_file_position_ {0};
 };
 
 } // namespace wallpaper::tests

@@ -107,12 +107,12 @@ size_t AudioResponseRetainedFrameCountForTesting();
 namespace
 {
 
-constexpr uint32_t kSubmitSampleRate = 12'000u;
-constexpr uint32_t kChunkFrameCount = 200u;
-constexpr uint32_t kChunkSubmitCount = 6u;
+constexpr uint32_t kSubmitSampleRate = kAudioResponseSampleRate;
+constexpr uint32_t kWindowFrames = kAudioResponseWindowFrames;
+// What the capture resampler hands over: a 60th of a second, half a window.
+constexpr uint32_t kChunkFrameCount = kWindowFrames / 2u;
+constexpr uint32_t kChunkSubmitCount = 2u;
 constexpr uint32_t kRetainedFrameCapacity = kSubmitSampleRate * 2u;
-constexpr float kAnalysisStepSeconds = 200.0f / 12000.0f;
-constexpr float kAttackTauSeconds = 0.020f;
 
 AudioSpectrumSnapshot WaitForGeneration() {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
@@ -173,44 +173,107 @@ float MaxAbsDifference(const std::array<float, 64>& lhs, const std::array<float,
     return difference;
 }
 
-std::array<float, 64> SmoothInSteps(const std::array<float, 64>& target, uint32_t steps_per_call, uint32_t call_count) {
-    std::array<float, 64> output {};
-    for (uint32_t call = 0; call < call_count; ++call) {
-        SmoothAudioResponseBinsForTesting(target, steps_per_call, &output);
+std::vector<float> Tone(double hz, float amplitude, size_t frames = kWindowFrames) {
+    std::vector<float> pcm(frames);
+    for (size_t sample = 0; sample < pcm.size(); ++sample) {
+        pcm[sample] = amplitude *
+            static_cast<float>(std::sin(2.0 * 3.141592653589793 * hz * sample / kSubmitSampleRate));
     }
-    return output;
+    return pcm;
 }
 
-TEST(AudioResponseMonoTest, TonesKeepTheirFrequencyAcrossBassMidrangeAndTreble) {
-    // Physical FFT frequencies, not an equality comparison between two analyzers.
-    // Include treble above the old 1.5 kHz cutoff and the real-FFT Nyquist slot.
-    for (unsigned bin : { 0u, 20u, 132u, 300u, 484u, 512u }) {
-        SCOPED_TRACE(bin * 12000.0 / 1024.0);
-        std::array<float, 1024> pcm {};
-        for (unsigned sample = 0; sample < pcm.size(); ++sample) {
-            pcm[sample] = 0.025f * std::cos(2.0 * 3.141592653589793 * bin * sample / pcm.size());
-        }
-        AudioSpectrumSnapshot spectrum {};
-        for (int step = 0; step < 10; ++step) {
-            AnalyzeAudioResponseMonoBlock(pcm.data(), pcm.size(), &spectrum);
-        }
-        const auto peak = std::max_element(spectrum.average64.begin(), spectrum.average64.end());
-        const auto band = std::distance(spectrum.average64.begin(), peak);
-        EXPECT_GT(*peak, 0.1f);
-        EXPECT_EQ(band, std::min(bin / 8u, 63u));
-        if (bin >= 300u) EXPECT_LT(spectrum.average64.front(), 0.001f);
+AudioSpectrumSnapshot AnalyzeTone(double hz, float amplitude) {
+    const auto pcm = Tone(hz, amplitude);
+    AudioSpectrumSnapshot spectrum {};
+    AnalyzeAudioResponseMonoBlock(pcm.data(), static_cast<uint32_t>(pcm.size()), &spectrum);
+    return spectrum;
+}
+
+template<size_t Bands>
+size_t PeakBand(const std::array<float, Bands>& bands) {
+    return static_cast<size_t>(std::distance(bands.begin(), std::max_element(bands.begin(), bands.end())));
+}
+
+// Which of Wallpaper Engine's 64 bands answer an octave tone, as measured on
+// it (Steam discussion 2592234299529771879): wallpapers are authored against
+// this layout, roughly one 23 Hz bin per band in the bass and widening to
+// about 15 kHz.
+struct MeasuredBand {
+    double hz;
+    size_t first;
+    size_t last;
+};
+constexpr MeasuredBand kWallpaperEngineBands[] = {
+    { 42.0, 0u, 1u },      { 95.0, 2u, 4u },      { 190.0, 5u, 9u },
+    { 380.0, 10u, 20u },   { 760.0, 21u, 31u },   { 1520.0, 32u, 37u },
+    { 3040.0, 38u, 45u },  { 6080.0, 46u, 54u },  { 12160.0, 55u, 63u },
+};
+
+TEST(AudioResponseMonoTest, TonesLandInTheBandsWallpaperEngineMeasures) {
+    for (const auto& measured : kWallpaperEngineBands) {
+        SCOPED_TRACE(measured.hz);
+        const auto spectrum = AnalyzeTone(measured.hz, 0.5f);
+        const size_t band = PeakBand(spectrum.average64);
+        EXPECT_GE(band, measured.first);
+        EXPECT_LE(band, measured.last);
+        // A tone at -6 dB on a 48 dB scale, give or take how it splits
+        // between neighbouring one-bin bands.
+        EXPECT_NEAR(spectrum.average64[band], 0.875f, 0.08f);
+        if (measured.hz >= 1000.0) EXPECT_EQ(spectrum.average64.front(), 0.0f);
         for (float value : spectrum.average64) {
             EXPECT_TRUE(std::isfinite(value));
             EXPECT_GE(value, 0.0f);
-            EXPECT_LE(value, 1.0f);
         }
     }
 }
 
-TEST(AudioResponseMonoTest, MonoSubmitUpdatesSnapshotAt12Khz) {
+TEST(AudioResponseMonoTest, LevelsSpanFortyEightDecibelsBelowAFullScaleTone) {
+    // A full-scale tone reads about 1, and slightly more where a wide band
+    // gathers the whole window lobe: Wallpaper Engine's values exceed 1 too.
+    const auto full = AnalyzeTone(1500.0, 1.0f);
+    const float full_level = full.average64[PeakBand(full.average64)];
+    EXPECT_GE(full_level, 0.98f);
+    EXPECT_LE(full_level, 1.1f);
+
+    // 24 dB quieter is half the scale lower.
+    const auto quieter = AnalyzeTone(1500.0, std::pow(10.0f, -24.0f / 20.0f));
+    EXPECT_NEAR(full_level - quieter.average64[PeakBand(quieter.average64)], 0.5f, 0.005f);
+
+    const auto below_floor = AnalyzeTone(1500.0, std::pow(10.0f, -54.0f / 20.0f));
+    for (float value : below_floor.average64) EXPECT_EQ(value, 0.0f);
+}
+
+TEST(AudioResponseMonoTest, CoarserResolutionsCoverTheSameFrequencies) {
+    for (const auto& measured : kWallpaperEngineBands) {
+        SCOPED_TRACE(measured.hz);
+        const auto spectrum = AnalyzeTone(measured.hz, 0.5f);
+        const size_t band = PeakBand(spectrum.average64);
+        EXPECT_EQ(PeakBand(spectrum.average32), band / 2u);
+        EXPECT_EQ(PeakBand(spectrum.average16), band / 4u);
+        EXPECT_GE(spectrum.average16[band / 4u], spectrum.average64[band]);
+    }
+}
+
+TEST(AudioResponseMonoTest, EachSpectrumStandsAlone) {
+    // Wallpaper Engine hands wallpapers each frame's levels as they are and
+    // leaves smoothing to them, so a loud block leaves nothing behind.
+    const auto loud = Tone(95.0, 1.0f);
+    const auto quiet = Tone(3040.0, 0.05f);
+    AudioSpectrumSnapshot carried {};
+    AnalyzeAudioResponseMonoBlock(loud.data(), kWindowFrames, &carried);
+    AnalyzeAudioResponseMonoBlock(quiet.data(), kWindowFrames, &carried);
+    AudioSpectrumSnapshot fresh {};
+    AnalyzeAudioResponseMonoBlock(quiet.data(), kWindowFrames, &fresh);
+    EXPECT_LE(MaxAbsDifference(carried.average64, fresh.average64), 0.00001f);
+    for (size_t band = 0; band < fresh.average16.size(); ++band) {
+        EXPECT_NEAR(carried.average16[band], fresh.average16[band], 0.00001f);
+    }
+}
+
+TEST(AudioResponseMonoTest, MonoSubmitUpdatesSnapshotAtTheAnalysisRate) {
     ResetAudioResponseServiceForTesting();
 
-    std::array<float, 200> samples {};
+    std::array<float, kChunkFrameCount> samples {};
     for (std::size_t index = 0; index < samples.size(); ++index) {
         samples[index] = std::sin(static_cast<float>(index) * 0.05f);
     }
@@ -222,7 +285,7 @@ TEST(AudioResponseMonoTest, MonoSubmitUpdatesSnapshotAt12Khz) {
     }
 
     auto snapshot = WaitForGeneration();
-    EXPECT_EQ(snapshot.sample_rate, 12'000u);
+    EXPECT_EQ(snapshot.sample_rate, kAudioResponseSampleRate);
     EXPECT_EQ(snapshot.last_submit_sample_rate, kSubmitSampleRate);
     EXPECT_EQ(snapshot.accepted_frame_count, samples.size() * kChunkSubmitCount);
     EXPECT_GT(snapshot.generation, 0u);
@@ -237,30 +300,10 @@ TEST(AudioResponseMonoTest, MonoSubmitUpdatesSnapshotAt12Khz) {
     EXPECT_EQ(snapshot.right16, snapshot.average16);
 }
 
-TEST(AudioResponseMonoTest, AnalyzerSmoothingIsIndependentOfStepGrouping) {
-    std::array<float, 64> target {};
-    for (std::size_t index = 0; index < target.size(); ++index) {
-        target[index] = 1.0f - (static_cast<float>(index) / static_cast<float>(target.size() * 2u));
-    }
-
-    std::array<float, 64> one_step {};
-    SmoothAudioResponseBinsForTesting(target, 1u, &one_step);
-
-    const auto many_small_steps = SmoothInSteps(target, 1u, 12u);
-    const auto fewer_large_steps = SmoothInSteps(target, 3u, 4u);
-    const float expected_one_step = 1.0f - std::exp(-kAnalysisStepSeconds / kAttackTauSeconds);
-    const float expected_twelve_steps = 1.0f - std::exp(-(kAnalysisStepSeconds * 12.0f) / kAttackTauSeconds);
-
-    EXPECT_NEAR(one_step.front(), expected_one_step, 0.00001f);
-    EXPECT_NEAR(many_small_steps.front(), expected_twelve_steps, 0.00001f);
-    EXPECT_LT(MaxAbsDifference(many_small_steps, fewer_large_steps), 0.00001f);
-    EXPECT_GT(many_small_steps.front(), 0.99f);
-}
-
 TEST(AudioResponseMonoTest, StaleSnapshotPublishesSilenceInsteadOfReusingOldBins) {
     ResetAudioResponseServiceForTesting();
 
-    std::array<float, 200> samples {};
+    std::array<float, kChunkFrameCount> samples {};
     for (std::size_t index = 0; index < samples.size(); ++index) {
         samples[index] = std::sin(static_cast<float>(index) * 0.05f);
     }
@@ -289,7 +332,7 @@ TEST(AudioResponseMonoTest, StaleSnapshotPublishesSilenceInsteadOfReusingOldBins
 TEST(AudioResponseMonoTest, NonFiniteSamplesAreTreatedAsSilence) {
     ResetAudioResponseServiceForTesting();
 
-    std::array<float, 200> samples {};
+    std::array<float, kChunkFrameCount> samples {};
     for (std::size_t index = 0; index < samples.size(); ++index) {
         samples[index] = index % 2u == 0u ? std::numeric_limits<float>::quiet_NaN()
                                           : std::numeric_limits<float>::infinity();
@@ -311,7 +354,7 @@ TEST(AudioResponseMonoTest, NonFiniteSamplesAreTreatedAsSilence) {
 TEST(AudioResponseMonoTest, ContinuousSilenceAfterSignalClearsSnapshot) {
     ResetAudioResponseServiceForTesting();
 
-    std::array<float, 200> signal {};
+    std::array<float, kChunkFrameCount> signal {};
     for (std::size_t index = 0; index < signal.size(); ++index) {
         signal[index] = std::sin(static_cast<float>(index) * 0.05f);
     }
@@ -326,7 +369,7 @@ TEST(AudioResponseMonoTest, ContinuousSilenceAfterSignalClearsSnapshot) {
     ASSERT_GT(live_snapshot.generation, 0u);
     ASSERT_TRUE(HasNonZeroAverage64Bin(live_snapshot));
 
-    std::array<float, 200> silence {};
+    std::array<float, kChunkFrameCount> silence {};
     for (uint32_t submit = 0; submit < kChunkSubmitCount; ++submit) {
         ASSERT_TRUE(SubmitMonoAudioFrames(kSubmitSampleRate, static_cast<uint32_t>(silence.size()), silence.data(), &error))
             << error;
@@ -342,7 +385,7 @@ TEST(AudioResponseMonoTest, ContinuousSilenceAfterSignalClearsSnapshot) {
 TEST(AudioResponseMonoTest, ResumeAfterStaleDoesNotAnalyzeRetainedOldSamples) {
     ResetAudioResponseServiceForTesting();
 
-    std::array<float, 200> samples {};
+    std::array<float, kChunkFrameCount> samples {};
     for (std::size_t index = 0; index < samples.size(); ++index) {
         samples[index] = std::sin(static_cast<float>(index) * 0.05f);
     }
@@ -361,7 +404,7 @@ TEST(AudioResponseMonoTest, ResumeAfterStaleDoesNotAnalyzeRetainedOldSamples) {
     ASSERT_GT(stale_snapshot.generation, live_snapshot.generation);
     ASSERT_FALSE(HasNonZeroAverage64Bin(stale_snapshot));
 
-    std::array<float, 1024> fresh_samples {};
+    std::array<float, kWindowFrames> fresh_samples {};
     for (std::size_t index = 0; index < fresh_samples.size(); ++index) {
         fresh_samples[index] = 0.05f * std::sin(static_cast<float>(index) * 0.08f);
     }
@@ -386,12 +429,12 @@ TEST(AudioResponseMonoTest, ResumeAfterStaleDoesNotAnalyzeRetainedOldSamples) {
 TEST(AudioResponseMonoTest, StalePartialFifoBeforeFirstBlockIsNotMixedIntoResume) {
     ResetAudioResponseServiceForTesting();
 
-    std::array<float, 1000> stale_samples {};
+    std::array<float, kWindowFrames - 200u> stale_samples {};
     for (std::size_t index = 0; index < stale_samples.size(); ++index) {
         stale_samples[index] = std::sin(static_cast<float>(index) * 0.75f);
     }
 
-    std::array<float, 1024> fresh_samples {};
+    std::array<float, kWindowFrames> fresh_samples {};
     for (std::size_t index = 0; index < fresh_samples.size(); ++index) {
         fresh_samples[index] = 0.05f * std::sin(static_cast<float>(index) * 0.08f);
     }
@@ -435,7 +478,7 @@ TEST(AudioResponseMonoTest, StalePartialFifoBeforeFirstBlockIsNotMixedIntoResume
 TEST(AudioResponseMonoTest, WorkerClearsStaleFullFifoBeforeAnalysis) {
     ResetAudioResponseServiceForTesting();
 
-    std::array<float, 1024> stale_samples {};
+    std::array<float, kWindowFrames> stale_samples {};
     for (std::size_t index = 0; index < stale_samples.size(); ++index) {
         stale_samples[index] = std::sin(static_cast<float>(index) * 0.09f);
     }
@@ -458,7 +501,7 @@ void ResetWaitingWorkerInChild(bool wait_for_stale) {
     // A lost stop wake must fail this child, not leave a joinable thread in the suite.
     alarm(2);
     ResetAudioResponseServiceForTesting();
-    std::array<float, 1024> tone {};
+    std::array<float, kWindowFrames> tone {};
     for (size_t index = 0; index < tone.size(); ++index) {
         tone[index] = 0.25f * std::sin(static_cast<float>(index) * 0.08f);
     }
@@ -501,15 +544,15 @@ TEST(AudioResponseMonoTest, ResetInterruptsExpiredInputWaitAndAcceptsFreshTone) 
 
 TEST(AudioResponseMonoTest, PartialSubmissionsExtendExpiryUntilACompleteBlockArrives) {
     ResetAudioResponseServiceForTesting();
-    std::array<float, 1024> tone {};
+    std::array<float, kWindowFrames> tone {};
     for (size_t index = 0; index < tone.size(); ++index) {
         tone[index] = 0.25f * std::sin(static_cast<float>(index) * 0.08f);
     }
-    ASSERT_TRUE(SubmitMonoAudioFrames(kSubmitSampleRate, 400, tone.data(), nullptr));
+    ASSERT_TRUE(SubmitMonoAudioFrames(kSubmitSampleRate, 600, tone.data(), nullptr));
     std::this_thread::sleep_for(std::chrono::milliseconds(150));
-    ASSERT_TRUE(SubmitMonoAudioFrames(kSubmitSampleRate, 400, tone.data() + 400, nullptr));
+    ASSERT_TRUE(SubmitMonoAudioFrames(kSubmitSampleRate, 600, tone.data() + 600, nullptr));
     std::this_thread::sleep_for(std::chrono::milliseconds(150));
-    ASSERT_TRUE(SubmitMonoAudioFrames(kSubmitSampleRate, 224, tone.data() + 800, nullptr));
+    ASSERT_TRUE(SubmitMonoAudioFrames(kSubmitSampleRate, kWindowFrames - 1200u, tone.data() + 1200, nullptr));
     const auto combined = WaitForGeneration();
     ASSERT_GT(combined.generation, 0u);
     ASSERT_TRUE(HasNonZeroAverage64Bin(combined));
@@ -530,7 +573,7 @@ TEST(AudioResponseMonoTest, SixtyFourBinFrameInputsPopulateAllSpectrumResolution
     }
 
     std::string error;
-    for (uint32_t submit = 0; submit < 20u; ++submit) {
+    for (uint32_t submit = 0; submit < kWindowFrames / samples.size(); ++submit) {
         ASSERT_TRUE(SubmitMonoAudioFrames(
             kSubmitSampleRate,
             static_cast<uint32_t>(samples.size()),
@@ -553,7 +596,7 @@ TEST(AudioResponseMonoTest, SixtyFourBinFrameInputsPopulateAllSpectrumResolution
 TEST(AudioResponseMonoTest, MonoSubmitRejectsInvalidInput) {
     ResetAudioResponseServiceForTesting();
 
-    std::array<float, 200> samples {};
+    std::array<float, kChunkFrameCount> samples {};
     std::string error;
 
     EXPECT_FALSE(SubmitMonoAudioFrames(0, kChunkFrameCount, samples.data(), &error));
@@ -571,18 +614,18 @@ TEST(AudioResponseMonoTest, MonoSubmitRejectsInvalidInput) {
 TEST(AudioResponseMonoTest, MonoSubmitRejectsNonAnalysisSampleRate) {
     ResetAudioResponseServiceForTesting();
 
-    std::array<float, 200> samples {};
+    std::array<float, kChunkFrameCount> samples {};
     std::string error;
 
-    EXPECT_FALSE(SubmitMonoAudioFrames(48'000u, kChunkFrameCount, samples.data(), &error));
+    EXPECT_FALSE(SubmitMonoAudioFrames(12'000u, kChunkFrameCount, samples.data(), &error));
     EXPECT_NE(error.find("sample_rate"), std::string::npos);
-    EXPECT_NE(error.find("12000"), std::string::npos);
+    EXPECT_NE(error.find(std::to_string(kAudioResponseSampleRate)), std::string::npos);
 }
 
 TEST(AudioResponseMonoTest, OversizedMonoSubmitIsAcceptedAndAnalyzed) {
     ResetAudioResponseServiceForTesting();
 
-    constexpr uint32_t oversized_frame_count = 24'200u;
+    constexpr uint32_t oversized_frame_count = kRetainedFrameCapacity + 200u;
     std::vector<float> samples(oversized_frame_count, 0.0f);
     for (std::size_t index = 0; index < samples.size(); ++index) {
         samples[index] = std::sin(static_cast<float>(index) * 0.03f);
@@ -593,7 +636,7 @@ TEST(AudioResponseMonoTest, OversizedMonoSubmitIsAcceptedAndAnalyzed) {
         << error;
 
     auto snapshot = WaitForGeneration();
-    EXPECT_EQ(snapshot.sample_rate, 12'000u);
+    EXPECT_EQ(snapshot.sample_rate, kAudioResponseSampleRate);
     EXPECT_EQ(snapshot.last_submit_sample_rate, kSubmitSampleRate);
     EXPECT_EQ(snapshot.accepted_frame_count, oversized_frame_count);
     EXPECT_GT(snapshot.generation, 0u);
@@ -605,14 +648,15 @@ TEST(AudioResponseMonoTest, StereoSubmitKeepsLeftAndRightSpectraApart) {
 
     // Left carries a bass tone, right a treble tone, so a channel collapse
     // would show up as two identical spectra peaking in the same band.
-    constexpr unsigned kLeftBin = 20u;
-    constexpr unsigned kRightBin = 300u;
-    constexpr std::size_t kFrames = 2048u;
+    const auto& bass = kWallpaperEngineBands[1];
+    const auto& treble = kWallpaperEngineBands[6];
+    constexpr std::size_t kFrames = kWindowFrames;
+    const auto left = Tone(bass.hz, 0.25f, kFrames);
+    const auto right = Tone(treble.hz, 0.25f, kFrames);
     std::vector<float> stereo(kFrames * 2u, 0.0f);
     for (std::size_t frame = 0; frame < kFrames; ++frame) {
-        const double phase = 2.0 * 3.141592653589793 * static_cast<double>(frame % 1024u) / 1024.0;
-        stereo[frame * 2u] = 0.25f * static_cast<float>(std::cos(phase * kLeftBin));
-        stereo[(frame * 2u) + 1u] = 0.25f * static_cast<float>(std::cos(phase * kRightBin));
+        stereo[frame * 2u] = left[frame];
+        stereo[(frame * 2u) + 1u] = right[frame];
     }
 
     std::string error;
@@ -631,8 +675,12 @@ TEST(AudioResponseMonoTest, StereoSubmitKeepsLeftAndRightSpectraApart) {
     const auto right_peak = std::max_element(snapshot.right64.begin(), snapshot.right64.end());
     EXPECT_GT(*left_peak, 0.1f);
     EXPECT_GT(*right_peak, 0.1f);
-    EXPECT_EQ(std::distance(snapshot.left64.begin(), left_peak), kLeftBin / 8u);
-    EXPECT_EQ(std::distance(snapshot.right64.begin(), right_peak), kRightBin / 8u);
+    const auto left_band = static_cast<size_t>(std::distance(snapshot.left64.begin(), left_peak));
+    const auto right_band = static_cast<size_t>(std::distance(snapshot.right64.begin(), right_peak));
+    EXPECT_GE(left_band, bass.first);
+    EXPECT_LE(left_band, bass.last);
+    EXPECT_GE(right_band, treble.first);
+    EXPECT_LE(right_band, treble.last);
 
     for (std::size_t band = 0; band < snapshot.average64.size(); ++band) {
         EXPECT_NEAR(
@@ -682,8 +730,8 @@ TEST(AudioResponseMonoTest, MonoSubmitAfterStereoClearsTheStereoFlagAndRejoinsCh
 TEST(AudioResponseMonoTest, StereoSubmitWithIdenticalChannelsMatchesMonoAnalysis) {
     ResetAudioResponseServiceForTesting();
 
-    std::array<float, 400> stereo {};
-    for (std::size_t frame = 0; frame < 200; ++frame) {
+    std::array<float, kChunkFrameCount * 2u> stereo {};
+    for (std::size_t frame = 0; frame < kChunkFrameCount; ++frame) {
         stereo[frame * 2u] = 0.5f;
         stereo[(frame * 2u) + 1u] = 0.5f;
     }
@@ -698,7 +746,7 @@ TEST(AudioResponseMonoTest, StereoSubmitWithIdenticalChannelsMatchesMonoAnalysis
 
     ResetAudioResponseServiceForTesting();
 
-    std::array<float, 200> mono {};
+    std::array<float, kChunkFrameCount> mono {};
     mono.fill(0.5f);
 
     error.clear();
@@ -708,11 +756,11 @@ TEST(AudioResponseMonoTest, StereoSubmitWithIdenticalChannelsMatchesMonoAnalysis
     }
 
     auto mono_snapshot = WaitForGeneration();
-    EXPECT_EQ(stereo_snapshot.sample_rate, 12'000u);
+    EXPECT_EQ(stereo_snapshot.sample_rate, kAudioResponseSampleRate);
     EXPECT_EQ(stereo_snapshot.last_submit_sample_rate, kSubmitSampleRate);
     EXPECT_EQ(stereo_snapshot.accepted_frame_count, kChunkFrameCount * kChunkSubmitCount);
     EXPECT_GT(stereo_snapshot.generation, 0u);
-    EXPECT_EQ(mono_snapshot.sample_rate, 12'000u);
+    EXPECT_EQ(mono_snapshot.sample_rate, kAudioResponseSampleRate);
     EXPECT_EQ(mono_snapshot.last_submit_sample_rate, kSubmitSampleRate);
     EXPECT_EQ(mono_snapshot.accepted_frame_count, kChunkFrameCount * kChunkSubmitCount);
     EXPECT_GT(mono_snapshot.generation, 0u);
@@ -729,9 +777,11 @@ TEST(AudioResponseMonoTest, StereoSubmitWithIdenticalChannelsMatchesMonoAnalysis
 TEST(AudioResponseMonoTest, CompactedFifoPreservesEveryStereoWindow) {
     ResetAudioResponseServiceForTesting();
 
-    constexpr uint32_t kWindowFrames = 1024u;
-    constexpr uint32_t kFollowingChunks = 40u;
-    constexpr uint32_t kTotalFrames = kWindowFrames + kFollowingChunks * kChunkFrameCount;
+    // Chunks that do not divide a window, so windows straddle submissions and
+    // the FIFO keeps compacting around a partial window.
+    constexpr uint32_t kChunk = 700u;
+    constexpr uint32_t kChunks = 49u;
+    constexpr uint32_t kTotalFrames = kChunk * kChunks;
     std::vector<float> left(kTotalFrames);
     std::vector<float> right(kTotalFrames);
     std::vector<float> stereo(kTotalFrames * 2u);
@@ -743,38 +793,39 @@ TEST(AudioResponseMonoTest, CompactedFifoPreservesEveryStereoWindow) {
         stereo[frame * 2u + 1u] = right[frame];
     }
 
-    AudioSpectrumSnapshot reference {};
     AudioSpectrumSnapshot snapshot {};
     std::string error;
-    for (uint32_t window = 0; window <= kFollowingChunks; ++window) {
-        SCOPED_TRACE(window);
-        const size_t window_start = window * kChunkFrameCount;
-        AnalyzeAudioResponseStereoBlock(
-            left.data() + window_start, right.data() + window_start, kWindowFrames, &reference);
-
-        const uint32_t submit_count = window == 0u ? kWindowFrames : kChunkFrameCount;
-        const size_t submit_start = window == 0u ? 0u : kWindowFrames + (window - 1u) * kChunkFrameCount;
+    uint64_t windows = 0u;
+    for (uint32_t chunk = 0; chunk < kChunks; ++chunk) {
         ASSERT_TRUE(SubmitAudioFrames(
-            kSubmitSampleRate, submit_count, stereo.data() + submit_start * 2u, &error))
+            kSubmitSampleRate, kChunk, stereo.data() + static_cast<size_t>(chunk) * kChunk * 2u, &error))
             << error;
-        snapshot = WaitForGenerationAfter(window, std::chrono::milliseconds(500));
-        ASSERT_EQ(snapshot.generation, window + 1u);
+        if ((chunk + 1u) * kChunk / kWindowFrames == windows) continue;
+        SCOPED_TRACE(windows);
+        AudioSpectrumSnapshot reference {};
+        AnalyzeAudioResponseStereoBlock(left.data() + windows * kWindowFrames,
+                                        right.data() + windows * kWindowFrames,
+                                        kWindowFrames,
+                                        &reference);
+        snapshot = WaitForGenerationAfter(windows, std::chrono::milliseconds(500));
+        ++windows;
+        ASSERT_EQ(snapshot.generation, windows);
         EXPECT_TRUE(snapshot.stereo);
         EXPECT_LE(MaxAbsDifference(snapshot.left64, reference.left64), 0.00001f);
         EXPECT_LE(MaxAbsDifference(snapshot.right64, reference.right64), 0.00001f);
         EXPECT_LE(MaxAbsDifference(snapshot.average64, reference.average64), 0.00001f);
     }
 
-    EXPECT_EQ(snapshot.generation, 41u);
-    EXPECT_EQ(snapshot.accepted_frame_count, 9024u);
-    EXPECT_EQ(AudioResponseRetainedFrameCountForTesting(), 824u);
+    EXPECT_EQ(windows, 21u);
+    EXPECT_EQ(CurrentAudioSpectrumSnapshot().accepted_frame_count, kTotalFrames);
+    EXPECT_EQ(AudioResponseRetainedFrameCountForTesting(), kTotalFrames - 21u * kWindowFrames);
 }
 
 TEST(AudioResponseMonoTest, OversizedStereoSubmitAnalyzesOnlyRetainedFrames) {
     ResetAudioResponseServiceForTesting();
 
     constexpr uint32_t oversized_frame_count = kRetainedFrameCapacity + 400u;
-    constexpr uint64_t retained_window_count = 115u;
+    constexpr uint64_t retained_window_count = kRetainedFrameCapacity / kWindowFrames;
     std::vector<float> stereo(static_cast<std::size_t>(oversized_frame_count) * 2u, 0.0f);
     std::vector<float> retained_stereo(static_cast<std::size_t>(kRetainedFrameCapacity) * 2u, 0.0f);
 
@@ -803,12 +854,12 @@ TEST(AudioResponseMonoTest, OversizedStereoSubmitAnalyzesOnlyRetainedFrames) {
     EXPECT_LE(AudioResponseRetainedFrameCountForTesting(), kRetainedFrameCapacity);
     auto stereo_snapshot = WaitForGenerationAfter(retained_window_count - 1u, std::chrono::milliseconds(500));
     ASSERT_EQ(stereo_snapshot.generation, retained_window_count);
-    EXPECT_EQ(stereo_snapshot.sample_rate, 12'000u);
+    EXPECT_EQ(stereo_snapshot.sample_rate, kAudioResponseSampleRate);
     EXPECT_EQ(stereo_snapshot.last_submit_sample_rate, kSubmitSampleRate);
     EXPECT_EQ(stereo_snapshot.accepted_frame_count, oversized_frame_count);
     EXPECT_TRUE(stereo_snapshot.stereo);
     EXPECT_TRUE(HasNonZeroAverage64Bin(stereo_snapshot));
-    EXPECT_EQ(AudioResponseRetainedFrameCountForTesting(), 1000u);
+    EXPECT_EQ(AudioResponseRetainedFrameCountForTesting(), kRetainedFrameCapacity % kWindowFrames);
     // No staging copy of the submitted interleaved buffer: the deinterleave
     // writes straight into the retained FIFOs.
     EXPECT_LT(g_largest_allocation.load(std::memory_order_relaxed), static_cast<std::size_t>(oversized_frame_count) * sizeof(float));
@@ -823,7 +874,7 @@ TEST(AudioResponseMonoTest, OversizedStereoSubmitAnalyzesOnlyRetainedFrames) {
     auto retained_snapshot = WaitForGenerationAfter(retained_window_count - 1u, std::chrono::milliseconds(500));
     ASSERT_EQ(retained_snapshot.generation, retained_window_count);
     EXPECT_EQ(retained_snapshot.accepted_frame_count, kRetainedFrameCapacity);
-    EXPECT_EQ(AudioResponseRetainedFrameCountForTesting(), 1000u);
+    EXPECT_EQ(AudioResponseRetainedFrameCountForTesting(), kRetainedFrameCapacity % kWindowFrames);
     EXPECT_EQ(stereo_snapshot.left64, retained_snapshot.left64);
     EXPECT_EQ(stereo_snapshot.right64, retained_snapshot.right64);
 }
@@ -831,12 +882,12 @@ TEST(AudioResponseMonoTest, OversizedStereoSubmitAnalyzesOnlyRetainedFrames) {
 TEST(AudioResponseMonoTest, StereoCompatibilityWrapperRejectsNonAnalysisSampleRate) {
     ResetAudioResponseServiceForTesting();
 
-    std::array<float, 400> stereo {};
+    std::array<float, kChunkFrameCount * 2u> stereo {};
     std::string error;
 
-    EXPECT_FALSE(SubmitAudioFrames(48'000u, kChunkFrameCount, stereo.data(), &error));
+    EXPECT_FALSE(SubmitAudioFrames(12'000u, kChunkFrameCount, stereo.data(), &error));
     EXPECT_NE(error.find("sample_rate"), std::string::npos);
-    EXPECT_NE(error.find("12000"), std::string::npos);
+    EXPECT_NE(error.find(std::to_string(kAudioResponseSampleRate)), std::string::npos);
 }
 
 } // namespace

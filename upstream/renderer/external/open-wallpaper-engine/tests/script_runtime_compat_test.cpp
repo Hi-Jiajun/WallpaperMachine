@@ -2484,12 +2484,15 @@ function update() {
 
 TEST(AudioResponseCompat, RegisteredBuffersSupportTypedViewsAndClearWhenDisabled) {
     audio::ResetAudioResponseServiceForTesting();
-    std::array<float, 2400> samples {};
+    // A bass tone: the lowest of 16 bands spans roughly 20 to 120 Hz.
+    std::array<float, audio::kAudioResponseWindowFrames> samples {};
     for (std::size_t index = 0; index < samples.size(); ++index) {
-        samples[index] = 0.025f * std::sin(2.0 * 3.141592653589793 * 234.375 * index / 12000.0);
+        samples[index] = 0.025f * std::sin(2.0 * 3.141592653589793 * 70.0 * index /
+                                           audio::kAudioResponseSampleRate);
     }
     std::string error;
-    ASSERT_TRUE(audio::SubmitMonoAudioFrames(12000, samples.size(), samples.data(), &error))
+    ASSERT_TRUE(audio::SubmitMonoAudioFrames(
+        audio::kAudioResponseSampleRate, samples.size(), samples.data(), &error))
         << error;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (audio::CurrentAudioSpectrumSnapshot().generation == 0 &&

@@ -185,8 +185,12 @@ impl Default for AudioResponseResampler {
 }
 
 impl AudioResponseResampler {
-    pub const TARGET_SAMPLE_RATE: u32 = 12_000;
-    pub const BLOCK_FRAMES: usize = 200;
+    /// The renderer's analysis rate (`kAudioResponseSampleRate`). The usual
+    /// 48 kHz tap passes through untouched; the interpolation below has no
+    /// anti-alias filter, so it must never decimate audible content.
+    pub const TARGET_SAMPLE_RATE: u32 = 48_000;
+    /// A 60th of a second per submission.
+    pub const BLOCK_FRAMES: usize = 800;
 
     #[must_use]
     pub fn new() -> Self {

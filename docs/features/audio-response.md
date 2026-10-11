@@ -41,6 +41,31 @@ left and right channels; a mono fallback supplies the same signal to both. See
 [web audio response](web-wallpapers.md#audio-response) for the capture and
 128-band listener contract.
 
+## What wallpapers receive
+
+Wallpapers are authored against Wallpaper Engine's numbers, so the analysis
+follows what its developer and its docs describe and what tones measure on it.
+Its exact formula is not published; where this differs, it is an estimate.
+
+- Captured audio is analysed at 48 kHz, 30 spectra a second, each from its own
+  33 ms Hann-windowed block. Nothing is decimated without a filter, so treble
+  stays in the treble bands.
+- The 64 bands are one ~23 Hz FFT bin wide up to about 400 Hz and then widen
+  exponentially to about 15 kHz: an octave tone at 42 Hz, 95 Hz, 190 Hz, 380 Hz,
+  760 Hz, 1.5 kHz, 3 kHz, 6 kHz and 12 kHz peaks in the band Wallpaper Engine
+  shows it in. The 32- and 16-band resolutions cover the same frequencies with
+  the energy of the bands they merge.
+- A band's value is its level on a 48 dB scale: 0 at -48 dB or below, about 1
+  for a full-scale tone, and occasionally a little above 1, as Wallpaper Engine
+  documents. Normal music sits mostly between 0.1 and 0.3 with peaks towards 1.
+- Every spectrum stands alone. Wallpaper Engine leaves smoothing to the
+  wallpaper, so a visualizer that smooths in its script looks as intended and
+  one that does not jumps from frame to frame, as it does there.
+
+Web pages still receive values clamped to 0.0–1.0 (see
+[web audio response](web-wallpapers.md#audio-response)); scenes receive them
+as analysed.
+
 ## Supported effect paths
 
 | Path | Notes |

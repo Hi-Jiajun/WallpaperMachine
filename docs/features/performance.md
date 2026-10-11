@@ -406,11 +406,11 @@ render scale, animation speed or audio-response subscription:
   float. Fixed 4×4 values use the existing inline storage; larger values own a
   vector. No camera, bone, script or effect result is cached by this path.
 - The audio-analysis FIFO advances a logical read position instead of moving
-  its tail after every 200-frame hop. Appends compact only when the consumed
-  prefix is at least the retained suffix or the physical queue would exceed
-  24,000 frames. Stereo channels advance together, capacity grows geometrically
-  within that bound, and every 1,024-frame analysis window is still copied and
-  processed at the original cadence.
+  its tail after every 1,600-frame window. Appends compact only when the
+  consumed prefix is at least the retained suffix or the physical queue would
+  exceed 96,000 frames (two seconds at 48 kHz). Stereo channels advance
+  together, capacity grows geometrically within that bound, and every window is
+  still copied and processed, 30 a second.
 - Repeated system-media artwork skips redundant input conversion while still
   consuming every media-state message; see [media integration](media-integration.md).
 - On Compatibility, a hidden layer's first-use clear is left out when nothing

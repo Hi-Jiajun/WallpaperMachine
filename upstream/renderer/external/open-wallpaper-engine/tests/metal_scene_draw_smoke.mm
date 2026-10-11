@@ -5026,15 +5026,17 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                 if (audio_hz != nullptr) {
                     // Synthetic PCM only, analysed by the same service the
                     // desktop tap feeds.
-                    std::array<float, 2400> pcm {};
+                    std::array<float, audio::kAudioResponseWindowFrames> pcm {};
                     const double hz = std::strtod(audio_hz, nullptr);
                     for (std::size_t i = 0; i < pcm.size(); ++i) {
                         pcm[i] = controls.audioSample(i, hz);
                     }
                     const auto generation = audio::CurrentAudioSpectrumSnapshot().generation;
                     std::string audio_error;
-                    ASSERT_TRUE(audio::SubmitMonoAudioFrames(
-                        12000, uint32_t(pcm.size()), pcm.data(), &audio_error))
+                    ASSERT_TRUE(audio::SubmitMonoAudioFrames(audio::kAudioResponseSampleRate,
+                                                             uint32_t(pcm.size()),
+                                                             pcm.data(),
+                                                             &audio_error))
                         << audio_error;
                     const auto deadline =
                         std::chrono::steady_clock::now() + std::chrono::seconds(2);

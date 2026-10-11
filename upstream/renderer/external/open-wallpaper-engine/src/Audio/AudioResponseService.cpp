@@ -17,9 +17,11 @@ namespace wallpaper::audio
 namespace
 {
 
-constexpr uint32_t kAnalysisSampleRate = 12000;
-constexpr uint32_t kFftSize = 1024;
-constexpr uint32_t kHopSize = 200;
+constexpr uint32_t kAnalysisSampleRate = kAudioResponseSampleRate;
+constexpr uint32_t kWindowSize = kAudioResponseWindowFrames;
+// Windows follow each other without overlap, so where one starts never
+// depends on how the input happened to be chunked.
+constexpr uint32_t kHopSize = kWindowSize;
 constexpr size_t kInterleavedChannels = 2u;
 constexpr size_t kMaxRetainedMonoFrames = static_cast<size_t>(kAnalysisSampleRate) * 2u;
 constexpr auto kSnapshotStaleAfter = std::chrono::milliseconds(250);
@@ -62,7 +64,8 @@ bool ValidateSubmitInput(
         return SetError(error, "sample_rate must be greater than zero");
     }
     if (sample_rate != kAnalysisSampleRate) {
-        return SetError(error, "sample_rate must be 12000 Hz for audio response analysis");
+        return SetError(error, "sample_rate must be " + std::to_string(kAnalysisSampleRate) +
+                                   " Hz for audio response analysis");
     }
     if (frame_count == 0) {
         return SetError(error, "frame_count must be greater than zero");
@@ -88,7 +91,7 @@ float SanitizePcmSample(float sample)
     return std::clamp(sample, -1.0f, 1.0f);
 }
 
-bool PcmBlockHasSignal(const std::array<float, kFftSize>& block)
+bool PcmBlockHasSignal(const std::array<float, kWindowSize>& block)
 {
     return std::any_of(block.begin(), block.end(), [](float sample) {
         return std::abs(sample) > kPcmSignalFloor;
@@ -143,7 +146,7 @@ void PrepareFifosForAppendLocked(size_t incoming_frames)
         if (required_size > fifo.capacity()) {
             fifo.reserve(std::min(
                 kMaxRetainedMonoFrames,
-                std::max(required_size, std::max(fifo.capacity() * 2u, static_cast<size_t>(kFftSize)))));
+                std::max(required_size, std::max(fifo.capacity() * 2u, static_cast<size_t>(kWindowSize)))));
         }
     };
     reserve(g_state.fifo);
@@ -155,8 +158,8 @@ void PrepareFifosForAppendLocked(size_t incoming_frames)
 void WorkerMain(std::stop_token stop_token)
 {
     while (true) {
-        std::array<float, kFftSize> block {};
-        std::array<float, kFftSize> right_block {};
+        std::array<float, kWindowSize> block {};
+        std::array<float, kWindowSize> right_block {};
         bool block_is_stereo = false;
         AudioSpectrumSnapshot next_snapshot {};
 
@@ -195,7 +198,7 @@ void WorkerMain(std::stop_token stop_token)
 
                 const auto submitted_at = g_state.last_submit_time;
                 const auto input_changed = [submitted_at] {
-                    return RetainedFramesLocked() >= kFftSize ||
+                    return RetainedFramesLocked() >= kWindowSize ||
                            g_state.last_submit_time != submitted_at;
                 };
                 if (submitted_at == std::chrono::steady_clock::time_point {}) {
@@ -212,9 +215,9 @@ void WorkerMain(std::stop_token stop_token)
         if (has_signal) {
             if (block_is_stereo) {
                 AnalyzeAudioResponseStereoBlock(
-                    block.data(), right_block.data(), kFftSize, &next_snapshot);
+                    block.data(), right_block.data(), kWindowSize, &next_snapshot);
             } else {
-                AnalyzeAudioResponseMonoBlock(block.data(), kFftSize, &next_snapshot);
+                AnalyzeAudioResponseMonoBlock(block.data(), kWindowSize, &next_snapshot);
             }
         } else {
             ClearAudioResponseSnapshot(&next_snapshot);

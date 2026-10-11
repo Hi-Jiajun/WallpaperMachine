@@ -11,25 +11,49 @@ namespace wallpaper::audio
 namespace
 {
 
-constexpr uint32_t kFftSize = 1024;
+// Wallpaper Engine's analysis, as its developer describes it and as tones
+// measure it: a zero-padded Hann-windowed block of about 33 ms, and 64 buckets
+// that are one FFT bin wide at the bottom (about 23 Hz each, up to roughly
+// 400 Hz) and then widen exponentially to about 15 kHz.
+constexpr uint32_t kFftSize = 2048;
+constexpr int kFftLog2 = 11;
+constexpr uint32_t kWindowSize = kAudioResponseWindowFrames;
 constexpr uint32_t kBandCount64 = 64;
-constexpr int kFftLog2 = 10;
-constexpr float kAnalysisStepSeconds = 200.0f / 12000.0f;
-constexpr float kAttackTauSeconds = 0.020f;
-constexpr float kReleaseTauSeconds = 0.180f;
-constexpr float kDecay = 0.88f;
-constexpr float kNeighborFalloff1 = 0.72f;
-constexpr float kNeighborFalloff2 = 0.42f;
+constexpr uint32_t kLinearBands = 16;
+constexpr uint32_t kTopBin = 640;
+// Levels span 48 dB below a full-scale tone.
+constexpr float kFloorDecibels = 48.0f;
+
+static_assert(kWindowSize <= kFftSize);
+static_assert(kTopBin < kFftSize / 2u);
 
 struct AnalyzerResources
 {
-    std::array<float, kFftSize> window {};
+    std::array<float, kWindowSize> window {};
+    // From the packed real FFT's output, which is twice the transform, to the
+    // amplitude a sine of that frequency has in the input.
+    float amplitude_scale { 0.0f };
+    std::array<uint16_t, kBandCount64 + 1u> edges {};
     FFTSetup fft_setup { nullptr };
 
     AnalyzerResources()
     {
-        vDSP_hann_window(window.data(), static_cast<vDSP_Length>(kFftSize), vDSP_HANN_NORM);
+        vDSP_hann_window(window.data(), static_cast<vDSP_Length>(kWindowSize), vDSP_HANN_DENORM);
+        float window_sum = 0.0f;
+        vDSP_sve(window.data(), 1, &window_sum, static_cast<vDSP_Length>(kWindowSize));
+        amplitude_scale = 1.0f / window_sum;
         fft_setup = vDSP_create_fftsetup(kFftLog2, FFT_RADIX2);
+
+        const double ratio =
+            std::pow(static_cast<double>(kTopBin) / (kLinearBands + 1u), 1.0 / (kBandCount64 - kLinearBands));
+        edges[0] = 1u;
+        for (uint32_t band = 0; band < kBandCount64; ++band) {
+            const double exponential =
+                kTopBin * std::pow(ratio, static_cast<double>(band) - (kBandCount64 - 1u));
+            const auto upper = band < kLinearBands ? band + 2u
+                                                   : static_cast<uint32_t>(std::lround(exponential));
+            edges[band + 1u] = static_cast<uint16_t>(std::max<uint32_t>(upper, edges[band] + 1u));
+        }
     }
 
     ~AnalyzerResources()
@@ -46,143 +70,81 @@ AnalyzerResources& Resources()
     return resources;
 }
 
-float EmaAlpha(float elapsed_seconds, float tau_seconds)
+float Level(float energy)
 {
-    return 1.0f - std::exp(-elapsed_seconds / tau_seconds);
+    if (! (energy > 0.0f) || ! std::isfinite(energy)) {
+        return 0.0f;
+    }
+    return std::max(0.0f, 1.0f + (20.0f * std::log10(energy)) / kFloorDecibels);
 }
 
-float SmoothValue(float current, float target, uint32_t step_count)
+struct ChannelLevels
 {
-    if (! std::isfinite(current)) {
-        current = 0.0f;
-    }
-    if (! std::isfinite(target)) {
-        target = 0.0f;
-    }
+    std::array<float, 64> bands64 {};
+    std::array<float, 32> bands32 {};
+    std::array<float, 16> bands16 {};
+};
 
-    const float elapsed_seconds = kAnalysisStepSeconds * static_cast<float>(step_count);
-    const float tau_seconds = target > current ? kAttackTauSeconds : kReleaseTauSeconds;
-    const float alpha = EmaAlpha(elapsed_seconds, tau_seconds);
-    return std::clamp(current + alpha * (target - current), 0.0f, 1.0f);
-}
-
-void SmoothBins(
-    const std::array<float, kBandCount64>& target,
-    uint32_t step_count,
-    std::array<float, kBandCount64>& output)
+// Energy is summed over each bucket's bins, so a coarser resolution covers the
+// same frequencies with the energy of the buckets it merges.
+ChannelLevels AnalyzeChannel(const float* pcm)
 {
-    if (step_count == 0u) {
-        return;
-    }
-
-    for (size_t band = 0; band < output.size(); ++band) {
-        output[band] = SmoothValue(output[band], target[band], step_count);
-    }
-}
-
-float WeightedMagnitude(float magnitude_squared, float band, float denominator)
-{
-    float log_magnitude = 0.0f;
-    if (magnitude_squared > 0.0f) {
-        log_magnitude = 0.35f * std::log10(magnitude_squared);
-    }
-
-    const float weight =
-        2.0f - std::exp(((1.0f - (band / denominator)) * 1.0f) - 0.5f);
-    return std::clamp(log_magnitude * weight, 0.0f, 1.0f);
-}
-
-float AggregateBandMagnitude(const std::array<float, kFftSize / 2u + 1u>& magnitudes, size_t band) {
-    constexpr size_t bins_per_band = (kFftSize / 2u) / kBandCount64;
-    const size_t     begin         = band * bins_per_band;
-    const size_t     end = band + 1u == kBandCount64 ? magnitudes.size() : begin + bins_per_band;
-
-    float value = 0.0f;
-    for (size_t index = begin; index < end; ++index) {
-        value = std::max(value, magnitudes[index]);
-    }
-    return value;
-}
-
-void DeriveBands(const std::array<float, 64>& source, std::array<float, 32>& target32, std::array<float, 16>& target16)
-{
-    target32.fill(0.0f);
-    target16.fill(0.0f);
-
-    for (size_t band = 0; band < source.size(); ++band) {
-        const float value = source[band];
-        const size_t index32 = band >> 1u;
-        const size_t index16 = band >> 2u;
-        target32[index32] = std::max(target32[index32], value);
-        target16[index16] = std::max(target16[index16], value);
-    }
-}
-
-void AnalyzeMono(const float* mono_pcm, std::array<float, 64>& output) {
     const auto& resources = Resources();
 
-    std::array<float, kFftSize>           windowed {};
-    std::array<float, kFftSize / 2u>      realp {};
-    std::array<float, kFftSize / 2u>      imagp {};
-    std::array<float, kFftSize / 2u + 1u> magnitudes {};
+    std::array<float, kFftSize>      windowed {};
+    std::array<float, kFftSize / 2u> realp {};
+    std::array<float, kFftSize / 2u> imagp {};
+    std::array<float, kFftSize / 2u> power {};
 
-    vDSP_vmul(mono_pcm,
-              1,
-              resources.window.data(),
-              1,
-              windowed.data(),
-              1,
-              static_cast<vDSP_Length>(kFftSize));
-    for (auto& sample : windowed) {
-        if (! std::isfinite(sample)) {
-            sample = 0.0f;
+    vDSP_vmul(pcm, 1, resources.window.data(), 1, windowed.data(), 1,
+              static_cast<vDSP_Length>(kWindowSize));
+    for (uint32_t index = 0; index < kWindowSize; ++index) {
+        if (! std::isfinite(windowed[index])) {
+            windowed[index] = 0.0f;
         }
     }
 
     // Real FFT input is packed as even samples in realp and odd samples in imagp.
-    // Filling the split buffers directly avoids a second copy and vDSP_ctoz's
-    // unusual interleaved stride (two floats, not one DSPComplex).
     for (size_t index = 0; index < realp.size(); ++index) {
         realp[index] = windowed[index * 2u];
         imagp[index] = windowed[(index * 2u) + 1u];
     }
-
     DSPSplitComplex split { .realp = realp.data(), .imagp = imagp.data() };
     vDSP_fft_zrip(resources.fft_setup, &split, 1, kFftLog2, FFT_FORWARD);
-    vDSP_zvmags(&split, 1, magnitudes.data(), 1, static_cast<vDSP_Length>(realp.size()));
-    // The packed real FFT stores Nyquist in imagp[0], not the imaginary DC term.
-    magnitudes[0]     = realp[0] * realp[0];
-    magnitudes.back() = imagp[0] * imagp[0];
+    // Slot 0 mixes DC with Nyquist; no bucket reads it.
+    vDSP_zvmags(&split, 1, power.data(), 1, static_cast<vDSP_Length>(power.size()));
 
-    std::array<float, kBandCount64> weighted_bands {};
-    for (size_t band = 0; band < weighted_bands.size(); ++band) {
-        const float magnitude_squared = AggregateBandMagnitude(magnitudes, band);
-        const float weighted = WeightedMagnitude(
-            magnitude_squared,
-            static_cast<float>(band),
-            static_cast<float>(kBandCount64 - 1u));
-        weighted_bands[band] = weighted;
+    std::array<float, kBandCount64> energy_squared {};
+    for (uint32_t band = 0; band < kBandCount64; ++band) {
+        float sum = 0.0f;
+        for (uint32_t bin = resources.edges[band]; bin < resources.edges[band + 1u]; ++bin) {
+            sum += power[bin];
+        }
+        energy_squared[band] = sum * resources.amplitude_scale * resources.amplitude_scale;
     }
 
-    std::array<float, kBandCount64> continuous_bands {};
-    for (size_t band = 0; band < weighted_bands.size(); ++band) {
-        float value = weighted_bands[band];
-        if (band > 0) {
-            value = std::max(value, weighted_bands[band - 1u] * kNeighborFalloff1);
-        }
-        if (band + 1u < weighted_bands.size()) {
-            value = std::max(value, weighted_bands[band + 1u] * kNeighborFalloff1);
-        }
-        if (band > 1u) {
-            value = std::max(value, weighted_bands[band - 2u] * kNeighborFalloff2);
-        }
-        if (band + 2u < weighted_bands.size()) {
-            value = std::max(value, weighted_bands[band + 2u] * kNeighborFalloff2);
-        }
-        continuous_bands[band] = std::clamp(value, 0.0f, 1.0f);
+    ChannelLevels levels;
+    for (uint32_t band = 0; band < kBandCount64; ++band) {
+        levels.bands64[band] = Level(std::sqrt(energy_squared[band]));
     }
+    for (uint32_t band = 0; band < 32u; ++band) {
+        levels.bands32[band] =
+            Level(std::sqrt(energy_squared[band * 2u] + energy_squared[band * 2u + 1u]));
+    }
+    for (uint32_t band = 0; band < 16u; ++band) {
+        float sum = 0.0f;
+        for (uint32_t part = 0; part < 4u; ++part) sum += energy_squared[band * 4u + part];
+        levels.bands16[band] = Level(std::sqrt(sum));
+    }
+    return levels;
+}
 
-    SmoothBins(continuous_bands, 1u, output);
+template<typename Array>
+void Average(const Array& left, const Array& right, Array& average)
+{
+    for (size_t band = 0; band < average.size(); ++band) {
+        average[band] = 0.5f * (left[band] + right[band]);
+    }
 }
 
 } // namespace
@@ -192,20 +154,15 @@ void AnalyzeAudioResponseMonoBlock(
     uint32_t frame_count,
     AudioSpectrumSnapshot* snapshot)
 {
-    if (mono_pcm == nullptr || snapshot == nullptr || frame_count < kFftSize) {
+    if (mono_pcm == nullptr || snapshot == nullptr || frame_count < kWindowSize) {
         return;
     }
 
-    AnalyzeMono(mono_pcm, snapshot->average64);
-    snapshot->left64 = snapshot->average64;
-    snapshot->right64 = snapshot->average64;
+    const auto levels = AnalyzeChannel(mono_pcm);
+    snapshot->average64 = snapshot->left64 = snapshot->right64 = levels.bands64;
+    snapshot->average32 = snapshot->left32 = snapshot->right32 = levels.bands32;
+    snapshot->average16 = snapshot->left16 = snapshot->right16 = levels.bands16;
     snapshot->stereo = false;
-
-    DeriveBands(snapshot->average64, snapshot->average32, snapshot->average16);
-    snapshot->left32 = snapshot->average32;
-    snapshot->right32 = snapshot->average32;
-    snapshot->left16 = snapshot->average16;
-    snapshot->right16 = snapshot->average16;
 }
 
 void AnalyzeAudioResponseStereoBlock(
@@ -215,45 +172,22 @@ void AnalyzeAudioResponseStereoBlock(
     AudioSpectrumSnapshot* snapshot)
 {
     if (left_pcm == nullptr || right_pcm == nullptr || snapshot == nullptr ||
-        frame_count < kFftSize) {
+        frame_count < kWindowSize) {
         return;
     }
 
-    // Each channel carries its own smoothing state across blocks, so the two
-    // spectra are analysed independently rather than derived from one another.
-    AnalyzeMono(left_pcm, snapshot->left64);
-    AnalyzeMono(right_pcm, snapshot->right64);
-    for (size_t band = 0; band < snapshot->average64.size(); ++band) {
-        snapshot->average64[band] = 0.5f * (snapshot->left64[band] + snapshot->right64[band]);
-    }
+    const auto left = AnalyzeChannel(left_pcm);
+    const auto right = AnalyzeChannel(right_pcm);
+    snapshot->left64 = left.bands64;
+    snapshot->right64 = right.bands64;
+    snapshot->left32 = left.bands32;
+    snapshot->right32 = right.bands32;
+    snapshot->left16 = left.bands16;
+    snapshot->right16 = right.bands16;
+    Average(snapshot->left64, snapshot->right64, snapshot->average64);
+    Average(snapshot->left32, snapshot->right32, snapshot->average32);
+    Average(snapshot->left16, snapshot->right16, snapshot->average16);
     snapshot->stereo = true;
-
-    DeriveBands(snapshot->left64, snapshot->left32, snapshot->left16);
-    DeriveBands(snapshot->right64, snapshot->right32, snapshot->right16);
-    DeriveBands(snapshot->average64, snapshot->average32, snapshot->average16);
-}
-
-void DecayAudioResponseSnapshot(AudioSpectrumSnapshot* snapshot)
-{
-    if (snapshot == nullptr) {
-        return;
-    }
-
-    auto decay_array = [](auto& values) {
-        for (auto& value : values) {
-            value *= kDecay;
-        }
-    };
-
-    decay_array(snapshot->left64);
-    decay_array(snapshot->right64);
-    for (size_t band = 0; band < snapshot->average64.size(); ++band) {
-        snapshot->average64[band] = 0.5f * (snapshot->left64[band] + snapshot->right64[band]);
-    }
-
-    DeriveBands(snapshot->left64, snapshot->left32, snapshot->left16);
-    DeriveBands(snapshot->right64, snapshot->right32, snapshot->right16);
-    DeriveBands(snapshot->average64, snapshot->average32, snapshot->average16);
 }
 
 void ClearAudioResponseSnapshot(AudioSpectrumSnapshot* snapshot)
@@ -272,19 +206,5 @@ void ClearAudioResponseSnapshot(AudioSpectrumSnapshot* snapshot)
     snapshot->right16.fill(0.0f);
     snapshot->average16.fill(0.0f);
 }
-
-#ifdef WESCENE_BUILD_TESTS
-void SmoothAudioResponseBinsForTesting(
-    const std::array<float, 64>& target,
-    uint32_t step_count,
-    std::array<float, 64>* output)
-{
-    if (output == nullptr) {
-        return;
-    }
-
-    SmoothBins(target, step_count, *output);
-}
-#endif
 
 } // namespace wallpaper::audio

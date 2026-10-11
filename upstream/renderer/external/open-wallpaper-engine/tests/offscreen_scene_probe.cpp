@@ -238,8 +238,8 @@ int main() {
             char* end = nullptr;
             audio_hz  = std::strtod(audio_hz_env, &end);
             Check(end != audio_hz_env && *end == '\0' && std::isfinite(audio_hz) &&
-                      audio_hz >= 0.0 && audio_hz <= 6000.0,
-                  "WE_TEST_AUDIO_HZ must be 0..6000");
+                      audio_hz >= 0.0 && audio_hz <= audio::kAudioResponseSampleRate / 2.0,
+                  "WE_TEST_AUDIO_HZ must be 0..24000");
             audio::ResetAudioResponseServiceForTesting();
         }
         // A fixed seed makes a particle scene repeatable, so the same project
@@ -652,12 +652,13 @@ int main() {
             if (audio_hz_env) {
                 // Synthetic PCM only. Submit after GPU setup so the live-input
                 // timeout cannot expire while shaders/pipelines are compiling.
-                std::array<float, 2400> pcm {};
+                std::array<float, audio::kAudioResponseWindowFrames> pcm {};
                 for (size_t i = 0; i < pcm.size(); ++i) {
                     pcm[i] = controls.audioSample(i, audio_hz);
                 }
                 const auto generation = audio::CurrentAudioSpectrumSnapshot().generation;
-                Check(audio::SubmitMonoAudioFrames(12000, pcm.size(), pcm.data(), &error),
+                Check(audio::SubmitMonoAudioFrames(
+                          audio::kAudioResponseSampleRate, pcm.size(), pcm.data(), &error),
                       error.c_str());
                 const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
                 while (audio::CurrentAudioSpectrumSnapshot().generation <= generation &&
