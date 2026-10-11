@@ -40,6 +40,18 @@ final class PlaylistStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.nextChange["primary"], due)
     }
 
+    func testCustomIntervalsOutliveTheAppAndOutOfRangeOnesFallBack() throws {
+        let store = PlaylistStore(defaults: defaults)
+        store.update("primary") { $0.mode = .rotate; $0.interval = 45 }
+        XCTAssertEqual(PlaylistStore(defaults: defaults).playlist(for: "primary").interval, 45)
+
+        for stored in [0, 7 * 24 * 60 + 1] {
+            let data = try XCTUnwrap(#"{"mode":"rotate","interval":\#(stored)}"#.data(using: .utf8))
+            let playlist = try JSONDecoder().decode(DisplayPlaylist.self, from: data)
+            XCTAssertEqual(playlist.interval, DisplayPlaylist().interval, "\(stored) minutes is outside the range")
+        }
+    }
+
     func testChangingTheRhythmStartsAFreshWait() {
         let store = PlaylistStore(defaults: defaults)
         store.update("primary") { $0.mode = .rotate }

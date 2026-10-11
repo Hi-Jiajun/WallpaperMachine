@@ -168,7 +168,7 @@ struct WallpaperBackupPreferences: Sendable {
                     case "interval", "dayStart", "nightStart":
                         guard let number = item as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
                               number.doubleValue == Double(number.intValue),
-                              (key == "interval" ? DisplayPlaylist.intervals.contains(number.intValue) : DisplayPlaylist.minuteOfDay(number.intValue) != nil) else { throw invalid() }
+                              (key == "interval" ? DisplayPlaylist.intervalRange.contains(number.intValue) : DisplayPlaylist.minuteOfDay(number.intValue) != nil) else { throw invalid() }
                     case "wallpaperIDs": guard let ids = item as? [String] else { throw invalid() }; try identities(ids)
                     default:
                         if item is NSNull { continue }

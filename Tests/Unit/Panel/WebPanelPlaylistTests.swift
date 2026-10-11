@@ -67,9 +67,18 @@ final class WebPanelPlaylistTests: XCTestCase {
     XCTAssertEqual(snapshot["primary"]?["mode"] as? String, "rotate")
   }
 
+  func testATypedIntervalOutsideTheMenuIsKept() async throws {
+    try await controller.perform("playlistSetting", body: ["displayID": "primary", "key": "interval", "value": 45])
+    XCTAssertEqual(playlists.playlist(for: "primary").interval, 45)
+    try await controller.perform("playlistSetting", body: ["displayID": "primary", "key": "interval", "value": 7 * 24 * 60])
+    XCTAssertEqual(playlists.playlist(for: "primary").interval, 7 * 24 * 60)
+  }
+
   func testValuesThePanelNeverOffersAreRefused() async {
     for body: [String: Any] in [
-      ["displayID": "primary", "key": "interval", "value": 7],
+      ["displayID": "primary", "key": "interval", "value": 0],
+      ["displayID": "primary", "key": "interval", "value": 7 * 24 * 60 + 1],
+      ["displayID": "primary", "key": "interval", "value": 7.5],
       ["displayID": "primary", "key": "dayStart", "value": 1440],
       ["displayID": "primary", "key": "mode", "value": "sometimes"],
       ["displayID": "primary", "key": "nightWallpaper", "value": "app"],

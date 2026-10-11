@@ -288,7 +288,7 @@ desktop, [become a Supporter](SPONSORS.md).
 
 <!-- supporters:start: written by scripts/update_sponsors.py from the website's sponsor wall; edits here are overwritten -->
 <p align="center">
-  <a href="https://www.wallpapermachine.app/#sponsors"><img src="https://www.wallpapermachine.app/sponsors/wall?v=6f2fc968ad62" width="100%" alt="WallpaperMachine Supporters: xwei12. 1 Supporter on the wall. 1 more supports privately."></a>
+  <a href="https://www.wallpapermachine.app/#sponsors"><img src="https://www.wallpapermachine.app/sponsors/wall?v=30fe4b2f9944" width="100%" alt="WallpaperMachine Supporters: xwei12, ReinforceZwei. 2 Supporters on the wall. 2 more support privately."></a>
 </p>
 <!-- supporters:end -->
 

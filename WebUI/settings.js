@@ -27,6 +27,8 @@ const hotkeyTitles = { togglePlayback: 'Play or pause wallpapers', nextWallpaper
 const automationLinks = ['wallpapermachine://toggle', 'wallpapermachine://play', 'wallpapermachine://pause', 'wallpapermachine://next', 'wallpapermachine://previous', 'wallpapermachine://apply?id=…', 'wallpapermachine://playlist?id=…', 'wallpapermachine://preset?id=…', 'wallpapermachine://layout?id=…', 'wallpapermachine://open?page=settings'];
 const playlistModes = [['off', 'Off'], ['rotate', 'Rotate wallpapers'], ['dayNight', 'Day and night']];
 const playlistOrders = [['sequential', 'In order'], ['shuffle', 'Shuffle']];
+// Draft keys of a display's How often menu and its custom minutes field.
+const intervalKeys = displayID => ({ menu: `display-${displayID}-playlist-interval`, field: `display-${displayID}-playlist-custom-interval` });
 
 // A minute of the day as an <input type="time"> value, and back.
 const clockValue = (minute) => `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
@@ -258,6 +260,7 @@ export function renderSettings(container, state, helpers) {
     container.addEventListener('input', event => onInput(view, event));
     container.addEventListener('change', event => onChange(view, event));
     container.addEventListener('submit', event => onSubmit(view, event));
+    container.addEventListener('focusout', event => onFocusOut(view, event));
     // Escape in an inline name field gives the field up, as its Cancel does.
     container.addEventListener('keydown', event => {
       if (event.key === 'Escape' && view.layoutEditor && !view.pending.has('display-layout') && event.target.closest('[data-form="display-layout"]')) {
@@ -532,17 +535,22 @@ function draw(view) {
     const name = label => t('{label} for {display}', { label, display: display.title });
     const wallpaper = (state.wallpapers || []).find(item => item.id === display.wallpaperID);
     const limited = performanceLimitedFps(playback.fps, settings);
-    const number = (field, label, min, max, step, suffix = '') => `<input class="settings-number" data-key="${e(key(field))}" type="number" inputmode="decimal" aria-label="${e(name(label))}" min="${min}"${max == null ? '' : ` max="${max}"`} step="${step}" value="${e(draft(key(field), playback[field]))}" ${data(field)}${disabled(playbackOff)}>${suffix ? `<span class="settings-unit">${e(suffix)}</span>` : ''}`;
+    const number = (field, label, min, max, step, suffix = '', { value = playback[field], attributes = data(field), off: inactive = playbackOff } = {}) => `<input class="settings-number" data-key="${e(key(field))}" type="number" inputmode="decimal" aria-label="${e(name(label))}"${min == null ? '' : ` min="${min}"`}${max == null ? '' : ` max="${max}"`} step="${step}" value="${e(draft(key(field), value))}" ${attributes}${disabled(inactive)}>${suffix ? `<span class="settings-unit">${e(suffix)}</span>` : ''}`;
     // The display's playlist: off, a rotation, or a day and a night wallpaper.
     const playlist = { mode: 'off', source: 'all', order: 'sequential', interval: 30, wallpaperIDs: [], collectionID: null, planID: null, dayWallpaperID: null, nightWallpaperID: null, dayStart: 420, nightStart: 1140, nextChange: null, ...((state.playlists || {})[id] || {}) };
     const playlistData = field => `data-playlist="${e(id)}" data-playlist-key="${field}"`;
+    // The menu offers the presets; any other stored interval, or choosing Custom, shows a minutes field.
+    const intervalPresets = state.playlistIntervals || [];
+    const [intervalMin, intervalMax] = state.playlistIntervalRange || [];
+    const intervalChoice = String(draft(intervalKeys(id).menu, intervalPresets.includes(Number(playlist.interval)) ? playlist.interval : 'custom'));
     const listed = (playlist.wallpaperIDs || []).map(wallpaperID => (state.wallpapers || []).find(item => item.id === wallpaperID)).filter(Boolean);
     const playable = (state.wallpapers || []).filter(item => item.supported).sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' }));
     const nextChange = playlist.nextChange != null && Number.isFinite(Number(playlist.nextChange)) ? changeTime(Number(playlist.nextChange)) : '';
     const clockInput = (field, label, minute) => `<input type="time" data-key="${e(key(`playlist-${field}`))}" aria-label="${e(name(label))}" value="${e(draft(key(`playlist-${field}`), clockValue(minute)))}" ${playlistData(field)}${disabled(off)}>`;
     const rotateRows = row(key('playlist-source-row'), t('Wallpapers'), sourceSelect(ctx, key('playlist-source'), name(t('Wallpapers')), playlist, listed.length, playlistData('source'), off), sourceNote(ctx, playlist))
       + row(key('playlist-order-row'), t('Order'), select(key('playlist-order'), name(t('Order')), draft(key('playlist-order'), playlist.order), localizedOptions(playlistOrders), playlistData('order'), off))
-      + row(key('playlist-interval-row'), t('How often'), select(key('playlist-interval'), name(t('How often')), draft(key('playlist-interval'), playlist.interval), (state.playlistIntervals || []).map(minutes => [minutes, intervalLabel(minutes)]), `${playlistData('interval')} data-number`, off))
+      + row(key('playlist-interval-row'), t('How often'), select(intervalKeys(id).menu, name(t('How often')), intervalChoice, [...intervalPresets.map(minutes => [minutes, intervalLabel(minutes)]), ['custom', t('Custom')]], playlistData('interval'), off))
+      + (intervalChoice === 'custom' ? row(key('playlist-custom-interval-row'), t('Minutes between changes'), number('playlist-custom-interval', t('Minutes between changes'), intervalMin, intervalMax, 1, t('min'), { value: playlist.interval, attributes: playlistData('interval'), off }), intervalMax == null ? '' : t('Any whole number of minutes, up to {count}.', { count: Number(intervalMax).toLocaleString(language()) })) : '')
       + (playlist.source === 'list' ? playlistOrderMarkup(ctx, id, playlist, off) : '')
       + playlistFailures(ctx, id, playlist, off)
       + row(key('playlist-next-row'), t('Next change'), button(t('Change now'), 'playlistSkip', { displayID: id }, off), nextChange ? t('Around {time}, if wallpapers are playing then.', { time: nextChange }) : t('Starts counting once wallpapers play.'));
@@ -717,6 +725,23 @@ function onInput(view, event) {
   }
 }
 
+// Leaving the custom minutes field without saving a number gives it up, so the menu and the
+// field show the saved interval again. Checked after the move settles, so switching to another
+// app keeps the field, and a number being saved is left to its own change.
+function onFocusOut(view, event) {
+  const input = event.target;
+  if (input.dataset?.playlistKey !== 'interval' || input.type !== 'number') return;
+  const keys = intervalKeys(input.dataset.playlist);
+  setTimeout(() => {
+    if (!document.hasFocus() || document.activeElement === input || view.pending.has(keys.field)) return;
+    const menuDraft = view.drafts.get(keys.menu) === 'custom';
+    if (!menuDraft && !view.drafts.has(keys.field)) return;
+    view.drafts.delete(keys.field);
+    if (menuDraft) view.drafts.delete(keys.menu);
+    draw(view);
+  });
+}
+
 async function onChange(view, event) {
   const input = event.target;
   if (displayLayoutChange(view, input, () => draw(view))) return;
@@ -771,7 +796,20 @@ async function onChange(view, event) {
   if (input.dataset.playlist !== undefined) {
     let field = input.dataset.playlistKey;
     let value = input.value;
-    if (field === 'interval') value = Number(value);
+    if (field === 'interval') {
+      // Custom only reveals the minutes field, starting from the saved interval; nothing changes
+      // until a number is entered there.
+      if (value === 'custom') {
+        const keys = intervalKeys(input.dataset.playlist);
+        view.drafts.set(keys.menu, 'custom');
+        view.drafts.delete(keys.field);
+        draw(view);
+        [...view.container.querySelectorAll('input[data-key]')].find(node => node.dataset.key === keys.field)?.focus();
+        return;
+      }
+      if (input.type === 'number' && (!input.checkValidity() || input.value.trim() === '')) { input.reportValidity(); return; }
+      value = Number(value);
+    }
     if (field === 'dayStart' || field === 'nightStart') {
       value = clockMinute(value);
       if (value === null) { input.reportValidity(); return; }
@@ -781,9 +819,15 @@ async function onChange(view, event) {
     if (field === 'source' && value.startsWith('collection:')) { field = 'collectionID'; value = value.slice('collection:'.length); }
     else if (field === 'source' && value === 'collection') { draw(view); return; }
     const draftKey = input.dataset.key;
+    const typedInterval = field === 'interval' && input.type === 'number';
     view.drafts.set(draftKey, input.value);
-    await perform(view, draftKey, 'playlistSetting', { displayID: input.dataset.playlist, key: field, value }, () => view.drafts.delete(draftKey));
-    view.drafts.delete(draftKey);
+    await perform(view, draftKey, 'playlistSetting', { displayID: input.dataset.playlist, key: field, value }, () => {
+      view.drafts.delete(draftKey);
+      // A saved typed interval that matches a preset shows as that preset again.
+      if (typedInterval) view.drafts.delete(intervalKeys(input.dataset.playlist).menu);
+    });
+    // A refused typed interval stays in its field next to the error.
+    if (!typedInterval) view.drafts.delete(draftKey);
     draw(view);
     return;
   }

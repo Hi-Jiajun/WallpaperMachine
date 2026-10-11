@@ -849,9 +849,10 @@ extension WebPanelController {
       guard let order = PlaylistOrder(rawValue: try request.string("value")) else { throw WebPanelRequest.invalid }
       playlists.update(display) { $0.order = order }
     case "interval":
-      let minutes = Int(try request.number("value", range: 1...Double(DisplayPlaylist.minutesPerDay)))
-      guard DisplayPlaylist.intervals.contains(minutes) else { throw WebPanelRequest.invalid }
-      playlists.update(display) { $0.interval = minutes }
+      let range = DisplayPlaylist.intervalRange
+      let minutes = try request.number("value", range: Double(range.lowerBound)...Double(range.upperBound))
+      guard minutes == minutes.rounded() else { throw WebPanelRequest.invalid }
+      playlists.update(display) { $0.interval = Int(minutes) }
     case "dayWallpaper", "nightWallpaper":
       // Empty clears the choice; anything else must be a wallpaper that can play.
       let value = try request.string("value")
