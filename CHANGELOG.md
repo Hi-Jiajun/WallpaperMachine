@@ -8,6 +8,64 @@ Simplified Chinese. The app's What's New window offers both translations; the
 GitHub Release body repeats only the English notes. See
 [docs/release.md](docs/release.md) for how a version is cut.
 
+## 1.3.3 — 2026-10-11
+
+### English
+
+This release lets playlists rotate at any interval you choose and makes many scene wallpapers, especially audio visualizers, look and move as they do in Wallpaper Engine
+
+#### New
+
+- Playlists can now rotate at any whole number of minutes from 1 to 10,080 by choosing Custom under How often
+
+#### Improved
+
+- On Macs with an XDR display, changes in HDR brightness no longer make the app refresh every display and redraw the control panel over and over
+- Dragging property sliders and other control panel updates respond more quickly
+- The app no longer stalls for hundreds of milliseconds during bursts of screen changes
+- With the experimental animated lock screen or the screen saver on, the app no longer rereads macOS wallpaper settings and writes to disk when nothing has changed
+- The Energy use readout in Settings > Performance now notes that figures shown right after applying a wallpaper include loading it
+- Scene assets that Steam installs or removes while the app is running are now picked up when you return to the control panel
+
+#### Fixed
+
+- Audio-reactive wallpapers now show thin, separate bars of varying length that move with the music, as in Wallpaper Engine
+- Audio visualizers built from imported Workshop assets show their bars again instead of nothing
+- Blended puppet shadows now darken what is behind them instead of showing a shrunken copy of the wallpaper with grey blocks
+- Motion blur trails no longer show faint, misplaced copies of other layers
+- Rotated layers aligned to an edge now turn about that edge and stay where their authors placed them
+- Web wallpapers no longer freeze briefly when you move the pointer while Show Desktop reveals them
+- The Energy use readout no longer shows videos played with optional native video playback as almost free and no longer rates them
+
+### 简体中文
+
+此版本允许播放列表按你设定的任意间隔轮换，并让许多场景壁纸（尤其是音频可视化壁纸）的外观和动态与 Wallpaper Engine 中一致
+
+#### 新增
+
+- 在播放列表的轮换频率中选择“自定义”，即可按 1 至 10,080 之间的任意整数分钟轮换壁纸
+
+#### 改进
+
+- 在配备 XDR 显示器的 Mac 上，HDR 亮度变化不再导致应用反复刷新所有显示器并重绘控制面板
+- 拖动属性滑块及控制面板的其他更新响应更快
+- 屏幕连续发生变化时，应用不再卡顿数百毫秒
+- 开启实验性的动态锁定屏幕或屏幕保护程序时，应用不再在没有变化的情况下重复读取 macOS 壁纸设置并写入磁盘
+- 设置 > 性能中的能耗读数现会注明，刚应用壁纸后的数值包含了加载壁纸的消耗
+- 应用运行期间由 Steam 安装或移除的场景资源，现会在你返回控制面板时被识别
+
+#### 修复
+
+- 音频响应壁纸现会像在 Wallpaper Engine 中一样，显示随音乐跳动、长短不一且彼此分开的细条
+- 使用导入的 Workshop 资源制作的音频可视化效果重新显示音频条，不再一片空白
+- 混合模式的人偶阴影现会正常压暗其后方内容，不再显示缩小的壁纸副本和灰色色块
+- 动态模糊拖影不再出现其他图层的模糊错位副本
+- 对齐到边缘的图层旋转时现会以该边缘为轴，并保持在作者设定的位置
+- 通过“显示桌面”露出网页壁纸时移动指针，网页壁纸不再短暂卡住
+- 能耗读数不再将使用可选原生视频播放的视频显示为几乎没有消耗，也不再对其评级
+
+**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.3.2...v1.3.3
+
 ## 1.3.2 — 2026-10-08
 
 ### English
