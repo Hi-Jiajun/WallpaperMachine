@@ -150,3 +150,26 @@ std::vector<std::vector<TexNode*>> RenderGraph::getLastReadTexs(std::span<const 
     }
     return res;
 }
+
+std::vector<std::string> RenderGraph::getCarriedOverKeys(std::span<const NodeID> nodes) const {
+    std::vector<std::string> read_first;
+    Set<std::string>         accessed;
+    Set<std::string>         written;
+    for (const auto node : nodes) {
+        for (const auto id : m_dg.GetNodeIn(node)) {
+            const auto* tex = getTexNode(id);
+            if (tex == nullptr || tex->type() != TexNode::TexType::Temp) continue;
+            if (accessed.insert(std::string(tex->key())).second) {
+                read_first.emplace_back(tex->key());
+            }
+        }
+        for (const auto id : m_dg.GetNodeOut(node)) {
+            const auto* tex = getTexNode(id);
+            if (tex == nullptr) continue;
+            accessed.insert(std::string(tex->key()));
+            written.insert(std::string(tex->key()));
+        }
+    }
+    std::erase_if(read_first, [&written](const std::string& key) { return ! written.contains(key); });
+    return read_first;
+}

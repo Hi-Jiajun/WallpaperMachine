@@ -1722,6 +1722,10 @@ bool VulkanRender::Impl::preparePasses(Scene& scene) {
         scene.imageParser->SetTextureSurfaceSize(scene.display_sized ? 0 : extent.width,
                                                  scene.display_sized ? 0 : extent.height);
     }
+    if (! ReserveCarriedOverTargets(scene, m_device->tex_cache())) {
+        LOG_ERROR("cannot allocate the render targets carried into the next frame");
+        return false;
+    }
     glslang::InitializeProcess();
     {
         // Decodes ahead of the passes on other threads; joined when this

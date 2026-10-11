@@ -524,6 +524,7 @@ int main() {
         rr.vertex_buf = &vertices; rr.dyn_buf = &dynamic;
         auto nodes = graph->topologicalOrder();
         auto releases = graph->getLastReadTexs(nodes);
+        Check(ReserveCarriedOverTargets(*scene, device.tex_cache()), "reserve carried targets");
         std::vector<VulkanPass*> passes;
         PrePass pre(PrePass::Desc {});
         pre.prepare(*scene, device, rr);

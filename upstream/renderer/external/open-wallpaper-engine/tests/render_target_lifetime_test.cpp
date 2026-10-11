@@ -98,6 +98,82 @@ TEST(RenderTargetLifetime, NoBackgroundEffectGetsRealTransparentWriterBeforeSamp
     EXPECT_EQ(draw->desc().textures[0], input);
     EXPECT_EQ(graph->getLastReadTexs(order)[1][0]->key(), input);
 }
+
+// Motion blur blends each frame into the one before: its accumulation reads a
+// history target that nothing this frame has written yet, and a copy stores the
+// blend there for the next frame. Pooled, the history's image went to whatever
+// target came next, so the next frame blended in that target's pixels -- a
+// faint copy of some other layer jumping about. Only such a target keeps its
+// own image; the effect's other targets and the scene output stay as they were.
+TEST(RenderTargetLifetime, OnlyTargetsReadBeforeTheFrameWritesThemKeepTheirOwnImage) {
+    Scene scene;
+    scene.renderTargets[std::string(SpecTex_Default)] = { .width = 64, .height = 64 };
+    const std::string input   = std::string(WE_EFFECT_PPONG_PREFIX_A) + "trail";
+    const std::string output  = std::string(WE_EFFECT_PPONG_PREFIX_B) + "trail";
+    const std::string history = "_rt_trail_history";
+    const std::string blend   = "_rt_trail_blend";
+    for (const auto& name : { input, output, history, blend }) {
+        scene.renderTargets[name] = { .width = 16, .height = 16, .allowReuse = true };
+    }
+    auto owner = Node("trailing layer");
+    owner->SetCamera("local");
+    auto camera = std::make_shared<SceneCamera>(16, 16, -1, 1);
+    auto layer  = std::make_shared<SceneImageEffectLayer>(owner.get(), 16, 16, input, output);
+    layer->SetFinalBlend(BlendMode::Translucent);
+    auto effect = std::make_shared<SceneImageEffect>();
+    effect->nodes.push_back({ blend, Node("accumulate", { input, history }) });
+    effect->commands.push_back({ .dst = history, .src = blend, .afterpos = 1 });
+    effect->nodes.push_back({ std::string(SpecTex_Default), Node("combine", { blend }) });
+    layer->AddEffect(effect);
+    camera->AttatchImgEffect(layer);
+    scene.cameras["local"]  = camera;
+    scene.cameras["effect"] = std::make_shared<SceneCamera>(16, 16, -1, 1);
+    scene.sceneGraph->AppendChild(owner);
+
+    const auto graph = sceneToRenderGraph(scene);
+    ASSERT_NE(graph, nullptr);
+
+    EXPECT_TRUE(scene.renderTargets.at(history).carriesPreviousFrame);
+    EXPECT_FALSE(scene.renderTargets.at(history).allowReuse);
+    for (const auto& name : { input, blend }) {
+        SCOPED_TRACE(name);
+        EXPECT_FALSE(scene.renderTargets.at(name).carriesPreviousFrame);
+        EXPECT_TRUE(scene.renderTargets.at(name).allowReuse);
+    }
+    EXPECT_FALSE(scene.renderTargets.at(std::string(SpecTex_Default)).carriesPreviousFrame);
+}
+
+TEST(RenderTargetLifetime, CarriedOverKeysAreTheOnesReadBeforeTheirFirstWrite) {
+    for (int seed = 1; seed <= 32; ++seed) {
+        SCOPED_TRACE(seed);
+        rg::RenderGraph graph;
+        std::map<rg::NodeID, std::pair<std::string, std::string>> accesses;
+        for (int i = 0; i < 40; ++i) {
+            const auto read  = "_rt_" + std::to_string((i * seed + 3) % 9);
+            const auto write = "_rt_" + std::to_string((i + seed) % 7);
+            auto* pass = graph.addPass<TestPass>("generated", rg::PassNode::Type::CustomShader,
+                [&](auto& b, auto&) {
+                    b.read(b.createTexNode({.name = read, .key = read, .type = rg::TexNode::TexType::Temp}));
+                    b.write(b.createTexNode({.name = write, .key = write, .type = rg::TexNode::TexType::Temp}, true));
+                });
+            accesses[pass->ID()] = { read, write };
+        }
+        const auto order = graph.topologicalOrder();
+        std::set<std::string> accessed, read_first, written;
+        for (const auto id : order) {
+            const auto& [read, write] = accesses.at(id);
+            if (accessed.insert(read).second) read_first.insert(read);
+            accessed.insert(write);
+            written.insert(write);
+        }
+        std::set<std::string> expected;
+        for (const auto& key : read_first)
+            if (written.contains(key)) expected.insert(key);
+        const auto carried = graph.getCarriedOverKeys(order);
+        EXPECT_EQ(std::set<std::string>(carried.begin(), carried.end()), expected);
+        EXPECT_EQ(carried.size(), expected.size());
+    }
+}
 // Exercise the rule with different names, dimensions, nesting and visibility;
 // nothing here depends on a workshop ID, shader name or clock layer.
 TEST(RenderTargetLifetime, NestedCompositesClearBeforeChildrenWithoutErasingThem) {

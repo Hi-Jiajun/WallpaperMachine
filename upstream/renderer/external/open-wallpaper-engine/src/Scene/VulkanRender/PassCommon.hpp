@@ -511,6 +511,18 @@ inline TextureKey ToTexKey(wallpaper::SceneRenderTarget rt) {
     };
 }
 
+/// Gives each target that carries pixels into the next frame its own image.
+/// Runs before the passes are prepared: preparing them hands on the images of
+/// targets they are done with, and a carried target given one of those would
+/// be drawn over by the target that had it every frame.
+inline bool ReserveCarriedOverTargets(const wallpaper::Scene& scene, TextureCache& cache) {
+    for (const auto& [name, rt] : scene.renderTargets) {
+        if (! rt.carriesPreviousFrame) continue;
+        if (! cache.Reserve(name, ToTexKey(rt)).has_value()) return false;
+    }
+    return true;
+}
+
 inline TextureKey ToTexKeyMsaa(wallpaper::SceneRenderTarget rt,
                                VkSampleCountFlagBits        sample_count) {
     auto key          = ToTexKey(rt);

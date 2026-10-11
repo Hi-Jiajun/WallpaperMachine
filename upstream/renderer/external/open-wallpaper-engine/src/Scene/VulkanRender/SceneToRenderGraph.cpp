@@ -641,6 +641,21 @@ std::unique_ptr<rg::RenderGraph> wallpaper::sceneToRenderGraph(Scene& scene) {
                                             .type = rg::TexNode::TexType::Temp });
     }
 
+    // A target read before anything this frame writes it holds what the
+    // previous frame left there, so it must keep its own image from one frame
+    // to the next. Pooled, its image goes to another target once the frame is
+    // done with it, and that target's pixels are what the next frame reads --
+    // a motion blur trail then shows whatever else was drawn at that size. The
+    // scene output is exempt: the frame's prepass clears it before any reader.
+    for (const auto& key : rgraph->getCarriedOverKeys(rgraph->topologicalOrder())) {
+        if (scene.ResolveRenderTargetName(key) == scene.ResolveRenderTargetName(SpecTex_Default))
+            continue;
+        auto* target = scene.FindRenderTarget(key);
+        if (target == nullptr) continue;
+        target->carriesPreviousFrame = true;
+        target->allowReuse           = false;
+    }
+
     Set<std::string> written_targets {};
     Set<std::string> transfer_written_targets {};
     // Targets whose latest write is a transparent clear and nothing else yet.

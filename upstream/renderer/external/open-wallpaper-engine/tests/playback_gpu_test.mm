@@ -2232,6 +2232,30 @@ TEST_F(PlaybackGPU, GraphOrderingAndDescriptorWritesPreservePixels) {
         }
     }
 }
+// A target that carries its pixels into the next frame owns its image. It is
+// not handed one that a target earlier in the frame released -- that target
+// redraws it every frame -- and its own is never handed to a target after it.
+TEST_F(PlaybackGPU, CarriedTargetsShareTheirImageWithNoOtherTarget) {
+    auto&      cache = device.tex_cache();
+    const auto key   = ToTexKey(SceneRenderTarget {.width = 24, .height = 40, .allowReuse = true});
+    const auto earlier = cache.Query("_rt_carry_earlier", key);
+    ASSERT_TRUE(earlier.has_value());
+    cache.MarkShareReady("_rt_carry_earlier");
+
+    scene.renderTargets["_rt_carry_history"] =
+        SceneRenderTarget {.width = 24, .height = 40, .carriesPreviousFrame = true};
+    ASSERT_TRUE(ReserveCarriedOverTargets(scene, cache));
+    const auto history = cache.Query("_rt_carry_history", key, true);
+    ASSERT_TRUE(history.has_value());
+    EXPECT_NE(history->handle, earlier->handle);
+
+    cache.MarkShareReady("_rt_carry_history");
+    const auto later = cache.Query("_rt_carry_later", key);
+    ASSERT_TRUE(later.has_value());
+    EXPECT_NE(later->handle, history->handle);
+    EXPECT_EQ(later->handle, earlier->handle) << "released images still go to the next target";
+}
+
 // The batched executor leaves a hidden layer's first-use clear out only when
 // nothing can see the target. Every kind of reader keeps it, and a reader
 // then samples the clear, not the pixels the layer drew before it was hidden.

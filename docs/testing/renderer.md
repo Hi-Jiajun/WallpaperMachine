@@ -927,6 +927,20 @@ projection policies, hierarchy, depth and reflection.
   effect inputs are cleared explicitly when `copybackground=false`.
   `render_target_lifetime_test` asserts version lifetimes and a real transparent
   writer before an effect samples its empty input.
+- A target the frame reads before anything writes it, and writes later, carries
+  the previous frame's pixels: motion blur's history buffer. The render graph
+  flags it (`carriesPreviousFrame`), and the Vulkan renderer and the offscreen
+  probe reserve it an image of its own before preparing passes, so it is never
+  pooled. Pooled, it took an image another target redraws every frame and gave
+  its own to the next target of that size, so a trail blended in a faint copy
+  of some other layer that jumped about from frame to frame. The scene output
+  is exempt; the frame's prepass clears it first.
+  `RenderTargetLifetime.OnlyTargetsReadBeforeTheFrameWritesThemKeepTheirOwnImage`
+  and `.CarriedOverKeysAreTheOnesReadBeforeTheirFirstWrite` cover the graph,
+  `PlaybackGPU.CarriedTargetsShareTheirImageWithNoOtherTarget` the reservation.
+  It costs exactly those buffers' memory: a scene with 43 motion blur layers
+  allocated about 84 MB more, and its frames matched isolated allocation byte
+  for byte where they had differed.
 
 ### Animation and puppets
 

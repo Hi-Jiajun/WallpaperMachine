@@ -213,6 +213,14 @@ public:
     std::optional<ImageParameters> Query(std::string_view key, TextureKey content_hash,
                                          bool persist = false);
 
+    /// Gives `key` an image no other key has been handed, and never hands it
+    /// back to the pool. For a target that carries its pixels into the next
+    /// frame: an image it shared with another key would be drawn over by that
+    /// key every frame. Called before any pass is prepared, as preparing a pass
+    /// releases the images of the targets it is the last to use; a key that
+    /// already has an image keeps it.
+    std::optional<ImageParameters> Reserve(std::string_view key, TextureKey content_hash);
+
     void MarkShareReady(std::string_view key);
 
     /// Takes a render target out of the reuse pool so its pixels survive into
@@ -412,6 +420,9 @@ private:
     };
     std::vector<std::unique_ptr<QueryTex>> m_query_texs;
     Map<std::string, QueryTex*>            m_query_map;
+
+    std::optional<ImageParameters> AllocateQuery(std::string_view key, TextureKey content_hash,
+                                                 bool persist);
 };
 
 } // namespace vulkan

@@ -43,6 +43,10 @@ public:
     // all render pass
     std::vector<NodeID>                topologicalOrder() const;
     std::vector<std::vector<TexNode*>> getLastReadTexs(std::span<const NodeID>) const;
+    // Keys of the targets a pass reads before any pass writes them and a later
+    // pass writes: what such a target holds when it is read is what the
+    // previous frame left there (an effect's history buffer).
+    std::vector<std::string> getCarriedOverKeys(std::span<const NodeID>) const;
 
     void ToGraphviz(std::string_view path) const { m_dg.ToGraphviz(path); };
 

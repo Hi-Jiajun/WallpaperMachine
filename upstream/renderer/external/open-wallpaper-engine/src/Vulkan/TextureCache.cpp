@@ -1874,12 +1874,27 @@ std::optional<ImageParameters> TextureCache::Query(std::string_view key, Texture
         return query->image;
     }
 
+    return AllocateQuery(key, content_hash, persist);
+}
+
+std::optional<ImageParameters> TextureCache::Reserve(std::string_view key,
+                                                     TextureKey       content_hash) {
+    if (const auto it = m_query_map.find(std::string(key)); it != m_query_map.end()) {
+        it->second->share_ready = false;
+        it->second->persist     = true;
+        return it->second->image;
+    }
+    return AllocateQuery(key, content_hash, true);
+}
+
+std::optional<ImageParameters> TextureCache::AllocateQuery(std::string_view key,
+                                                           TextureKey content_hash, bool persist) {
     m_query_texs.emplace_back(std::make_unique<QueryTex>());
     auto& query                   = *m_query_texs.back();
     m_query_map[std::string(key)] = &query;
 
     query.index        = (idx)m_query_texs.size() - 1;
-    query.content_hash = tex_hash;
+    query.content_hash = TextureKey::HashValue(content_hash);
     query.format       = content_hash.format;
     query.query_keys.insert(std::string(key));
     query.persist = persist;

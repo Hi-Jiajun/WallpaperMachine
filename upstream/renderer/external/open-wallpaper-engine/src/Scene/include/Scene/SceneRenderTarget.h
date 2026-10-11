@@ -39,5 +39,9 @@ struct SceneRenderTarget {
     uint32_t      sample_count { 1 };
     /// Authored color intermediates may exceed one; masks/media keep RGBA8.
     TextureFormat format { TextureFormat::RGBA8 };
+    /// Read in a frame before anything writes it, so it holds what the previous
+    /// frame left there (an effect's history buffer). It owns its image: one
+    /// shared with another target would hold that target's pixels instead.
+    bool          carriesPreviousFrame { false };
 };
 } // namespace wallpaper
