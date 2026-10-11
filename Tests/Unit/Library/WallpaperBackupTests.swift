@@ -464,7 +464,7 @@ final class WallpaperBackupTests: XCTestCase {
             $0.mode = .rotate
             $0.source = .collection
             $0.collectionID = collection.id
-            $0.interval = 15
+            $0.interval = 45
         }
         let plan = try playlists.savePlan(from: "display-one", name: "Night plan")
         let placement = try StillImagePlacement(x: 0.2, y: 0.7, zoom: 1.5)
@@ -609,7 +609,7 @@ final class WallpaperBackupTests: XCTestCase {
             ("WallpaperMachine.wallpaperPresets", Data(#"{"version":2,"items":[]}"#.utf8)),
             ("WallpaperMachine.collections", Data(#"[{"id":"x","name":"Missing members"}]"#.utf8)),
             ("WallpaperMachine.playlistPlans", Data(#"[{"id":"p","name":"Bad","playlist":{"mode":"unknown"}}]"#.utf8)),
-            ("WallpaperMachine.playlists", Data(#"{"screen":{"wallpaperIDs":["a"],"interval":7}}"#.utf8)),
+            ("WallpaperMachine.playlists", Data(#"{"screen":{"wallpaperIDs":["a"],"interval":0}}"#.utf8)),
             ("WallpaperMachine.imagePlacements", Data(#"{"version":1,"placements":{"w":{"screen":{"x":2,"y":0.5,"zoom":1}}}}"#.utf8)),
             ("WallpaperMachine.imagePlacements", Data(#"{"version":2,"placements":{}}"#.utf8)),
             ("WallpaperMachine.hotKeys", Data(#"{"togglePlayback":{"keyCode":"oops","modifiers":0,"label":"P"}}"#.utf8)),

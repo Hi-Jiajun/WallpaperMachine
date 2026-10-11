@@ -13,7 +13,7 @@ the mode:
 | Mode | Rows | What happens |
 | --- | --- | --- |
 | **Off** | — | The wallpaper changes only when the user changes it. |
-| **Rotate wallpapers** | **Wallpapers** (All wallpapers, Favorites, This display's list, or a local collection), **Order** (In order, Shuffle), **How often** (every 5, 10, 15 or 30 minutes, every hour, every 2, 3, 6 or 12 hours, every day) | After each interval the display moves to the next wallpaper. |
+| **Rotate wallpapers** | **Wallpapers** (All wallpapers, Favorites, This display's list, or a local collection), **Order** (In order, Shuffle), **How often** (every 5, 10, 15 or 30 minutes, every hour, every 2, 3, 6 or 12 hours, every day, or **Custom**: any whole number of minutes from 1 to 10,080, one week) | After each interval the display moves to the next wallpaper. |
 | **Day and night** | **Day wallpaper**, **Day starts at**, **Night wallpaper**, **Night starts at** | The day wallpaper takes over at the day time and the night wallpaper at the night time. |
 
 For weekday schedules, sunrise/sunset, system appearance or temporary Focus
@@ -112,6 +112,11 @@ default (JSON; fields a newer build adds decode with defaults) and each display'
 next change in `WallpaperMachine.playlistNextChange`, so a relaunch neither
 restarts a long interval nor skips a change that fell due while the app was
 closed. Shuffle's round is kept for the running app only.
+
+Builds before custom intervals accept only the menu presets. Such a build
+reading a custom interval falls back to 30 minutes and saves that over it on its
+next playlist change, and its backup restore refuses a backup that contains one
+(playlists or saved plans) as an invalid preference value.
 
 ## Code
 

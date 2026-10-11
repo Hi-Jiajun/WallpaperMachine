@@ -28,14 +28,16 @@ enum PlaylistOrder: String, Codable, CaseIterable, Sendable {
 /// One display's playlist. Every field has a default, so a display nobody configured is `off`
 /// and a playlist saved by an older build decodes with the fields it lacks filled in.
 struct DisplayPlaylist: Codable, Equatable, Sendable {
-    /// The intervals the panel offers, in minutes.
+    /// The intervals the panel's menu offers, in minutes.
     static let intervals = [5, 10, 15, 30, 60, 120, 180, 360, 720, 1440]
     static let minutesPerDay = 24 * 60
+    /// Any whole number of minutes from one minute to a week can be typed in as a custom interval.
+    static let intervalRange = 1...(7 * minutesPerDay)
 
     var mode: PlaylistMode = .off
     var source: PlaylistSource = .all
     var order: PlaylistOrder = .sequential
-    /// Minutes between changes; one of `intervals`.
+    /// Minutes between changes; one of `intervals` or a custom value in `intervalRange`.
     var interval = 30
     var wallpaperIDs: [String] = []
     var collectionID: String?
@@ -56,7 +58,7 @@ struct DisplayPlaylist: Codable, Equatable, Sendable {
         source = (try? container.decodeIfPresent(PlaylistSource.self, forKey: .source)) ?? fallback.source
         order = (try? container.decodeIfPresent(PlaylistOrder.self, forKey: .order)) ?? fallback.order
         let interval = (try? container.decodeIfPresent(Int.self, forKey: .interval)) ?? fallback.interval
-        self.interval = Self.intervals.contains(interval) ? interval : fallback.interval
+        self.interval = Self.intervalRange.contains(interval) ? interval : fallback.interval
         wallpaperIDs = (try? container.decodeIfPresent([String].self, forKey: .wallpaperIDs)) ?? []
         collectionID = try? container.decodeIfPresent(String.self, forKey: .collectionID)
         planID = try? container.decodeIfPresent(String.self, forKey: .planID)

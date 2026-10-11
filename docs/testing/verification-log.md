@@ -25,6 +25,24 @@ move the oldest entries verbatim into
 (or a new dated archive file) first, and promote anything durable before it
 goes. Trimming is allowed; editing an entry's recorded result is not.
 
+## 2026-10-11 — Custom playlist interval: review fixes and first native gate
+
+- Review follow-up for the custom rotation interval: abandoned or refused minutes keep or drop drafts correctly; draft keys come from one helper; the hint follows the native range; the minutes field reuses the display number helper; docs note older builds' fallback and backup refusal.
+- First full gate on macOS: python3 scripts/test.py, first run failed 2 stale tests (PlaylistPlannerTests and WallpaperBackupTests still expected a 7-minute interval to be refused); both now use 0. Rerun: 1,321 passed, 0 failed, 14 skipped of 1,335.
+- Run in a detached worktree of the PR branch, linked against main's libwallpaper_bridge.a (no App/Bridge differences between the trees).
+- Headless Chromium harness over renderSettings with a stub snapshot: Custom sends nothing and starts from the saved interval; leaving after an invalid 0 restores the saved preset; switching apps keeps a typed value; a valid value committed on leave is saved; a refused send keeps the field and value next to the error; a typed preset snaps the menu back.
+- Not checked: real WKWebView panel appearance and focus events (focusout was dispatched by hand in a hidden tab); no Release build, the branch is behind main.
+
+## 2026-10-10 — Custom playlist rotation interval
+
+Playlists accept any whole number of minutes from 1 to 10,080 next to the preset menu. Verified from a Linux cloud container without Xcode.
+
+- `python3 -m unittest discover -s scripts/tests` — 271 tests OK, 17 skipped (includes panel localization key parity)
+- `node --check` on settings.js, plans.js and the three locale catalogs — OK
+- Headless Chromium harness over `renderSettings`: choosing Custom sends nothing and focuses the minutes field; 45 sends `interval: 45`; 0 is refused locally; 60 snaps the menu back to Every hour
+- Native gate (`python3 scripts/test.py`, incl. new WebPanelPlaylistTests/PlaylistStoreTests cases) — not run: needs macOS/Xcode
+- WKWebView appearance in the real panel — unchecked; no Release build
+
 ## 2026-10-10 — Lock state and scene-assets folder no longer probed per update
 
 Cached the session lock state in WallpaperPresentationPolicy (asked at start, lock/unlock, display wake, user switch and while locked) and resolved the scene-assets folder with its readiness in WorkshopStore instead of in every page snapshot.
@@ -111,25 +129,3 @@ Why MTLCompilerService recompiled Lucy (3521337568) after a launch despite warm 
 - python3 scripts/test.py: 267 Python tests passed; native 1315 passed, 0 failed, 14 skipped of 1329. Full gate run once.
 - Gap: smoothness after the fix on the real desktop is not yet measured; the same capture script must be re-run against a build that contains it.
 - Separate, unfixed: a web page assigned while its display is suspended loads detached, so its first reveal is a cold start (327 ms hidden content plus shader compiles on 2026-10-09 18:03:57).
-
-## 2026-10-09 — v1.3.2 published release and import-helper recovery
-
-- Published [v1.3.2](https://github.com/WallpaperMachine/WallpaperMachine/releases/tag/v1.3.2), build 31, from `e278ae8f205e324835facd6f84c70e27f3d31cc7`; [Version run 37825423704](https://github.com/WallpaperMachine/WallpaperMachine/actions/runs/37825423704) passed every required job. Failed, unpublished v1.3.0/v1.3.1 tags were preserved; notes cover v1.2.6 through v1.3.2.
-- Import-helper repair `8fb411a`: six targeted child-process tests passed normally and with `TEST_RUNNER_LIBDISPATCH_COOPERATIVE_POOL_STRICT=1`. Local `python3 scripts/test.py` passed 268 Python and 1,313 native tests, with 14 skips; no desktop picker was opened.
-- CI `python3 scripts/test.py --serial` passed 268 Python and 1,312 native tests, with 15 skips and no failures. Rust core, bridge, core-integration and shader checks passed; six explicit desktop/corpus exclusions and three missing-asset shader skips remain unverified.
-- CI renderer checks passed 12 generated pixel comparisons and eight projects through two reloads. Seven asset-dependent cases were skipped. The compiled timer probe exited 77 (35.20 ms median for a 10 ms wait), so ten named wall-clock cadence cases were skipped under `--allow-imprecise-timers`; these skips are not passing runtime coverage.
-- CI verified the Release bundle and mounted disk image. Independently downloaded the public DMG: 36,496,549 bytes, SHA-256 `abaa683f21d1c24e97f8eb6f8c08839e9ba1bc0a4b573b893ea1d4258af47e32`; it matches the CI artifact, public sidecar, release asset metadata and public latest update manifest.
-- Release body matches the tagged English notes and `Built from` commit; bundled changelog contains English and Simplified Chinese. Latest resolves to v1.3.2 and equals the highest public stable version. Public DMG and manifest requests succeeded.
-- `gh attestation verify` passed for the public DMG, restricted to this repository and `.github/workflows/build.yml`, rejecting self-hosted runners and enforcing source digest `8fb411a34d05dc1a3f4218afaa1d647bc9d94089`. As documented, this event digest precedes the version-bump commit; `Built from` records the built revision.
-- No install, launch/restart, desktop/Spaces/Mission Control/VoiceOver, real Siri/Focus, or manual disk-image smoke was performed. CI packaging and headless checks do not verify those surfaces. The release remains self-signed, not Developer ID signed or notarized.
-
-## 2026-10-09 — Release recovery after hosted test timing failures
-
-- v1.3.0 was tagged but not published: attempt 1 failed an onboarding test that counted incoming snapshots as requests; attempt 2 failed ThreadTimerTest.RequestsAfterALongWaitStillRespectTheCeiling on a host whose timer probe returned 77.
-- Test-only welcome replay fix `5ff25f1` now checks outgoing actions and injects an unrelated snapshot. Application code remains unchanged.
-- Added the omitted 50 ms cadence test to the existing exact-name CI fallback, only after the compiled timer probe reports imprecise timers. Default local runs still execute it; other failures remain failures.
-- Version workflow accepts optional notes_from, passed as release_notes.py --previous, so a new patch after an unpublished failed tag can include all changes since the last public release. Tags and live releases are not rewritten.
-- Python renderer/version/release-notes suites: 106 passed. Workflow shell arguments verified for default and explicit previous tag; developer preview includes the unpublished feature commits from v1.2.6.
-- Full local gate: 268 Python and 1,312 native passed, 0 failed, 14 skipped; artifacts/tests/Tests-20261009-012014-576231.xcresult (disposable).
-- First local renderer pass hit the time-sensitive UnchangedPresent frame-order assertion. Separate rerun python3 scripts/check_renderer.py --skip-build passed, with realtime_checks_executed=true, 12 equal pixel comparisons and 8 x 2 reloads; four asset checks skipped. Evidence artifacts/renderer/adaptive-20261009-012147 (disposable).
-- No runtime implementation, desktop interaction, installation, first-launch or manual-smoke changes. Recovery publication is tracked separately and must still pass the CI gate.

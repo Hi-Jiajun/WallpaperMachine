@@ -136,9 +136,9 @@ final class PlaylistPlannerTests: XCTestCase {
 
     func testSavedPlaylistsDecodeWithWhatTheyLack() throws {
         let decoded = try JSONDecoder().decode(
-            DisplayPlaylist.self, from: Data(#"{"mode":"rotate","interval":7,"dayStart":9999,"source":"sideways"}"#.utf8))
+            DisplayPlaylist.self, from: Data(#"{"mode":"rotate","interval":0,"dayStart":9999,"source":"sideways"}"#.utf8))
         XCTAssertEqual(decoded.mode, .rotate)
-        XCTAssertEqual(decoded.interval, DisplayPlaylist().interval, "an interval the panel never offers falls back")
+        XCTAssertEqual(decoded.interval, DisplayPlaylist().interval, "an interval outside the range falls back")
         XCTAssertEqual(decoded.dayStart, DisplayPlaylist().dayStart)
         XCTAssertEqual(decoded.source, .all)
     }

@@ -16,8 +16,10 @@ const collectionName = (state, id) => collectionsOf(state).find(item => item.id 
 
 // Minutes as the interval menu names them, shared with the display rows in settings.js.
 export function intervalLabel(minutes) {
+  if (minutes === 1) return t('Every minute');
   if (minutes === 60) return t('Every hour');
   if (minutes === 1440) return t('Every day');
+  if (minutes % 1440 === 0) return t('Every {count} days', { count: minutes / 1440 });
   return minutes % 60 === 0 ? t('Every {count} hours', { count: minutes / 60 }) : t('Every {count} minutes', { count: minutes });
 }
 
