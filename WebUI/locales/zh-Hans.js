@@ -967,7 +967,7 @@ export default {
   'Records extra detail from now on, including after a restart. Turn it off when you are done.': '从现在起记录更多细节，重启后仍然有效。排查完毕后请关闭。',
   'Diagnostics report': '诊断报告',
   'Export…': '导出…',
-  'Saves recent logs, lock screen and crash reports and a system summary as one .zip file to attach to a bug report. Home folder paths, your Mac user name and Steam account names are replaced.': '将最近的日志、锁屏日志、崩溃报告和系统摘要存为一个 .zip 文件，可附在问题报告中。个人文件夹路径、Mac 用户名和 Steam 账户名会被替换。',
+  'Saves recent logs, the lock screen log, macOS crash, resource, spin and hang reports, which wallpapers were loading when WallpaperMachine quit unexpectedly, and a system summary as one .zip file to attach to a bug report. Home folder paths, your Mac user name and Steam account names are replaced.': '将最近的日志、锁屏日志、macOS 的崩溃、资源占用、卡顿（spin）和无响应（hang）报告、WallpaperMachine 意外退出时正在加载的壁纸记录，以及系统摘要存为一个 .zip 文件，可附在问题报告中。个人文件夹路径、Mac 用户名和 Steam 账户名会被替换。',
 
   // Settings: about
   'Independent macOS client': '独立的 macOS 客户端',

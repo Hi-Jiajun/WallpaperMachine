@@ -106,6 +106,7 @@ reveals it in Finder. It is built off the main actor by `DiagnosticsBundle`
 |---|---|
 | `logs/<session>/<N>.log` | Newest 5 sessions, newest files first, at most 64 MB in total. A file that would exceed the budget contributes its tail, marked `[truncated: …]` |
 | `lock-screen/extension.log` | The extension's log, if present |
+| `load-journal.json` | The crash-loop guard's journal, [crash-recovery.md](crash-recovery.md): the strikes per wallpaper and the scenes that were opening when the app last stopped. Wallpaper ids, display numbers, times, the build and an opaque session id; no paths. The file exists once a scene has been opened; without it the report notes that it was not present |
 | `crash-reports/*.ips` | Up to 5 macOS crash reports from the last 14 days whose name starts with `WallpaperMachine` (app and extension) |
 | `environment.txt` | The environment lines above, read at export time, plus the saved renderer preferences and the backend each running scene actually uses |
 | `README.txt` | What is included, what was missing or skipped, and what was redacted |

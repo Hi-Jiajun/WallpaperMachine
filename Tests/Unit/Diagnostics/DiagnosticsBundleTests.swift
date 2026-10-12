@@ -101,6 +101,9 @@ final class DiagnosticsBundleTests: XCTestCase {
             at: exportedAt)
         XCTAssertTrue(report.missing.contains("lock-screen/extension.log was not readable"))
         XCTAssertFalse(report.included.contains("lock-screen/extension.log"))
+        XCTAssertFalse(
+            report.missing.contains { $0.hasPrefix("load-journal.json") },
+            "a caller with no journal source gets no note about one")
         XCTAssertEqual(report.included, report.included.sorted())
         XCTAssertTrue(report.included.contains("logs/20260927-120000/0.log"))
         XCTAssertTrue(report.included.contains("environment.txt"))
@@ -115,6 +118,52 @@ final class DiagnosticsBundleTests: XCTestCase {
         XCTAssertTrue(readme.contains("logs/20260927-120000/0.log"))
         XCTAssertTrue(readme.contains("lock-screen/extension.log was not readable"))
         XCTAssertNotEqual(try Data(contentsOf: destination), Data("previous".utf8))
+    }
+
+    func testLoadJournalIsIncludedAndRedacted() throws {
+        let logs = try makeLogs(["20260927-120000": ["0.log": "ok\n"]])
+        let journal = root.appendingPathComponent("load-journal.json")
+        let body = """
+            {"version":1,"build":"1.3.2 (45)","session":"9f3a6c0d2b81e475",\
+            "strikes":{"3177024520":{"count":1,"last_at":1791800000,"display":7}},\
+            "in_flight":[],"note":"/Users/alice/Library/Application Support/WallpaperMachine"}
+            """
+        try Data(body.utf8).write(to: journal)
+
+        let exported = try export(makeBundle(logs: logs, loadJournal: journal))
+        XCTAssertTrue(exported.report.included.contains("load-journal.json"))
+        XCTAssertFalse(exported.report.missing.contains { $0.hasPrefix("load-journal.json") })
+
+        let written = try text(exported, "load-journal.json")
+        XCTAssertTrue(written.contains("~/Library/Application Support/WallpaperMachine"))
+        XCTAssertFalse(written.contains("alice"))
+        let parsed = try JSONSerialization.jsonObject(with: Data(written.utf8)) as? [String: Any]
+        let strikes = parsed?["strikes"] as? [String: [String: Any]]
+        XCTAssertEqual(strikes?["3177024520"]?["count"] as? Int, 1, "the strike history survives redaction")
+        XCTAssertTrue(try text(exported, "README.txt").contains("load-journal.json"))
+    }
+
+    func testMissingLoadJournalIsNotedAndTheRestIsStillExported() throws {
+        let logs = try makeLogs(["20260927-120000": ["0.log": "ok\n"]])
+        let journal = root.appendingPathComponent("never-written/load-journal.json")
+
+        let exported = try export(makeBundle(logs: logs, loadJournal: journal))
+        XCTAssertEqual(exported.report.missing.filter { $0.hasPrefix("load-journal.json") }, ["load-journal.json was not present"])
+        XCTAssertFalse(exported.report.included.contains("load-journal.json"))
+        XCTAssertTrue(exported.report.included.contains("logs/20260927-120000/0.log"))
+        XCTAssertTrue(exported.report.included.contains("environment.txt"))
+        XCTAssertTrue(try text(exported, "README.txt").contains("load-journal.json was not present"))
+    }
+
+    func testUnreadableLoadJournalIsNotedDifferentlyFromAnAbsentOne() throws {
+        let logs = try makeLogs(["20260927-120000": ["0.log": "ok\n"]])
+        let journal = root.appendingPathComponent("load-journal.json", isDirectory: true)
+        try FileManager.default.createDirectory(at: journal, withIntermediateDirectories: true)
+
+        let exported = try export(makeBundle(logs: logs, loadJournal: journal))
+        XCTAssertEqual(exported.report.missing.filter { $0.hasPrefix("load-journal.json") }, ["load-journal.json was not readable"])
+        XCTAssertFalse(exported.report.included.contains("load-journal.json"))
+        XCTAssertTrue(exported.report.included.contains("logs/20260927-120000/0.log"))
     }
 
     func testSuggestedFileNameUsesLocalPOSIXTime() {
@@ -135,7 +184,8 @@ final class DiagnosticsBundleTests: XCTestCase {
     func testSourcesUseTheLockScreenExchangeAndDiagnosticReports() {
         let home = root.appendingPathComponent("home")
         let logs = root.appendingPathComponent("logs")
-        let sources = DiagnosticsBundle.sources(logsRoot: logs, home: home)
+        let support = root.appendingPathComponent("support")
+        let sources = DiagnosticsBundle.sources(logsRoot: logs, home: home, supportRoot: support)
         XCTAssertEqual(sources.logsRoot.standardizedFileURL, logs.standardizedFileURL)
         XCTAssertEqual(
             sources.extensionLog.standardizedFileURL,
@@ -143,6 +193,7 @@ final class DiagnosticsBundleTests: XCTestCase {
         XCTAssertEqual(
             sources.crashReports.standardizedFileURL,
             home.appending(path: "Library/Logs/DiagnosticReports").standardizedFileURL)
+        XCTAssertEqual(sources.loadJournal?.standardizedFileURL, support.appending(path: "load-journal.json").standardizedFileURL)
     }
 
     private struct Exported {
@@ -160,13 +211,15 @@ final class DiagnosticsBundleTests: XCTestCase {
         logs: URL,
         extensionLog: URL? = nil,
         crashes: URL? = nil,
+        loadJournal: URL? = nil,
         limits: DiagnosticsBundle.Limits = DiagnosticsBundle.Limits()
     ) -> DiagnosticsBundle {
         DiagnosticsBundle(
             sources: DiagnosticsBundle.Sources(
                 logsRoot: logs,
                 extensionLog: extensionLog ?? root.appendingPathComponent("absent-extension.log"),
-                crashReports: crashes ?? root.appendingPathComponent("absent-crashes")),
+                crashReports: crashes ?? root.appendingPathComponent("absent-crashes"),
+                loadJournal: loadJournal),
             limits: limits,
             redactor: DiagnosticsRedactor(homeDirectory: "/Users/alice", userNames: ["alice"], secrets: ["steamalice"]))
     }

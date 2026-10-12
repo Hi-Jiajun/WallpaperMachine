@@ -1,7 +1,8 @@
 import Foundation
 
 /// A zip a user can attach to a bug report: recent logs, the lock-screen
-/// extension log, crash reports and the environment lines they were asked for.
+/// extension log, the load journal, crash reports and the environment lines
+/// they were asked for.
 ///
 /// Synchronous and off the main actor. The caller decides where it runs.
 /// Missing sources are notes in the report, not failures — a bug report with
@@ -11,6 +12,9 @@ struct DiagnosticsBundle {
         var logsRoot: URL
         var extensionLog: URL
         var crashReports: URL
+        /// The bridge's `load-journal.json` (see docs/features/crash-recovery.md).
+        /// `nil` means the caller has no journal to offer, which is not noted.
+        var loadJournal: URL? = nil
     }
 
     struct Limits {
@@ -29,11 +33,19 @@ struct DiagnosticsBundle {
     var limits = Limits()
     var redactor: DiagnosticsRedactor
 
-    static func sources(logsRoot: URL, home: URL = FileManager.default.homeDirectoryForCurrentUser) -> Sources {
+    /// The file the bridge keeps beside `config.toml`.
+    static let loadJournalFileName = "load-journal.json"
+
+    static func sources(
+        logsRoot: URL,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        supportRoot: URL = ClientPaths.supportURL
+    ) -> Sources {
         Sources(
             logsRoot: logsRoot,
             extensionLog: home.appending(path: LockScreenConfiguration.exchangeRelativePath).appending(path: "extension.log"),
-            crashReports: home.appending(path: "Library/Logs/DiagnosticReports"))
+            crashReports: home.appending(path: "Library/Logs/DiagnosticReports"),
+            loadJournal: supportRoot.appending(path: loadJournalFileName))
     }
 
     /// Local time, POSIX locale, so the name sorts and does not pick up a
@@ -62,6 +74,7 @@ struct DiagnosticsBundle {
         var missing: [String] = []
         try collectLogs(into: staging, included: &included, missing: &missing)
         try collectExtensionLog(into: staging, included: &included, missing: &missing)
+        try collectLoadJournal(into: staging, included: &included, missing: &missing)
         try collectCrashReports(into: staging, at: date, included: &included, missing: &missing)
         try write(
             redactor.redact(environment.joined(separator: "\n") + "\n"),
@@ -169,6 +182,24 @@ struct DiagnosticsBundle {
         }
     }
 
+    /// Which wallpapers the app was opening when it died, and how often. Absent
+    /// is normal: the file exists only once a scene has been opened, so it is a
+    /// note, and the rest of the report is unaffected.
+    private func collectLoadJournal(into staging: URL, included: inout [String], missing: inout [String]) throws {
+        guard let source = sources.loadJournal else { return }
+        let relative = Self.loadJournalFileName
+        let data: Data
+        do {
+            data = try Data(contentsOf: source)
+        } catch {
+            let absent = (error as? CocoaError)?.code == .fileReadNoSuchFile
+            missing.append("\(relative) was not \(absent ? "present" : "readable")")
+            return
+        }
+        try write(redactor.redact(String(decoding: data, as: UTF8.self)), to: staging.appending(path: relative))
+        included.append(relative)
+    }
+
     private func collectCrashReports(
         into staging: URL,
         at date: Date,
@@ -230,7 +261,7 @@ struct DiagnosticsBundle {
         Wallpaper Machine diagnostics
         Generated: \(generated)
 
-        This archive is for a bug report. It holds the newest application log sessions that fit in the export limit, the lock-screen extension log, recent crash reports, and the environment lines supplied at export.
+        This archive is for a bug report. It holds the newest application log sessions that fit in the export limit, the lock-screen extension log, the load journal (which wallpapers the app was opening when it last quit unexpectedly), recent crash reports, and the environment lines supplied at export.
 
         Home folder paths were replaced with ~. The macOS user name was replaced with <user>. Steam account names were replaced with <account>.
 

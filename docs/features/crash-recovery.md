@@ -128,8 +128,8 @@ engine.
 - A crash later than the settle window is not attributed to a load.
 - Isolated support roots (`WALLPAPER_MACHINE_HOME`, tests) have their own journal,
   because it lives beside `config.toml`.
-- The journal is not in the Settings backup package and is not part of the diagnostics
-  report yet.
+- The journal is not in the Settings backup package. It is in the diagnostics report (see
+  below).
 - A file that cannot be parsed, or has an unknown version, is renamed to
   `load-journal.json.corrupt` and the journal starts empty. If it cannot be written the
   load goes ahead; the journal never blocks one.
@@ -154,6 +154,19 @@ by another build is discarded whole, strikes and in-flight entries alike. `sessi
 identifies the process that wrote the file. Times are Unix seconds. Writes go through a
 temporary file and a rename and are not synced: the file has to survive the process
 dying, which the page cache does, not a power cut.
+
+## In the diagnostics report
+
+**Export…** under Settings → Storage → Troubleshooting → Diagnostics report puts a copy of
+`load-journal.json` at the root of the zip (`DiagnosticsBundle.collectLoadJournal`,
+see [diagnostics.md](diagnostics.md#diagnostics-report)), so a bug report about a held
+wallpaper carries the strike history. It goes through the same redaction as the logs
+(the file holds no paths today, so this only guards later fields) and `README.txt` lists
+it. A missing file is a note under "Not included" (`load-journal.json was not present`),
+not a failure: the file is written only once a scene has been opened. One that exists but
+cannot be read is noted as not readable. The crash report of the run that died is picked
+up by the existing `crash-reports/*.ips` rule, and the `load journal:` lines in the
+exported logs name the same wallpaper ids.
 
 ## Logging
 
@@ -186,6 +199,9 @@ Device-free, against the fake engine and a temporary support root:
   while startup still holds the actor (or a load that begins after the quit) leaves no
   strike, only scenes that
   really open are recorded, quitting and failing loads leave no strike.
+- `DiagnosticsBundleTests`: the journal is exported at the zip root, redacted and listed
+  in `README.txt`, its strike history survives redaction, and a missing or unreadable
+  journal is noted while the rest of the report is still exported.
 - `ControlPanelHeldWallpaperTests` (hosted, windowless web view): the panel snapshot names
   each held wallpaper with the localized sentence, `releaseHeld` reaches the bridge once for
   a held wallpaper and rejects an installed one that is not held, the banner lists the rows
