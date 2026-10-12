@@ -41,6 +41,17 @@ unchanged. A newly acquired surface or a changed wallpaper still needs an initia
 load, macOS can show its own cached snapshot before it presents the extension, and
 real lock/wake timing is OS-controlled.
 
+Whether the display is asleep and whether the session is locked are read from the
+system each time a surface decides, not remembered from a notification. A surface asks
+about its own display, so one monitor sleeping does not pause the surface on another,
+and a surface acquired while the displays sleep pauses as soon as its first frame
+exists. Display sleep and wake, system sleep and wake, lock, unlock and the wallpaper
+service's wake notice only start a re-check: at once, and again 0.25, 0.75 and 2
+seconds later, because displays, the session and the video decoder do not all come
+back at the same moment. A notification that arrives early, late or not at all
+therefore cannot leave a surface paused or rendering for good. A newer event replaces
+the checks still pending, and a surface whose state did not change does nothing.
+
 ### Display changes
 
 Topology refreshes stage the next complete configuration before
@@ -365,6 +376,20 @@ delivery, sleep/wake visuals, live registration repair, ending a genuinely stale
 extension process, macOS choosing the intended extension and the wallpaper service's
 wake and time-change notices completing without an error in WallpaperAgent's log still
 require an authorized desktop check.
+
+### After sleep, wake, lock and unlock
+
+Each of those events logs one line when the surfaces re-check, and a surface logs a
+`Playback` line only when its paused state actually changes:
+
+```sh
+grep 'Re-checking presentation\|Playback display' ~/Library/Application\ Support/WallpaperMachine/LockScreenExchange/extension.log
+```
+
+`Re-checking presentation (display wake) surfaces=1` names the cause (`display sleep`,
+`display wake`, `system sleep`, `system wake`, `screen locked`, `screen unlocked` or
+`wallpaper service wake`). The `Playback ... paused=` line after it should match the real
+display state, including after a wake for which no `display wake` line appears.
 
 ### After a macOS update
 

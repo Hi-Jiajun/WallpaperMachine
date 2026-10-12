@@ -519,13 +519,20 @@ or depend on a second physical monitor.
   sorted, and the live runtime's encodings of an Objective-C protocol. The request
   handlers live in the extension target, which the unit tests do not load; their
   agreement with the system is what the drift line in `extension.log` reports.
+- `DisplayPowerProbeTests` — a known display answering for itself, a display-less
+  surface counting as asleep only when every online display is, no displays not
+  counting as asleep, and the power state read at each question rather than remembered.
+- `LockScreenReevaluationBurstTests` — a check now and one at each offset, a newer
+  trigger retiring the earlier burst even for a check already on its way, cancel, and
+  the sleeping schedule running each check once and not running a cancelled one.
 - `WallpaperPresentationAuthorityTests` — both display/host wake orders, user
   pause surviving sleep and wake, a lock-screen surface presenting only while
   locked, and an unlocked one settling for `desktopSettleBudget` before it holds
   a frame.
 
 Not covered: real lock-screen visual timing, private XPC snapshot transport, the
-wallpaper service's wake and time-change notices completing, live
+wallpaper service's wake and time-change notices completing, the real display power
+and session state after sleep, wake, lock and unlock, live
 registration repair, ending a genuinely stale extension process and macOS choosing
 the intended extension copy; these need an authorized runtime check
 ([lock-screen](../features/lock-screen.md#verification)).

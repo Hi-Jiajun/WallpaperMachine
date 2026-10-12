@@ -291,6 +291,11 @@ earlier wallpaper (select it again in System Settings once).
       the error so Exit can be retried.
 - [ ] Lock and unlock the screen and confirm the provider becomes active with
       playback unpaused.
+- [ ] Put the displays to sleep and wake them, then close and reopen a laptop lid, with
+      the lock screen or screen saver animating: `extension.log` shows a `Re-checking
+      presentation` line per event and the `Playback ... paused=` lines follow the real
+      display state, including after a wake that logs no `display wake`
+      ([lock-screen](../features/lock-screen.md#after-sleep-wake-lock-and-unlock)).
 - [ ] Do not run this alongside a competing global wallpaper manager; a conflict
       is reported and ownership-aware restoration runs instead.
 

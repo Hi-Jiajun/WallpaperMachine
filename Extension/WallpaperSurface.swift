@@ -322,7 +322,7 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
     return WallpaperPresentationAuthority.Request(
       role: preview ? .preview : .lockScreen,
       userPaused: scene.paused,
-      displaysAsleep: WallpaperController.shared.displaysAsleep,
+      displaysAsleep: WallpaperController.shared.displayPower.displaysAsleep(for: displayID),
       sessionLocked: locked,
       presentationMode: presentation,
       hostActivity: activity == "suspended" ? .suspended : .active,

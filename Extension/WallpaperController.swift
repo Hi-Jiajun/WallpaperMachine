@@ -6,7 +6,14 @@ final class WallpaperController {
   private let surfaces = LockScreenSurfaceRegistry<WallpaperSurface>()
   private(set) var configuration: LockScreenConfiguration?
   private var observers: [NSObjectProtocol] = []
-  private(set) var displaysAsleep = false
+  /// Asked each time a surface decides whether to present, so a missed sleep or
+  /// wake notification cannot leave it paused or rendering.
+  let displayPower = DisplayPowerProbe.system
+  /// Every signal that display power or the lock state may have changed only
+  /// starts this: the answer comes from the system, now and over the next 2 s.
+  private lazy var reevaluation = LockScreenReevaluationBurst(perform: { [weak self] in
+    self?.surfaces.values.forEach { $0.applyPolicy() }
+  })
   private var started = false
   /// Static so the extension's listener can count a connection off the main queue.
   nonisolated static let idleExit = LockScreenIdleExit(
@@ -23,24 +30,26 @@ final class WallpaperController {
     WallpaperRuntime.removeLegacyExchange()
     reload()
     let workspace = NSWorkspace.shared.notificationCenter
-    for (name, asleep) in [
-      (NSWorkspace.screensDidSleepNotification, true),
-      (NSWorkspace.screensDidWakeNotification, false),
+    for (name, cause) in [
+      (NSWorkspace.screensDidSleepNotification, "display sleep"),
+      (NSWorkspace.screensDidWakeNotification, "display wake"),
+      (NSWorkspace.willSleepNotification, "system sleep"),
+      (NSWorkspace.didWakeNotification, "system wake"),
     ] {
       observers.append(
         workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-          MainActor.assumeIsolated {
-            self?.displaysAsleep = asleep
-            self?.surfaces.values.forEach { $0.applyPolicy() }
-          }
+          MainActor.assumeIsolated { self?.presentationEnvironmentChanged(cause: cause) }
         })
     }
-    for name in ["com.apple.screenIsLocked", "com.apple.screenIsUnlocked"] {
+    for (name, cause) in [
+      ("com.apple.screenIsLocked", "screen locked"),
+      ("com.apple.screenIsUnlocked", "screen unlocked"),
+    ] {
       observers.append(
         DistributedNotificationCenter.default().addObserver(
           forName: .init(name), object: nil, queue: .main
         ) { [weak self] _ in
-          MainActor.assumeIsolated { self?.surfaces.values.forEach { $0.applyPolicy() } }
+          MainActor.assumeIsolated { self?.presentationEnvironmentChanged(cause: cause) }
         })
     }
     CFNotificationCenterAddObserver(
@@ -209,14 +218,23 @@ final class WallpaperController {
   }
 
   /// A notice the wallpaper service forwards to its extensions. Waking is the only one that
-  /// needs work: surfaces re-evaluate whether they should be presenting. The others, such as
+  /// needs work: surfaces re-check whether they should be presenting. The others, such as
   /// `SignificantTimeChangeNotification`, are logged once so a new kind is noticed.
   func hostNotification(named name: String) {
     if name == "com.apple.wallpaper.hostDidWake" {
-      surfaces.values.forEach { $0.applyPolicy() }
+      presentationEnvironmentChanged(cause: "wallpaper service wake")
     } else if WallpaperRuntime.firstTime("host-notification-\(name)") {
       WallpaperRuntime.log("Host notification \(name) needs no action")
     }
+  }
+
+  /// Display power or the lock state may have changed. Nothing here trusts the signal to say
+  /// which: each surface reads both from the system when it decides, now and again shortly
+  /// after, because a display, a decoder or the session dictionary can trail the notification
+  /// and some notifications never arrive.
+  private func presentationEnvironmentChanged(cause: String) {
+    WallpaperRuntime.log("Re-checking presentation (\(cause)) surfaces=\(surfaces.values.count)")
+    reevaluation.trigger()
   }
 
   func update(id value: Any?, request: Any?) throws {

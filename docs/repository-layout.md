@@ -66,7 +66,7 @@ Extension/                         WallpaperMachineExtension sources, Info.plist
                                    its own string catalog (Localizable.xcstrings), third-party notice
 Shared/                            contracts compiled into both targets: lock-screen configuration, status and surface
                                    lifecycle, web-wallpaper protocol and screen-saver surface, RuntimeCounters,
-                                   WallpaperPresentationAuthority
+                                   WallpaperPresentationAuthority, display power and its re-check burst
 WebUI/                             HTML/CSS/JS control panel; bundled verbatim as the app resource folder WebUI
   app-icons/                       Dock icon variants (the Settings icon picker and the Dock icon)
   locales/                         one panel catalog module per shipped language (zh-Hans.js, zh-Hant.js, ja.js), registered in i18n.js

@@ -446,7 +446,7 @@ only on macOS 26 and later (`LockScreenConfiguration.isSupportedBySystem`).
 |---|---|
 | `WallpaperExtension.swift` | `@main AppExtension`; XPC handler for the whole system protocol (21 requests on macOS 27.0): `acquire`/`update`/`invalidate`/`snapshot`/`provideSettingsViewModels`/`isChoiceDownloaded`/`selectedChoicesDidChange`/`handleNotification` do the work, the rest reply "nothing to do"; connection acceptance |
 | `WallpaperRuntime.swift` | Loads and checks the private hosting ABI, verifies the caller's code signature via its audit token, resolves `CAContext`, compares the exported XPC protocol with the system's (`verifyXPCProtocol`), reads the published configuration and asset paths, logging |
-| `WallpaperController.swift` | Singleton surface registry; reacts to screen sleep/wake, `com.apple.screenIsLocked`/`Unlocked`, the wallpaper service's `hostDidWake` notice, and the Darwin notification `app.wallpapermachine.lock-screen.changed` |
+| `WallpaperController.swift` | Singleton surface registry; screen and system sleep/wake, `com.apple.screenIsLocked`/`Unlocked` and the wallpaper service's `hostDidWake` notice each start a bounded re-check burst of every surface (display power and lock state are read from the system, never remembered); reloads on the Darwin notification `app.wallpapermachine.lock-screen.changed` |
 | `WallpaperSurface.swift` | One `WallpaperID` to one `CAContext` with a scene/video `CAMetalLayer` or live WebKit layer tree; bounded geometry, readiness and snapshots |
 | `WallpaperSettingsProvider.swift` | Encodes the private wallpaper settings view-model payload |
 | `WallpaperExtensionBridge.h` | Objective-C bridging header declaring the private `CAContext`, `NSXPCConnection.auditToken` and the XPC protocol, selector for selector as the system declares it; also includes `SceneWallpaperBindings.h` |
@@ -473,6 +473,11 @@ contracts they must agree on:
   screen saver (selected by `LockScreenScene.webEntryFile`); `LockScreenSurfaceRegistry`,
   `LockScreenFrameBacking` and `LockScreenIdleExit` manage surface lifecycle, pixel backing and
   the extension process's exit once nothing uses it, so the next launch runs the registered copy.
+- `DisplayPowerProbe` answers whether a surface's display is asleep (`CGDisplayIsAsleep`, or
+  every online display for a surface with none) each time `WallpaperPresentationAuthority` is
+  asked, and `LockScreenReevaluationBurst` turns a sleep, wake, lock or unlock signal into
+  checks now and 0.25, 0.75 and 2 seconds later that a newer signal replaces, so a signal that
+  arrives early, late or never cannot leave a surface in the wrong state.
 - `LockScreenXPCDrift` reads the extension's and the system's XPC protocol declarations and
   reports requests or reply types that differ; the extension logs the result once per launch
   (see [After a macOS update](features/lock-screen.md#after-a-macos-update)).
