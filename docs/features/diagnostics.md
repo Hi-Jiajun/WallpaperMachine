@@ -132,8 +132,13 @@ anything is torn down. The line is written for a request that arrives while a qu
 already running too, which is how a second Exit or a logout during a user quit shows up:
 
 ```
-quit: reason=logout frontmost=com.apple.loginwindow panelVisible=false updateInstallPending=false alreadyInProgress=false powerOffNotified=true appleEventReason='rlgo'
+quit: reason=logout mode=powerOff frontmost=com.apple.loginwindow panelVisible=false updateInstallPending=false alreadyInProgress=false powerOffNotified=true appleEventReason='rlgo'
 ```
+
+`mode` is how the quit behaves: `powerOff` when the reason is a logout, restart or shutdown or
+macOS announced one (a signal that arrives during a shutdown is still `powerOff`), otherwise
+`interactive`. A power-off quit has shorter deadlines and is never refused; see
+[desktop picture](desktop-picture.md#logout-restart-and-shutdown).
 
 `reason` (`QuitReason`) is the first of these that applies:
 
@@ -176,12 +181,19 @@ and the lines say what happened when one is missed:
 | `quit: stage restore had not finished after N ms and was left behind`, then `quit: cancelled after …` | restoration took longer than 20 s; the quit is refused. `Quit cancelled because wallpaper restoration did not finish within N ms` follows at `ERROR` |
 | `quit: stage <name> had not finished after N ms and was left behind`, then `quit: finished without <names> after …` | a later stage outlived its share of the 10 s teardown budget; the quit went on without it. `quit: going on without <names>, which did not finish in time` follows at `WARN`. A stage that had no time left at all is still started, and logged this way too |
 | `quit: stage <name> took N ms and failed: <error>` | a later stage threw; the quit went on |
+| `quit: power off; desktop restoration unfinished (<why>), the poster journal will finish it at the next launch`, then `quit: finished without restore …` | a logout, restart or shutdown: restoration threw or took longer than 3 s, and the quit went on instead of being refused. The stage line before it says which |
+| `quit: already in progress, this request waits for it` | a request to quit arrived during a quit and was not refused, because it was a logout, restart or shutdown or the quit running was one. The quit that is running answers both when it finishes |
+| `quit: a logout, restart or shutdown arrived during this quit; going on under its time limits` | the user's quit failed to restore the desktop after such a request had joined it. Instead of being refused it is run once more with the power-off limits |
+| `quit: already in progress, this request is refused` | a second user quit during a user quit |
 | `quit: the process was still running N ms after the quit finished; ending it` | the exit fuse: `applicationWillTerminate` ran, and the process did not exit within 5 s (1 s after a stalled stage), so it was ended with `_exit` after the preferences were flushed. It is armed only once restoration is done, so it can never cut restoration short |
 
 The summary marks each stage that did not finish as `(stalled)` and one that threw as
 `(failed)`. A quit that left a stage behind does not mark the session ledger `ended`: the
 record stays `quitting` with the stage named in its reason, so the next launch logs
-`previous session: quit did not finish (user; left running: bridge)`. A stage that stalls
+`previous session: quit did not finish (user; left running: bridge)`. A power-off quit that
+went on without restoring the desktop still ends: its reason carries the note instead, and
+the next launch logs `previous session: quit normally (logout; desktop restoration
+unfinished)`. A stage that stalls
 is a sign of what to look at (a SteamCMD that does not stop, a renderer shutdown that
 hangs), and the stage durations of ordinary quits are what its budget has to be tuned from.
 

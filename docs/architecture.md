@@ -71,7 +71,11 @@ automation schedulers, the web and native-video wallpaper hosts, system media).
   called off and the menu shows the error. The other stages share 10 seconds; one that
   outlives its time is named, left behind and the rest still run, and the bridge keeps at
   least 2 seconds whatever is left. Once the app has replied it arms an exit fuse (5 seconds,
-  1 second if a stage was left behind) that ends the process if a slow exit has hung. The
+  1 second if a stage was left behind) that ends the process if a slow exit has hung. A quit
+  the system asked for (`QuitMode.powerOff`: logout, restart, shutdown) uses shorter limits
+  (3 s, 1.5 s with a 1 s floor for the bridge, a 2 s fuse) and never cancels: whatever
+  restoration does not finish stays in the originals journal for the next launch
+  ([logout, restart and shutdown](features/desktop-picture.md#logout-restart-and-shutdown)). The
   bridge's `Shutdown` also ends the load journal's in-flight record, so quitting during a
   load is not counted as a crash ([crash recovery](features/crash-recovery.md)). Each quit logs
   who asked for it (`QuitReason`: the user, an update, logout, restart, shutdown, a signal) and

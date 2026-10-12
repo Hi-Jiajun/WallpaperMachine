@@ -38,7 +38,7 @@ App/                               WallpaperMachine application target sources o
     Library/                       ClientPaths (owns the app-support layout), import/deletion, still-image wallpapers,
                                    collections, presets, history, compatibility checks, backup and restore
     Lifecycle/                     why the app is quitting (QuitReason, the power-off notice), how long each quit stage takes
-                                   (QuitTimings) and the deadline each stage gets (QuitSupervisor, the exit fuse)
+                                   (QuitTimings) and the deadline each stage gets (QuitSupervisor, QuitMode, the exit fuse)
     Localization/                  AppLanguage.swift: shipped-language registry and the language preference store
     LockScreen/                    lock-screen selection overrides, extension registration and configuration publishing
     NativeVideo/                   AVFoundation video backend: admission, player and host window

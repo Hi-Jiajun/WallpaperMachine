@@ -89,6 +89,14 @@ one still queued behind a startup load, has already closed it and the next launc
 strike for a scene that was still loading. The next launch's `previous session:` line says the
 quit did not finish and names the stage.
 
+During a logout, restart or shutdown the deadlines are shorter (1.5 seconds for the other
+stages, and the bridge keeps at least one second of them) and a restoration that does not
+finish no longer refuses the quit; see [desktop picture](desktop-picture.md#logout-restart-and-shutdown).
+The bridge is still the last stage and still closes the journal's record the moment it starts,
+so a logout during a load is not counted as a crash even when the bridge does not finish its
+second. What a logout can still count is a process that is ended before the bridge stage has
+started, while restoration or an earlier stage is running.
+
 ## Strikes and the hold
 
 At launch `LoadJournal::open` reads the file. Entries left by a different session mean

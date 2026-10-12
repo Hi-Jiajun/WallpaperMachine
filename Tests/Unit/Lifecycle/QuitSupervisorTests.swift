@@ -131,9 +131,9 @@ final class QuitSupervisorTests: XCTestCase {
     /// The stages that started, in order.
     private var events: [String] = []
 
-    private func makeSupervisor(budgets: QuitSupervisor.Budgets = .interactive) -> QuitSupervisor {
+    private func makeSupervisor(mode: QuitMode = .interactive) -> QuitSupervisor {
         QuitSupervisor(
-            budgets: budgets,
+            mode: mode,
             now: { [clock] in clock.instant },
             sleep: { [sleeper] in try await sleeper.sleep($0) },
             log: { [unowned self] in self.lines.append($0) })
@@ -307,6 +307,96 @@ final class QuitSupervisorTests: XCTestCase {
                       "the log says why: \(lines)")
     }
 
+    // MARK: Power off
+
+    func testAPowerOffQuitGoesOnWhenRestorationFailsInsteadOfRefusingTheLogout() async {
+        let supervisor = makeSupervisor(mode: .powerOff)
+
+        let outcome = await supervisor.run(
+            restoration: throwing("restore", StillRestoring()),
+            teardown: [stage("imports"), stage("bridge")])
+
+        XCTAssertEqual(outcome, .proceedUnrestored(
+            .restorationFailed("macOS is still restoring the desktop wallpaper."), stalled: []))
+        XCTAssertEqual(events, ["restore", "imports", "bridge"], "the teardown still runs, so the renderer closes its journal")
+        XCTAssertTrue(lines.contains { $0.hasPrefix("quit: power off; desktop restoration unfinished") && $0.contains("still restoring") },
+                      "the log says what was left to the journal: \(lines)")
+        XCTAssertTrue(lines.last?.hasPrefix("quit: finished without restore") == true, lines.last ?? "")
+    }
+
+    func testAPowerOffQuitGoesOnWhenRestorationNeverReturnsAfterItsShortBudget() async {
+        let supervisor = makeSupervisor(mode: .powerOff)
+        let latch = Latch()
+        let run = Task {
+            await supervisor.run(restoration: hanging("restore", on: latch), teardown: [stage("imports")])
+        }
+
+        // The interactive budget is 20 s; a logout is not given that.
+        await waitUntil("the restoration budget to start counting") { sleeper.isPending(.seconds(3)) }
+        XCTAssertFalse(sleeper.isPending(.seconds(20)))
+        sleeper.fire(.seconds(3))
+        let outcome = await run.value
+
+        XCTAssertEqual(outcome, .proceedUnrestored(.restorationTimedOut, stalled: []))
+        XCTAssertEqual(events, ["restore", "imports"])
+        XCTAssertEqual(supervisor.timings.stages.map(\.stalled), [true, false])
+        XCTAssertTrue(lines.contains { $0.hasPrefix("quit: power off; desktop restoration unfinished") && $0.contains("3000 ms") },
+                      "\(lines)")
+        await waitUntil("the restoration to be told to stop, so the journal keeps what it did not finish") { latch.wasCancelled }
+    }
+
+    func testAPowerOffQuitThatRestoredTheDesktopIsAnOrdinaryProceed() async {
+        let outcome = await makeSupervisor(mode: .powerOff).run(
+            restoration: stage("restore"), teardown: [stage("bridge")])
+
+        XCTAssertEqual(outcome, .proceed(stalled: []))
+        XCTAssertFalse(lines.contains { $0.contains("power off") })
+    }
+
+    func testAPowerOffQuitHasLessTeardownTimeAndTheRendererKeepsItsFloor() async {
+        let supervisor = makeSupervisor(mode: .powerOff)
+        let steamcmd = Latch(), bridge = Latch()
+        let run = Task {
+            await supervisor.run(
+                restoration: stage("restore"),
+                teardown: [stage("imports", takes: .seconds(1)), hanging("steamcmd", on: steamcmd), hanging("bridge", on: bridge)])
+        }
+
+        // 1.5 s for all, 1 s used by the first stage.
+        await waitUntil("steamcmd to be given what is left of the budget") { sleeper.isPending(.milliseconds(500)) }
+        clock.pass(.milliseconds(500))
+        sleeper.fire(.milliseconds(500))
+        // The budget is spent. The renderer's shutdown still gets a second, not the two
+        // an interactive quit would give it.
+        await waitUntil("the last stage to be given its floor") { sleeper.isPending(.seconds(1)) }
+        XCTAssertFalse(sleeper.isPending(.seconds(2)))
+        sleeper.fire(.seconds(1))
+        let outcome = await run.value
+
+        XCTAssertEqual(outcome, .proceed(stalled: ["steamcmd", "bridge"]))
+    }
+
+    func testTheSameRestorationFailureStillRefusesAnInteractiveQuit() async {
+        let outcome = await makeSupervisor(mode: .interactive).run(
+            restoration: throwing("restore", StillRestoring()), teardown: [stage("bridge")])
+
+        XCTAssertEqual(outcome, .cancel(.restorationFailed("macOS is still restoring the desktop wallpaper.")))
+        XCTAssertEqual(events, ["restore"])
+    }
+
+    func testAPowerOffQuitIsGivenLessTimeInEveryPart() {
+        let interactive = QuitMode.interactive.budgets, powerOff = QuitMode.powerOff.budgets
+
+        XCTAssertLessThan(powerOff.restoration, interactive.restoration)
+        XCTAssertLessThan(powerOff.teardown, interactive.teardown)
+        XCTAssertLessThan(powerOff.exitFuse, interactive.exitFuse)
+        XCTAssertLessThanOrEqual(powerOff.lastStageFloor, interactive.lastStageFloor)
+        for budgets in [interactive, powerOff] {
+            XCTAssertLessThanOrEqual(budgets.stalledExitFuse, budgets.exitFuse,
+                                     "a stage left running must not make the exit slower")
+        }
+    }
+
     // MARK: Exit fuse
 
     func testAStageLeftRunningSelectsTheShorterExitFuse() {
@@ -356,6 +446,42 @@ final class QuitSupervisorTests: XCTestCase {
         XCTAssertEqual(outcomes.items, [.cancel(.restorationTimedOut), .proceed(stalled: ["bridge"])])
         restoration.release()
         teardown.release()
+    }
+}
+
+/// The answer to a request to quit is a pure function of the quit that is running, so a
+/// logout arriving mid-quit is exercised without one.
+final class QuitRequestAnswerTests: XCTestCase {
+    private func answer(finished: Bool = false, running: QuitMode?, request: QuitMode) -> QuitRequestAnswer {
+        QuitRequestAnswer.answer(finished: finished, running: running, request: request)
+    }
+
+    func testAnIdleAppStartsAQuitWhoeverAsks() {
+        XCTAssertEqual(answer(running: nil, request: .interactive), .start)
+        XCTAssertEqual(answer(running: nil, request: .powerOff), .start)
+    }
+
+    func testAFinishedQuitLetsTheProcessGo() {
+        for running in [nil, QuitMode.interactive, .powerOff] {
+            for request in [QuitMode.interactive, .powerOff] {
+                XCTAssertEqual(answer(finished: true, running: running, request: request), .terminateNow)
+            }
+        }
+    }
+
+    func testASecondUserQuitIsRefusedWhileOneRuns() {
+        XCTAssertEqual(answer(running: .interactive, request: .interactive), .refuse)
+    }
+
+    func testALogoutDuringAUsersQuitWaitsInsteadOfBeingRefused() {
+        XCTAssertEqual(answer(running: .interactive, request: .powerOff), .wait,
+                       "refusing it would cancel the logout")
+    }
+
+    func testAnyRequestDuringAPowerOffQuitWaitsForIt() {
+        XCTAssertEqual(answer(running: .powerOff, request: .powerOff), .wait)
+        XCTAssertEqual(answer(running: .powerOff, request: .interactive), .wait,
+                       "the process is leaving either way, and refusing would cancel the system's request")
     }
 }
 

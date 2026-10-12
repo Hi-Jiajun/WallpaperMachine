@@ -41,6 +41,24 @@ enum QuitReason: String, Codable, CaseIterable, Sendable {
         return .user
     }
 
+    /// The system is logging out, restarting or shutting down.
+    var isPowerOff: Bool {
+        switch self {
+        case .logout, .restart, .shutdown: true
+        case .user, .update, .signal, .unknown: false
+        }
+    }
+
+    /// What the session ledger keeps as the reason of a quit that did not go to plan, so
+    /// the next launch's `previous session:` line says what was left undone. A quit that
+    /// went to plan keeps the plain reason.
+    static func ledgerText(for reason: QuitReason, desktopUnrestored: Bool, stalled: [String]) -> String {
+        var text = reason.rawValue
+        if desktopUnrestored { text += "; desktop restoration unfinished" }
+        if !stalled.isEmpty { text += "; left running: " + stalled.joined(separator: ", ") }
+        return text
+    }
+
     private static func powerOffKind(forCode code: UInt32) -> QuitReason? {
         switch code {
         case UInt32(kAEReallyLogOut), UInt32(kAELogOut): .logout

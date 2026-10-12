@@ -184,6 +184,14 @@ reuse, or visual behavior, which is why these items are manual.
       wallpaper and Mission Control thumbnails remain unchanged.
 - [ ] Change a native wallpaper outside the app and verify that quitting does
       not overwrite it.
+- [ ] With a live wallpaper applied, log out, then restart and shut down (separate
+      runs, authorized only). macOS must show no "cancelled" or "preventing logout"
+      dialog. The log says `quit: reason=logout mode=powerOff` (or restart or
+      shutdown) and every stage duration; if a line says `desktop restoration
+      unfinished`, the next login shows the last poster until the app runs again and
+      the next launch logs `previous session: quit normally (logout; desktop
+      restoration unfinished)`. Also start a quit from the menu with a restoration that
+      cannot finish and log out while it runs: the logout must not be cancelled.
 
 Mission Control posters are sampled still frames, not live animation. Updates
 begin as soon as a rendered frame is available, but rendering, JPEG encoding and

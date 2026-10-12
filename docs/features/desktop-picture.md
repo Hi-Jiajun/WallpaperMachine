@@ -182,7 +182,11 @@ and says so:
   their wallpaper again in System Settings), or that restoring took too long, and that
   quitting again retries;
 - an update installer that was waiting for the app to quit is called off, so it cannot
-  replace the app at some later quit; the update stays downloaded and About offers it again;
+  replace the app at some later quit; the update stays downloaded and About offers it again.
+  The helper can take two seconds to answer, so this is done after the system has been told
+  the quit is cancelled. The app counts as running again only in the step that sends that
+  reply: a request that arrives before it is answered by the quit that is running, and one
+  that arrives later starts a new quit, so a cancellation never lands on a quit that has begun;
 - the error also stays as a line in the menu bar menu, and the user can quit again.
 
 The restoration stage is cancelled when its time is up. `restoreForTermination` checks for
@@ -192,10 +196,52 @@ ignores cancellation (a hung call into WallpaperAgent) cannot be stopped; the qu
 refused on time, but that step may finish later.
 
 While a quit is running the menu shows a disabled **Quitting…** in place of **Exit**, and a
-second request to quit is refused. The stages after restoration (services, imports,
-SteamCMD, Workshop, pixiv, the renderer) share 10 seconds. See
+second request to quit from the user is refused. The stages after restoration (services,
+imports, SteamCMD, Workshop, pixiv, the renderer) share 10 seconds. See
 [architecture](../architecture.md#appkit-shell) for the budgets and the exit fuse and
 [diagnostics](diagnostics.md#why-the-app-quit) for the log lines.
+
+### Logout, restart and shutdown
+
+Refusing a quit is right for a user who can read an alert and try again. It is wrong when
+macOS is logging out, restarting or shutting down: the system is waiting for every app,
+and a refusal cancels the whole logout and shows the user a dialog. So a quit that the
+system asked for (`QuitMode.powerOff`: the quit event names a logout, restart or
+shutdown, or macOS announced one with `willPowerOffNotification`) never refuses. It runs
+the same ordered stages with shorter deadlines and goes on whatever restoration does:
+
+| | user's quit | logout, restart, shutdown |
+|---|---|---|
+| restoring the desktop | 20 s | 3 s |
+| the other stages together | 10 s | 1.5 s |
+| the renderer's shutdown keeps at least | 2 s | 1 s |
+| exit fuse after the quit finished | 5 s | 2 s |
+| restoration fails or does not finish | the quit is refused, with the alert and the panel | the quit goes on |
+
+The budgets are judgments, not measurements; the stage durations every quit logs are what
+to tune them from.
+
+Restoration that is cut short loses nothing. `restoreForTermination` stops at the next of its
+25 attempts when its deadline cancels it, and `DesktopWallpaperLedger` keeps an entry in
+`originals.json` until its poster is no longer shown. The desktop may keep showing the last
+poster after the next login until the app runs again, and the original it replaced is still
+on record to put back, as after a crash ([the journal](#the-journal-of-originals)). The log
+says that the desktop restoration is unfinished and that the poster journal will finish it
+at the next launch (`quit: power off; desktop restoration unfinished (…)`). The session
+ledger keeps `logout; desktop restoration unfinished` as the quit's reason, so the next
+launch's `previous session:` line reads `quit normally (logout; desktop restoration
+unfinished)` and not a crash.
+
+The quit alert, bringing the panel back and the **Quitting…** line belong to a refused quit
+and never appear. A call that never returns because it blocks the main thread (a hung call
+into WallpaperAgent) cannot be stopped by any deadline; the system's own patience, and then
+its kill, end it, and the journal covers that as it covers a crash.
+
+A request to quit that arrives while another quit is running is answered by what it is:
+a second user quit is refused, but a logout, restart or shutdown (and anything that arrives
+during one) waits for the quit that is running and is answered with it, so it is not
+refused either. If the user's quit then fails to restore, it is tried again once under the
+power-off limits instead of being refused.
 
 ## The native lock-screen provider and Space selection
 

@@ -55,6 +55,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     /// Teardown stages the quit gave up waiting for, so the exit fuse is shorter and the
     /// session ledger does not call the run a clean quit.
     private var stalledQuitStages: [String] = []
+    /// How the quit that is running, or ran last, behaves. Chosen when it starts.
+    private var quitMode = QuitMode.interactive
+    /// A logout, restart or shutdown asked to quit while a user's quit was running. That quit
+    /// must then not be refused, because the system would take the refusal as its own.
+    private var powerOffJoinedQuit = false
     private var themeSubscription: AnyCancellable?
     private var iconSubscription: AnyCancellable?
     private var diagnostics: RuntimeDiagnosticsSession?
@@ -688,7 +693,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     /// flushed first because `_exit` skips the flush a normal exit does.
     private func armExitFuse() {
         if NSClassFromString("XCTestCase") != nil { return }
-        let delay = QuitSupervisor.Budgets.interactive.exitFuse(stalled: stalledQuitStages)
+        let delay = quitMode.budgets.exitFuse(stalled: stalledQuitStages)
         let defaults = ClientPreferences.defaults
         ExitFuse.arm(after: delay) {
             AppLog.error("quit: the process was still running \(delay.wholeMilliseconds) ms after the quit finished; ending it")
@@ -700,18 +705,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         // The test host must not instantiate services against the user's app-support folder.
         if NSClassFromString("XCTestCase") != nil { return .terminateNow }
-        let reason = logQuitRequest()
-        guard !shutdownComplete else {
+        let (reason, mode) = logQuitRequest()
+        switch QuitRequestAnswer.answer(
+            finished: shutdownComplete, running: shutdownInProgress ? quitMode : nil, request: mode)
+        {
+        case .terminateNow:
             return .terminateNow
-        }
-        guard !shutdownInProgress else {
+        case .refuse:
             AppLog.info("quit: already in progress, this request is refused")
             return .terminateCancel
+        case .wait:
+            // Refusing would cancel a logout, restart or shutdown. The quit that is running
+            // replies, and if it would have been refused it goes on instead (see the retry below).
+            if quitMode == .interactive { powerOffJoinedQuit = true }
+            AppLog.info("quit: already in progress, this request waits for it")
+            return .terminateLater
+        case .start:
+            break
         }
 
         shutdownInProgress = true
+        quitMode = mode
+        powerOffJoinedQuit = false
         SessionLedger.shared?.markQuitting(reason: reason.rawValue)
-        let supervisor = QuitSupervisor()
         let panelWasVisible = controlPanelWindow?.isVisible == true
         let whatsNewWasVisible = whatsNewWindow?.isVisible == true
         previewWindow?.session.close()
@@ -725,32 +741,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         NSApp.setActivationPolicy(.accessory)
 
         Task {
-            let outcome = await supervisor.run(
-                restoration: .init(name: "restore") { [self] in try await restoreDesktopForQuit(wallpaperRestorer) },
-                teardown: servicesToTearDownForQuit())
+            var supervisor = QuitSupervisor(mode: mode)
+            var outcome = await runQuitStages(on: supervisor, restorer: wallpaperRestorer)
+            if case .cancel = outcome, powerOffJoinedQuit {
+                // The user's quit would have been refused, but the system has asked to leave
+                // in the meantime. Try again within its time limits and do not refuse.
+                AppLog.info("quit: a logout, restart or shutdown arrived during this quit; going on under its time limits")
+                quitMode = .powerOff
+                supervisor = QuitSupervisor(mode: .powerOff)
+                outcome = await runQuitStages(on: supervisor, restorer: wallpaperRestorer)
+            }
             switch outcome {
             case .cancel(let cancellation):
-                await cancelQuit(
+                // Nothing here suspends between clearing `shutdownInProgress` and the reply, so a
+                // request that arrives meanwhile is answered either by the running quit or, once
+                // the reply is out, by a new one. The reply never lands on a quit that has begun.
+                cancelQuit(
                     cancellation, restorationBudget: supervisor.budgets.restoration,
                     restoringPanel: panelWasVisible, whatsNew: whatsNewWasVisible)
                 sender.reply(toApplicationShouldTerminate: false)
                 presentQuitFailure(cancellation)
+                // An installer waiting for this app to quit would replace it whenever it did. The
+                // helper takes up to two seconds to answer, which is why this comes last.
+                await appUpdater.cancelPendingInstall()
+                rebuildMenu()
             case .proceed(let stalled):
-                if !stalled.isEmpty {
-                    AppLog.warn("quit: going on without \(stalled.joined(separator: ", ")), which did not finish in time")
-                    // Stays `quitting` through the exit (see `applicationWillTerminate`), so
-                    // the next launch can say which stage was left behind.
-                    SessionLedger.shared?.markQuitting(
-                        reason: "\(reason.rawValue); left running: \(stalled.joined(separator: ", "))")
-                }
-                stalledQuitStages = stalled
-                shutdownInProgress = false
-                shutdownComplete = true
-                sender.reply(toApplicationShouldTerminate: true)
+                completeQuit(sender, reason: reason, desktopUnrestored: false, stalled: stalled)
+            case .proceedUnrestored(_, let stalled):
+                completeQuit(sender, reason: reason, desktopUnrestored: true, stalled: stalled)
             }
         }
 
         return .terminateLater
+    }
+
+    private func runQuitStages(on supervisor: QuitSupervisor, restorer: DesktopWallpaperSync?) async -> QuitSupervisor.Outcome {
+        await supervisor.run(
+            restoration: .init(name: "restore") { [self] in try await restoreDesktopForQuit(restorer) },
+            teardown: servicesToTearDownForQuit())
+    }
+
+    /// The quit went on: tells the system the app may exit. What was left undone is kept
+    /// in the session ledger, which stays `quitting` (see `applicationWillTerminate`) when
+    /// a stage is still running, so the next launch can say which.
+    private func completeQuit(
+        _ sender: NSApplication, reason: QuitReason, desktopUnrestored: Bool, stalled: [String]
+    ) {
+        if !stalled.isEmpty {
+            AppLog.warn("quit: going on without \(stalled.joined(separator: ", ")), which did not finish in time")
+        }
+        let note = QuitReason.ledgerText(for: reason, desktopUnrestored: desktopUnrestored, stalled: stalled)
+        if note != reason.rawValue { SessionLedger.shared?.markQuitting(reason: note) }
+        stalledQuitStages = stalled
+        shutdownInProgress = false
+        shutdownComplete = true
+        sender.reply(toApplicationShouldTerminate: true)
     }
 
     /// Puts the user's own desktop picture back, the lock screen's first. A failure or a
@@ -810,12 +855,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     /// The desktop could not be restored in time or at all, so the app keeps running:
-    /// everything the quit stopped starts again, the panel comes back and a pending
-    /// update is called off. The caller replies to the system afterwards.
+    /// everything the quit stopped starts again and the panel comes back. Synchronous on
+    /// purpose: the caller replies to the system right after it, and the app must not count
+    /// as running again before that reply is on its way (see `applicationShouldTerminate`).
+    /// A pending update install is called off by the caller afterwards.
     private func cancelQuit(
         _ cancellation: QuitSupervisor.Cancellation, restorationBudget: Duration,
         restoringPanel: Bool, whatsNew: Bool
-    ) async {
+    ) {
         let failure = QuitFailure(cancellation)
         switch cancellation {
         case .restorationFailed:
@@ -844,8 +891,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             NSApp.setActivationPolicy(.regular)
             whatsNewWindow.makeKeyAndOrderFront(nil)
         }
-        // An installer waiting for this app to quit would replace it whenever it did.
-        await appUpdater.cancelPendingInstall()
         rebuildMenu()
     }
 
@@ -855,10 +900,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         presentErrorAlert(QuitFailure(cancellation), bringForward: true)
     }
 
-    /// Works out who asked for this quit and logs it, also for a request that arrives
-    /// while a quit is already running. The Apple event is only readable here, while it
-    /// is being handled.
-    private func logQuitRequest() -> QuitReason {
+    /// Works out who asked for this quit and how it must behave, and logs both, also for a
+    /// request that arrives while a quit is already running. The Apple event is only
+    /// readable here, while it is being handled.
+    private func logQuitRequest() -> (reason: QuitReason, mode: QuitMode) {
         let appleEventReason = QuitReason.appleEventReason(from: NSAppleEventManager.shared().currentAppleEvent)
         let powerOffNotified = powerOffNotice.isCurrent()
         let updateInstallPending = appUpdater.isInstallPending
@@ -868,15 +913,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             updateInstallPending: updateInstallPending,
             // Nothing in the app turns a termination signal into a quit today.
             terminationSignal: nil)
+        let mode = QuitMode.resolve(reason: reason, powerOffNotified: powerOffNotified)
         let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none"
         AppLog.info(
-            "quit: reason=\(reason.rawValue) frontmost=\(frontmost) "
+            "quit: reason=\(reason.rawValue) mode=\(mode.rawValue) "
+                + "frontmost=\(frontmost) "
                 + "panelVisible=\(controlPanelWindow?.isVisible ?? false) "
                 + "updateInstallPending=\(updateInstallPending) "
                 + "alreadyInProgress=\(shutdownInProgress || shutdownComplete) "
                 + "powerOffNotified=\(powerOffNotified) "
                 + "appleEventReason=\(appleEventReason.map(QuitReason.text(forCode:)) ?? "none")")
-        return reason
+        return (reason, mode)
     }
 
     private func syncPlaybackMonitors() {

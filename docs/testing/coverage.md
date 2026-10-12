@@ -55,7 +55,9 @@ unattached `CAMetalLayer`s and injected notification and encoding services:
   independent per-Space originals survive; a user's own wallpaper change is not
   overwritten on restore; quit waits for the native reload, every read-back and
   in-flight writes, keeps the original when restoration fails persistently, and
-  cannot be blocked forever by an unreachable reference.
+  cannot be blocked forever by an unreachable reference; cancelling a restoration
+  that is waiting (a logout's deadline) stops it and leaves the journal entry and the
+  poster for a later run to finish.
 - Retention: frame URLs are immutable and pruned only after every Space updates;
   displays on the current-Space fallback or with an unreadable Space keep a
   bounded number of the newest posters.
@@ -250,7 +252,10 @@ on [manual-smoke.md](manual-smoke.md).
   beats a plain quit, the event's own reason beats the power-off announcement, an unknown
   code is not taken for the user's; the codes match the SDK's; the reason is read from a
   real `NSAppleEventDescriptor` parameter and not from an attribute, text or an integer; an
-  announcement stops counting after its lifetime and after a refused quit.
+  announcement stops counting after its lifetime and after a refused quit. They also pin which
+  reasons make a power-off quit (the three kinds, and a signal that arrives during an announced
+  shutdown, but not a user's quit, an update or an unknown reason) and the text the session
+  ledger keeps for a quit that left the desktop unrestored or a stage running.
 - `QuitTimingsTests` — stages keep their own duration in the order they were settled, a stage
   that failed is timed and says why in the log, a stage that was left behind is marked and keeps
   how long it was waited for, the total covers the work between stages, one line per stage plus
@@ -264,7 +269,13 @@ on [manual-smoke.md](manual-smoke.md).
   once, off the main thread. The deadline is a scripted sleep fired by the test and the
   budget each stage was given is the sleep it waits for, so nothing depends on machine
   speed; one test runs the real timer with tiny budgets. `FirstResultTests` pin that the race
-  resumes its waiter once however many results arrive.
+  resumes its waiter once however many results arrive. For a logout, restart or shutdown
+  (`QuitMode.powerOff`): restoration that throws or never returns lets the quit go on
+  without refusing it, the teardown still runs, the restoration is waited for 3 seconds
+  and not 20, the teardown has 1.5 seconds with a one-second floor for the last stage, and
+  the same failure still refuses a user's quit. `QuitRequestAnswerTests` pin the answer to
+  a request that arrives mid-quit: a second user quit is refused, a logout during one waits
+  for it, and anything during a power-off quit waits.
 - `AppUpdateTests` (GitHub) also pin when an install counts as pending: not while the
   update is prepared, yes once the installer waits and the app is asked to quit, not when
   the installer could not start. They also pin that a refused quit stops the waiting
@@ -272,7 +283,10 @@ on [manual-smoke.md](manual-smoke.md).
   waits, and keeps a helper that would not stop owned.
 - Not covered: a real quit, logout or restart; `applicationShouldTerminate` itself needs
   the running app (hosted tests short-circuit it), so the alert, the panel coming back, the
-  "Quitting…" menu line and the exit fuse's `_exit` are desktop-only observations.
+  "Quitting…" menu line, the exit fuse's `_exit`, whether macOS shows its cancelled-logout
+  dialog, how AppKit treats a request answered with `terminateLater` while another is
+  pending, and the retry of a user's quit that a logout interrupted are desktop-only
+  observations ([manual smoke](manual-smoke.md#native-desktop-posters-and-mission-control)).
 
 ## Localization
 

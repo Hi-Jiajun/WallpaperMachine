@@ -452,6 +452,64 @@ final class DesktopWallpaperTests: XCTestCase {
         }
     }
 
+    /// A logout gives restoration a few seconds and then cancels it, so cancelling must stop
+    /// it where it is and leave the journal as it was: the poster stays on the desktop until
+    /// the app runs again, and the original it replaces is still on record to put back.
+    @MainActor
+    func testRestoreForTerminationStopsWhenCancelledAndKeepsTheJournal() async throws {
+        let workspace = MemoryDesktopWorkspace()
+        workspace.pictures = [one: original("before")]
+        let ledger = try DesktopWallpaperLedger(folder: root, workspace: workspace)
+        try ledger.apply(image: Data([1]), target: one)
+        let poster = try XCTUnwrap(workspace.pictures[one])
+        workspace.lagging = [one]
+        let journalURL = root.appendingPathComponent("originals.json")
+        func journaledNames() throws -> Set<String> {
+            let entries = try JSONSerialization.jsonObject(with: Data(contentsOf: journalURL)) as? [String: Any]
+            return Set(try XCTUnwrap(entries).keys)
+        }
+        XCTAssertEqual(try journaledNames(), [poster.url.lastPathComponent])
+
+        let sync = try DesktopWallpaperSync(folder: root, workspace: workspace,
+                                            surfaces: { [] }, frameCenter: NotificationCenter())
+        let waiting = expectation(description: "restoration is waiting for the desktop to read back")
+        let finished = expectation(description: "restoration returned")
+        let restoration = Task { @MainActor () -> String in
+            defer { finished.fulfill() }
+            do {
+                try await sync.restoreForTermination {
+                    waiting.fulfill()
+                    // Parked here until the task is cancelled, like the 200 ms wait between attempts.
+                    try await Task.sleep(for: .seconds(3600))
+                }
+                return "finished"
+            } catch is CancellationError {
+                return "cancelled"
+            } catch {
+                return "failed: \(error)"
+            }
+        }
+        await fulfillment(of: [waiting], timeout: 30)
+        restoration.cancel()
+        await fulfillment(of: [finished], timeout: 30)
+
+        let result = await restoration.value
+        XCTAssertEqual(result, "cancelled")
+        XCTAssertEqual(try journaledNames(), [poster.url.lastPathComponent],
+                       "what restoration did not finish stays on record")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: poster.url.path),
+                      "the poster is not deleted while the desktop may still show it")
+
+        // A later run finishes what the cancelled one left.
+        workspace.land()
+        workspace.lagging = []
+        let next = try DesktopWallpaperSync(folder: root, workspace: workspace,
+                                            surfaces: { [] }, frameCenter: NotificationCenter())
+        try await next.restoreForTermination(wait: {})
+        XCTAssertEqual(workspace.pictures[one], original("before"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: poster.url.path))
+    }
+
     /// A poster write still in flight can land after quit restored its desktop, so
     /// quit waits out the confirmation window and restores it again.
     @MainActor

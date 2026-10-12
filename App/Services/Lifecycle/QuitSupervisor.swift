@@ -17,6 +17,9 @@ import Foundation
 ///
 /// What a refused or cut-short quit does to the rest of the app (the alert, the panel,
 /// the menu, the exit fuse) belongs to `AppDelegate`; this type only decides and logs.
+///
+/// How strict it is depends on who asked (`QuitMode`). A user's quit can be refused when
+/// the desktop cannot be restored; the system's logout, restart or shutdown never is.
 @MainActor
 final class QuitSupervisor {
     /// How long each part of a quit may take.
@@ -41,6 +44,17 @@ final class QuitSupervisor {
             restoration: .seconds(20), teardown: .seconds(10), exitFuse: .seconds(5),
             stalledExitFuse: .seconds(1), lastStageFloor: .seconds(2))
 
+        /// The system is waiting for the app and its patience is limited, so every part is
+        /// short. Judgments, not measurements: restoration is given a little over half the
+        /// time its own retries use (they go on for about five seconds), because what it
+        /// does not finish stays in the originals journal. The last stage keeps a second
+        /// even so, because it closes the renderer's scenes and log. It closes the load
+        /// journal as it starts, so a logout during a load is not counted as a crash
+        /// whatever is left of that second.
+        static let powerOff = Budgets(
+            restoration: .seconds(3), teardown: .milliseconds(1500), exitFuse: .seconds(2),
+            stalledExitFuse: .seconds(1), lastStageFloor: .seconds(1))
+
         func exitFuse(stalled: [String]) -> Duration {
             stalled.isEmpty ? exitFuse : stalledExitFuse
         }
@@ -62,46 +76,72 @@ final class QuitSupervisor {
         /// Restoration is done and the app may exit. `stalled` names the stages that were
         /// left behind, in order.
         case proceed(stalled: [String])
+        /// The system is logging out, restarting or shutting down and the desktop was not
+        /// restored in time (or at all). The app may exit anyway: whatever is unrestored
+        /// stays in the originals journal. Only a `QuitMode.powerOff` quit ends this way.
+        case proceedUnrestored(Cancellation, stalled: [String])
         /// The desktop could not be restored in time, so the app keeps running.
         case cancel(Cancellation)
     }
 
     /// Every stage and the whole quit are logged through this.
     let timings: QuitTimings
+    let mode: QuitMode
     let budgets: Budgets
     private let now: () -> ContinuousClock.Instant
     private let sleep: @Sendable (Duration) async throws -> Void
+    private let log: (String) -> Void
 
+    /// `budgets` stands in for the mode's own, which tests use to make them small.
     init(
-        budgets: Budgets = .interactive,
+        mode: QuitMode = .interactive,
+        budgets: Budgets? = nil,
         now: @escaping () -> ContinuousClock.Instant = { .now },
         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
         log: @escaping (String) -> Void = { AppLog.info($0) }
     ) {
-        self.budgets = budgets
+        self.mode = mode
+        self.budgets = budgets ?? mode.budgets
         self.now = now
         self.sleep = sleep
+        self.log = log
         timings = QuitTimings(now: now, log: log)
     }
 
-    /// Runs `restoration`, and only if it succeeds in time, the `teardown` stages in order.
+    /// Runs `restoration`, then the `teardown` stages in order.
+    ///
+    /// An interactive quit goes on only if restoration succeeds in time; otherwise it is
+    /// refused and nothing after it runs. A power-off quit goes on whatever happens to
+    /// restoration (see `Outcome.proceedUnrestored`), because refusing would cancel the
+    /// logout, restart or shutdown for everyone.
     ///
     /// A teardown stage that throws is logged and the quit goes on without it: nothing
     /// after restoration is worth keeping the app alive for. A stage that outlives the
     /// time it has left is named in `stalled` and the stages after it still run.
     func run(restoration: Stage, teardown: [Stage]) async -> Outcome {
         let restoreStart = now()
+        let shortfall: Cancellation?
         switch await race(restoration, allowance: budgets.restoration) {
         case .finished:
             timings.record(restoration.name, since: restoreStart)
+            shortfall = nil
         case .threw(let error):
             timings.record(restoration.name, since: restoreStart, failed: true, detail: error.localizedDescription)
-            timings.finish("cancelled")
-            return .cancel(.restorationFailed(error.localizedDescription))
+            shortfall = .restorationFailed(error.localizedDescription)
         case .deadline:
             timings.recordStalled(restoration.name, since: restoreStart)
-            timings.finish("cancelled")
-            return .cancel(.restorationTimedOut)
+            shortfall = .restorationTimedOut
+        }
+        if let shortfall {
+            guard mode == .powerOff else {
+                timings.finish("cancelled")
+                return .cancel(shortfall)
+            }
+            let why = switch shortfall {
+            case .restorationFailed(let text): text
+            case .restorationTimedOut: "not finished after \(budgets.restoration.wholeMilliseconds) ms"
+            }
+            log("quit: power off; desktop restoration unfinished (\(why)), the poster journal will finish it at the next launch")
         }
 
         let deadline = now().advanced(by: budgets.teardown)
@@ -128,7 +168,9 @@ final class QuitSupervisor {
                 stalled.append(stage.name)
             }
         }
-        timings.finish(stalled.isEmpty ? "finished" : "finished without " + stalled.joined(separator: ", "))
+        let skipped = (shortfall == nil ? [] : [restoration.name]) + stalled
+        timings.finish(skipped.isEmpty ? "finished" : "finished without " + skipped.joined(separator: ", "))
+        if let shortfall { return .proceedUnrestored(shortfall, stalled: stalled) }
         return .proceed(stalled: stalled)
     }
 
@@ -157,6 +199,54 @@ final class QuitSupervisor {
         let result = await gate.wait()
         if case .deadline = result { work.cancel() } else { timer.cancel() }
         return result
+    }
+}
+
+/// How a quit behaves, which depends on who asked for it.
+enum QuitMode: String, Equatable, Sendable {
+    /// The user, an update or an app: restoring the desktop may take its time, and when it
+    /// fails the quit is refused so the user can see why and try again.
+    case interactive
+    /// macOS is logging out, restarting or shutting down. The system is waiting for this
+    /// app, and a refusal cancels the logout for every app and shows the user a dialog, so
+    /// the quit never refuses: it restores what it can in a short time and goes.
+    case powerOff
+
+    /// Pure, so every combination is exercised without a logout. The announcement counts
+    /// as well as the reason because a signal that arrives during a shutdown has the
+    /// reason `signal`, and it is still the shutdown that is waiting.
+    static func resolve(reason: QuitReason, powerOffNotified: Bool) -> QuitMode {
+        powerOffNotified || reason.isPowerOff ? .powerOff : .interactive
+    }
+
+    var budgets: QuitSupervisor.Budgets {
+        switch self {
+        case .interactive: .interactive
+        case .powerOff: .powerOff
+        }
+    }
+}
+
+/// What `applicationShouldTerminate` answers a request to quit.
+enum QuitRequestAnswer: Equatable {
+    /// A quit already finished; the process is about to exit.
+    case terminateNow
+    /// Nothing is running, so begin a quit.
+    case start
+    /// A quit is running and this request must not stop it: reply later, and the running
+    /// quit answers for both. Refusing a logout would cancel it.
+    case wait
+    /// A user's quit is running and another one adds nothing.
+    case refuse
+
+    /// `running` is the mode of the quit in progress, `nil` when none is.
+    ///
+    /// A request from the system always waits for the quit in progress, and anything waits
+    /// for a power-off quit, which ends the process either way.
+    static func answer(finished: Bool, running: QuitMode?, request: QuitMode) -> QuitRequestAnswer {
+        if finished { return .terminateNow }
+        guard let running else { return .start }
+        return request == .powerOff || running == .powerOff ? .wait : .refuse
     }
 }
 

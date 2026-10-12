@@ -82,6 +82,53 @@ final class QuitReasonTests: XCTestCase {
         XCTAssertEqual(AEKeyword(kAEQuitReason), code("why?"))
     }
 
+    // MARK: The mode a reason selects
+
+    func testLogoutRestartAndShutdownAreThePowerOffQuits() {
+        for event in ["rlgo", "rest", "shut"] {
+            let reason = classify(event: event)
+            XCTAssertTrue(reason.isPowerOff, event)
+            XCTAssertEqual(QuitMode.resolve(reason: reason, powerOffNotified: false), .powerOff, event)
+        }
+        XCTAssertEqual(Set(QuitReason.allCases.filter(\.isPowerOff)), [.logout, .restart, .shutdown])
+    }
+
+    func testAUsersQuitAnUpdateAndAnUnknownReasonStayInteractive() {
+        for reason in QuitReason.allCases where !reason.isPowerOff {
+            XCTAssertEqual(QuitMode.resolve(reason: reason, powerOffNotified: false), .interactive, reason.rawValue)
+        }
+    }
+
+    func testASignalDuringAnAnnouncedShutdownIsStillAPowerOffQuit() {
+        let reason = classify(notified: true, signal: SIGTERM)
+
+        XCTAssertEqual(reason, .signal, "the signal is the proximate cause")
+        XCTAssertEqual(QuitMode.resolve(reason: reason, powerOffNotified: true), .powerOff,
+                       "but it is the shutdown that is waiting for the app")
+        XCTAssertEqual(QuitMode.resolve(reason: classify(signal: SIGTERM), powerOffNotified: false), .interactive)
+    }
+
+    func testTheAnnouncementAloneSelectsThePowerOffMode() {
+        // The mode asks the announcement too, in case a reason is ever added that outranks it.
+        XCTAssertEqual(QuitMode.resolve(reason: .user, powerOffNotified: true), .powerOff)
+        XCTAssertEqual(QuitMode.resolve(reason: .update, powerOffNotified: true), .powerOff)
+    }
+
+    // MARK: What the session ledger keeps
+
+    func testAQuitThatWentToPlanKeepsThePlainReason() {
+        XCTAssertEqual(QuitReason.ledgerText(for: .logout, desktopUnrestored: false, stalled: []), "logout")
+    }
+
+    func testTheLedgerSaysWhatAQuitLeftUndone() {
+        XCTAssertEqual(QuitReason.ledgerText(for: .logout, desktopUnrestored: true, stalled: []),
+                       "logout; desktop restoration unfinished")
+        XCTAssertEqual(QuitReason.ledgerText(for: .user, desktopUnrestored: false, stalled: ["steamcmd", "bridge"]),
+                       "user; left running: steamcmd, bridge")
+        XCTAssertEqual(QuitReason.ledgerText(for: .shutdown, desktopUnrestored: true, stalled: ["bridge"]),
+                       "shutdown; desktop restoration unfinished; left running: bridge")
+    }
+
     // MARK: The Apple event
 
     private func quitEvent() -> NSAppleEventDescriptor {
