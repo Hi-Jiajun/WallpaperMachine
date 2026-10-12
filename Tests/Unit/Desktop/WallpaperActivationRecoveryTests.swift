@@ -181,9 +181,7 @@ final class WallpaperActivationRecoveryTests: XCTestCase {
     }
 
     func testSupportPromptWaitsForSuccessfulDownloadedActivation() async throws {
-        let suite = UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = try TemporaryDefaults.make(for: self).defaults
         let prompt = SupportPromptStore(defaults: defaults)
         prompt.recordDownload(wallpaperID: "failing")
         let bridge = ApplyFailureBridge(noPointer: .init())
@@ -201,9 +199,7 @@ final class WallpaperActivationRecoveryTests: XCTestCase {
     }
 
     func testSupportPromptDoesNotTreatMissingDisplayAssignmentAsSuccess() async throws {
-        let suite = UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = try TemporaryDefaults.make(for: self).defaults
         let prompt = SupportPromptStore(defaults: defaults)
         prompt.recordDownload(wallpaperID: "failing")
         let bridge = ApplyFailureBridge(noPointer: .init())
@@ -218,9 +214,7 @@ final class WallpaperActivationRecoveryTests: XCTestCase {
     }
 
     func testAutomaticActivationAndNoOpReapplyDoNotRequestSupport() async throws {
-        let suite = UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = try TemporaryDefaults.make(for: self).defaults
         let prompt = SupportPromptStore(defaults: defaults)
         prompt.recordDownload(wallpaperID: "failing")
         let bridge = ApplyFailureBridge(noPointer: .init())
@@ -235,9 +229,7 @@ final class WallpaperActivationRecoveryTests: XCTestCase {
     }
 
     func testApplyingAnImportedWallpaperDoesNotRequestSupport() async throws {
-        let suite = UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = try TemporaryDefaults.make(for: self).defaults
         let prompt = SupportPromptStore(defaults: defaults)
         let bridge = ApplyFailureBridge(noPointer: .init())
         bridge.applyError = nil
@@ -249,9 +241,7 @@ final class WallpaperActivationRecoveryTests: XCTestCase {
     }
 
     func testEnablingDownloadedWallpaperThroughApplyChangesRequestsSupportOnlyOnSuccess() async throws {
-        let suite = UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = try TemporaryDefaults.make(for: self).defaults
         let prompt = SupportPromptStore(defaults: defaults)
         prompt.recordDownload(wallpaperID: "failing")
         let bridge = ApplyFailureBridge(noPointer: .init())

@@ -196,7 +196,7 @@ final class WebPanelPropertyLabelTests: XCTestCase {
 
     init() throws {
       store = BridgeStore(bridge: bridge)
-      defaults = try XCTUnwrap(UserDefaults(suiteName: root.lastPathComponent))
+      defaults = TemporaryDefaults.makeForCurrentTest().defaults
       workshop = WorkshopStore(
         downloader: WorkshopDownloadManager(sessionDirectory: root), supportDirectory: root,
         defaults: defaults)
@@ -216,7 +216,6 @@ final class WebPanelPropertyLabelTests: XCTestCase {
 
     func tearDown() {
       controller.stop()
-      defaults.removePersistentDomain(forName: root.lastPathComponent)
       try? FileManager.default.removeItem(at: root)
     }
   }

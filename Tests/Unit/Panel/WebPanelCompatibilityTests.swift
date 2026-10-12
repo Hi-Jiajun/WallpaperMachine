@@ -89,7 +89,7 @@ final class WebPanelCompatibilityTests: XCTestCase {
     let controller: WebPanelController
     let compatibility: WallpaperCompatibilityStore
     init() throws {
-      defaults = try XCTUnwrap(UserDefaults(suiteName: root.lastPathComponent))
+      defaults = TemporaryDefaults.makeForCurrentTest().defaults
       store = BridgeStore(bridge: LayoutSnapshotBridge(noPointer: .init()))
       compatibility = WallpaperCompatibilityStore(service: WallpaperCompatibilityService(libraryURL: root))
       let navigation = ControlPanelNavigation()
@@ -114,7 +114,6 @@ final class WebPanelCompatibilityTests: XCTestCase {
     }
     func stop() {
       controller.stop()
-      defaults.removePersistentDomain(forName: root.lastPathComponent)
       try? FileManager.default.removeItem(at: root)
     }
   }

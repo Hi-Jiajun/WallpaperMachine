@@ -13,7 +13,7 @@ final class WebPanelPlaylistTests: XCTestCase {
 
   override func setUp() async throws {
     root = FileManager.default.temporaryDirectory.appendingPathComponent("panel-playlist-\(UUID().uuidString)")
-    defaults = try XCTUnwrap(UserDefaults(suiteName: root.lastPathComponent))
+    defaults = try TemporaryDefaults.make(for: self).defaults
     playlists = PlaylistStore(defaults: defaults)
     store = BridgeStore(bridge: WallpaperBridge(noPointer: .init()))
     store.settingsSnapshot = BridgeSnapshotFixtures.settings(displays: [
@@ -42,7 +42,6 @@ final class WebPanelPlaylistTests: XCTestCase {
 
   override func tearDown() async throws {
     controller.stop()
-    defaults.removePersistentDomain(forName: root.lastPathComponent)
     try? FileManager.default.removeItem(at: root)
   }
 

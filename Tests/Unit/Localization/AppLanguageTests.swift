@@ -6,19 +6,17 @@ import XCTest
 final class AppLanguageTests: XCTestCase {
   /// A fresh suite. The app-domain `AppleLanguages` override is read back through the
   /// persistent domain because a suite's search list falls through to the global one.
-  private struct Suite {
-    let name = "AppLanguageTests.\(UUID().uuidString)"
+  @MainActor private struct Suite {
     let defaults: UserDefaults
-    init() throws { defaults = try XCTUnwrap(UserDefaults(suiteName: name)) }
+    let name: String
+    init(_ test: XCTestCase) throws { (defaults, name) = try TemporaryDefaults.make(for: test) }
     var appleLanguages: [String]? {
       defaults.persistentDomain(forName: name)?[AppLanguageStore.appleLanguagesKey] as? [String]
     }
-    func tearDown() { defaults.removePersistentDomain(forName: name) }
   }
 
   func testFollowsTheSystemLanguageUntilTheUserChooses() throws {
-    let suite = try Suite()
-    defer { suite.tearDown() }
+    let suite = try Suite(self)
     let cases: [([String], String)] = [
       (["zh-CN"], "zh-Hans"), (["zh"], "zh-Hans"), (["zh-Hans-TW"], "zh-Hans"),
       (["fr", "zh-CN", "en"], "zh-Hans"), (["zh-TW"], "zh-Hant"), (["zh-Hant-HK"], "zh-Hant"),
@@ -33,8 +31,7 @@ final class AppLanguageTests: XCTestCase {
   }
 
   func testChoiceSurvivesRecreationAndReachesAppleLanguages() throws {
-    let suite = try Suite()
-    defer { suite.tearDown() }
+    let suite = try Suite(self)
     suite.defaults.set(true, forKey: "unrelatedPreference")
     let store = AppLanguageStore(defaults: suite.defaults, systemLanguages: ["en-US", "fr"])
     try store.set("zh-Hans")
@@ -56,8 +53,7 @@ final class AppLanguageTests: XCTestCase {
   }
 
   func testUnknownOrUnsafeTagsAreRefusedAndKeepTheSavedChoice() throws {
-    let suite = try Suite()
-    defer { suite.tearDown() }
+    let suite = try Suite(self)
     let store = AppLanguageStore(defaults: suite.defaults, systemLanguages: ["en"])
     try store.set("zh-Hans")
     for value in ["zh-TW", "zh-CN", "fr", "", "en';alert(1);//", "SYSTEM"] {
@@ -70,8 +66,7 @@ final class AppLanguageTests: XCTestCase {
   }
 
   func testDamagedSavedChoiceFallsBackToSystem() throws {
-    let suite = try Suite()
-    defer { suite.tearDown() }
+    let suite = try Suite(self)
     suite.defaults.set("tlh", forKey: AppLanguageStore.defaultsKey)
     let store = AppLanguageStore(defaults: suite.defaults, systemLanguages: ["zh-CN"])
     XCTAssertEqual(store.preference, AppLanguageStore.systemChoice)
@@ -79,8 +74,7 @@ final class AppLanguageTests: XCTestCase {
   }
 
   func testSnapshotOffersEveryShippedLanguageByItsOwnName() throws {
-    let suite = try Suite()
-    defer { suite.tearDown() }
+    let suite = try Suite(self)
     let store = AppLanguageStore(defaults: suite.defaults, systemLanguages: ["en"])
     let options = try XCTUnwrap(store.snapshot["options"] as? [[String: String]])
     XCTAssertEqual(options.map { $0["id"] }, AppLanguage.supported.map(\.tag))

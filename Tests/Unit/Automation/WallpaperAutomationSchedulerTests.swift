@@ -4,7 +4,6 @@ import XCTest
 @MainActor
 final class WallpaperAutomationSchedulerTests: XCTestCase {
     private var defaults: UserDefaults!
-    private var suite: String!
     private var rules: WallpaperAutomationStore!
     private var focus: FocusFilterState!
     private var states: [String: WallpaperAutomationDisplayState] = [:]
@@ -21,10 +20,9 @@ final class WallpaperAutomationSchedulerTests: XCTestCase {
         var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(secondsFromGMT: 0)!; return calendar
     }
 
-    override func setUp() {
-        super.setUp()
-        suite = "automation-scheduler-\(UUID().uuidString)"
-        defaults = UserDefaults(suiteName: suite)!
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        defaults = try TemporaryDefaults.make(for: self).defaults
         rules = WallpaperAutomationStore(defaults: defaults)
         focus = FocusFilterState(defaults: defaults)
         var playlist = DisplayPlaylist()
@@ -34,7 +32,6 @@ final class WallpaperAutomationSchedulerTests: XCTestCase {
         spaceVisits = [:]
         clock = calendar.date(from: DateComponents(year: 2026, month: 10, day: 8, hour: 10))!
     }
-    override func tearDown() { defaults.removePersistentDomain(forName: suite); super.tearDown() }
     private func settle() async { for _ in 0..<70 { await Task.yield() } }
     private func target(_ id: String, _ kind: WallpaperAutomationTarget.Kind = .wallpaper) -> WallpaperAutomationTarget { .init(kind: kind, id: id) }
     private func scheduler() -> WallpaperAutomationScheduler {

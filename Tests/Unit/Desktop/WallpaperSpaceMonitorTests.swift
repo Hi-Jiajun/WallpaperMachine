@@ -41,8 +41,7 @@ final class WallpaperSpaceMonitorTests: XCTestCase {
     }
 
     func testVisitsPersistAcrossRelaunchAndChangeOnlyWhenTheDesktopChanges() throws {
-        let suite = "space-visits-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite)); defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = try TemporaryDefaults.make(for: self).defaults
         var value: [String: WallpaperDisplaySpaces]? = ["1": .init(displayUUID: "screen", spaces: [.init(id: "a", number: 1), .init(id: "b", number: 2)], current: "a")]
         let monitor = WallpaperSpaceMonitor(defaults: defaults, provider: { value }); defer { monitor.stop() }
         monitor.refresh()

@@ -586,7 +586,7 @@ private final class SourceFixture {
     session = URLSession(configuration: configuration)
     SourceFixtureProtocol.register(identifier, answers: answers)
     service = WorkshopService(session: session)
-    defaults = try XCTUnwrap(UserDefaults(suiteName: "WorkshopSourceTests.\(identifier)"))
+    defaults = TemporaryDefaults.makeForCurrentTest().defaults
     store = WorkshopStore(
       service: service,
       downloader: WorkshopDownloadManager(sessionDirectory: root.appendingPathComponent("SteamSession")),
@@ -597,7 +597,6 @@ private final class SourceFixture {
     store.cancelSearch()
     session.invalidateAndCancel()
     SourceFixtureProtocol.remove(identifier)
-    defaults.removePersistentDomain(forName: "WorkshopSourceTests.\(identifier)")
     try? FileManager.default.removeItem(at: root)
   }
 }

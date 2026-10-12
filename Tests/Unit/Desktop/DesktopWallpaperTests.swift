@@ -18,6 +18,10 @@ private final class MemoryDesktopWorkspace: DesktopPictureWorkspace {
     var refused: [DesktopPictureTarget] = []
     /// Listed by `targets()`, but their current picture cannot be read.
     var unreadable: Set<DesktopPictureTarget> = []
+    /// Desktops whose writes read back only after `land()`, as WallpaperAgent
+    /// applies them asynchronously.
+    var lagging: Set<DesktopPictureTarget> = []
+    private var inFlight: [DesktopPictureTarget: DesktopPicture] = [:]
     var didWrite: (() -> Void)?
     var didEnumerate: (() -> Void)?
 
@@ -35,9 +39,18 @@ private final class MemoryDesktopWorkspace: DesktopPictureWorkspace {
             refused.append(target)
             throw CocoaError(.fileWriteNoPermission)
         }
-        pictures[target] = picture
         writes.append(target)
+        if lagging.contains(target) {
+            inFlight[target] = picture
+            didWrite?()
+            throw DesktopPictureUnconfirmed()
+        }
+        pictures[target] = picture
         didWrite?()
+    }
+    func land() {
+        pictures.merge(inFlight) { $1 }
+        inFlight.removeAll()
     }
     func referencedPictureURLs(targets: [DesktopPictureTarget]) -> Set<URL> { persistedPictures }
 }
@@ -388,6 +401,110 @@ final class DesktopWallpaperTests: XCTestCase {
     }
 
     @MainActor
+    func testUnreachablePosterReferenceDoesNotBlockQuitForever() async throws {
+        let workspace = MemoryDesktopWorkspace()
+        workspace.pictures = [one: original("before")]
+        let ledger = try DesktopWallpaperLedger(folder: root, workspace: workspace)
+        try ledger.apply(image: Data([1]), target: one)
+        let poster = try XCTUnwrap(workspace.pictures[one])
+        // The display-wide selection keeps the poster; no Space write reaches it.
+        workspace.persistedPictures = [poster.url]
+        let sync = try DesktopWallpaperSync(folder: root, workspace: workspace,
+                                            surfaces: { [] }, frameCenter: NotificationCenter())
+        var waits = 0
+        try await sync.restoreForTermination { waits += 1 }
+        XCTAssertGreaterThan(waits, 0, "A lagging reload is still waited for first")
+        XCTAssertEqual(workspace.pictures[one], original("before"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: poster.url.path),
+                      "A poster macOS still names must not be deleted")
+    }
+
+    /// A store that no longer names the poster does not prove the desktop stopped
+    /// showing it: quit waits for the restoration itself to read back.
+    @MainActor
+    func testQuitWaitsForEveryRestorationToReadBack() async throws {
+        let workspace = MemoryDesktopWorkspace()
+        workspace.pictures = [one: original("before")]
+        let ledger = try DesktopWallpaperLedger(folder: root, workspace: workspace)
+        try ledger.apply(image: Data([1]), target: one)
+        workspace.lagging = [one]
+        let sync = try DesktopWallpaperSync(folder: root, workspace: workspace,
+                                            surfaces: { [] }, frameCenter: NotificationCenter())
+        var waits = 0
+        try await sync.restoreForTermination {
+            waits += 1
+            if waits == 3 { workspace.land() }
+        }
+        XCTAssertEqual(waits, 3)
+        XCTAssertEqual(workspace.pictures[one], original("before"))
+
+        // One that never reads back cancels quit even with nothing left in the store.
+        workspace.lagging = []
+        try DesktopWallpaperLedger(folder: root, workspace: workspace).apply(image: Data([2]), target: one)
+        workspace.lagging = [one]
+        let next = try DesktopWallpaperSync(folder: root, workspace: workspace,
+                                            surfaces: { [] }, frameCenter: NotificationCenter())
+        do {
+            try await next.restoreForTermination(wait: {})
+            XCTFail("An unconfirmed restoration must not let the app quit")
+        } catch {
+            XCTAssertEqual(error as? DesktopWallpaperLedger.Failure, .restorationUnconfirmed)
+        }
+    }
+
+    /// A poster write still in flight can land after quit restored its desktop, so
+    /// quit waits out the confirmation window and restores it again.
+    @MainActor
+    func testQuitWaitsForAPosterWriteStillInFlight() async throws {
+        let workspace = MemoryDesktopWorkspace()
+        workspace.pictures = [one: original("one")]
+        workspace.lagging = [one]
+        let ledger = try DesktopWallpaperLedger(folder: root, workspace: workspace,
+                                                confirmationWindow: .milliseconds(200))
+        try ledger.synchronize(posters: ["1": Data([1])], liveDisplays: ["1"])
+        XCTAssertThrowsError(try ledger.restoreAll()) {
+            XCTAssertEqual($0 as? DesktopWallpaperLedger.Failure, .restorationUnconfirmed)
+        }
+        workspace.lagging = []
+        workspace.land()
+        XCTAssertThrowsError(try ledger.restoreAll(), "Restored, but the write is still in its window")
+        XCTAssertEqual(workspace.pictures[one], original("one"))
+        try await Task.sleep(for: .milliseconds(250))
+        try ledger.restoreAll()
+        XCTAssertEqual(workspace.pictures[one], original("one"))
+    }
+
+    /// WallpaperAgent copies a poster after the write. A newer frame or a desktop
+    /// that stops receiving posters must not delete a file it may still copy, and a
+    /// poster that lands afterwards on a stopped desktop is restored.
+    @MainActor
+    func testPosterFilesStayUntilTheirWritesSettle() async throws {
+        let workspace = MemoryDesktopWorkspace()
+        workspace.pictures = [one: original("one")]
+        workspace.lagging = [one]
+        let ledger = try DesktopWallpaperLedger(folder: root, workspace: workspace,
+                                                confirmationWindow: .milliseconds(200))
+        try ledger.synchronize(posters: ["1": Data([1])], liveDisplays: ["1"])
+        try ledger.synchronize(posters: ["1": Data([2])], liveDisplays: ["1"])
+        try ledger.synchronize(posters: [:], liveDisplays: [])
+        let posters = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix("poster-") }
+        XCTAssertEqual(posters.count, 2, "Both in-flight frames stay on disk")
+        XCTAssertTrue(ledger.awaitsConfirmation)
+
+        workspace.land()
+        workspace.lagging = []
+        try ledger.synchronize(posters: [:], liveDisplays: [])
+        XCTAssertEqual(workspace.pictures[one], original("one"))
+
+        try await Task.sleep(for: .milliseconds(250))
+        try ledger.synchronize(posters: [:], liveDisplays: [])
+        XCTAssertFalse(ledger.awaitsConfirmation)
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix("poster-") }.isEmpty)
+    }
+
+    @MainActor
     func testUserChoiceDuringNativeReloadSurvivesQuit() async throws {
         let workspace = MemoryDesktopWorkspace()
         workspace.pictures = [one: original("before")]
@@ -601,8 +718,15 @@ final class DesktopWallpaperTests: XCTestCase {
             "ImageFilePath": before.url.path, "Placement": "Centered", "DynamicStyle": 2,
             "ChangePath": root.path, "ChangeDuration": 100, "BackgroundColor": [0.1, 0.2, 0.3]
         ], format: .binary, options: 0)
-        let config = try DesktopSpaceWallpaperAPI.configuration(before)
+        let config = try DesktopSpaceWallpaperAPI.configuration(before, absolutePaths: false)
         XCTAssertEqual(config["ImageFilePath"] as? String, String(before.url.path.dropFirst()))
+        // macOS 27's sandboxed agent resolves relative paths in its own container.
+        let absolute = try DesktopSpaceWallpaperAPI.configuration(before, absolutePaths: true)
+        XCTAssertEqual(absolute["ImageFilePath"] as? String, before.url.path)
+        XCTAssertEqual(absolute["ChangePath"] as? String, root.path)
+        XCTAssertEqual(try DesktopSpaceWallpaperAPI.configuration(
+            .poster(URL(fileURLWithPath: "/~/Pictures/poster.jpg")), absolutePaths: true)["ImageFilePath"] as? String,
+            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Pictures/poster.jpg").path)
         XCTAssertEqual(config["Placement"] as? String, "Centered")
         XCTAssertEqual(config["DynamicStyle"] as? Int, 2)
         XCTAssertEqual(config["ChangeDuration"] as? Int, 100)
@@ -998,6 +1122,60 @@ final class DesktopWallpaperTests: XCTestCase {
         await fulfillment(of: [retried], timeout: 2)
         workspace.didWrite = nil
         XCTAssertEqual(try Data(contentsOf: XCTUnwrap(workspace.pictures[two]?.url)), Data([3]))
+    }
+
+    /// macOS 27 applies a per-Space write about 0.3 s after the call, so its readback
+    /// cannot confirm it at once. Every such write was counted as refused, logged, and
+    /// after a few snapshots left alone although macOS had accepted it.
+    @MainActor
+    func testPosterThatReadsBackLateIsConfirmedWithoutCountingARefusal() async throws {
+        let workspace = MemoryDesktopWorkspace()
+        workspace.pictures = [one: original("one")]
+        workspace.lagging = [one]
+        let frames = NotificationCenter(), layer = CAMetalLayer()
+        let sync = try DesktopWallpaperSync(folder: root, workspace: workspace,
+                                            surfaces: { [DesktopPosterSurface(layer: layer, display: "1")] },
+                                            frameCenter: frames, encode: { $0.pixels },
+                                            confirmationDelay: .milliseconds(150))
+        sync.start()
+        defer { sync.stop() }
+        post(Data([1]), layer: layer, center: frames)
+        try await waitUntil { workspace.writes.count == 1 }
+        workspace.land()
+        // Past the confirmation pass and the quick retries: the write is not repeated.
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertEqual(workspace.writes, [one])
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(workspace.pictures[one]?.url)), Data([1]))
+
+        // A later frame is written at once; the desktop was never paused.
+        workspace.lagging = []
+        let updated = expectation(description: "Next poster written")
+        workspace.didWrite = { updated.fulfill() }
+        post(Data([2]), layer: layer, center: frames)
+        await fulfillment(of: [updated], timeout: 2)
+        workspace.didWrite = nil
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(workspace.pictures[one]?.url)), Data([2]))
+    }
+
+    /// A write that never reads back is still a refusal, counted once per confirmation
+    /// window, so a desktop macOS ignores is paused rather than rewritten forever.
+    @MainActor
+    func testPosterThatNeverReadsBackIsPausedAfterItsConfirmations() async throws {
+        let workspace = MemoryDesktopWorkspace()
+        workspace.pictures = [one: original("one")]
+        workspace.lagging = [one]
+        let frames = NotificationCenter(), layer = CAMetalLayer()
+        let sync = try DesktopWallpaperSync(folder: root, workspace: workspace,
+                                            surfaces: { [DesktopPosterSurface(layer: layer, display: "1")] },
+                                            frameCenter: frames, encode: { $0.pixels },
+                                            confirmationDelay: .milliseconds(50))
+        sync.start()
+        defer { sync.stop() }
+        post(Data([1]), layer: layer, center: frames)
+        try await waitUntil { workspace.writes.count == DesktopWallpaperLedger.refusalsBeforePause }
+        try await Task.sleep(for: .milliseconds(800))
+        XCTAssertEqual(workspace.writes.count, DesktopWallpaperLedger.refusalsBeforePause)
+        XCTAssertEqual(workspace.pictures[one], original("one"))
     }
 
     @MainActor

@@ -12,14 +12,13 @@ final class WorkshopUpdateStoreTests: XCTestCase {
     override func setUpWithError() throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("workshop-updates-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        defaults = try XCTUnwrap(UserDefaults(suiteName: root.lastPathComponent))
+        defaults = try TemporaryDefaults.make(for: self).defaults
         clock = Date(timeIntervalSince1970: 1_800_000_000)
         asked = []
         answer = []
     }
 
     override func tearDownWithError() throws {
-        defaults.removePersistentDomain(forName: root.lastPathComponent)
         try FileManager.default.removeItem(at: root)
     }
 

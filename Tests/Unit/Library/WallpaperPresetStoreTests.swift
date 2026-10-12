@@ -604,7 +604,6 @@ final class WallpaperPresetStoreTests: XCTestCase {
   @MainActor
   private struct Context {
     let root: URL
-    let suite: String
     let defaults: UserDefaults
     let managed: ManagedUserAssetStore
     let store: WallpaperPresetStore
@@ -612,15 +611,13 @@ final class WallpaperPresetStoreTests: XCTestCase {
     init() throws {
       root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).resolvingSymlinksInPath()
       try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-      suite = "WallpaperPresetTests.\(UUID().uuidString)"
-      defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+      defaults = TemporaryDefaults.makeForCurrentTest().defaults
       managed = ManagedUserAssetStore(root: root.appendingPathComponent("UserAssets"))
       store = WallpaperPresetStore(defaults: defaults, managed: managed)
     }
 
     func reopen() -> WallpaperPresetStore { WallpaperPresetStore(defaults: defaults, managed: managed) }
     func close() {
-      defaults.removePersistentDomain(forName: suite)
       try? FileManager.default.removeItem(at: root)
     }
   }

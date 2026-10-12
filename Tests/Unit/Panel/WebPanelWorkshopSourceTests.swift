@@ -13,7 +13,7 @@ final class WebPanelWorkshopSourceTests: XCTestCase {
 
   override func setUpWithError() throws {
     root = FileManager.default.temporaryDirectory.appendingPathComponent("panel-sources-\(UUID().uuidString)")
-    defaults = try XCTUnwrap(UserDefaults(suiteName: root.lastPathComponent))
+    defaults = try TemporaryDefaults.make(for: self).defaults
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [OfflineProtocol.self]
     workshop = WorkshopStore(
@@ -27,7 +27,6 @@ final class WebPanelWorkshopSourceTests: XCTestCase {
   override func tearDown() {
     controller?.stop()
     workshop?.cancelSearch()
-    defaults?.removePersistentDomain(forName: root.lastPathComponent)
     try? FileManager.default.removeItem(at: root)
     controller = nil
     workshop = nil

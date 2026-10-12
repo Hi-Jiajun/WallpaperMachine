@@ -7,11 +7,8 @@ import XCTest
 final class WebPanelWorkshopUpdateTests: XCTestCase {
   func testAnOutdatedWallpaperIsMarkedAndOnlyItCanBeUpdated() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("panel-updates-\(UUID().uuidString)")
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: root.lastPathComponent))
-    defer {
-      defaults.removePersistentDomain(forName: root.lastPathComponent)
-      try? FileManager.default.removeItem(at: root)
-    }
+    let defaults = try TemporaryDefaults.make(for: self).defaults
+    defer { try? FileManager.default.removeItem(at: root) }
     // Installed two hours ago; its author changed it an hour ago.
     let folder = root.appendingPathComponent("Library/123")
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

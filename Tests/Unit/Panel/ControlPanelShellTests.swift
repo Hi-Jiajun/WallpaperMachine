@@ -21,9 +21,7 @@ final class ControlPanelShellTests: ControlPanelTestCase {
     let session = FileManager.default.temporaryDirectory.appendingPathComponent(
       "layout-\(UUID().uuidString)")
     defer { try? FileManager.default.removeItem(at: session) }
-    let defaultsName = "ControlPanelShellTests.\(UUID().uuidString)"
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
-    defer { defaults.removePersistentDomain(forName: defaultsName) }
+    let defaults = try TemporaryDefaults.make(for: self).defaults
     let workshop = WorkshopStore(
       downloader: WorkshopDownloadManager(sessionDirectory: session),
       supportDirectory: session, defaults: defaults)
@@ -61,11 +59,8 @@ final class ControlPanelShellTests: ControlPanelTestCase {
     let fixture = makeStore()
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(
       "web-panel-\(UUID().uuidString)")
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: root.lastPathComponent))
-    defer {
-      defaults.removePersistentDomain(forName: root.lastPathComponent)
-      try? FileManager.default.removeItem(at: root)
-    }
+    let defaults = try TemporaryDefaults.make(for: self).defaults
+    defer { try? FileManager.default.removeItem(at: root) }
     let workshop = WorkshopStore(
       downloader: WorkshopDownloadManager(sessionDirectory: root), supportDirectory: root,
       defaults: defaults)
@@ -155,11 +150,8 @@ final class ControlPanelShellTests: ControlPanelTestCase {
     let fixture = makeStore()
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(
       "web-panel-language-\(UUID().uuidString)")
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: root.lastPathComponent))
-    defer {
-      defaults.removePersistentDomain(forName: root.lastPathComponent)
-      try? FileManager.default.removeItem(at: root)
-    }
+    let defaults = try TemporaryDefaults.make(for: self).defaults
+    defer { try? FileManager.default.removeItem(at: root) }
     let workshop = WorkshopStore(
       downloader: WorkshopDownloadManager(sessionDirectory: root), supportDirectory: root,
       defaults: defaults)
@@ -236,11 +228,8 @@ final class ControlPanelShellTests: ControlPanelTestCase {
     let fixture = makeStore()
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(
       "web-panel-language-switch-\(UUID().uuidString)")
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: root.lastPathComponent))
-    defer {
-      defaults.removePersistentDomain(forName: root.lastPathComponent)
-      try? FileManager.default.removeItem(at: root)
-    }
+    let defaults = try TemporaryDefaults.make(for: self).defaults
+    defer { try? FileManager.default.removeItem(at: root) }
     let workshop = WorkshopStore(
       downloader: WorkshopDownloadManager(sessionDirectory: root), supportDirectory: root,
       defaults: defaults)
@@ -326,11 +315,8 @@ final class ControlPanelShellTests: ControlPanelTestCase {
     let fixture = makeStore()
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(
       "update-snap-\(UUID().uuidString)")
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: root.lastPathComponent))
-    defer {
-      defaults.removePersistentDomain(forName: root.lastPathComponent)
-      try? FileManager.default.removeItem(at: root)
-    }
+    let defaults = try TemporaryDefaults.make(for: self).defaults
+    defer { try? FileManager.default.removeItem(at: root) }
     let workshop = WorkshopStore(
       downloader: WorkshopDownloadManager(sessionDirectory: root), supportDirectory: root,
       defaults: defaults)
@@ -380,11 +366,8 @@ final class ControlPanelShellTests: ControlPanelTestCase {
     let fixture = makeStore()
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(
       "update-ui-\(UUID().uuidString)")
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: root.lastPathComponent))
-    defer {
-      defaults.removePersistentDomain(forName: root.lastPathComponent)
-      try? FileManager.default.removeItem(at: root)
-    }
+    let defaults = try TemporaryDefaults.make(for: self).defaults
+    defer { try? FileManager.default.removeItem(at: root) }
     let workshop = WorkshopStore(
       downloader: WorkshopDownloadManager(sessionDirectory: root), supportDirectory: root,
       defaults: defaults)
@@ -516,11 +499,8 @@ final class ControlPanelShellTests: ControlPanelTestCase {
     let fixture = makeStore()
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(
       "theme-ui-\(UUID().uuidString)")
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: root.lastPathComponent))
-    defer {
-      defaults.removePersistentDomain(forName: root.lastPathComponent)
-      try? FileManager.default.removeItem(at: root)
-    }
+    let defaults = try TemporaryDefaults.make(for: self).defaults
+    defer { try? FileManager.default.removeItem(at: root) }
     let theme = AppThemeStore(defaults: defaults)
     try theme.set("mode", value: "light")
     let workshop = WorkshopStore(

@@ -12,7 +12,6 @@ final class WallpaperBackupTests: XCTestCase {
     private var source: URL { root.appendingPathComponent("source") }
     private var destination: URL { root.appendingPathComponent("destination") }
     private var package: URL { root.appendingPathComponent("Roundtrip.wmbackup") }
-    private var suites: [String] = []
     private var domains: [ObjectIdentifier: String] = [:]
     private let presetID = "00000000-0000-4000-8000-000000000001"
     private let existingPresetID = "00000000-0000-4000-8000-000000000002"
@@ -23,14 +22,11 @@ final class WallpaperBackupTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     }
     override func tearDownWithError() throws {
-        for suite in suites { UserDefaults.standard.removePersistentDomain(forName: suite) }
         try FileManager.default.removeItem(at: root)
     }
 
     private func defaults() throws -> UserDefaults {
-        let name = "Backup-tests-\(UUID().uuidString)"
-        suites.append(name)
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        let (defaults, name) = try TemporaryDefaults.make(for: self)
         domains[ObjectIdentifier(defaults)] = name
         return defaults
     }

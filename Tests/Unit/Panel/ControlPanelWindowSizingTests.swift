@@ -13,9 +13,7 @@ final class ControlPanelWindowSizingTests: XCTestCase {
     let session = FileManager.default.temporaryDirectory.appendingPathComponent(
       "window-sizing-\(UUID().uuidString)")
     defer { try? FileManager.default.removeItem(at: session) }
-    let defaultsName = "ControlPanelWindowSizingTests.\(UUID().uuidString)"
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
-    defer { defaults.removePersistentDomain(forName: defaultsName) }
+    let defaults = try TemporaryDefaults.make(for: self).defaults
     let workshop = WorkshopStore(
       downloader: WorkshopDownloadManager(sessionDirectory: session),
       supportDirectory: session, defaults: defaults)

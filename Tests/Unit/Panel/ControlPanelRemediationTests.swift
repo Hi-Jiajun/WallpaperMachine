@@ -22,9 +22,7 @@ final class ControlPanelRemediationTests: ControlPanelTestCase {
   func testFavoritesUseInjectedDefaultsAcrossReopenAndRemoval() async throws {
     let fixture = makeStore()
     let panel = try PanelFixture(store: fixture.store, bridge: fixture.bridge, displayTitles: .renderer)
-    let secondName = "favorites-unrelated-\(UUID().uuidString)"
-    let other = try XCTUnwrap(UserDefaults(suiteName: secondName))
-    defer { other.removePersistentDomain(forName: secondName) }
+    let other = try TemporaryDefaults.make(for: self).defaults
     do {
       panel.store.librarySnapshot.wallpapers = [.init(id: "first", title: "First", kind: .webpage,
         supported: true, active: false, selected: false, previewPath: nil)]

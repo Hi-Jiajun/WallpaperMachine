@@ -251,7 +251,8 @@ final class PanelFixture {
     self.store = store
     self.bridge = bridge
     library = root.appendingPathComponent("Library", isDirectory: true)
-    defaults = try XCTUnwrap(UserDefaults(suiteName: root.lastPathComponent))
+    let suite: String
+    (defaults, suite) = TemporaryDefaults.makeForCurrentTest()
     defaults.set(root.appendingPathComponent("missing").path, forKey: "WallpaperMachineSteamCMDPath")
     previousHome = ProcessInfo.processInfo.environment["WALLPAPER_MACHINE_HOME"]
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -316,7 +317,7 @@ final class PanelFixture {
       defaults: defaults, managed: ManagedUserAssetStore(root: root.appendingPathComponent("UserAssets")))
     let pickers = self.pickers
     backup = WallpaperBackupStore(
-      service: WallpaperBackupService(supportRoot: root), defaults: defaults, domainName: root.lastPathComponent,
+      service: WallpaperBackupService(supportRoot: root), defaults: defaults, domainName: suite,
       exportDestination: { await pickers.exportBackup() }, restoreSource: { await pickers.restoreBackup() })
     imagePlacement = StillImagePlacementStore(defaults: defaults, library: library)
     let sceneAssets = root.appendingPathComponent("SceneAssets", isDirectory: true)
@@ -485,7 +486,6 @@ final class PanelFixture {
     await workshop.downloader.shutdown()
     await workshop.steamCMDSetup.shutdown()
     await pixiv.downloads.shutdown()
-    defaults.removePersistentDomain(forName: root.lastPathComponent)
     if let previousHome { setenv("WALLPAPER_MACHINE_HOME", previousHome, 1) }
     else { unsetenv("WALLPAPER_MACHINE_HOME") }
     try? FileManager.default.removeItem(at: root)

@@ -3,11 +3,9 @@ import XCTest
 
 @MainActor
 final class WallpaperDisplayLayoutStoreTests: XCTestCase {
-    private var suite: String!
     private var defaults: UserDefaults!
     private let assignments = [WallpaperDisplayAssignment(displayID: "primary", displayTitle: "Main", wallpaperID: "a")]
-    override func setUp() { super.setUp(); suite = "display-layouts-\(UUID().uuidString)"; defaults = UserDefaults(suiteName: suite)! }
-    override func tearDown() { defaults.removePersistentDomain(forName: suite); super.tearDown() }
+    override func setUpWithError() throws { try super.setUpWithError(); defaults = try TemporaryDefaults.make(for: self).defaults }
 
     func testSaveRenameAndDeletePersist() throws {
         let store = WallpaperDisplayLayoutStore(defaults: defaults)

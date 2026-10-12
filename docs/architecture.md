@@ -227,6 +227,13 @@ Swift keeps the *system* wallpaper consistent with that window:
   with identical pixels can reuse the encoded image for a new Space. Its ledger writes
   only the active native Space and retains inactive posters through replacement gaps.
   Public fallback targets have no Space identity and cannot accept scoped writes.
+  On macOS 27 the per-Space setter forwards to WallpaperAgent, which applies the write about
+  0.3 s later, and the sandboxed agent resolves relative image paths inside its own container,
+  so paths are sent absolute there (`DesktopSpaceWallpaperAPI.takesAbsolutePaths`; older
+  systems mis-expand absolute home paths and keep root-relative ones). A write that does not
+  read back yet is unconfirmed, not refused: its poster stays on disk and the coordinator
+  synchronizes again after `DesktopWallpaperLedger.confirmationWindow`, counting a refusal
+  only if it still has not landed.
   A desktop macOS keeps refusing (`DesktopWallpaperLedger.refusalsBeforePause`
   writes in a row, the initial one plus the quick retries) is left alone until the next Space
   change or wake rather than rewritten on every snapshot. It suspends itself while the native
@@ -235,6 +242,11 @@ Swift keeps the *system* wallpaper consistent with that window:
   native store read-only, retains still-referenced posters and their journal entries across
   WallpaperAgent reloads, and retries asynchronous restoration for about five seconds. Failure cancels quit before
   other services are torn down; provider callbacks cannot discard the restorer during quit.
+  A poster the store still names after that wait, once every writable desktop is restored, is
+  logged and does not cancel quit: macOS 27 copies a write to a display's visible Space into the
+  display-wide and system-default selections. Restoring that Space copies the original back, but
+  a write that never reached the Space itself can leave a poster there that no per-Space write
+  reaches, which otherwise blocked quit forever.
   A cancelled quit immediately restarts poster synchronization if the native provider has
   released the desktop, without waiting for another wallpaper or settings change.
 - `WallpaperPresentationPolicy` suspends or unloads presentation when no wallpaper pixel can reach a

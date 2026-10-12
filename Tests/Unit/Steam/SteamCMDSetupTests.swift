@@ -864,17 +864,16 @@ final class SteamCMDSetupTests: XCTestCase {
     private struct Fixture {
         let root: URL
         let defaults: UserDefaults
-        let suite: String
         let configuration: URLSessionConfiguration
         let identifier: String
         init(body: Data? = nil, status: Int = 200,
              headers: [String: String] = [:], holdDownload: Bool = false, redirect: URL? = nil) throws {
             identifier = UUID().uuidString
-            suite = "SteamCMDSetupTests.\(identifier)"
-            defaults = UserDefaults(suiteName: suite)!
+            defaults = TemporaryDefaults.makeForCurrentTest().defaults
             let temporaryPath = try XCTUnwrap(realpath(FileManager.default.temporaryDirectory.path, nil))
             defer { free(temporaryPath) }
-            root = URL(fileURLWithPath: String(cString: temporaryPath), isDirectory: true).appendingPathComponent(suite)
+            root = URL(fileURLWithPath: String(cString: temporaryPath), isDirectory: true)
+                .appendingPathComponent("SteamCMDSetupTests.\(identifier)")
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             configuration = .ephemeral
             configuration.protocolClasses = [BootstrapURLProtocol.self]
@@ -882,7 +881,6 @@ final class SteamCMDSetupTests: XCTestCase {
             BootstrapURLProtocol.register(identifier, response: .init(body: body ?? SteamCMDSetupTests.tar(SteamCMDSetupTests.bootstrapEntries), status: status, headers: headers, hold: holdDownload, redirect: redirect))
         }
         func remove() {
-            defaults.removePersistentDomain(forName: suite)
             BootstrapURLProtocol.remove(identifier)
             try? FileManager.default.removeItem(at: root)
         }

@@ -3,20 +3,15 @@ import XCTest
 
 @MainActor
 final class PlaylistStoreTests: XCTestCase {
-    private var suite: String!
     private var defaults: UserDefaults!
 
-    override func setUp() {
-        super.setUp()
-        suite = "WallpaperMachine.tests.\(UUID().uuidString)"
-        defaults = UserDefaults(suiteName: suite)
-        defaults.removePersistentDomain(forName: suite)
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        defaults = try TemporaryDefaults.make(for: self).defaults
     }
 
     override func tearDown() {
-        defaults.removePersistentDomain(forName: suite)
         defaults = nil
-        suite = nil
         super.tearDown()
     }
 

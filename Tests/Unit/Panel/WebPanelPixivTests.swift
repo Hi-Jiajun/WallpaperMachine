@@ -17,11 +17,8 @@ final class WebPanelPixivTests: ControlPanelTestCase {
 
   private func makeContext() throws -> Context {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("web-pixiv-\(UUID().uuidString)")
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: root.lastPathComponent))
-    addTeardownBlock {
-      defaults.removePersistentDomain(forName: root.lastPathComponent)
-      try? FileManager.default.removeItem(at: root)
-    }
+    let defaults = try TemporaryDefaults.make(for: self).defaults
+    addTeardownBlock { try? FileManager.default.removeItem(at: root) }
     let transport = PixivFixtureTransport(respondingToSession: { url, session in
       if url.path == "/touch/ajax/user/self/status" {
         return PixivFixtures.status(signedIn: session == PixivFixtures.session)

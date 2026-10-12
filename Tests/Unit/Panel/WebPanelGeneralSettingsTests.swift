@@ -8,11 +8,8 @@ final class WebPanelGeneralSettingsTests: XCTestCase {
   func testHidingAfterApplyingIsOffUntilTurnedOnAndPersists() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(
       "panel-general-\(UUID().uuidString)")
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: root.lastPathComponent))
-    defer {
-      defaults.removePersistentDomain(forName: root.lastPathComponent)
-      try? FileManager.default.removeItem(at: root)
-    }
+    let defaults = try TemporaryDefaults.make(for: self).defaults
+    defer { try? FileManager.default.removeItem(at: root) }
     let workshop = WorkshopStore(
       downloader: WorkshopDownloadManager(sessionDirectory: root), supportDirectory: root,
       defaults: defaults)

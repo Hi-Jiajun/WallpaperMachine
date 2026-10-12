@@ -95,13 +95,13 @@ final class DesktopSpaceWallpaperAPI {
         guard let display = UInt32(target.display), let space = target.space else { return }
         let config = try Self.configuration(picture)
         setPicture(display, config as CFDictionary, 0, 0, space as CFString)
-        // The setter returns void. Detect rejected/stale writes instead of
-        // silently declaring success; the coordinator retries transient failures.
+        // The setter returns void, and on macOS 27 WallpaperAgent applies the
+        // write asynchronously: the readback trails an accepted write by about
+        // 0.3 s. A write not visible yet is unconfirmed, not refused; the
+        // ledger checks it again and only then counts a refusal.
         guard let actual = copyPicture(display, 0, space as CFString)?.takeRetainedValue() as? [String: Any],
               Self.acknowledges(actual, expected: config) else {
-            throw NSError(domain: "DesktopWallpaperSync", code: 1, userInfo: [
-                NSLocalizedDescriptionKey: "macOS has not accepted the wallpaper for desktop \(space)."
-            ])
+            throw DesktopPictureUnconfirmed()
         }
     }
 
@@ -122,7 +122,16 @@ final class DesktopSpaceWallpaperAPI {
         return URL(fileURLWithPath: absolute.hasPrefix("/") ? absolute : "/" + absolute)
     }
 
-    static func configuration(_ picture: DesktopPicture) throws -> [String: Any] {
+    /// Whether the per-Space setter takes absolute image paths. Through macOS 26
+    /// it mis-expanded absolute home paths into `/~`, so paths were sent
+    /// root-relative. macOS 27's sandboxed WallpaperAgent resolves a relative
+    /// path inside its own container, where the file does not exist, and
+    /// rejects the write; absolute paths reach it intact.
+    static let takesAbsolutePaths = ProcessInfo.processInfo.isOperatingSystemAtLeast(
+        OperatingSystemVersion(majorVersion: 27, minorVersion: 0, patchVersion: 0))
+
+    static func configuration(_ picture: DesktopPicture,
+                              absolutePaths: Bool = takesAbsolutePaths) throws -> [String: Any] {
         var config: [String: Any]
         if let data = picture.nativeOptions {
             guard let original = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else {
@@ -140,11 +149,12 @@ final class DesktopSpaceWallpaperAPI {
             config = ["ImageFilePath": picture.url.path, "Placement": placement,
                       "BackgroundColor": Array(picture.fill.prefix(3))]
         }
-        // Sonoma+ mis-expands absolute home paths into /~ in this legacy API.
-        // Root-relative filesystem paths are accepted and read back as absolute.
+        // Normalize file URLs and `/~` forms; see `takesAbsolutePaths` for why
+        // older systems need root-relative paths. Both read back as absolute.
         for key in ["ImageFilePath", "NewImageFilePath", "ChangePath", "NewChangePath"] {
             if let path = config[key] as? String, !path.isEmpty {
-                config[key] = String(imageURL(path).path.dropFirst())
+                let absolute = imageURL(path).path
+                config[key] = absolutePaths ? absolute : String(absolute.dropFirst())
             }
         }
         return config

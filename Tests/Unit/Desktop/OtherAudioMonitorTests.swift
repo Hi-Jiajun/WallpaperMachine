@@ -88,11 +88,8 @@ final class OtherAudioMonitorTests: XCTestCase {
         XCTAssertFalse(monitor.isActive)
     }
 
-    func testKeepRunningDoesNotListen() {
-        let suite = "WallpaperMachine.tests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
-        defer { defaults.removePersistentDomain(forName: suite) }
+    func testKeepRunningDoesNotListen() throws {
+        let defaults = try TemporaryDefaults.make(for: self).defaults
         let preferences = PlaybackPreferences(defaults: defaults)
         XCTAssertEqual(preferences.otherAudioAction, .keepRunning)
         let source = FakeProcessAudioSource()
@@ -105,10 +102,8 @@ final class OtherAudioMonitorTests: XCTestCase {
         XCTAssertFalse(monitor.isActive)
     }
 
-    func testChangingPolicyReinstallsAudioChangeCallback() {
-        let suite = "WallpaperMachine.tests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+    func testChangingPolicyReinstallsAudioChangeCallback() throws {
+        let defaults = try TemporaryDefaults.make(for: self).defaults
         let preferences = PlaybackPreferences(defaults: defaults)
         let source = FakeProcessAudioSource()
         let monitor = makeMonitor(source, preferences: preferences, activate: .zero, deactivate: .zero)

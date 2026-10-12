@@ -4,14 +4,10 @@ import XCTest
 @MainActor
 final class ClientPreferencesTests: XCTestCase {
     func testAnExplicitSuiteKeepsApplicationPreferencesIndependent() throws {
-        let firstName = "app.wallpapermachine.tests.\(UUID().uuidString)"
-        let secondName = "app.wallpapermachine.tests.\(UUID().uuidString)"
+        let firstName = try TemporaryDefaults.make(for: self).suite
+        let secondName = try TemporaryDefaults.make(for: self).suite
         let first = ClientPreferences.resolve(environment: [ClientPreferences.suiteEnvironmentKey: firstName])
         let second = ClientPreferences.resolve(environment: [ClientPreferences.suiteEnvironmentKey: secondName])
-        defer {
-            first.removePersistentDomain(forName: firstName)
-            second.removePersistentDomain(forName: secondName)
-        }
         first.set("en", forKey: AppLanguageStore.defaultsKey)
         first.set(true, forKey: WebPanelController.welcomeSeenKey)
         first.set(true, forKey: WhatsNewStore.suppressedKey)

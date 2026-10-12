@@ -165,6 +165,16 @@ the first-run welcome's `welcomeSeen` flag, sidebar choices, favorites — and
 silently changes what the app does at the next launch. Pass the test's own
 suite everywhere; `PanelFixture` does.
 
+A named suite also outlives its test: `removePersistentDomain(forName:)` still
+leaves an empty `~/Library/Preferences/<suite>.plist`, because cfprefsd flushes
+the removal after the test deletes the file. Every unit-test suite comes from
+`TemporaryDefaults` (`Tests/Unit/Support/`), which names it by an absolute path
+inside a temporary directory and deletes that directory when the test ends:
+`make(for: self)` inside an `XCTestCase`, `makeForCurrentTest()` in fixtures
+that have no test case to hand (`PanelFixture`, `AppLanguageStore.english()`).
+Both return the suite's name with it for code that needs a domain name, such
+as backup preferences. Never pass `UserDefaults(suiteName:)` a plain name.
+
 For an explicitly authorized UI run, `WallpaperMachineUITests` creates both a
 unique `WALLPAPER_MACHINE_HOME` and a `WALLPAPER_MACHINE_DEFAULTS_SUITE`. App-owned
 default stores and direct private-key accesses use `ClientPreferences`; backup

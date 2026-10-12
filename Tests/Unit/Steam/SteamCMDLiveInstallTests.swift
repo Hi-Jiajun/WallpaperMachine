@@ -13,12 +13,8 @@ final class SteamCMDLiveInstallTests: XCTestCase {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("SteamCMDLiveInstall-\(UUID().uuidString)")
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
-        let suite = "SteamCMDLiveInstallTests.\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer {
-            defaults.removePersistentDomain(forName: suite)
-            try? fm.removeItem(at: root)
-        }
+        let defaults = try TemporaryDefaults.make(for: self).defaults
+        defer { try? fm.removeItem(at: root) }
         let service = SteamCMDRuntimeService(approvalDirectory: root.appendingPathComponent("Approvals"))
         let downloader = WorkshopDownloader(sessionDirectory: root.appendingPathComponent("Session"), runtimeProvider: service)
         let runner = RecordingNativeRunner()

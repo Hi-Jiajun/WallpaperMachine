@@ -40,13 +40,12 @@ final class WebWallpaperHostLifecycleTests: XCTestCase {
     let host: WebWallpaperHost
     let pump = WebWallpaperAudioPump(read: { nil })
     let defaults: UserDefaults
-    let suite = "WebHostLifecycle.\(UUID().uuidString)"
     init() throws {
       root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
       try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
       try "<!doctype html><script>window.contentVersion = 1</script>".write(
         to: root.appendingPathComponent("index.html"), atomically: true, encoding: .utf8)
-      defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+      defaults = TemporaryDefaults.makeForCurrentTest().defaults
       let model = model
       host = WebWallpaperHost(fetch: { [] },
         screens: { [(UInt32(7), NSRect(x: 0, y: 0, width: 320, height: 200))] },
@@ -71,7 +70,6 @@ final class WebWallpaperHostLifecycleTests: XCTestCase {
     }
     func close() {
       host.shutdown()
-      defaults.removePersistentDomain(forName: suite)
       try? FileManager.default.removeItem(at: root)
     }
   }

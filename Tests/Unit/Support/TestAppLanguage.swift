@@ -12,9 +12,6 @@ extension AppLanguageStore {
   /// specific language build their own with `systemLanguages`.
   @MainActor
   static func english() -> AppLanguageStore {
-    let suite = "app.wallpapermachine.tests.language-\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suite)!
-    defaults.removePersistentDomain(forName: suite)
-    return AppLanguageStore(defaults: defaults, systemLanguages: ["en"])
+    AppLanguageStore(defaults: TemporaryDefaults.makeForCurrentTest().defaults, systemLanguages: ["en"])
   }
 }

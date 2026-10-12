@@ -47,7 +47,7 @@ final class WebPanelEnergyUsageTests: XCTestCase {
     var visible = true
 
     init() throws {
-      defaults = try XCTUnwrap(UserDefaults(suiteName: root.lastPathComponent))
+      defaults = TemporaryDefaults.makeForCurrentTest().defaults
       let workshop = WorkshopStore(
         downloader: WorkshopDownloadManager(sessionDirectory: root), supportDirectory: root,
         defaults: defaults)
@@ -65,7 +65,6 @@ final class WebPanelEnergyUsageTests: XCTestCase {
 
     func tearDown() {
       controller.stop()
-      defaults.removePersistentDomain(forName: root.lastPathComponent)
       try? FileManager.default.removeItem(at: root)
     }
   }

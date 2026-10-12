@@ -19,9 +19,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
   private var previousHome: String?
 
   override func setUpWithError() throws {
-    defaultsSuite = "lock-screen-service-tests-" + UUID().uuidString
-    defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsSuite))
-    defaults.removePersistentDomain(forName: defaultsSuite)
+    (defaults, defaultsSuite) = try TemporaryDefaults.make(for: self)
     // Asset snapshots derive relative paths from a resolved enumeration root;
     // the temporary directory is under /var, a symlink that enumeration
     // resolves but standardizedFileURL restores, so stage under Caches instead.
@@ -41,7 +39,6 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
   override func tearDownWithError() throws {
     timers.forEach { $0.invalidate() }
     timers.removeAll()
-    defaults.removePersistentDomain(forName: defaultsSuite)
     try FileManager.default.removeItem(at: root)
     if let previousHome {
       setenv("WALLPAPER_MACHINE_HOME", previousHome, 1)

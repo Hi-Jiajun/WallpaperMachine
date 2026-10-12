@@ -541,7 +541,7 @@ final class WorkshopStoreTests: XCTestCase {
       configuration.timeoutIntervalForResource = 5
       session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
       WorkshopFixtureProtocol.register(identifier, inbox: inbox)
-      defaults = try XCTUnwrap(UserDefaults(suiteName: "WorkshopStoreTests.\(identifier)"))
+      defaults = TemporaryDefaults.makeForCurrentTest().defaults
       // Search and setup metadata use only this fixture's isolated storage.
       store = WorkshopStore(
         service: WorkshopService(session: session),
@@ -594,7 +594,6 @@ final class WorkshopStoreTests: XCTestCase {
       store.cancelSearch()
       session.invalidateAndCancel()
       WorkshopFixtureProtocol.remove(identifier)
-      defaults.removePersistentDomain(forName: "WorkshopStoreTests.\(identifier)")
       try? FileManager.default.removeItem(at: root)
     }
   }
@@ -669,7 +668,6 @@ private final class WorkshopFixtureProtocol: URLProtocol, @unchecked Sendable {
 @MainActor
 final class WorkshopDownloadIntentTests: XCTestCase {
   private var home: URL!
-  private var suite = ""
   private var defaults: UserDefaults!
   private var previousHome: String?
   private var fixtures: [Fixture] = []
@@ -690,8 +688,7 @@ final class WorkshopDownloadIntentTests: XCTestCase {
     try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
     previousHome = ProcessInfo.processInfo.environment["WALLPAPER_MACHINE_HOME"]
     setenv("WALLPAPER_MACHINE_HOME", home.path, 1)
-    suite = "WorkshopDownloadIntentTests.\(home.lastPathComponent)"
-    defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defaults = try TemporaryDefaults.make(for: self).defaults
   }
 
   /// Children own PTYs and staging inside `home`; every one of them must be reaped before the
@@ -702,7 +699,6 @@ final class WorkshopDownloadIntentTests: XCTestCase {
       await fixture.store.steamCMDSetup.shutdown()
     }
     fixtures.removeAll()
-    defaults.removePersistentDomain(forName: suite)
     if let previousHome {
       setenv("WALLPAPER_MACHINE_HOME", previousHome, 1)
     } else {

@@ -230,6 +230,19 @@ not continually rewrite registration. Startup logs include the extension bundle
 path and configuration version; checking only its identifier does not prove
 which copy macOS actually loaded.
 
+The extension exits 30 seconds after its last wallpaper-service connection
+closes, provided no lock-screen, screen-saver or preview surface is alive; a new
+connection or surface in that window keeps it. RunningBoard otherwise hands an
+already-running extension process to WallpaperAgent even after macOS has
+registered another copy (an update or another build). That process never
+receives the new connection, and WallpaperAgent processes requests one at a
+time, so each System Settings query then stalls for about 30 seconds while
+wallpaper choices, the lock screen and the screen saver wait behind it: the lock
+screen and screen saver stayed black and new wallpapers applied only minutes
+later. A process from a build before 2026-10-12 can still linger after another
+copy is registered; quitting it (`pkill -x WallpaperMachineExtension`) or logging
+out clears it, since macOS starts the registered copy on the next request.
+
 ## Turning it off
 
 Disabling either control restores only its still-owned selections. Quitting

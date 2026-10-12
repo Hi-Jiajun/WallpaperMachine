@@ -5,9 +5,7 @@ import XCTest
 @MainActor
 final class AppThemeTests: XCTestCase {
   func testThemeSurvivesRecreationAndResetLeavesOtherPreferencesUntouched() throws {
-    let name = "AppThemeTests.\(UUID().uuidString)"
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
-    defer { defaults.removePersistentDomain(forName: name) }
+    let defaults = try TemporaryDefaults.make(for: self).defaults
     defaults.set(true, forKey: "unrelatedPreference")
 
     let store = AppThemeStore(defaults: defaults)
@@ -31,9 +29,7 @@ final class AppThemeTests: XCTestCase {
   }
 
   func testInvalidThemeChangeCannotOverwriteSavedPreferences() throws {
-    let name = "AppThemeTests.\(UUID().uuidString)"
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
-    defer { defaults.removePersistentDomain(forName: name) }
+    let defaults = try TemporaryDefaults.make(for: self).defaults
     let store = AppThemeStore(defaults: defaults)
     try store.set("mode", value: "dark")
     try store.set("accent", value: "#aa3366")
@@ -50,9 +46,7 @@ final class AppThemeTests: XCTestCase {
   }
 
   func testDamagedSavedColorDoesNotDiscardValidAppearanceChoice() throws {
-    let name = "AppThemeTests.\(UUID().uuidString)"
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
-    defer { defaults.removePersistentDomain(forName: name) }
+    let defaults = try TemporaryDefaults.make(for: self).defaults
     defaults.set(
       ["mode": "dark", "accent": "not-a-color", "tone": "warm", "icon": "minimal"],
       forKey: AppThemeStore.defaultsKey)
@@ -64,9 +58,7 @@ final class AppThemeTests: XCTestCase {
   }
 
   func testUnknownSavedIconDoesNotDiscardOtherPreferences() throws {
-    let name = "AppThemeTests.\(UUID().uuidString)"
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
-    defer { defaults.removePersistentDomain(forName: name) }
+    let defaults = try TemporaryDefaults.make(for: self).defaults
     defaults.set(
       ["mode": "dark", "accent": "#aa3366", "tone": "cool", "icon": "unavailable"],
       forKey: AppThemeStore.defaultsKey)

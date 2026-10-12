@@ -3,7 +3,6 @@ import XCTest
 
 @MainActor
 final class SystemConditionMonitorTests: XCTestCase {
-    private var suite: String!
     private var defaults: UserDefaults!
     private var preferences: PlaybackPreferences!
     private var focus: FocusFilterState!
@@ -11,11 +10,9 @@ final class SystemConditionMonitorTests: XCTestCase {
     private var lowPower = false
     private var thermal = ProcessInfo.ThermalState.nominal
 
-    override func setUp() {
-        super.setUp()
-        suite = "WallpaperMachine.tests.\(UUID().uuidString)"
-        defaults = UserDefaults(suiteName: suite)
-        defaults.removePersistentDomain(forName: suite)
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        defaults = try TemporaryDefaults.make(for: self).defaults
         preferences = PlaybackPreferences(defaults: defaults)
         focus = FocusFilterState(defaults: defaults)
         systemCenter = NotificationCenter()
@@ -24,7 +21,6 @@ final class SystemConditionMonitorTests: XCTestCase {
     }
 
     override func tearDown() {
-        defaults.removePersistentDomain(forName: suite)
         defaults = nil
         preferences = nil
         focus = nil

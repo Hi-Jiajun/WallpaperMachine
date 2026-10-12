@@ -8,20 +8,16 @@ import XCTest
 final class StillImagePageUpgradeTests: XCTestCase {
     private var library: URL!
     private var defaults: UserDefaults!
-    private var suite: String!
 
     override func setUpWithError() throws {
         library = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: library, withIntermediateDirectories: false)
-        suite = "WallpaperMachine.image-preparation.tests.\(UUID().uuidString)"
-        defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defaults = try TemporaryDefaults.make(for: self).defaults
     }
 
     override func tearDownWithError() throws {
         try FileManager.default.removeItem(at: library)
-        defaults.removePersistentDomain(forName: suite)
         defaults = nil
-        suite = nil
         library = nil
     }
 

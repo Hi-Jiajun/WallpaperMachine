@@ -192,9 +192,7 @@ final class WebPanelSupportPromptTests: ControlPanelTestCase {
   private func withPromptPanel(
     _ body: (PanelFixture, SupportPromptStore, UserDefaults) async throws -> Void
   ) async throws {
-    let suite = "WebPanelSupportPromptTests.\(UUID().uuidString)"
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = try TemporaryDefaults.make(for: self).defaults
     let prompt = SupportPromptStore(defaults: defaults)
     try await withPanel(supportPrompt: prompt) { panel in
       panel.controller.openSupportURL = { _ in

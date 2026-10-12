@@ -10,14 +10,11 @@ final class WallpaperAutomationStoreTests: XCTestCase {
         value.mode = .spaces; value.spaces["desktop-uuid"] = .init(kind: .wallpaper, id: "ocean")
         XCTAssertEqual(try JSONDecoder().decode(DisplayWallpaperAutomation.self, from: JSONEncoder().encode(value)), value)
     }
-    private var suite: String!
     private var defaults: UserDefaults!
-    override func setUp() {
-        super.setUp()
-        suite = "automatic-store-\(UUID().uuidString)"
-        defaults = UserDefaults(suiteName: suite)!
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        defaults = try TemporaryDefaults.make(for: self).defaults
     }
-    override func tearDown() { defaults.removePersistentDomain(forName: suite); super.tearDown() }
 
     func testRulesLocationAndHandledStatePersistAndUnchangedEditsKeepTheRevision() throws {
         let store = WallpaperAutomationStore(defaults: defaults)

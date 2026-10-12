@@ -3,7 +3,6 @@ import XCTest
 
 @MainActor
 final class PlaylistSchedulerTests: XCTestCase {
-    private var suite: String!
     private var defaults: UserDefaults!
     private var store: PlaylistStore!
     private var collections: WallpaperCollectionStore!
@@ -17,11 +16,9 @@ final class PlaylistSchedulerTests: XCTestCase {
         return calendar
     }()
 
-    override func setUp() {
-        super.setUp()
-        suite = "WallpaperMachine.tests.\(UUID().uuidString)"
-        defaults = UserDefaults(suiteName: suite)
-        defaults.removePersistentDomain(forName: suite)
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        defaults = try TemporaryDefaults.make(for: self).defaults
         store = PlaylistStore(defaults: defaults)
         collections = WallpaperCollectionStore(defaults: defaults)
         shown = ["primary": "a"]
@@ -31,7 +28,6 @@ final class PlaylistSchedulerTests: XCTestCase {
     }
 
     override func tearDown() {
-        defaults.removePersistentDomain(forName: suite)
         defaults = nil
         store = nil
         collections = nil
