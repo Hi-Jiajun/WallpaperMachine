@@ -244,7 +244,7 @@ reveals it in Finder. It is built off the main actor by `DiagnosticsBundle`
 | `load-journal.json` | The crash-loop guard's journal, [crash-recovery.md](crash-recovery.md): the strikes per wallpaper and the scenes that were opening when the app last stopped. Wallpaper ids, display numbers, times, the build and an opaque session id; no paths. The file exists once a scene has been opened; without it the report notes that it was not present |
 | `crash-reports/*.ips` | Up to 5 macOS crash reports from the last 14 days whose name starts with `WallpaperMachine` (app and extension) |
 | `diagnostic-reports/*.diag`, `*.spin`, `*.hang` | Up to 5 macOS resource, spin and hang reports from the last 14 days whose name starts with `WallpaperMachine`, newest first across both report folders. See [below](#macos-resource-spin-and-hang-reports) |
-| `environment.txt` | The environment lines above, read at export time, plus the saved renderer preferences and the backend each running scene actually uses |
+| `environment.txt` | The environment lines above, read at export time, plus the saved renderer preferences, the backend each running scene actually uses, and the state of each wallpaper window with whether the displays have separate Spaces ([below](#wallpaper-window-state)) |
 | `README.txt` | What is included, what was missing or skipped, and what was redacted |
 
 Everything except `README.txt` passes through `DiagnosticsRedactor` first:
@@ -296,6 +296,41 @@ Bug reports on GitHub use the issue form in
 exported report, and points to Detailed logging for problems that are hard to
 reproduce.
 
+### Wallpaper window state
+
+`environment.txt` ends with one `desktop windows:` line (how many wallpaper
+windows are open, and whether the displays have separate Spaces) and one
+`desktop window …` line per window of the three kinds that host wallpaper
+pixels (the scene renderer, web and native video windows). It tells "the
+process died" apart from "the window exists but is not shown":
+
+```
+desktop window MWEWallpaperDesktopWindow #1234 display 1: frame (0,0,3456,2234), display frame (0,0,3456,2234), level -2147483623, collection behavior 0x51, alpha 1.0, ordered in yes, active Space yes, occlusion visible yes; window server: layer -2147483623, alpha 1.0, on screen yes, bounds (0,0,3456,2234); state ok
+```
+
+AppKit's view (frame, level, ordered in, active Space, occlusion) and the window
+server's view (layer, alpha, on screen, bounds, which are in CoreGraphics
+coordinates with the origin at the top left) are read once, at export. The
+server side is one `CGWindowListCreateDescriptionFromArray` call for the app's own
+window numbers: no window list scan, no polling and no Screen Recording
+permission. Titles are never read. The last field names the first fault that
+applies, in this order:
+
+| `state` | Meaning |
+|---|---|
+| `notOrderedIn` | AppKit does not consider the window ordered in |
+| `absentFromWindowServer` | The window server has no entry for the window number (`window server: absent`) |
+| `notOnActiveSpace` | Ordered in on a Space that is not showing |
+| `offScreenInWindowServer` | AppKit says shown, but the window server does not list it on screen |
+| `outsideItsDisplay` | The frame does not intersect its display (`display ?` when the window is on none) |
+| `transparent` | The window's or the window server's alpha is below 1 |
+| `ok` | None of the above |
+
+A state is an observation, not a verdict: inside another app's full-screen Space
+the wallpaper windows legitimately read `notOnActiveSpace`. Whether any of these
+faults explains a missing wallpaper on a given Mac is not established here; the
+lines exist to show which one a report has.
+
 ## Verification
 
 - Rust:
@@ -305,8 +340,9 @@ reproduce.
   - `settings_intents::verbose_logging_persists_across_relaunch_and_can_be_turned_off`.
 - Swift: `AppLogRouterTests`, `DiagnosticsRedactorTests`, `DiagnosticsBundleTests`,
   `SessionLedgerTests`, `CrashReportIndexTests`, `UncaughtExceptionLogTests`,
-  `QuitReasonTests`, `QuitTimingsTests`, and `AppUpdateTests` for when an install counts as
-  pending.
+  `QuitReasonTests`, `QuitTimingsTests`, `AppUpdateTests` for when an install counts as
+  pending, and `DesktopWindowDiagnosticsTests` (state precedence, line format, window server
+  description parsing and the window ID array read, against injected observations).
 - Not established by tests:
   - that a real scene's renderer lines carry its number on the desktop;
   - the unreadable-folder note on a Mac whose account is not in `_analyticsusers`
@@ -322,4 +358,7 @@ reproduce.
     `.ips` fixtures are modeled on the shape of a real report;
   - that ReportCrash has written the report by the time the lookup runs;
   - the Save panel;
-  - Finder reveal.
+  - Finder reveal;
+  - the wallpaper window lines for open wallpaper windows (the window server read is checked
+    against whatever window the session lists on screen, and skipped when there is none; the
+    AppKit read against an `NSWindow` that is never shown).

@@ -294,6 +294,28 @@ final class DiagnosticsBundleTests: XCTestCase {
         XCTAssertEqual(notOffered.report.missing.filter { $0.contains("resource") }, ["no resource, spin or hang reports in the last 14 days"])
     }
 
+    /// Window state travels in `environment.txt` like every other environment
+    /// line: the redactor must neither mangle it nor miss a user path beside it.
+    func testWindowStateLinesSurviveRedactionIntoEnvironment() throws {
+        let window = DesktopWindowObservation(
+            windowNumber: 1234, className: "MWEWallpaperDesktopWindow", displayID: 1,
+            frame: CGRect(x: 0, y: 0, width: 3456, height: 2234),
+            displayFrame: CGRect(x: 0, y: 0, width: 3456, height: 2234), level: -2_147_483_623, alpha: 1,
+            isOrderedIn: true, isOnActiveSpace: false, occlusionVisible: false, collectionBehaviorRaw: 0x51,
+            server: .init(layer: -2_147_483_623, alpha: 1, isOnScreen: false,
+                          bounds: CGRect(x: 0, y: 0, width: 3456, height: 2234)))
+        let windowLines = DesktopWindowDiagnostics.lines([window], separateSpaces: true)
+        let destination = root.appendingPathComponent("windows.zip")
+        _ = try makeBundle(logs: try makeLogs(["20260927-120000": ["0.log": "ok\n"]])).export(
+            to: destination, environment: ["app /Users/alice/Applications/WallpaperMachine.app"] + windowLines,
+            at: exportedAt)
+        let environment = try String(
+            contentsOf: try unzip(destination).appending(path: "environment.txt"), encoding: .utf8)
+        XCTAssertEqual(
+            environment, (["app ~/Applications/WallpaperMachine.app"] + windowLines).joined(separator: "\n") + "\n")
+        XCTAssertTrue(environment.contains("; state notOnActiveSpace\n"))
+    }
+
     func testSuggestedFileNameUsesLocalPOSIXTime() {
         let name = DiagnosticsBundle.suggestedFileName(at: exportedAt)
         XCTAssertTrue(name.hasPrefix("WallpaperMachine-diagnostics-"))
