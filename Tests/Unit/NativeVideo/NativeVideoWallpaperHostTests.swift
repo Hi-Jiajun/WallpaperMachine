@@ -56,7 +56,15 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         var offered: [BridgeNativeVideoWallpaper]?
         /// Where each probed file was said to live, in the order it was asked.
         var storageQueries: [String] = []
+        /// Every surface the host built, by the media path it was built for. A
+        /// window that was built and closed again still counts: it was on the
+        /// desktop for a moment, and that is what a superseded open must avoid.
+        var made: [String] = []
+        /// When set, the bridge cannot be read.
+        var fetchFailure: Error?
     }
+
+    private struct BridgeUnreachable: Error {}
 
     /// Stands in for the desktop window. The controller's rules are what these
     /// tests are about, and an automated run has no authorization to put a
@@ -105,9 +113,13 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
             onPreparationFailure?(generation ?? self.generation, detail)
         }
 
+        /// Every volume the surface was given, in order: the first is the one
+        /// it started with.
+        private(set) var volumeHistory: [Float] = []
         func setVolume(_ volume: Float, muted: Bool) {
             self.volume = volume
             self.muted = muted
+            volumeHistory.append(volume)
         }
         /// Every scaling choice the host handed this surface, in order.
         private(set) var scalingCalls: [(mode: BridgeScalingMode, factor: Double)] = []
@@ -187,6 +199,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         return NativeVideoWallpaperHost(
             fetch: {
                 recorder.fetched += 1
+                if let failure = recorder.fetchFailure { throw failure }
                 return recorder.offered ?? wallpapers
             },
             reject: { id, key, reason in
@@ -208,7 +221,8 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
                 }
                 return refusalByKey[UInt64(fps)] ?? refusal
             },
-            makeSurface: { [weak self] _, frame, key, paused in
+            makeSurface: { [weak self] url, frame, key, paused in
+                recorder.made.append(url.path)
                 let surface = FakeSurface(
                     recorder: recorder, paused: paused, generation: key.generation)
                 surface.setScreenFrame(frame)
@@ -815,6 +829,279 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         await host.apply([])
         await host.apply([wallpaper(admissionKey: 11)])
         XCTAssertEqual(recorder.admissionProbes.count, 1, "no second read of the file")
+    }
+
+    // MARK: Superseded passes
+
+    private static let pathA = "/tmp/does-not-need-to-exist/a.mp4"
+    private static let pathB = "/tmp/does-not-need-to-exist/b.mp4"
+    private static let pathC = "/tmp/does-not-need-to-exist/c.mp4"
+
+    /// A host whose reconcile is held inside the metadata read of `pathA`
+    /// until the returned gate opens, which is the window a newer snapshot has
+    /// to arrive in.
+    private func hostHeldInTheReadOfA(
+        _ recorder: Recorder
+    ) -> (host: NativeVideoWallpaperHost, gate: AsyncGate, passes: PassCounter) {
+        let gate = stuckFile(recorder, path: Self.pathA)
+        let host = makeHost(wallpapers: [], recorder: recorder, manualLimits: true)
+        let passes = PassCounter()
+        host.onSurfacesChanged = { passes.record() }
+        return (host, gate, passes)
+    }
+
+    func testASupersededWallpaperIsNeverPresented() async {
+        // A rapid A, then B: while A's file is read the bridge commits B. The
+        // reconcile that is running coalesces it into one trailing pass, which
+        // would close what the first pass opened. Building A anyway puts a
+        // decoder and a visible window on the desktop for a wallpaper that was
+        // already replaced.
+        let recorder = Recorder()
+        let (host, gate, passes) = hostHeldInTheReadOfA(recorder)
+        defer { host.shutdown() }
+        let a = wallpaper(id: "300", admissionKey: 1, mediaPath: Self.pathA)
+        let b = wallpaper(id: "301", admissionKey: 2, mediaPath: Self.pathB)
+
+        recorder.offered = [a]
+        host.reconcile()
+        await gate.waitUntilWaiting()
+        recorder.offered = [b]
+        host.reconcile()
+        gate.open()
+        await passes.wait(for: 2)
+
+        XCTAssertEqual(recorder.made, [Self.pathB], "A was never built, not even briefly")
+        XCTAssertEqual(recorder.presented, 1)
+        XCTAssertEqual(recorder.stopped, 0, "so there was nothing to close either")
+        XCTAssertTrue(recorder.rejected.isEmpty)
+        XCTAssertEqual(host.activeDisplayIDs, [7])
+    }
+
+    func testAWallpaperThatLeftTheBackendWhileItsFileWasReadIsNotPresented() async {
+        // The user went back to a scene wallpaper: the display is no longer in
+        // the bridge's native list at all.
+        let recorder = Recorder()
+        let (host, gate, passes) = hostHeldInTheReadOfA(recorder)
+        defer { host.shutdown() }
+        var states: [HostWallpaperState] = []
+        host.onStateChanged = { states.append($0) }
+
+        recorder.offered = [wallpaper(admissionKey: 1, mediaPath: Self.pathA)]
+        host.reconcile()
+        await gate.waitUntilWaiting()
+        recorder.offered = []
+        host.reconcile()
+        gate.open()
+        await passes.wait(for: 2)
+
+        XCTAssertTrue(recorder.made.isEmpty)
+        XCTAssertEqual(recorder.presented, 0)
+        XCTAssertTrue(host.isEmpty)
+        XCTAssertEqual(
+            states.last?.phase, .closed,
+            "the startup the abandoned open began is ended, not left at loading")
+    }
+
+    func testAMediaChangeAtTheSamePathWhileItsFileWasReadIsOpenedOnceUnderTheNewKey() async {
+        // The admission key is what the decision was taken for. A snapshot that
+        // changed it describes a different file, so the old key's open is
+        // dropped even though the wallpaper id and path are the same.
+        let recorder = Recorder()
+        let (host, gate, passes) = hostHeldInTheReadOfA(recorder)
+        defer { host.shutdown() }
+
+        recorder.offered = [wallpaper(admissionKey: 1, mediaPath: Self.pathA)]
+        host.reconcile()
+        await gate.waitUntilWaiting()
+        recorder.offered = [wallpaper(admissionKey: 2, mediaPath: Self.pathA)]
+        host.reconcile()
+        gate.open()
+        await passes.wait(for: 2)
+
+        XCTAssertEqual(recorder.made, [Self.pathA], "one surface, for the key that is current")
+        XCTAssertEqual(recorder.stopped, 0)
+        XCTAssertEqual(host.activeDisplayIDs, [7])
+        XCTAssertTrue(recorder.rejected.isEmpty)
+    }
+
+    func testARepeatedOfferOfTheSameWallpaperDoesNotAbandonTheOpen() async {
+        // A volume slider being dragged commits a snapshot per step, every one
+        // of them offering the same wallpaper. Abandoning whenever a newer pass
+        // is queued would abandon every pass in turn, and the clip would never
+        // open for as long as the drag lasted.
+        let recorder = Recorder()
+        let (host, gate, passes) = hostHeldInTheReadOfA(recorder)
+        defer { host.shutdown() }
+        let a = wallpaper(id: "300", volume: 0.9, admissionKey: 1, mediaPath: Self.pathA)
+
+        recorder.offered = [a]
+        host.reconcile()
+        await gate.waitUntilWaiting()
+        for volume: Float in [0.8, 0.6, 0.25] {
+            var dragged = a
+            dragged.volume = volume
+            recorder.offered = [dragged]
+            host.reconcile()
+        }
+        gate.open()
+        await passes.wait(for: 2)
+
+        XCTAssertEqual(recorder.made, [Self.pathA], "opened once")
+        XCTAssertEqual(recorder.presented, 1)
+        XCTAssertEqual(recorder.stopped, 0)
+        XCTAssertTrue(recorder.rejected.isEmpty)
+        XCTAssertEqual(
+            surfacesMade[7]?.volumeHistory.first, 0.25,
+            "and it starts at the volume the bridge holds now, not the one it was offered at")
+    }
+
+    func testAnOverlappingDirectApplyDropsTheOlderOne() async {
+        // Two passes in flight at once. The newer one has the final list, so
+        // the older one must neither build what it was waiting on nor go on to
+        // read and build the rest of its own list: C was dropped by the newer
+        // list, and reading its file would be work for a wallpaper nobody wants.
+        let recorder = Recorder()
+        let (host, gate, _) = hostHeldInTheReadOfA(recorder)
+        defer { host.shutdown() }
+        let a = wallpaper(displayID: 7, id: "300", admissionKey: 1, mediaPath: Self.pathA)
+        let b = wallpaper(displayID: 7, id: "301", admissionKey: 2, mediaPath: Self.pathB)
+        let c = wallpaper(displayID: 9, id: "302", admissionKey: 3, mediaPath: Self.pathC)
+
+        let older = Task { await host.apply([a, c]) }
+        await gate.waitUntilWaiting()
+        await host.apply([b])
+        XCTAssertEqual(recorder.made, [Self.pathB])
+        gate.open()
+        await older.value
+
+        XCTAssertEqual(recorder.made, [Self.pathB], "neither A nor C was built")
+        XCTAssertEqual(recorder.admissionProbes.count, 2, "C's file was not read for a list that was replaced")
+        XCTAssertEqual(host.activeDisplayIDs, [7])
+        XCTAssertEqual(recorder.presented, 1)
+        XCTAssertEqual(recorder.stopped, 0)
+    }
+
+    func testAnOlderPassDoesNotPutItsStaleSettingsOverANewerOne() async {
+        // Display 9 already plays. The older pass waits on display 7's file,
+        // and by the time it reaches display 9 a newer pass has applied a newer
+        // volume to it; carrying on would put the old volume back.
+        let recorder = Recorder()
+        let (host, gate, _) = hostHeldInTheReadOfA(recorder)
+        defer { host.shutdown() }
+        let c = wallpaper(displayID: 9, id: "302", volume: 1, admissionKey: 3, mediaPath: Self.pathC)
+        await host.apply([c])
+        let playing = surfacesMade[9]
+        var quieter = c
+        quieter.volume = 0.2
+
+        let older = Task {
+            await host.apply([wallpaper(displayID: 7, id: "300", admissionKey: 1, mediaPath: Self.pathA), c])
+        }
+        await gate.waitUntilWaiting()
+        await host.apply([quieter])
+        gate.open()
+        await older.value
+
+        XCTAssertEqual(playing?.volume, 0.2)
+        XCTAssertEqual(playing?.volumeHistory.last, 0.2, "the older pass did not touch it afterwards")
+    }
+
+    func testADisplayThatVanishedDuringAdmissionGetsNoSurface() async {
+        // The frame was read when the pass began. A display unplugged while an
+        // earlier file was being read would be given a window anyway, at a
+        // frame that no longer exists.
+        let recorder = Recorder()
+        let (host, gate, _) = hostHeldInTheReadOfA(recorder)
+        defer { host.shutdown() }
+        var states: [HostWallpaperState] = []
+        host.onStateChanged = { states.append($0) }
+        let a = wallpaper(id: "300", admissionKey: 1, mediaPath: Self.pathA)
+        let present = screenFrames
+
+        let pass = Task { await host.apply([a]) }
+        await gate.waitUntilWaiting()
+        screenFrames = present.filter { $0.id != 7 }
+        gate.open()
+        await pass.value
+
+        XCTAssertTrue(recorder.made.isEmpty, "no surface for a display that is not there")
+        XCTAssertEqual(recorder.presented, 0)
+        XCTAssertTrue(host.isEmpty)
+        XCTAssertTrue(recorder.rejected.isEmpty, "and the wallpaper was not refused for it")
+
+        await host.apply([])
+        XCTAssertEqual(states.last?.phase, .closed, "the startup it began is swept by the next pass")
+
+        // The display returns: the kept verdict opens it without a second read.
+        screenFrames = present
+        await host.apply([a])
+        XCTAssertEqual(recorder.made, [Self.pathA])
+        XCTAssertEqual(recorder.admissionProbes.count, 1, "the file was not read again")
+        XCTAssertEqual(host.activeDisplayIDs, [7])
+    }
+
+    func testASurfaceOpensOnTheFrameItsDisplayHasNow() async {
+        let recorder = Recorder()
+        let (host, gate, _) = hostHeldInTheReadOfA(recorder)
+        defer { host.shutdown() }
+        let moved = NSRect(x: 0, y: 0, width: 300, height: 150)
+
+        let pass = Task {
+            await host.apply([wallpaper(id: "300", admissionKey: 1, mediaPath: Self.pathA)])
+        }
+        await gate.waitUntilWaiting()
+        screenFrames = [(id: 7, frame: moved), (id: 9, frame: NSRect(x: 300, y: 0, width: 200, height: 100))]
+        gate.open()
+        await pass.value
+
+        XCTAssertEqual(surfacesMade[7]?.frame, moved)
+    }
+
+    func testAPassThatWaitedPlacesALaterDisplayAtItsCurrentFrame() async {
+        // The same staleness on the other branch: display 9 already plays, and
+        // the pass reaches it after waiting on display 7's file.
+        let recorder = Recorder()
+        let (host, gate, _) = hostHeldInTheReadOfA(recorder)
+        defer { host.shutdown() }
+        let c = wallpaper(displayID: 9, id: "302", admissionKey: 3, mediaPath: Self.pathC)
+        await host.apply([c])
+        let moved = NSRect(x: 200, y: 0, width: 640, height: 360)
+
+        let pass = Task {
+            await host.apply([wallpaper(displayID: 7, id: "300", admissionKey: 1, mediaPath: Self.pathA), c])
+        }
+        await gate.waitUntilWaiting()
+        screenFrames = [(id: 7, frame: NSRect(x: 0, y: 0, width: 200, height: 100)), (id: 9, frame: moved)]
+        gate.open()
+        await pass.value
+
+        XCTAssertEqual(surfacesMade[9]?.frame, moved)
+    }
+
+    func testAFetchFailureWhileCheckingStillPresents() async {
+        // Asking the bridge again is a courtesy to the user: if it cannot
+        // answer, the wallpaper is presented as it was offered rather than
+        // left off the desktop, and the trailing pass puts right whatever that
+        // got wrong.
+        let recorder = Recorder()
+        let (host, gate, _) = hostHeldInTheReadOfA(recorder)
+        defer { host.shutdown() }
+        var errors: [String] = []
+        host.onError = { errors.append($0) }
+
+        recorder.offered = [wallpaper(id: "300", admissionKey: 1, mediaPath: Self.pathA)]
+        host.reconcile()
+        await gate.waitUntilWaiting()
+        recorder.fetchFailure = BridgeUnreachable()
+        host.reconcile()
+        gate.open()
+        // The trailing pass cannot read the bridge either, and says so.
+        await settle(until: { !errors.isEmpty })
+
+        XCTAssertEqual(recorder.made, [Self.pathA])
+        XCTAssertEqual(recorder.presented, 1)
+        XCTAssertEqual(recorder.stopped, 0)
+        XCTAssertEqual(host.activeDisplayIDs, [7], "and the failed trailing pass closes nothing")
     }
 
     // MARK: First frame

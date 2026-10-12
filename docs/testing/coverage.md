@@ -615,6 +615,17 @@ need an authorized runtime check
   with every replaced item released; a healthy clip restarts and plays again, its
   stable run earning the allowance back through the injected clock; and a restart
   never starts a paused clip and is refused after a stop or a reported failure.
+- A pass overtaken while it waited, in the host suite with a metadata read held open by
+  a gate while the next snapshot arrives: a wallpaper that was replaced, dropped from
+  the native list or given another admission key by then is never built (the host
+  records every surface it makes, so one built and closed again would show), and the
+  startup it began is ended by the next pass. A burst of snapshots that keep offering
+  the same wallpaper does not abandon its open, and the clip starts at the latest
+  volume; a bridge that cannot be asked presents the wallpaper as offered. A second
+  `apply` in flight drops the older one, including the files it had still to read and
+  the settings it would have put over the newer pass's. A display that vanished or
+  moved while a file was read gets no surface or the frame it has now, and the next
+  pass opens it from the kept verdict without reading the file again.
 - `NativeVideoLayoutTests` — where the picture goes under Fit, Fill, Stretch,
   Original size and a scale factor: the rectangles equal the numbers the
   renderer's own `ComputeWallpaperScalingLayout` gives (Original size is one video
@@ -651,7 +662,8 @@ need an authorized runtime check
   and an upright clip keeps reading the playing frame (`nativeVideoPosterFallback`
   stays 0).
 
-Not covered: first frames presented on a real display, the Mission Control
+Not covered: first frames presented on a real display, a rapid A, then B switch on
+a real display (that no window of the replaced clip appears, even briefly), the Mission Control
 or other-Space poster of a rotated clip as macOS shows it, a side-by-side of
 Fit, Original size and a scale factor on a real display against Compatibility
 (including the composition cost of a large factor), and a genuinely stuck volume (a

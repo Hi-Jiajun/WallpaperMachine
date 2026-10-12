@@ -78,6 +78,9 @@ final class NativeVideoWallpaperHost {
     }
     private var firstFrameWatches: [UInt32: FirstFrameWatch] = [:]
     private var surfaceGeneration: UInt64 = 0
+    /// Moves on every `apply`, so a pass that was overtaken while it waited on
+    /// a metadata read can tell and stop acting on the list it was given.
+    private var applyGeneration: UInt64 = 0
     private var reconcileInFlight = false
     private var reconcileRequested = false
     private var stopped = false
@@ -200,10 +203,11 @@ final class NativeVideoWallpaperHost {
     }
 
     func apply(_ wallpapers: [BridgeNativeVideoWallpaper]) async {
-        let screenFrames = Dictionary(
-            screens().map { ($0.id, $0.frame) }, uniquingKeysWith: { first, _ in first })
+        applyGeneration &+= 1
+        let generation = applyGeneration
+        let screenIDs = Set(screens().map { $0.id })
         var wanted: [UInt32: BridgeNativeVideoWallpaper] = [:]
-        for wallpaper in wallpapers where screenFrames[wallpaper.displayId] != nil {
+        for wallpaper in wallpapers where screenIDs.contains(wallpaper.displayId) {
             wanted[wallpaper.displayId] = wallpaper
         }
         for (displayID, var state) in states where wanted[displayID] == nil {
@@ -238,23 +242,85 @@ final class NativeVideoWallpaperHost {
         }
 
         for (displayID, wallpaper) in wanted.sorted(by: { $0.key < $1.key }) {
+            // Every open before this one may have waited on a metadata read, and
+            // a newer pass can have taken over meanwhile. What is left of this
+            // list is then out of date: opening from it would read files
+            // nobody wants any more, and updating from it would put an older
+            // volume or scaling over what the newer pass already applied.
+            guard !stopped, generation == applyGeneration else { break }
             // No local skip list. If the bridge is still offering this key,
             // this host must either play it or say again that it cannot —
             // silently ignoring an offer is how a display ends up with no
             // backend at all.
+            //
+            // The frame is read when it is used, not once at the top: a display
+            // can move or go away while an earlier display's file is read.
             if let surface = surfaces[displayID] {
-                if let frame = screenFrames[displayID] { surface.setScreenFrame(frame) }
+                if let frame = currentFrame(of: displayID) { surface.setScreenFrame(frame) }
                 update(surface: surface, with: wallpaper, displayID: displayID)
                 continue
             }
-            guard let frame = screenFrames[displayID] else { continue }
-            await open(wallpaper: wallpaper, displayID: displayID, frame: frame)
+            guard currentFrame(of: displayID) != nil else { continue }
+            await open(wallpaper: wallpaper, displayID: displayID, generation: generation)
         }
+        // A newer pass reports its own result, and reporting this one's would
+        // describe a list that has been replaced.
+        guard generation == applyGeneration else { return }
         notifySurfacesChanged()
     }
 
+    private func currentFrame(of displayID: UInt32) -> NSRect? {
+        screens().first { $0.id == displayID }?.frame
+    }
+
+    /// What this display should be opened with, or `nil` when the offer was
+    /// overtaken while its file was read.
+    ///
+    /// Reading a file can take seconds, and the bridge goes on committing
+    /// snapshots meanwhile. The reconcile that is running coalesces them into
+    /// one trailing pass, which closes whatever the earlier list opened: a
+    /// decoder and a visible window built for a wallpaper that was already
+    /// replaced. So when a newer pass is queued, the bridge is asked again and
+    /// the open goes ahead only if it still wants this wallpaper under this
+    /// admission key.
+    ///
+    /// Asking again, rather than giving up whenever a newer pass is queued, is
+    /// what stops a burst of snapshots that keep offering the same wallpaper
+    /// (a volume slider being dragged) from starving its open: every pass would
+    /// be abandoned by the next one. The answer is the fresher descriptor, so a
+    /// clip does not start at the old volume or pause state. If the bridge
+    /// cannot be asked, the clip is presented as it was offered and the
+    /// trailing pass corrects it.
+    private func currentOffer(
+        for wallpaper: BridgeNativeVideoWallpaper, displayID: UInt32, generation: UInt64,
+        load: UInt64?
+    ) async -> BridgeNativeVideoWallpaper? {
+        guard !stopped, generation == applyGeneration else { return nil }
+        // Nothing newer is queued, so this is still what the bridge holds.
+        guard reconcileRequested else { return wallpaper }
+        var latest: [BridgeNativeVideoWallpaper]?
+        var failure: String?
+        do {
+            latest = try await fetch()
+        } catch {
+            failure = error.localizedDescription
+        }
+        guard !stopped, generation == applyGeneration else { return nil }
+        guard let latest else {
+            AppLog.warn(
+                "native video wallpaper \(wallpaper.wallpaperId): the bridge could not be asked "
+                    + "whether it is still wanted (\(failure ?? "unknown error")); presenting it as "
+                    + "offered", load: load)
+            return wallpaper
+        }
+        return latest.first {
+            $0.displayId == displayID && $0.wallpaperId == wallpaper.wallpaperId
+                && $0.admissionKey == wallpaper.admissionKey
+        }
+    }
+
     private func open(
-        wallpaper: BridgeNativeVideoWallpaper, displayID: UInt32, frame: NSRect
+        wallpaper: BridgeNativeVideoWallpaper, displayID: UInt32, generation: UInt64
     ) async {
         recordState(wallpaper, phase: .loading)
         let url = URL(fileURLWithPath: wallpaper.mediaPath)
@@ -273,6 +339,27 @@ final class NativeVideoWallpaperHost {
             return
         }
         guard !stopped else { return }
+        // Admission may have taken a while. Nothing below waits again, so what
+        // is decided here is what gets built: a window is only ordered onto the
+        // desktop for a wallpaper that is still wanted, on a display that is
+        // still there, at the frame it has now. The verdict stays cached, so an
+        // abandoned read is not repeated if the wallpaper comes back. The state
+        // this left (`loading`, a log entry) is overwritten by the pass that
+        // follows, or swept when the display is no longer wanted.
+        guard let wallpaper = await currentOffer(
+            for: wallpaper, displayID: displayID, generation: generation, load: load)
+        else {
+            AppLog.info(
+                "native video wallpaper \(wallpaper.wallpaperId): superseded while its metadata "
+                    + "was read; not presented", load: load)
+            return
+        }
+        guard let frame = currentFrame(of: displayID) else {
+            AppLog.info(
+                "native video wallpaper \(wallpaper.wallpaperId): \(DiagnosticEnvironment.display(displayID)) "
+                    + "is no longer in the screen list; not presented", load: load)
+            return
+        }
         surfaceGeneration += 1
         let key = RuntimeSurfaceKey(
             kind: .desktopNativeVideo, displayID: displayID, generation: surfaceGeneration)

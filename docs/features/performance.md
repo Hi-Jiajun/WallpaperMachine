@@ -533,6 +533,18 @@ counts every deadline that passed without a frame as `nativeVideoFirstFrameTimeo
 a single count with no refusal means the rebuild brought the picture, and on the
 internal drive any count means the pipeline stalled.
 
+Switching wallpapers quickly does not put the ones in between on the desktop. Reading
+a clip's metadata can take a moment, and the next switch may be committed meanwhile.
+When one has, native playback asks the bridge again before it builds a window, and
+builds one only if the display still wants that wallpaper with the settings the read
+checked; otherwise nothing appears and the next pass opens what is wanted now. A burst
+of changes to the same wallpaper (dragging its volume, say) does not hold the clip
+back, and it starts with the latest values. A display that was unplugged during the
+read gets no window, and one that moved gets its current frame. If the bridge cannot be
+asked, the clip is shown as it was offered and the next pass corrects it. **In use
+now** is unaffected: an abandoned open is only a line in the diagnostics log
+(`superseded while its metadata was read`).
+
 When the clip's audio output cannot start (no output device, or one that will not
 start), AVFoundation fails the whole clip, muted or not, and reports only
 `AVErrorUnknown`. Native playback then rebuilds the clip from its video track alone
