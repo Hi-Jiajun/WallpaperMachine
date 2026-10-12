@@ -56,52 +56,47 @@ continue using the currently applied per-display content.
 
 ## Poster ownership and late frames
 
-`WallpaperSpaceMonitor` reads the optional `CGSCopyManagedDisplaySpaces` entry point
-and decodes `Display Identifier`, `Spaces` and `Current Space`. Existing primary
-references for this private data shape are [yabai's display enumeration](https://github.com/koekeishiya/yabai/blob/master/src/display.c)
-and [the Current Space dictionary example](https://gist.github.com/abdusco/ac9d57485a08cc65f42779858d84b84f).
-They document the integration shape, not a guarantee for every macOS version.
-Symbols and decoding are optional; no Accessibility permission, synthetic gesture,
-Space mutation, plist patch or Dock restart is used.
+`WallpaperSpaceMonitor` reads the optional private `CGSCopyManagedDisplaySpaces` entry
+point and decodes `Display Identifier`, `Spaces` and `Current Space`. The data shape is
+private and not guaranteed on every macOS version, so the symbol and decoding are optional;
+no Accessibility permission, synthetic gesture, Space mutation, plist patch or Dock restart
+is used.
 
 Poster requests carry a context containing the current visit, assignment and content
 revision. Scene, Web and native-video producers return the context of the original
-request. The coordinator rejects mismatched contexts on receipt and checks them
-again after asynchronous encoding. Changing out of Space mode also rejects late
-Space-scoped frames. Scene readback contexts travel alongside the existing request
-sequence so retries cannot attribute old pixels to a newer visit.
+request, and the coordinator rejects mismatched contexts on receipt and again after
+asynchronous encoding. Changing out of Space mode also rejects late Space-scoped frames, and
+scene readback contexts travel alongside the existing request sequence so retries cannot
+attribute old pixels to a newer visit.
 
-`DesktopWallpaperLedger` restricts writes to the matching native Space. A scope
-with no current target holds writes; the public NSWorkspace fallback has no Space
-identity and cannot receive a scoped poster. Inactive posters and their original
-wallpaper journal remain referenced across renderer replacement gaps. Ejecting the
-current wallpaper restores that desktop while preserving other desktops' posters.
-Normal stop/quit restoration still restores all original selections using the
-existing journal and external-change checks.
+`DesktopWallpaperLedger` restricts writes to the matching native Space. A scope with no
+current target holds writes; the public NSWorkspace fallback has no Space identity and
+cannot receive a scoped poster. Inactive posters and their original wallpaper journal remain
+referenced across renderer replacement gaps. Ejecting the current wallpaper restores that
+desktop while preserving other desktops' posters, and normal stop/quit restoration still
+restores all original selections using the existing journal and external-change checks. The
+rest of the poster service (how it resolves originals, confirms writes and restores at quit)
+is in [architecture](../architecture.md#desktop-wallpaper-windows-and-private-api-handling).
 
 ## Storage and verification
 
-Mappings live in the existing `WallpaperMachine.automaticWallpapers` records, under
-`spaces`; older records decode to an empty map. Local backups include the mappings.
-UUIDs on another Mac or after system recreation may not match; those choices remain
-unavailable until explicitly reassigned. `WallpaperMachine.spaceVisits` is local
-runtime state, excluded from backups and cleared with handled events and Focus
-recovery on successful restore. Failed restore journals put that local state back.
+Mappings live in the existing `WallpaperMachine.automaticWallpapers` records, under `spaces`;
+records without it decode to an empty map. Local backups include the mappings. UUIDs on
+another Mac or after system recreation may not match; those choices remain unavailable until
+explicitly reassigned. `WallpaperMachine.spaceVisits` is local runtime state, excluded from
+backups and cleared with handled events and Focus recovery on successful restore; failed
+restore journals put that local state back.
 
-`WallpaperSpaceMonitorTests` covers independent/shared display groups, reordered
-UUIDs, fullscreen Spaces without UUIDs, malformed topology, persistent visits and
-notification teardown. `WallpaperAutomationSchedulerTests` covers manual overrides,
-unmapped visits, rapid queued switches, paused catch-up and Focus exit while topology
-is unavailable. Store and backup tests cover old-schema decoding and mapping restore.
+Space topology, shared/independent display groups, reordered UUIDs, fullscreen Spaces,
+malformed topology, persistent visits and notification teardown are covered by
+`WallpaperSpaceMonitorTests`; manual overrides, unmapped visits, rapid queued switches, paused
+catch-up and Focus exit while topology is unavailable by `WallpaperAutomationSchedulerTests`;
+old-schema decoding and mapping restore by the store and backup tests; scoped writes,
+public-fallback exclusion, late frames and encodes, mode changes, replacement gaps,
+current-only ejection and all-Space restoration by `DesktopWallpaperTests`; and the offscreen
+picker, reordering, unavailable mappings, forgetting and native validation by
+`ControlPanelSpaceWallpaperTests`.
 
-`DesktopWallpaperTests` covers scoped writes, public-fallback exclusion, late frames,
-late encodes, mode changes, replacement gaps, current-only ejection and all-Space
-restoration. The native-video host's poster integration exercises the context through
-the real coordinator with an injected surface. `ControlPanelSpaceWallpaperTests`
-drives the offscreen WebKit picker, reordering, unavailable mappings, forgetting and
-native validation. Renderer-only compilation and `scripts/check_renderer.py` validate
-the changed Objective-C++ readback path alongside existing non-desktop regressions.
-
-These checks do not establish actual Mission Control animations, OS notification
-timing, visible layout, VoiceOver or installed-app behavior. A separate explicitly
-authorized desktop run is still needed for those claims.
+These checks do not establish actual Mission Control animations, OS notification timing,
+visible layout, VoiceOver or installed-app behavior. A separate explicitly authorized desktop
+run is still needed for those claims.

@@ -18,54 +18,64 @@ README.zh-CN.md                    README.md in 简体中文; change both togeth
 SECURITY.md                        private vulnerability reporting, supported versions and scope
 SPONSORS.md                        Supporter pricing, benefits and other ways to help; follows the website's pricing page
 project.yml                        XcodeGen spec: the only source of truth for targets/settings/versions
-WallpaperMachine.xcodeproj/    generated from project.yml by xcodegen; committed, never hand-edited
+WallpaperMachine.xcodeproj/        generated from project.yml by xcodegen; committed, never hand-edited
 App/                               WallpaperMachine application target sources only
   WallpaperEngineApp.swift         @main AppKit entry point; no scene/UI logic
   AppDelegate.swift                lifecycle, menu bar, window and shutdown ordering
-  Bridge/                          BridgeEnvironment.swift (Vulkan ICD) and Generated/ (uniffi output; not hand-edited)
-  Logging/                         AppLog.swift; the only Swift logging entry point
-  Services/Appearance/             AppTheme.swift: theme preference model and store
-  Services/Automation/             keyboard shortcuts, App Intents, links, weekday/solar/appearance selection rules,
+  Bridge/                          BridgeEnvironment.swift (Vulkan ICD), WallpaperPreviewBridge.h (scene C API for previews)
+                                   and Generated/ (uniffi output; not hand-edited)
+  Logging/                         AppLog.swift (the only Swift logging entry point) and its router
+  Services/<Domain>/               domain logic and stores, one folder per domain:
+    Appearance/                    AppTheme.swift: theme preference model and store
+    Automation/                    keyboard shortcuts, App Intents, links, weekday/solar/appearance selection rules,
                                    and temporary Focus choices with restoration
-  Services/Desktop/                multi-display copy/swap and recovery, desktop picture APIs, original-wallpaper ledger,
-                                   scoped poster sync, read-only Space topology, presentation policy, playback rules and system conditions
-  Services/Diagnostics/            runtime diagnostics session and counter sampling; per-coalition energy readout
-  Services/GitHub/                 GitHub release client, update models, update store, installer
-  Services/Library/                ClientPaths and library import/deletion; owns the app-support layout
-  Services/Localization/           AppLanguage.swift: shipped-language registry and the language preference store
-  Services/LockScreen/             lock-screen selection overrides and configuration publishing
-  Services/NativeVideo/            AVFoundation video backend: admission, player and host window
-  Services/Pixiv/                  pixiv browsing, sign-in session, downloads and still-wallpaper packaging
-  Services/Playlist/               per-display playlists: model, planner, store and the scheduler that switches wallpapers
-  Services/Preview/                isolated live preview inputs, lifecycle, WebKit and scene/video surfaces
-  Services/Steam/                  SteamCMD runtime discovery and setup state
-  Services/SystemMedia/            shared now-playing session (MediaRemote, Music/Spotify
+    Desktop/                       multi-display copy/swap and recovery, desktop picture APIs, original-wallpaper ledger,
+                                   scoped poster sync, read-only Space topology, presentation policy, playback rules,
+                                   system conditions and display refresh
+    Diagnostics/                   runtime diagnostics session, diagnostics report, counter sampling, energy readout
+                                   and per-wallpaper energy ratings
+    GitHub/                        GitHub release client, update models, update store, installer, what's-new records
+    Library/                       ClientPaths (owns the app-support layout), import/deletion, still-image wallpapers,
+                                   collections, presets, history, compatibility checks, backup and restore
+    Localization/                  AppLanguage.swift: shipped-language registry and the language preference store
+    LockScreen/                    lock-screen selection overrides, extension registration and configuration publishing
+    NativeVideo/                   AVFoundation video backend: admission, player and host window
+    Pixiv/                         pixiv browsing, sign-in session, downloads and still-wallpaper packaging
+    Playlist/                      per-display playlists: model, planner, store and the scheduler that switches wallpapers
+    Preview/                       isolated live preview inputs, lifecycle, WebKit and scene/video surfaces
+    Steam/                         SteamCMD runtime discovery and setup state
+    Support/                       the support prompt shown after a downloaded wallpaper is applied
+    SystemMedia/                   shared now-playing session (MediaRemote, Music/Spotify
                                    AppleScript fallback) and artwork for Web and Scene media integration
-  Services/UserAssets/             importing, watching and picking for file/directory wallpaper properties;
+    UserAssets/                    importing, watching and picking for file/directory wallpaper properties;
                                    owns the app's copies under <support>/UserAssets/ and the derived,
                                    regenerable <project>/.mwe-user-assets/ bridge a page can read
-  Services/WebWallpaper/           WKWebView host windows and page protocol for web wallpapers
-  Services/Workshop/               Workshop query model and sources, browse store, downloader and queue
+    WebWallpaper/                  WKWebView host windows and page protocol for web wallpapers
+    Workshop/                      Workshop query model and sources, browse store, downloader and queue
   ViewModels/                      BridgeStore and editor draft state; observable, no view code
-  Views/ControlPanel/              SwiftUI container, WKWebView host, snapshot builder, action handlers
-  Resources/                       Info.plist, string catalogs, Assets.xcassets; app resources only
+  Views/ControlPanel/              SwiftUI container, WKWebView host, snapshot builder, action handlers,
+                                   sign-in, preview and what's-new windows
+  Resources/                       Info.plist, string catalogs, Assets.xcassets, AppIcon.icon; app resources only
 Extension/                         WallpaperMachineExtension sources, Info.plist, entitlements, bridging header,
-                                   its own string catalog (Localizable.xcstrings)
-Shared/                            contracts compiled into both targets: LockScreenConfiguration,
-                                   RuntimeCounters, WallpaperPresentationAuthority
+                                   its own string catalog (Localizable.xcstrings), third-party notice
+Shared/                            contracts compiled into both targets: lock-screen configuration, status and surface
+                                   lifecycle, web-wallpaper protocol and screen-saver surface, RuntimeCounters,
+                                   WallpaperPresentationAuthority
 WebUI/                             HTML/CSS/JS control panel; bundled verbatim as the app resource folder WebUI
+  app-icons/                       Dock icon variants (the Settings icon picker and the Dock icon)
   locales/                         one panel catalog module per shipped language (zh-Hans.js, zh-Hant.js, ja.js), registered in i18n.js
 Resources/StarterWallpaper/        bundled sample wallpaper (Aurora.mp4, preview.jpg, project.json)
-Tests/Unit/<Domain>/               WallpaperMachineTests, grouped Appearance, Automation, Desktop, Diagnostics, GitHub,
-                                   Library, Localization, LockScreen, NativeVideo, Panel, Pixiv, Playlist, Steam, SystemMedia,
-                                   UserAssets, WebWallpaper, Workshop; hosted in the app binary
+Tests/Unit/<Domain>/               WallpaperMachineTests, one folder per App/Services domain plus Panel for
+                                   Views/ControlPanel; hosted in the app binary
 Tests/UI/                          WallpaperMachineUITests; desktop-driving XCUITest suite
 docs/                              all project documentation; see docs/README.md for the index
+  features/                        product behavior, one document per feature
+  testing/                         test strategy, renderer checks, verification log
   archive/                         retired plans and records; rg skips them (repository .ignore, `rg -u` to search)
 scripts/                           developer command line; Python only
   lib/                             shared helpers (glyphs.py status markers, paths.py repo paths,
                                    xcode.py quiet runner: full tool output to artifacts/, failures on screen,
-                                   dmg.py drag-to-install disk image: .DS_Store layout, build, verify)
+                                   dmg.py drag-to-install disk image, wordmark.py logo outlines for brand.py)
   tests/                           unit tests for the scripts, run by scripts/test.py
 Formula/                           mwe-ffmpeg.rb: the LGPL-2.1-or-later FFmpeg build the app links (scripts/install_ffmpeg.py)
 Packaging/dmg/                     disk-image window background (background.png, @2x); generated by scripts/brand.py --dmg
@@ -73,11 +83,9 @@ upstream/                          vendored third-party code only
   provenance.json                  repositories, pinned revisions, modification status
   renderer/                        Rust workspace (crates/), C++ scene engine (external/), cargo target/;
                                    trimmed to what the build and renderer checks use
-  mediaremote-adapter/             ungive/mediaremote-adapter, BSD-3-Clause, unmodified; built as an embedded framework
+  mediaremote-adapter/             ungive/mediaremote-adapter, BSD-3-Clause; built as an embedded framework
 artifacts/                         Git-ignored: all test and verification evidence
 build/                             Git-ignored: Xcode derived data and built products only
-.agents/ .claude/ .commandcode/    Git-ignored: machine-local agent harness state, rules and skills;
-.conductor/ .omo/ .omp/ .pi/       never committed (see AGENTS.md)
 .github/FUNDING.yml                the repository's Sponsor button; links the website's pricing page
 .github/ISSUE_TEMPLATE/            issue forms (bug report, feature request) and the chooser's links (config.yml);
                                    blank issues stay on for the app's prefilled "Report on GitHub" link
@@ -86,6 +94,10 @@ build/                             Git-ignored: Xcode derived data and built pro
                                    claude.yml and claude-code-review.yml
 .github/actions/prepare-build/     composite action: Xcode, Homebrew packages, LGPL FFmpeg and the build caches
 ```
+
+Git-ignored and machine-local, never committed: `artifacts/`, `build/`, the agent tool
+directories and `CLAUDE.local.md` named in `AGENTS.md`, and the root `node_modules/`,
+`package.json` and `package-lock.json` (`WebUI/` has no npm build).
 
 Things that must not appear:
 
@@ -103,15 +115,15 @@ Things that must not appear:
 | App service or domain logic | `App/Services/<Domain>/` | Reuse an existing domain folder before creating one; a new domain needs a new folder plus a matching `Tests/Unit/<Domain>/` |
 | View or panel-hosting feature | `App/Views/ControlPanel/` | Page state belongs in the snapshot builder, actions in the action handlers |
 | Observable app state | `App/ViewModels/` | Keep renderer calls behind `BridgeStore`; no views here |
-| Web-panel UI | `WebUI/` | Extend `panel.js`/`settings.js`/`welcome.js` plus the matching CSS; new files must be added to the served allow list in `WebPanelAssets` and to the file list in `scripts/tests/test_panel_localization.py`. Icons come from the vendored Lucide set in `icons.js`, never hand-drawn SVG |
-| A language | `WebUI/locales/<tag>.js`, `WebUI/i18n.js`, `App/Services/Localization/AppLanguage.swift`, both `.xcstrings` | Follow [localization.md](localization.md); the allow list and Settings picker derive from `AppLanguage.supported` |
+| Web-panel UI | `WebUI/` | Extend the matching module (`panel.js`, `settings.js`, `welcome.js` or a per-feature module) plus its CSS; new files must be added to the served allow list in `WebPanelAssets` and, if they call `t()`, to the file list in `scripts/tests/test_panel_localization.py`. Icons come from the vendored Lucide set in `icons.js`, never hand-drawn SVG |
+| A language | `WebUI/locales/<tag>.js`, `WebUI/i18n.js`, `App/Services/Localization/AppLanguage.swift`, all three `.xcstrings` | Follow [localization.md](localization.md); the allow list and Settings picker derive from `AppLanguage.supported` |
 | Code shared with the extension | `Shared/` | Only if both targets genuinely need it, and it must build extension-API-only |
 | Lock-screen extension behaviour | `Extension/` | Nothing here may depend on app-only APIs or app-private files |
 | Unit test | `Tests/Unit/<Domain>/` | Same domain folder name as the code under test |
 | UI test | `Tests/UI/` | Runs only via `scripts/test.py --ui`; it takes over the desktop |
 | Developer script | `scripts/<name>.py` | `snake_case.py`, argparse flags, no shell wrappers |
 | Shared Python helper | `scripts/lib/` | With a test in `scripts/tests/` |
-| Documentation | `docs/` (or `docs/testing/`) | Add it to the index in [README.md](README.md); one topic per file |
+| Documentation | `docs/`, `docs/features/` (product behavior) or `docs/testing/` | Add it to the index in [README.md](README.md); one topic per file |
 | Renderer, scene-engine or shader change | `upstream/renderer/` | Vendored: keep changes minimal and reflect them in `upstream/provenance.json` |
 | Generated code | nowhere by hand | Regenerate via `scripts/build.py`; commit only what the tooling produces |
 | Evidence, logs, result bundles | `artifacts/` | Disposable; never committed |
@@ -123,7 +135,6 @@ Things that must not appear:
 | `WallpaperMachine.xcodeproj/` | Generated by `xcodegen generate` from `project.yml`, and committed. Regenerate rather than edit. |
 | `App/Bridge/Generated/` | Produced by `scripts/build.py` (`uniffi-bindgen` over `libwallpaper_bridge.a`). Hand edits are overwritten. |
 | `upstream/` | Vendored third-party code, governed by `upstream/provenance.json` and [../LICENSING.md](../LICENSING.md). |
-| `Formula/` | `mwe-ffmpeg.rb`, the LGPL-2.1-or-later FFmpeg build the app links; installed by `scripts/install_ffmpeg.py`. |
 | `Packaging/dmg/` | Generated by `python3 scripts/brand.py --dmg` and committed; `scripts/package.py` lays the disk-image window over it. Regenerate rather than edit. |
 | `artifacts/` | Disposable, Git-ignored. Test and verification evidence, including the full `xcodebuild`/`cargo` logs the scripts keep off the terminal; removable with `scripts/clean.py`. |
 | `build/` | Disposable, Git-ignored. Xcode derived data and built products only. |
@@ -141,4 +152,4 @@ Things that must not appear:
 | Web panel files | lowercase, one concern per file (`panel.js`, `settings.css`, `theme.js`) |
 | Markdown under `docs/` | lowercase-hyphenated (`repository-layout.md`, `development-tools.md`); `README.md` is the only uppercase name |
 | Root Markdown | uppercase (`README.md`, `AGENTS.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `LICENSING.md`); the license text is the extensionless `LICENSE` |
-| Bundle identifiers | `app.wallpapermachine` and `app.wallpapermachine.wallpaper-extension` |
+| Bundle identifiers | `app.wallpapermachine` and `app.wallpapermachine.wallpaper-extension` (plus `.MediaRemoteAdapter`, `.tests` and `.uitests` for the other targets) |

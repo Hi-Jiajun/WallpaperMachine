@@ -7,18 +7,18 @@ one.
 
 Test strategy and the layers around this one: [README.md](README.md).
 
-## Why a manifest comes first
+## Configuration manifest
 
 Two runs are comparable only when the content, the real presented frame rate,
 the output geometry and the machine state match. Brightness, HDR, an external
 display's own panel power, charging state and thermal history all move the
 result more than most renderer changes do. `python3 scripts/power_benchmark.py`
 writes that configuration to `artifacts/power/manifest-<timestamp>.json`:
-workspace commit and whether the tree was dirty, requested build configuration, chip and memory,
-macOS build, every online display's pixel geometry and refresh rate, charging
-and low-power state, recorded thermal warnings, current host Homebrew versions,
-and the workspace's pinned `upstream/` revisions. These workspace/host fields do
-not identify the application already running.
+workspace commit and whether the tree was dirty, requested build configuration,
+chip and memory, macOS build, every online display's pixel geometry and refresh
+rate, charging and low-power state, recorded thermal warnings, current host
+Homebrew versions, and the workspace's pinned `upstream/` revisions. These
+workspace and host fields do not identify the application already running.
 
 Schema version 2 separates `workspace`, `host_renderer_libraries` and
 `workspace_upstream_revisions` from `build.processes`. During a measurement, the
@@ -29,8 +29,7 @@ bundle changed since launch, exited/reused PID or unreadable file is reported as
 unknown. Source revision, build configuration and loaded renderer dylib versions
 remain explicitly unknown because the running process does not expose them.
 Never substitute the worktree HEAD or current Homebrew symlink for those values.
-Identity hashing happens before the sample window. Older manifests whose `build`
-field came from the repository are not proof of the measured executable's identity.
+Identity hashing happens before the sample window.
 
 Without `--measure` the script measures nothing. Every condition is written as
 `"measured": false`, and `measurement_tool` stays `null`. `--print-only` emits
@@ -90,10 +89,11 @@ powermetrics that fails or is refused at once does not shorten it.
   refusal is recorded as `package_power.measured = false` with sudo's reason,
   and the other rows are still written.
 
-A desktop run is taken serially, with the display set and power source
-unchanged across a comparison: quit the app with an Apple Event and wait until it
-has exited (`open` can fail with `-600` for a few seconds after that), launch
-with `open --env WALLPAPER_MACHINE_DIAGNOSTICS=60 --env
+A desktop run (which needs authorization, see [Authorization
+boundary](#authorization-boundary)) is taken serially, with the display set and
+power source unchanged across a comparison: quit the app with an Apple Event and
+wait until it has exited (`open` can fail with `-600` for a few seconds after
+that), launch with `open --env WALLPAPER_MACHINE_DIAGNOSTICS=60 --env
 WALLPAPER_MACHINE_DIAGNOSTICS_DELAY=120`, and start a 60-second measurement 120
 seconds after launch. These independently started windows approximately overlap;
 the delay alone does not synchronize their boundaries. The diagnostics report's
@@ -103,38 +103,35 @@ same-throughput power claim needs timestamped counter deltas aligned to the
 actual power window. Neither the configured ceiling nor timer-wakeup counts
 provide elapsed time or displayed-frame counts.
 
-Before 2026-09-28 the frame clock delivered 45–52 draws/s at a configured 60 fps
-ceiling. `ThreadTimer` computed each deadline from the time the previous tick
-actually woke, not from the previous deadline, so every wait's timer slack was
-added to the period instead of being absorbed: a headless probe with a
-zero-cost draw measured about 20.3 ms between ticks at a 60 fps ceiling
-(50.5 draws/s), about 10.4 ms at 120 (100/s) and about 37.5 ms at 30 (27/s). A
-cadence tick is now anchored to the deadline it was due at, and one more than a
-whole interval late restarts the cadence instead of bursting to catch up
-(`ThreadTimerTest.CadenceKeepsItsPeriodDespiteWakeSlack`: 50 ticks in 600 ms
-at 10 ms before, 54–62 required after). Measurements taken before that date at
-a given ceiling therefore describe fewer frames than the same ceiling delivers
-now. `FrameTimer` still drops any tick that finds the
-previous DRAW still running, and on Compatibility a DRAW includes the GPU frame
-(the fence wait follows the present). A DRAW that ends within a quarter
-interval of the tick it made the clock drop runs that frame at once and restarts
-the cadence from it (`FrameTimerTest.ADrawSlightlyLongerThanTheIntervalDoesNotHalveTheRate`:
-18 ms draws at 60 fps deliver at least 42 frames a second, 35 without it); one
-that ends later loses the whole period, so a scene that cannot keep up settles at
-a steady fraction of the rate instead of drawing back to back. Otherwise
-`FrameEnd` re-arms the clock only for an outstanding update request. This is
-measured delivery, not presentation: whether and when those frames were
-displayed is still not observable. Correcting the cadence raised delivered work
-toward the configured ceiling, so a comparison across that change has to report
-its throughput separately from any power figure. The app opens its
-control panel at launch, so each such run includes it; while the library page
-is visible, installed GIF previews animate. Some runs showed WebContent at
-8–13 % CPU and higher WindowServer CPU, but the recordings did not establish
-that preview animation caused the difference. With other applications running, system power with the
-app quit ranged from 10 W to 25 W over one morning and package power moved by
-about 1 W between repeats; the app's own CPU and GPU percentages were the
-steadier signal, and system power needs a baseline taken minutes from the run it
-is set against.
+The app opens its control panel at launch, so each such run includes it, and
+animated GIF previews on the library page add WebContent and WindowServer work;
+say whether the panel was open. System power includes every other application,
+so it is only comparable against a paired baseline taken minutes from the run;
+the app's own CPU and GPU percentages are the steadier signal.
+
+## Frame delivery
+
+The frame clock decides how much work a configured ceiling turns into, so a
+comparison across a clock change reports throughput separately from power.
+
+- `ThreadTimer` anchors each cadence tick to the deadline it was due at, not to
+  when the previous tick woke, so wake slack is absorbed instead of added to the
+  period. A tick more than one whole interval late restarts the cadence instead
+  of bursting to catch up
+  (`ThreadTimerTest.CadenceKeepsItsPeriodDespiteWakeSlack`).
+- `FrameTimer` drops any tick that finds the previous DRAW still running; on
+  Compatibility a DRAW includes the GPU frame (the fence wait follows the
+  present). A DRAW that ends within a quarter interval of the tick it made the
+  clock drop runs that frame at once and restarts the cadence from it
+  (`FrameTimerTest.ADrawSlightlyLongerThanTheIntervalDoesNotHalveTheRate`); one
+  that ends later loses the whole period, so a scene that cannot keep up settles
+  at a steady fraction of the rate instead of drawing back to back. Otherwise
+  `FrameEnd` re-arms the clock only for an outstanding update request.
+
+This is measured delivery, not presentation: whether and when those frames were
+displayed is not observable. Measurements recorded before 2026-09-28, when the
+cadence was anchored, describe fewer delivered frames at a given ceiling and are
+not comparable with later ones.
 
 ## App-process CPU and memory comparisons
 
@@ -148,8 +145,8 @@ must remain without an on-screen panel throughout; it is not a playback test.
 these separately: adding process RSS can double-count shared pages, while
 physical footprint is the kernel's memory charge, not free system RAM. Normalize
 its Mach-absolute CPU counters with `mach_timebase_info` and cross-check totals
-against `ps -o time`; assuming nanoseconds directly undercounted this Apple
-Silicon machine by 125/3. CPU percentages use one logical core as 100%.
+against `ps -o time`; on Apple Silicon the ratio is 125/3, so reading the counter
+as nanoseconds undercounts. CPU percentages use one logical core as 100%.
 
 Record window lengths, warm-up, content/cache identity, and per-build ranges.
 Several windows from one app session are not independent launch repetitions.
@@ -159,145 +156,89 @@ or claiming a CPU improvement when the observed ranges overlap.
 
 ## Per-app energy without root
 
-Findings from 2026-09 on an M5 Pro, macOS 26.6, checked against `powermetrics`:
+Established on Apple Silicon (an M5 Pro, macOS 26.6 and 27.0.1) against
+`powermetrics`; recheck when a macOS release changes the kernel structures.
 
 - `proc_pid_rusage` `ri_energy_nj` tracks CPU energy (within 8 % of the
   `powermetrics` CPU delta for one busy core) but includes no GPU energy.
   `task_power_info_v2.task_gpu_utilisation` is only accumulated on x86_64 and
   reads 0 on Apple Silicon.
 - `accumulatedGPUTime` in `ioreg` `AGXDeviceUserClient`, which this script
-  reports as GPU %, gave 2.8–38.6 % for five runs of the same saturating load.
-  Treat it as a coarse activity signal, never as energy.
+  reports as GPU %, varied from 2.8 to 38.6 % across five runs of the same
+  saturating load. Treat it as a coarse activity signal, never as energy.
 - Resource-coalition accounting (`coalition_info_resource_usage`: `energy`,
   `gpu_energy_nj`, `gpu_time`) needs no privileges, covers the app with its
   WebKit and decoder services, and summed over all coalitions matches the
-  whole-GPU figure within 5–9 %. GPU energy is apportioned by GPU time, so it
-  overstates an app sharing the GPU with a heavy load. The in-app readout uses
-  it; see [features/performance.md](../features/performance.md#energy-use).
-
-Rechecked 2026-10-10 on an M5 Pro, macOS 27.0.1, without root:
-
-- The kernel's `struct coalition_resource_usage` is now 50 fields: five were
-  appended after `swapins` (index 44). `energy` (11), `gpu_time` (8) and
-  `gpu_energy_nj` (41) did not move.
-- IOReport `Energy Model` `GPU Energy` (nJ) still advances unprivileged, but
-  its mJ channels (`CPU Energy`, `GPU0` and the rest) did not change over
-  25 s, so they no longer serve as a CPU reference.
-- Under a saturating Metal load the loading coalition was charged 16.85 W,
-  all coalitions 17.56 W and IOReport `GPU Energy` 17.94 W. At three load
-  levels each coalition's share of GPU energy matched its share of summed GPU
-  time within 0.1 point: the whole GPU's energy is split by busy time. A small
-  60 fps probe's own GPU time fell under load (0.063 to 0.021–0.033 of the
-  window) while its charge rose from 91 to 412 mW.
-- `gpu_energy_nj` reaches coalitions in batches every 500 ms, so a 2 s
-  window can be a quarter off and the readout's 6 s window about 8 %.
-- `gpu_energy_nj_billed_to_me` and `_billed_to_others` were 0 in all 818
-  coalitions after 15 hours of uptime: nobody's GPU work, WindowServer's
-  included, is billed back to the app it served. CPU billing is in use
-  (about 15 % of all CPU energy) but nets to about 1 % for this app.
-- Hardware video decoding is charged to no one: see
+  whole-GPU figure within 5–9 %. The whole GPU's energy is split between
+  coalitions by busy time, so an app sharing the GPU with a heavy load is
+  overstated. The in-app readout uses it; see
+  [features/performance.md](../features/performance.md#energy-use). The struct
+  grew from 45 to 50 fields on macOS 27; the three fields used keep their
+  indexes (`gpu_time` 8, `energy` 11, `gpu_energy_nj` 41), see
+  `App/Services/Diagnostics/CoalitionEnergySource.swift`.
+- `gpu_energy_nj` reaches coalitions in batches every 500 ms, so a 2 s window
+  can be a quarter off and the readout's 6 s window about 8 %; compare over
+  windows much longer than that.
+- `gpu_energy_nj_billed_to_me` and `_billed_to_others` read 0 in every
+  coalition: nobody's GPU work, WindowServer's included, is billed back to the
+  app it served. CPU billing is in use but nets to about 1 % for this app.
+- IOReport `Energy Model` `GPU Energy` (nJ) advances unprivileged, but its mJ
+  channels (`CPU Energy`, `GPU0` and the rest) did not change over 25 s on macOS
+  27.0.1, so they no longer serve as a CPU reference.
+- Hardware video decoding is charged to no one; see
   [features/performance.md](../features/performance.md#energy-use).
-- What a switch costs, per second per process, on the primary display while
-  windows covered it (so no frames were drawn): Yae Miko's first load
-  (3013702957), whose shader cache folder did not exist yet, compiled 42
-  programs in 1.1 s at 6.8 W, then `MTLCompilerService` drew 4.5–6 W for
-  2.5 s, 20 J in all. Lucy (3521337568) hit all 111 cached programs and the
-  Vulkan pipeline cache, yet `MTLCompilerService` still drew 5.3 and 4.8 W for
-  2 s. That launch ran the build in `build/Build/Products/Release`, and Lucy
-  had last been loaded by the copy in `/Applications`: macOS keeps compiled
-  Metal source per app location, so the second copy compiled it again, once.
-  A relaunch of the same copy does not (see
-  [renderer.md](renderer.md#metal-compile-across-processes)). Yae Miko again
-  in the same process cost 1.4 J, a video 3 J and The Winter Nothingness
-  (3796026374), every cache warm, 5.8 J. `WallpaperAgent` drew about 0.5 J
-  after each desktop picture update. Separately, bursts of screen-parameter
-  changes (`display refresh: N screen changes … merged` in the log) cost the
-  app and the panel's WebContent about 12 J over 3 s each.
-- Those bursts were EDR headroom ramps (2026-10-10, M5 Pro, macOS 27.0.1,
-  built-in XDR). Whenever something requests EDR (a menu-bar system banner,
-  HDR content) `corebrightnessd` ramps headroom between 1.0 and 1.2 over 2 s,
-  and AppKit posts `didChangeScreenParametersNotification` for every frame:
-  241 per ramp, one to three ramps a minute that session, with nothing but
-  `maximumExtendedDynamicRangeColorComponentValue` changed. Each ran a full
-  display refresh, so with Settings open one ramp measured 0.6 + 6.5 + 5.2 J
-  (app 3.3 W and 712 ms CPU per second, WebContent 3.2 W and 831 ms), and
-  WebKit logged 252 snapshot pushes. A 2 s `sample` of the app's main thread
-  during a ramp had 580 samples on CPU: 379 in the lock-screen service's
-  re-sync after each snapshot (it rereads the system wallpaper store and
-  rewrites its journal with `fsync`), 90 building the page snapshot, 33 in
-  the display refresh itself and 15 rebuilding the status menu. Another 233
-  waited on the window server in `sessionIsLocked()`
-  (`CGSessionCopyCurrentDictionary`, which the presentation policy calls once
-  for the notification and once after each refresh). With the panel closed
-  the lock-screen re-sync was 644 of 745 on-CPU samples, and a ramp cost
-  0.9–3.8 J and 0.9–1.9 s of app CPU. WebContent spent 398 of 459 busy
-  samples in the pushed render. Screen changes that leave the displays and
-  working areas as they were now do none of this; see
-  [renderer.md](renderer.md#regression-areas-that-must-stay-covered). Three
-  ramps after the change, with the panel open, the app drew 56–74 ms CPU per
-  second against a 71 ms quiet median, the panel's WebContent did not rise,
-  and the only display refresh was the first one after launch.
-- Dragging a scene property slider (2026-10-10, same Mac, Release build, panel
-  open, 40 s windows): every step applies an engine snapshot, which runs the
-  presentation policy, and pushes a page snapshot. Before, 30 drags over 17 s
-  put 141 main-thread samples into building page snapshots, 50 of them in
-  `ClientPaths.assetsURL` (up to four folder probes, 124 µs median per call
-  in a standalone loop), and 1 in `sessionIsLocked()` (52 µs median, 84 µs
-  p95). The lock read only adds up in bursts. After, over 18 drags, neither
-  ran under the snapshot or the policy. The folder is resolved when the panel
-  becomes key instead, which the desktop automation driving the drags
-  triggered on every drag (15 samples); a drag in the focused panel does not.
-  Coalition energy during the drags stayed within noise (app 119 vs 112 ms
-  CPU and 170 vs 156 mJ per second; coalition 552 vs 523 ms and 934 vs
-  923 mJ), and the after build also carried the lock-screen re-sync fix,
-  which removed another 123 samples from the same window.
+- A wallpaper switch costs energy: a first load compiles shaders (in the app and
+  in `MTLCompilerService`), a warm repeat costs far less, and `WallpaperAgent`
+  spends a little after each desktop picture update. How compiled Metal is
+  cached per app location, and what that means for measuring a switch, is in
+  [renderer.md](renderer.md#metal-compile-across-processes). A burst of
+  screen-parameter changes (an EDR headroom ramp posts one per frame) is
+  covered by the regression in
+  [renderer.md](renderer.md#regression-areas-that-must-stay-covered).
 
 ## WindowServer's share
 
-Findings from 2026-09-28 on an M3 Max, macOS 27.2, built-in XDR at 120 Hz in
-a 4112x2658 scaled mode, AC power, coalition energy over 40–45 s windows run
-in alternation, other apps hidden. The probe was a disposable desktop-level
-window configured like `MWEWallpaperDesktopWindow` whose frames are one clear,
-so its own GPU work was negligible.
+Findings from alternating coalition-energy windows of 40–45 s on one Mac (M3 Max,
+macOS 27.2, built-in XDR at 120 Hz in a 4112x2658 scaled mode, AC power, other
+apps hidden); read the magnitudes as indicative and the conclusions as the
+result. The probe was a disposable desktop-level window configured like
+`MWEWallpaperDesktopWindow` whose frames are one clear, so its own GPU work was
+negligible.
 
 - **It follows the present rate of a full-screen layer.** With the desktop
-  exposed, WindowServer drew 31–39 mW idle and, for the probe, 197–213 mW at
-  30 fps, 294–364 mW at 60 and 568–571 mW at 120. Lucy (3521337568) cost it
-  the same for the same rate (506 mW at about 89 fps, 297–361 mW at 46–50).
-  Next to the app's own GPU work (about 5 W at 89 fps, 2.3 W at 48, 1.1 W at
-  26) it is about a tenth, so the renderer's frame rate is the lever for both.
-- **A covered desktop still costs it.** Behind zoomed windows the strip under
-  the translucent menu bar kept the wallpaper presenting; pausing that display
-  took WindowServer from 365 to 23 mW (the covered-desktop setting in
+  exposed, WindowServer drew about 30–40 mW idle and, for the probe, about 0.2 W
+  at 30 fps, 0.3–0.36 W at 60 and 0.57 W at 120. A real scene cost it the same
+  for the same rate. Next to the app's own GPU work (about 5 W at 89 fps, 1.1 W
+  at 26) it is about a tenth, so the renderer's frame rate is the lever for both.
+- **A covered desktop still costs it.** Behind zoomed windows the strip under the
+  translucent menu bar kept the wallpaper presenting; pausing that display took
+  WindowServer from 365 to 23 mW (the covered-desktop setting in
   [performance](../features/performance.md#playback)).
 - **No direct-to-display.** Metal System Trace's `displayed-surfaces-interval`
   table never marked a wallpaper frame `direct-to-display` in any drawable size
-  or colour space: a desktop-level layer under the Finder desktop window and
-  the menu bar is always composited.
+  or colour space: a desktop-level layer under the Finder desktop window and the
+  menu bar is always composited.
 - **Pacing and drawable size did not matter.** At 60 fps, plain presents,
-  `presentDrawable:afterMinimumDuration:` and a `CAMetalDisplayLink` gave
-  294–377 mW; a drawable at the panel's 3456x2234 or half the backing size
-  gave 287–388 mW against 294–364 for the backing size.
-- **Colour space costs the probe a third, the wallpaper little.** The layer
-  is tagged sRGB so it matches the sRGB desktop poster, and WindowServer
-  colour-matches it to the display. In strict alternation the probe cost
-  268–290 mW tagged sRGB against 175–200 mW tagged with the display's own
-  space at 60 fps, and 495–503 against 328–345 at 120. Lucy at 60 fps, tagged
-  or left untagged, gave 215–333 against 203–307 mW (pairs 12, 75 and 19 mW
-  apart), inside the run-to-run spread. Not adopted: an exact sRGB-to-display
-  conversion in both renderers, a poster that stays sRGB and a rebuild on
-  every display-profile change would buy at most tens of milliwatts next to
-  about 3 W of rendering.
+  `presentDrawable:afterMinimumDuration:` and a `CAMetalDisplayLink` cost the
+  same within the run-to-run spread, as did a drawable at the panel's size or
+  half the backing size.
+- **Colour space costs the probe a third, the wallpaper little.** The layer is
+  tagged sRGB so it matches the sRGB desktop poster, and WindowServer
+  colour-matches it to the display. The probe cost 268–290 mW tagged sRGB
+  against 175–200 mW tagged with the display's own space at 60 fps; a real scene
+  tagged or left untagged differed by less than the spread. Not adopted: an
+  exact sRGB-to-display conversion in both renderers, a poster that stays sRGB
+  and a rebuild on every display-profile change would buy at most tens of
+  milliwatts next to about 3 W of rendering.
 - **Not established:** whether the ProMotion panel drops below 120 Hz for a
-  60 fps wallpaper. Single 6-second traces disagreed (display link 78 Hz at
-  60 fps but 121 Hz at 30), and about 30 composited frames a second had no
-  attributed process even with nothing running. Panel power is outside
-  coalition energy and `powermetrics`, and battery-telemetry system power was
-  too noisy to settle it.
+  60 fps wallpaper. Single 6-second traces disagreed, and about 30 composited
+  frames a second had no attributed process even with nothing running. Panel
+  power is outside coalition energy and `powermetrics`, and battery-telemetry
+  system power was too noisy to settle it.
 
-Two traps: a covered-layout run with the user active gave an idle WindowServer
-of 141–762 mW, so compare only quiet windows; and Chrome left open triggered
-about 60 composites a second on its own.
+Two traps: with the user active an idle WindowServer drew 141–762 mW, so compare
+only quiet windows; and Chrome left open triggered about 60 composites a second
+on its own.
 
 ## Runtime counters
 
@@ -354,29 +295,28 @@ relabelled as displayed frames, and no frame-rate claim may be derived from it.
 
 ### A/B comparison entry points
 
-Three switches make a comparison measure one change in one binary rather than
+These switches make a comparison measure one change in one binary rather than
 two builds. All cover a strategy only: none restores a resource-lifetime or
 decode-correctness defect.
 
 | Switch | Off (default) | On |
 |---|---|---|
-| `WALLPAPER_MACHINE_CONTENT_PACING=1` | Tick at the configured ceiling | Pace video to its observed content rate |
+| Settings → Performance → Advanced → Experimental → Content pacing (`experimental.content_pacing`) | Tick at the configured ceiling | Pace video to its observed content rate |
 | `WALLPAPER_MACHINE_FEEDBACK_COPIES=1` | Native Metal trades textures for a copy a layer only makes to read the image it draws into | Every such copy is made as a copy; the picture is byte-identical either way |
-| `experimental.native_video_backend` in the app config | Every wallpaper on the scene engine | Eligible plain local videos on the platform player |
+| Settings → Performance → Advanced → Video playback (`video_backend` in the app config) | Compatibility: every wallpaper on the scene engine | Native video preferred: eligible plain local videos on the platform player |
+
+`WALLPAPER_MACHINE_CONTENT_PACING=1` switches content pacing on in headless
+probes. An explicit setting wins over it and the app pushes its saved value at
+launch, so measure the app through the Settings switch.
 
 Demand-driven pacing is off by default because its remaining exposure cannot be
 bounded here: the content period only reaches the frame clock after a completed
 frame, so a rate that turns out tighter than the interval being waited out loses
-every frame produced during the remainder of it. The native video backend is off
-by default because it has never been visually verified and supports a declared
-subset only.
-
-A four-way attribution therefore needs: the baseline; baseline plus R02;
-baseline plus I01; and the native backend opted in. R02 and I01 are not switched
-— they are correctness and resource changes, so comparing them needs a separate
-build directory or worktree. Whichever way two versions are compared, they need
-isolated `WALLPAPER_MACHINE_HOME` directories and must be measured serially,
-never concurrently.
+every frame produced during the remainder of it. Changes that are not switchable
+(correctness and resource-lifetime fixes) need a separate build directory or
+worktree. Whichever way two versions are compared, they need isolated
+`WALLPAPER_MACHINE_HOME` directories and must be measured serially, never
+concurrently.
 
 ### What the native backend cannot report
 
@@ -425,15 +365,17 @@ saving                    = (old incremental - new incremental) / old incrementa
 - Warm shaders, caches and temperature first; report cold start, first decoded
   frame and first shader compile separately from the steady-state window.
 - Compare wallpaper switches only between runs of the same copy of the app (the
-  manifest's `executable`). macOS keeps compiled Metal source per app location,
-  so the first load of a wallpaper in another copy with the same bundle ID is a
-  cold load, even when the scene's shader and pipeline caches are warm.
+  `executable` path under the measurement's `build.processes`). macOS keeps
+  compiled Metal source per app location, so the first load of a wallpaper in
+  another copy with the same bundle ID is a cold load, even when the scene's
+  shader and pipeline caches are warm.
 - Activity Monitor's Energy Impact is not watts, and GPU utilization is not
   energy.
 
 ## Authorization boundary
 
-Without `--powermetrics`, `scripts/power_benchmark.py` is safe to run: it reads
+The general rule is in [README.md](README.md#authorization-boundary). Without
+`--powermetrics`, `scripts/power_benchmark.py` is safe to run: it reads
 configuration and the counters of processes that are already running, and
 changes nothing. Everything else that produces an actual power number is out of
 scope for routine verification and needs explicit authorization, because it
@@ -445,5 +387,5 @@ sampling:
 - Screen capture and audio capture.
 
 Until then, a power result is recorded as unverified, never as a pass. The
-boundary itself is described in
+optional diagnostic tooling on the other side of the boundary is in
 [../development-tools.md](../development-tools.md).

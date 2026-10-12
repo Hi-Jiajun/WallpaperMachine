@@ -61,11 +61,10 @@ as their referrer, through a thumbnail cache of their own
 (`Cache/PixivThumbnails`, 256 MB, six fetches at a time) served to the page as
 `mwe-ui://pixiv-thumbnail/<id>`.
 
-A general HTTP 403 means the request was denied, not that pixiv has confirmed a
-rate limit or that waiting a minute will fix it. The error asks users to check
-access in a browser and their network/proxy connection. A browser working does
-not prove the app's requests will be accepted. HTTP 429 has separate rate-limit
-advice. Failed HTTP responses log only the status code, not URLs, searches,
+A general HTTP 403 is reported as a denied request, not as a confirmed rate limit, and
+the error asks users to check access in a browser and their network/proxy connection (a
+working browser does not prove the app's requests are accepted); HTTP 429 has separate
+rate-limit advice. Failed HTTP responses log only the status code, never URLs, searches,
 cookies or response bodies, for the [diagnostics report](diagnostics.md#diagnostics-report).
 R-18 ranking denials have the account-specific handling described below.
 
@@ -81,15 +80,14 @@ or retried. Queue order and original-image checkpoints survive quitting and
 relaunch in the app's `Downloads/Pixiv` directory; restored jobs wait for an
 explicit **Resume download**. No pixiv session cookie is stored with the queue.
 
-For a partial original with an ETag or Last-Modified validator, resuming sends
-HTTP Range and If-Range. A matching partial response continues at the saved byte
-offset; a full response replaces the old partial bytes. A server that supplies
-no usable validator starts that original again. Cancel immediately removes the
-job from the saved queue, then discards its checkpoint when the transfer stops;
-it cannot return as paused if the app exits during that cleanup. Starting that
-page again discards any partial bytes left by the interrupted cleanup. Clearing
-finished jobs keeps paused work. The byte limit applies to the whole
-original, including the bytes retained before pausing.
+Resuming a partial original with an ETag or Last-Modified validator sends HTTP Range and
+If-Range: a matching partial response continues at the saved byte offset, and a full
+response replaces the old partial bytes. A server that supplies no usable validator
+starts that original again. Cancel removes the job from the saved queue at once, then
+discards its checkpoint when the transfer stops, so it cannot return as paused if the app
+exits during that cleanup; starting that page again discards any partial bytes left
+behind. Clearing finished jobs keeps paused work. The byte limit applies to the whole
+original, including bytes retained before pausing.
 
 A page is saved as a `web` project, since the renderer plays scene, video and web
 projects only (`PixivWallpaperPackager`, with the page, properties and sizes of
@@ -175,13 +173,10 @@ and password always works.
 
 ## Verification
 
-`Tests/Unit/Pixiv/` covers decoding against pixiv's answer shapes, addresses,
-ratings and query sanitising, request pacing, the session reaching only
-`www.pixiv.net`, sign-in, log out and expiry against an in-memory keychain, the
-download queue and packaging. `WebPanelPixivTests` and the offscreen
-`ControlPanelPixivTests` drive the tab's actions and page with a fixture pixiv
-and a closure in place of the sign-in window. Nothing in the suite reaches pixiv
-or opens a window, so the real sign-in page and pixiv's signed-in answers are
-checked by hand; see [Testing](../testing/README.md).
-
-Back to the [project README](../../README.md).
+`Tests/Unit/Pixiv/` covers decoding against pixiv's answer shapes, addresses, ratings and
+query sanitising, request pacing, the session reaching only `www.pixiv.net`, sign-in, log
+out and expiry against an in-memory keychain, the download queue and packaging.
+`WebPanelPixivTests` and the offscreen `ControlPanelPixivTests` drive the tab's actions
+and page with a fixture pixiv and a closure in place of the sign-in window. Nothing in
+the suite reaches pixiv or opens a window, so the real sign-in page and pixiv's
+signed-in answers are checked by hand; see [Testing](../testing/README.md).

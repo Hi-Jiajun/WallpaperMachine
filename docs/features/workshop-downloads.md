@@ -1,39 +1,29 @@
 # Workshop browsing and downloads
 
 Workshop browsing and downloading are implemented independently of the Steam
-client. Browsing needs no Steam login; downloading does, because Steam enforces
-that the account owns Wallpaper Engine.
-
-The bundled Aurora Drift wallpaper can be applied immediately from Library
-without any download. Public browsing also needs no Steam Web API key.
-Credentials for a download are entered only in the app's own local prompts.
+client. Browsing needs no Steam login and no Steam Web API key; downloading needs
+a login, because Steam enforces that the account owns Wallpaper Engine. The
+bundled Aurora Drift video wallpaper (`Resources/StarterWallpaper`) can be applied
+from Installed without any download. Credentials for a download are entered only
+in the app's own local prompts.
 
 ## Discover
 
 The **Discover** tab searches the Workshop and pages through results with
-previous/next buttons or by typing a page number and pressing Return. A page
-is exactly one Steam page of 30 tiles, and the panel never offers more than
-1,000 pages (`WorkshopStore.maxPages`, mirrored in the snapshot as `maxPages`):
-the page number, the jump field and the native `workshopPage` action all clamp
-to that limit. Fetched pages are cached per query, so paging back never touches
-the network; a new search always starts a fresh cache. Nothing about a page
-depends on the window: the grid lays its 30 tiles out in as many columns as its
-width holds and scrolls the rest, so resizing only reflows the tiles and never
-re-fetches or re-cuts a page. Tiles are always exactly square, on both Installed
-and Discover, and there are never fewer than three per row: the grid's track
-minimum is the smaller of the preferred tile size (154px, smaller in narrow
-columns) and a third of the grid's width, so the 760px window minimum still
-shows three columns and wider windows add columns as they fit. The grid
-reserves its scrollbar gutter so the columns hold still whether or not a page
-scrolls, and the column count is a pure function of the grid's width, so the
-layout cannot flap. Steam's public browse page clamps every query to
-1,000 pages of 30 items, so at most 30,000 results are reachable per query
-(the snapshot's `reachable` count) and the page jump clamps to that. The
-filter sidebar on the left (opened and closed with the toolbar's **Filter**
-button, see [control-panel](control-panel.md#filtering)) mirrors Wallpaper
-Engine's own sidebar, tag for tag and default for default (Installed reuses the
-same boxes against the library, see
-[control-panel](control-panel.md#filtering)):
+previous/next buttons or by typing a page number and pressing Return. A page is
+exactly one Steam page of 30 tiles, and the panel never offers more than 1,000
+pages (`WorkshopStore.maxPages`, mirrored in the snapshot as `maxPages`): the page
+number, the jump field and the native `workshopPage` action all clamp to that
+limit. Steam's public browse page clamps every query to 1,000 pages of 30 items,
+so at most 30,000 results are reachable per query (the snapshot's `reachable`
+count). Fetched pages are cached per query, so paging back never touches the
+network; a new search always starts a fresh cache. Nothing about a page depends
+on the window: resizing only reflows the tiles and never re-fetches or re-cuts a
+page (grid rules: [control panel](control-panel.md#layout)).
+
+The filter sidebar on the left (opened and closed with the toolbar's **Filter**
+button, see [control panel](control-panel.md#filtering)) mirrors Wallpaper
+Engine's own sidebar, tag for tag and default for default:
 
 | Group | Boxes | Default |
 | --- | --- | --- |
@@ -54,108 +44,107 @@ the out-of-the-box list: Application, Asset, Questionable, Mature,
 Unspecified). A tag that is both required and excluded would empty the result,
 so the required one wins and it is not sent as excluded. The toolbar's filter
 count is the number of boxes that differ from the defaults; **Clear** restores
-them. Results open on Most popular this year and can be sorted by Highest
-rated (Steam's all-time `toprated`), Most popular today / Trending this week /
-Most popular this month / Most popular this year (Steam's `trend` sort with a
-`days` window of 1, 7, 30 or 365), Most subscribed, Newest or Relevance.
-Steam's public browse page has no "most voted" sort; unknown `browsesort`
-values silently fall back to trending, so none is offered. Wallpaper Engine's
-"mobile compatible" box has no Steam tag behind it, so it is not offered.
+them.
+
+Results open on Most popular this year and can be sorted by Highest rated
+(Steam's all-time `toprated`), Most popular today / Trending this week / Most
+popular this month / Most popular this year (Steam's `trend` sort with a `days`
+window of 1, 7, 30 or 365), Most subscribed, Newest or Relevance. Steam's public
+browse page has no "most voted" sort and silently treats unknown `browsesort`
+values as trending, so none is offered. Wallpaper Engine's "mobile compatible"
+box has no Steam tag behind it, so it is not offered either.
 
 ### Tile thumbnails
 
 Steam's `preview_url` is the full-size preview, and most trending previews are
 animated GIFs of roughly a megabyte each. Tiles load `mwe-ui://thumbnail/<id>`
-instead: the panel's scheme handler asks `WorkshopThumbnailCache` for the
-item, which downloads the preview **once, exactly as Steam published it**, and
-keeps both halves under `Cache/WorkshopThumbnails` in the app-support folder:
-one still frame decoded with ImageIO and stored as a 512px JPEG (`<key>.jpg`),
-and, when the preview is animated, the original bytes beside it (`<key>.anim`).
-A single-frame preview gets an empty `<key>.still` marker instead. Streaming stops
-at 24 MiB, including responses without a declared length. Original animations
-are relayed only up to 300 frames, 4,194,304 pixels per frame and 33,554,432 total
-frame pixels; larger animations keep their bounded static JPEG instead.
+instead: the panel's scheme handler asks `WorkshopThumbnailCache` for the item,
+which downloads the preview **once, exactly as Steam published it**, and keeps
+both halves under `Cache/WorkshopThumbnails` in the app-support folder: one still
+frame decoded with ImageIO and stored as a 512px JPEG (`<key>.jpg`) and, when the
+preview is animated, the original bytes beside it (`<key>.anim`). A single-frame
+preview gets an empty `<key>.still` marker instead. Streaming stops at 24 MiB,
+including responses without a declared length. Original animations are relayed
+only up to 300 frames, 4,194,304 pixels per frame and 33,554,432 total frame
+pixels; larger animations keep their bounded static JPEG instead.
 
-The original is fetched on purpose. Steam's CDN serves it from its edge in
-0.15–0.3 s, whereas a scaled variant (`?imw=512…`) makes the CDN re-encode the
-whole GIF on a cold path: measured on 2026-09-19 at 2–5 s per tile for about a
-quarter fewer bytes, 14.0 s for a cold 29-tile page at four at a time against
-1.1 s for the originals at eight at a time. Asking for the scaled variant and
-then the original for the animation also downloaded every animated tile twice.
+The original is fetched on purpose. Steam's CDN serves it from its edge, whereas
+a scaled variant (`?imw=512…`) makes the CDN re-encode the whole GIF on a cold
+path, and asking for the scaled variant and then the original for the animation
+downloaded every animated tile twice.
 
-Many animated previews fade in from black, so the still is not simply the
-first frame: the cache measures the mean luminance of up to eight evenly spaced
-frames on a 32px decode and keeps the earliest one that is nearly as bright
-(at least 60%) as the brightest sample. A preview that starts bright, is dark
-throughout, or is a still image keeps frame 0.
+Many animated previews fade in from black, so the still is not simply the first
+frame: the cache measures the mean luminance of up to eight evenly spaced frames
+on a 32px decode and keeps the earliest one that is at least 60% as bright as
+the brightest sample. A preview that starts bright, is dark throughout, or is a
+still image keeps frame 0.
 
 At most eight previews download at once, concurrent requests for the same tile
-share one download, cache hits cost no network at all and survive relaunches,
-and the folder is trimmed to 512 MB oldest-first (stills and animations age
+share one download, and cache hits cost no network and survive relaunches. The
+folder is trimmed to 512 MB oldest-first (stills and animations age
 independently; a hit keeps its entry young). Only ids announced in the current
-snapshot (results, queued downloads and pending requests) resolve; a tile
-pulses its placeholder until its image arrives and hides a failed image.
+snapshot (results, queued downloads and pending requests) resolve; a tile pulses
+its placeholder until its image arrives and hides a failed image.
 
-Nothing waits for the web view to ask. `WorkshopStore.onPreviewsAvailable`
-hands every Steam page's preview URLs to `WorkshopThumbnailCache.warm` the
-moment the page is decoded, and with `prefetchesNextPage` (both set by
+Nothing waits for the web view to ask. `WorkshopStore.onPreviewsAvailable` hands
+every Steam page's preview URLs to `WorkshopThumbnailCache.warm` the moment the
+page is decoded, and with `prefetchesNextPage` (both set by
 `WebControlPanel.makeCoordinator`) the store fetches the page after the one on
 show in the background, so paging forward is served from the page cache and its
-tiles from disk, like paging back. A failed prefetch is silent; the page is
-simply loaded normally when the user gets there.
+tiles from disk. A failed prefetch is silent; the page is loaded normally when
+the user gets there.
 
-The animation follows the stills. Discover stills load eagerly, and no
-animation is requested until every still on the page has settled (loaded or
-failed). After that, for each tile on screen, the panel requests
-`mwe-ui://animated/<id>`, six at a time, which is normally a local read of the
-`.anim` file the still pass left behind (an animation asked for while its still
-is still downloading waits for that download rather than starting another). It
-is fetched again, two at a time on its own lane and then kept, only when that
-copy was pruned or the still predates this layout; a preview the still pass
-found to be a single frame is refused without a request. The animation is
-placed beneath the still and revealed by its image-load event; a load failure
-keeps the still visible. The original animation plays as authored, including
-black fades. The panel does not sample animation pixels: synchronous WebKit
-canvas draw/readback calls can block its JavaScript thread in repeated
-15-second graphics-process waits, making every control appear frozen even
-while the native app remains responsive. Bright still selection remains in
-the native ImageIO cache, off the panel's JavaScript thread.
-Scrolling a tile offscreen, hiding the document, or leaving Discover releases
-its animation source; returning to a visible tile reuses the disk cache.
-Flipping to another page drops the pending animation requests. The inspector
+The animation follows the stills. Discover stills load eagerly, and no animation
+is requested until every still on the page has settled (loaded or failed). After
+that, for each tile on screen, the panel requests `mwe-ui://animated/<id>`, six
+at a time, which is normally a local read of the `.anim` file the still pass left
+behind (an animation asked for while its still is downloading waits for that
+download rather than starting another). It is fetched again, two at a time on its
+own lane, only when that copy was pruned; a preview the still pass found to be a
+single frame is refused without a request. The animation is placed beneath the
+still and revealed by its image-load event; a load failure keeps the still
+visible. The original animation plays as authored, including black fades.
+
+The panel never samples animation pixels: synchronous WebKit canvas
+draw/readback calls can block its JavaScript thread in repeated 15-second
+graphics-process waits, making every control appear frozen while the native app
+stays responsive. Bright still selection therefore stays in the native ImageIO
+cache. Scrolling a tile offscreen, hiding the document or leaving Discover
+releases its animation source, and returning to a visible tile reuses the disk
+cache; flipping to another page drops pending animation requests. The inspector
 keeps the full-size preview for the selected item.
 
 ## Collections, authors and subscriptions
 
 A row of tabs heading Discover's toolbar chooses what it lists: **Wallpapers**
-(the browse page above), **Collections** or **Your subscriptions**. They are tabs
-rather than a menu so subscriptions can be found at a glance; in a narrow column
-(the window minimum with the filters open) they drop their glyphs instead of
-wrapping. An author's wallpapers and a collection's items are opened from a tile
-instead: no tab is current, and the search field gives way to a back button and
-what is on show; back returns to the list, page 1, they were opened from
-(`WorkshopStore.open`, `back` and `sourceHistory`). Choosing a tab starts a new
-history. A list that fails to open empties the grid rather than leaving the list
-it was to replace on show under its tab, where Next would page that other list;
-its error offers **Try again** for the list that failed. Only Wallpapers and
-Collections are searched and sorted by Steam; the others come in their own order,
-so the panel hides the search field and the sort menu for them. The filter sidebar
-applies everywhere: Steam applies it to the two lists, and `WorkshopService.matching`
-applies the same rules to the other sources' pages, which can therefore show fewer
-than 30 tiles, or none while Steam's count says more exist: such a page says the
-filters hide everything on it and offers the next page. The line above the grid
-links **Open on Steam** to the Steam page listing what is on show
-(`WorkshopStore.browseURL`, the snapshot's `steamURL`). The sources are `WorkshopSource` in
-`App/Services/Workshop/WorkshopSource.swift`.
+(the browse page above), **Collections** or **Your subscriptions**. In a narrow
+column they drop their glyphs instead of wrapping. An author's wallpapers and a
+collection's items are opened from a tile instead: no tab is current, and the
+search field gives way to a back button and what is on show; back returns to the
+list, page 1, they were opened from (`WorkshopStore.open`, `back` and
+`sourceHistory`). Choosing a tab starts a new history. A list that fails to open
+empties the grid rather than leaving the list it was to replace on show under its
+tab, where Next would page that other list; its error offers **Try again** for the
+list that failed.
+
+Only Wallpapers and Collections are searched and sorted by Steam; the others come
+in their own order, so the panel hides the search field and the sort menu for
+them. The filter sidebar applies everywhere: Steam applies it to the two lists,
+and `WorkshopService.matching` applies the same rules to the other sources'
+pages, which can therefore show fewer than 30 tiles, or none while Steam's count
+says more exist; such a page says the filters hide everything on it and offers
+the next page. The line above the grid links **Open on Steam** to the Steam page
+listing what is on show (`WorkshopStore.browseURL`, the snapshot's `steamURL`).
+The sources are `WorkshopSource` in `App/Services/Workshop/WorkshopSource.swift`.
 
 ### Collections
 
-**Collections** is Steam's browse page with `section=collections`. A collection
-is a list, not a download: its tile says Collection and has no download ring,
+**Collections** is Steam's browse page with `section=collections`. A collection is
+a list, not a download: its tile says Collection and has no download ring,
 double-clicking it or **Open collection** in its details opens it, and native
 refuses a `requestDownload` for it. Opening one asks Steam's public
-`ISteamRemoteStorage/GetCollectionDetails` for its items in the collection's
-own order, then shows them 30 at a time through the details endpoint.
+`ISteamRemoteStorage/GetCollectionDetails` for its items in the collection's own
+order, then shows them 30 at a time through the details endpoint.
 
 Collections rarely carry tags, and an age rating is a tag. So while Questionable
 or Mature is unticked, a collection is shown only when it has a wallpaper among
@@ -165,20 +154,19 @@ own list of each collection's children, and one details request covers the whole
 page. A collection inside a collection is dropped for the same reason, as nothing
 vouches for what it holds. Ticking both ratings shows every collection unsampled.
 
-Screening often drops most of a Steam page (two thirds of the popular ones under
-the default Everyone-only rating), so while it is on, a panel page is not one
-Steam page: `WorkshopStore.filledPage` fills it to 30 from as many screened Steam
-pages as it takes (at most `maxSteamPagesPerPage`), on from where the previous
-panel page stopped, and fetches the next Steam page alongside. Next and Back show
-each kept collection once, and each Steam page is read once per search. The page
-count and result count are estimates from the rate at which pages so far consumed
-Steam's, and refine while paging. A page jumped to before the one ahead of it was
-shown starts at an estimated Steam page, so it can repeat or skip collections near
-its edges. A page whose read limit runs out before any collection passes is empty
-but offers Next to read on, and once the last page is reached the count adds up what
-each page really showed. A search, refresh or other list ends a fill in progress
-before it reads further, so a superseded query's pages never reach the new one's
-cache. **Open on Steam** goes to the Steam page the panel page starts on.
+Screening often drops most of a Steam page, so while it is on, a panel page is not
+one Steam page: `WorkshopStore.filledPage` fills it to 30 from as many screened
+Steam pages as it takes (at most `maxSteamPagesPerPage`), on from where the
+previous panel page stopped, and fetches the next Steam page alongside. Next and
+Back show each kept collection once, and each Steam page is read once per search.
+The page and result counts are estimates from the rate at which pages so far
+consumed Steam's, and refine while paging; a page jumped to before the one ahead
+of it was shown starts at an estimated Steam page, so it can repeat or skip
+collections near its edges. A page whose read limit runs out before any
+collection passes is empty but offers Next to read on. A search, refresh or other
+list ends a fill in progress before it reads further, so a superseded query's
+pages never reach the new one's cache. **Open on Steam** goes to the Steam page
+the panel page starts on.
 
 ### Authors
 
@@ -195,49 +183,45 @@ subscriptions** needs a Steam Community sign-in. This is a different sign-in fro
 SteamCMD's (see [Steam sign-in](#steam-sign-in)), and the app never sees the
 password: **Sign in to Steam…** opens Steam's own sign-in page in a window
 (`WebSignInWindowController` with its `.steam` site, the same one pixiv uses) and
-takes the `steamLoginSecure` cookie Steam sets. The cookie is kept in memory
-only (`WorkshopStore.steamWebSession`): it is never written to disk or the
-keychain, ends when the app quits or on **Sign out of Steam**, and is sent only to
+takes the `steamLoginSecure` cookie Steam sets. The cookie is kept in memory only
+(`WorkshopStore.steamWebSession`): it is never written to disk or the keychain,
+ends when the app quits or on **Sign out of Steam**, and is sent only to
 `steamcommunity.com` over HTTPS (a redirect anywhere else goes without it,
-`WorkshopService.redirected`), to read the subscriptions list (the author page with
-`browsefilter=mysubscriptions`). That page lists rows rather than an author's
-tiles, so `WorkshopService.decodeProfileListing` reads an item's id from either
-layout: an author tile's `data-publishedfileid`, or a subscription row's own
-id (`<div class="workshopItemSubscription" id="Subscription<id>">`; Steam may fill
-the row's details and Unsubscribe control in later, so they are only a fallback). A
-page whose paging line counts entries but none can be read is reported as
-unreadable instead of being shown as an empty list. Without a session, or when
-Steam answers with its sign-in page instead, the session is forgotten and the grid
-is emptied (no tiles of the list shown before stay behind), so the panel offers
-**Sign in to Steam…** and says it is separate from SteamCMD's sign-in.
+`WorkshopService.redirected`), to read the subscriptions list (the author page
+with `browsefilter=mysubscriptions`).
+
+That page lists rows rather than an author's tiles, so
+`WorkshopService.decodeProfileListing` reads an item's id from either layout: an
+author tile's `data-publishedfileid`, or a subscription row's own id
+(`id="Subscription<id>"`). A page whose paging line counts entries but none can be
+read is reported as unreadable instead of being shown as an empty list. Without a
+session, or when Steam answers with its sign-in page instead, the session is
+forgotten and the grid is emptied, so the panel offers **Sign in to Steam…** and
+says it is separate from SteamCMD's sign-in.
 
 Signed in, the line above the grid says so, counts the subscriptions, and leads
 with **Download the ones not in your library** as the list's main action beside
 **Sign out of Steam**; a list with no subscriptions offers **Browse Workshop**.
-
 **Download the ones not in your library** reads every page of subscriptions (at
-most 1,000 pages of 30), drops what is installed, collections and Application items, and
-queues the rest as ordinary downloads, which need SteamCMD's own sign-in as any
-download does. Nothing is subscribed or unsubscribed on Steam.
+most 1,000 pages of 30), drops what is installed, collections and Application
+items, and queues the rest as ordinary downloads, which need SteamCMD's own
+sign-in as any download does. Nothing is subscribed or unsubscribed on Steam.
 
 ## One decision per download
 
-Double-click a Discover tile, or choose **Download** in the inspector, once.
-With SteamCMD installed and a saved Steam sign-in, nothing else opens: the
-download starts and its tile reports it. A dialog appears only for what the
-download cannot do alone — installing SteamCMD, the first Steam account name,
-consent for shared scene resources, or a password / Steam Guard request that
-Steam actually sends — and it closes by itself once Steam is satisfied.
-**Not now** closes the dialog without removing the request; that exact request
-stays quiet until Steam asks for something else, and the tile's shield or
-**Continue setup** in the inspector or Downloads reopens it.
-The dialog keeps its heading and close action reachable while long content
-scrolls. New stages/prompts move focus only when the previous control is no
-longer usable; progress updates do not interrupt typing or another focused
-action. Rejected dialog actions appear inside the dialog as well as in the
-panel's error state, without losing the account or request. Closing/reopening
-starts a new local error session, so an earlier asynchronous rejection cannot
-appear in it; closing does not dismiss the panel's global error.
+Double-click a Discover tile, or choose **Download** in the inspector, once. With
+SteamCMD installed and a saved Steam sign-in, nothing else opens: the download
+starts and its tile reports it. A dialog appears only for what the download
+cannot do alone — installing SteamCMD, the first Steam account name, consent for
+shared scene resources, or a password / Steam Guard request that Steam actually
+sends — and it closes by itself once Steam is satisfied. **Not now** closes the
+dialog without removing the request; that exact request stays quiet until Steam
+asks for something else, and the tile's shield or **Continue setup** in the
+inspector or Downloads reopens it. The dialog keeps its heading and close action
+reachable while long content scrolls; new stages and prompts move focus only when
+the previous control is no longer usable, and progress updates never interrupt
+typing. A rejected dialog action appears inside the dialog as well as in the
+panel's error state, without losing the account or request.
 
 The app-owned `WorkshopStore` observes setup, account and resource readiness even
 when no control panel exists. Completing a prerequisite continues a retained
@@ -246,8 +230,8 @@ paused and require **Resume download** before starting another session.
 
 ### Download state on the tile
 
-A Discover tile wears its download state as a ring over its thumbnail, the
-way Wallpaper Engine's own library does:
+A Discover tile wears its download state as a ring over its thumbnail, the way
+Wallpaper Engine's own library does:
 
 | Ring | Meaning | Click |
 | --- | --- | --- |
@@ -259,43 +243,48 @@ way Wallpaper Engine's own library does:
 | Retry mark | Failed or cancelled | Try again |
 | Small check in the corner | Already in your library | — |
 
+Before any bytes move, the sweeping ring names the current SteamCMD step inside
+it (Preparing, Connecting, Updating, Signing in, Requesting) from the job's
+`phase`; a transfer without a percentage yet shows its speed instead, and after
+the last byte the full ring reads Finishing while the files are validated and
+imported. The full status sentence stays in the tooltip, the inspector and the
+downloads list.
+
 Double-clicking a tile that is already in the library applies it, as on the
 Installed tab.
 
 ### Transfer progress
 
 SteamCMD prints byte counters for `app_update` (shared scene resources) but
-nothing while it fetches a Workshop item, so Workshop progress is measured
-outside its output and compared with the `file_size` Steam's Workshop listing
-gave for the item. While Steam reports the item as downloading, the app takes
-two measures twice a second and shows the smaller: the bytes that have landed
-under the private staging's `steamapps/workshop` tree (allocated blocks, so a
-sparse file does not count), and the bytes the SteamCMD process has received
-over the network since the transfer began, read from the same per-process
-`nettop` session that supplies the speed. Steam can allocate a file's full
-length before its chunks arrive, which the network total cannot overstate;
-compressed chunks make the network total run slightly behind, which the tree
-cannot overstate. `nettop`'s first row counts everything since the process
-launched (the sign-in), so it only anchors the timeline and neither the speed
-nor the total includes it. The ring and the inspector show that percentage
-together with received/total bytes and the measured network speed; the last
-percent is claimed only by Steam's own success line, then validation and
-import follow. An item Steam lists without a size keeps the spinning arc and
-the speed; if `nettop` is unavailable the tree alone is used.
+nothing while it fetches a Workshop item, so Workshop progress is measured outside
+its output and compared with the `file_size` Steam's Workshop listing gave for the
+item. While Steam reports the item as downloading, the app takes two measures
+twice a second and shows the smaller: the bytes that have landed under the private
+staging's `steamapps/workshop` tree (allocated blocks, so a sparse file does not
+count), and the bytes the SteamCMD process has received over the network since the
+transfer began, read from the same per-process `nettop` session that supplies the
+speed. Steam can allocate a file's full length before its chunks arrive, which the
+network total cannot overstate; compressed chunks make the network total run
+slightly behind, which the tree cannot overstate. `nettop`'s first row counts
+everything since the process launched (the sign-in), so it only anchors the
+timeline and neither the speed nor the total includes it. The ring and the
+inspector show that percentage together with received/total bytes and the
+measured network speed; the last percent is claimed only by Steam's own success
+line, then validation and import follow. An item Steam lists without a size keeps
+the spinning arc and the speed; if `nettop` is unavailable the tree alone is used.
 
 Downloads never subscribe on Steam and never apply automatically. Use **Show in
-library**, then Apply — see [Control panel](control-panel.md).
+library**, then Apply — see [Control panel](control-panel.md#selection-versus-apply).
 
 ## SteamCMD setup
 
 SteamCMD is Valve's command-line download tool. Installing it does not sign you
 in. A download can guide you through installing it or locating an existing macOS
-runtime; setup also remains available in **Settings -> Library & Steam**.
-Pending download requests continue once their prerequisites are met.
-In the download dialog, installation always shows progress while busy; an
-unknown total is indeterminate rather than 0%. Installation failure retains its
-details and offers **Try again**, unless the retained copy needs explicit
-approval first.
+runtime; setup also remains available in **Settings → Library & Steam**. Pending
+download requests continue once their prerequisites are met. In the download
+dialog, installation always shows progress while busy (an unknown total is
+indeterminate rather than 0%), and a failure retains its details and offers **Try
+again**, unless the retained copy needs explicit approval first.
 
 Setup downloads Valve's HTTPS `client/steam_cmd_osx` package manifest and installs
 its universal runtime packages directly. It verifies each package's SHA-256,
@@ -305,232 +294,227 @@ manifest is retained as `package/steam_cmd_osx.manifest`. No Intel bootstrap or
 Valve updater is run, and Rosetta is not needed. Every runtime Mach-O must carry
 an arm64 slice; all setup and download launches require native execution.
 Existing Intel-only copies offer **Install SteamCMD**, with confirmation before
-replacing the old installation. Retained candidates from the retired bootstrap
-installer are discarded so installation can restart natively. Valve changing or
-removing this manifest can block new installs; malformed or missing packages
-fail closed without replacing a working copy.
+replacing the old installation. Valve changing or removing this manifest can
+block new installs; malformed or missing packages fail closed without replacing a
+working copy.
 
 Signature, dependency and Gatekeeper checks remain required. Because official
 signed SteamCMD is a command-line tool, one-click **Install SteamCMD** does not
 wait for an extra Allow step once Valve's signature checks pass. Copies that
 Gatekeeper actually rejects stay at the same path across restarts and retries;
-you can follow Apple's guidance, or explicitly confirm **Allow This SteamCMD**.
+you can follow Apple's guidance, or explicitly confirm **Allow this SteamCMD…**.
 In that case the app removes quarantine only from that verified copy and records
 its content fingerprint. Global Gatekeeper stays enabled, changed files require
 another approval, and the app never re-signs SteamCMD or silently grants an
-exception. A retained download that is not yet usable can be revealed in Finder
-or discarded from Settings.
+exception. A retained download that is not yet usable can be revealed in Finder or
+discarded from Settings.
 
 Valve's packages contain a `Breakpad.framework` whose sealed resources no longer
 match its own `CodeResources`, so validation checks the code seal dyld actually
 enforces — once per architecture slice, for every Mach-O image including that
 framework — instead of a bundle-wide resource verification. No signature is
-changed and no system security setting is disabled. Gatekeeper assessment errors
-remain hard failures; the special exit-3 diagnostic for valid non-app code is
-not an assessment error. macOS can still kill a quarantined CLI at launch after
-that valid-non-app assessment. A no-login smoke run therefore uses the same
-validated private copy path as downloads: validate the quarantined source, clear quarantine only
-on a disposable copy, revalidate it, then launch natively. The installation
-candidate stays quarantined and is revalidated before publication.
+changed and no system security setting is disabled; Gatekeeper assessment errors
+remain hard failures, and the special exit-3 diagnostic for valid non-app code is
+not one. Because macOS can still kill a quarantined CLI at launch after that
+assessment, a no-login smoke run uses the same private copy path as downloads:
+validate the quarantined source, clear quarantine only on a disposable copy,
+revalidate it, then launch natively. The installation candidate stays quarantined
+and is revalidated before publication.
 
 Downloads and smoke runs use `-inhibitbootstrap`, so a prepared complete runtime
 never self-updates mid-download. Reinstall through setup when a newer version is
-needed. This is implemented in `App/Services/Steam/SteamCMDPackages.swift`,
-`App/Services/Steam/SteamCMDRuntime.swift` and
-`App/Services/Steam/SteamCMDSetupStore.swift`.
+needed. The implementation is `App/Services/Steam/SteamCMDPackages.swift`,
+`SteamCMDRuntime.swift` and `SteamCMDSetupStore.swift`.
 
 ## The download queue
 
 Every download also appears in a compact popover from the bottom activity bar,
 and from the top-bar downloads button that is shown while there is download
-activity. Each transfer uses a private SteamCMD session and an account that
-owns Wallpaper Engine.
+activity. Each transfer uses a private SteamCMD session and an account that owns
+Wallpaper Engine. Closing the popover, the sign-in dialog or the panel never stops
+work.
 
-- Up to three downloads run at once by default; **Settings → Library & Steam →
-  Downloads at once** chooses 1–6 (`WorkshopDownloadManager.concurrentDownloadRange`,
-  stored under `WallpaperMachine.concurrentDownloads`). Raising it starts queued
-  jobs immediately; lowering it lets running transfers finish and only holds back
-  jobs that have not started. Each job runs in its own private SteamCMD session and
-  staging directory with its own copy of the saved sign-in; clicking several
-  tiles queues them and they fill the free slots in order without another
-  click. With a saved sign-in for the account on disk every job restores it
-  itself, so a batch starts together without waiting for the first job to get
-  through Steam's login. Without one, the batch signs in once through the job
-  at the front of the queue: the rest wait while that sign-in is in progress
-  (and whenever a password or Steam Guard prompt is on screen, so prompts
-  never pile up), and the worker saves the session the moment Steam accepts
-  it — not only at the end of the transfer — so the waiting jobs start
-  silently from it while the first transfer is still running. Every queued job
+- **Slots.** Up to three downloads run at once by default; **Settings → Library &
+  Steam → Downloads at once** chooses 1–6
+  (`WorkshopDownloadManager.concurrentDownloadRange`, stored under
+  `WallpaperMachine.concurrentDownloads`). Raising it starts queued jobs
+  immediately; lowering it lets running transfers finish and only holds back jobs
+  that have not started. Each job runs in its own private SteamCMD session and
+  staging directory with its own copy of the saved sign-in, and every queued job
   shows why it is waiting (a free slot, the current sign-in, or the previous
-  download). The app log records each start and hold reason, and for every
+  download).
+- **Sign-in handoff.** With a saved sign-in on disk every job restores it itself,
+  so a batch starts together without waiting for the first job to get through
+  Steam's login. Without one, the batch signs in once through the job at the front
+  of the queue: the rest wait while that sign-in is in progress (and whenever a
+  password or Steam Guard prompt is on screen, so prompts never pile up), and the
+  worker saves the session the moment Steam accepts it — not only at the end of
+  the transfer — so the waiting jobs start silently from it while the first
+  transfer is still running.
+- **Serial fallback.** Sessions that cannot share a sign-in run one after another:
+  with **Keep me signed in** off each job prompts on its own, and if Steam ends a
+  session because the same account signed in from another of the app's sessions
+  ("logged in elsewhere"), the ended job goes back in line once behind the running
+  one and the queue stays serial for the rest of the app's run
+  (`sessionConflictDetected`). A session Steam ends while no sibling is running is
+  reported as an ordinary failure with a retry. Settings says when the queue is
+  running one at a time.
+- **Cost of parallelism.** Every job signs in separately, a fixed cost per job, so
+  extra slots mainly help batches of small items; large items share the link.
+  SteamCMD's `@cMaxInitialDownloadSources` is not set.
+- **Diagnosis.** The app log records each start and hold reason, and for every
   session the runtime preparation, whether a saved sign-in was restored, each
   status change, the sign-in handoff and SteamCMD's exit status, so a stalled
   batch can be diagnosed from **Show download logs**.
-- Sessions that cannot share a sign-in run one after another: with **Keep me
-  signed in** off each job prompts on its own, and if Steam ends a session
-  because the same account signed in from another of the app's sessions
-  ("logged in elsewhere"), the ended job goes back in line once behind the
-  running one and the queue stays serial for the rest of the app's run
-  (`sessionConflictDetected`). A session Steam ends while no sibling is running
-  is reported as an ordinary failure with a retry.
-- Every job signs in separately (about 10–13 s from launch to "Waiting for user
-  info...OK" on a saved sign-in), so parallel slots mainly hide that fixed cost for
-  batches of small items; large items share the link. Measured on a real account
-  (2026-09-24): 12 items of 1–10 MB took 67.7 s with 3 sessions and 47.0 s with 6,
-  all 24 succeeded, and Steam neither ended a session nor rate-limited the sign-ins;
-  with 6 sessions each sign-in took 13–22 s, so the gain is sublinear. SteamCMD's
-  `@cMaxInitialDownloadSources` (default -1) showed no consistent effect on one
-  150 MB item (9.3/14.4 MB/s off, 4.3/16.3 MB/s on) and is not set. Settings says
-  when Steam has ended a session and the queue is running one at a time.
-- The activity bar carries the running job's status, percentage and speed, or
-  the batch's count, mean percentage and summed speed while several run. The
-  queue footer states the slot rule.
-- Passwords and Steam Guard codes belong to that exact job; the dialog seeds the
-  account per request, so switching requests cannot submit another one's
-  sign-in. A submitted secret is cleared from the field immediately and is not
-  retained by the panel. **Change account** cancels that job and hands the same
-  intent back at the sign-in step.
-- The account stage is just the **Steam account name** field, the keep-signed-in
-  checkbox and a note that the password and Steam Guard come next; there is no
-  guide card, because the field label already says what to type. A password
-  prompt is the same: identity, labelled field, actions and the footer note.
-  Steam Guard stages are guide cards: a glyph, a one-line title and numbered
-  steps for whichever method Steam asked for — mobile approval, authenticator
-  code or emailed code. The mobile-approval steps say to answer **Steam Client**
-  when the Steam app asks "Where are you trying to sign in?", because SteamCMD
-  signs in as the client. Steam may still require another approval.
-- When Steam accepts the sign-in the dialog does not vanish: it switches to a
+- **Activity bar.** It carries the running job's status, percentage and speed, or
+  the batch's count, mean percentage and summed speed while several run. The queue
+  footer states the slot rule.
+- **Prompts.** Passwords and Steam Guard codes belong to that exact job; the
+  dialog seeds the account per request, so switching requests cannot submit
+  another one's sign-in. A submitted secret is cleared from the field immediately
+  and is not retained by the panel. **Change account** cancels that job and hands
+  the same intent back at the sign-in step.
+- **Dialog stages.** The account stage is just the **Steam account name** field,
+  the keep-signed-in checkbox and a note that the password and Steam Guard come
+  next; a password prompt is the same without the checkbox. Steam Guard stages are
+  guide cards: a glyph, a one-line title and numbered steps for whichever method
+  Steam asked for — mobile approval, authenticator code or emailed code. The
+  mobile-approval steps say to answer **Steam Client** when the Steam app asks
+  "Where are you trying to sign in?", because SteamCMD signs in as the client.
+  Steam may still require another approval.
+- **Accepted sign-in.** When Steam accepts the sign-in the dialog switches to a
   "Signed in" card with the running job's status and progress (or notes that
   shared resources download first), offers **Done** and **Show downloads**, and
-  closes by itself six seconds later. The transfer is already running on the
-  tile and in the activity bar throughout.
-- Closing the panel, popover or sign-in dialog does not stop work. **Pause download**
-  releases the transfer's slot and retains its downloaded content. **Resume download**
-  starts a fresh private SteamCMD runtime and lets Steam validate and reuse its
-  partial content and manifests. Resuming a scene asks for shared-resource consent again
-  when those assets are missing and no shared-resource job is running.
-  Cancelling discards this job's partial data;
-  removing a waiting request prevents it from starting.
-- Pending, paused and failed jobs keep their order in `Downloads/Workshop/queue.json`
-  under the app support directory; prerequisite requests use `Downloads/workshop-requests.json`.
-  Quitting pauses active and queued downloads after stopping their child processes.
-  Relaunch restores them as paused, without starting a login or transfer automatically.
-  Checkpoints contain only `steamapps` and `wallpaper-engine` download content;
-  passwords, terminal state and private SteamCMD runtime files are never included.
-  Checkpoint publication retains recoverable pending and previous directories until
-  the new checkpoint is published. Resume recovers interrupted publication; cancel
-  removes all three copies. The separately managed saved sign-in remains subject
-  to **Keep me signed in**.
-  An interrupted process can lose bytes still in transient staging; the persisted
-  job can still be resumed and Steam will redownload any missing content.
-- Failed and cancelled jobs stay visible with a primary **Try again** action;
-  when SteamCMD is not ready it stays disabled beside the setup explanation.
-  Completed jobs collapse behind **Show completed** and can be cleared. Clearing
-  history keeps paused jobs. The same popover also lists pixiv downloads and their
-  pause, resume, retry and cancel actions.
+  closes by itself six seconds later. The transfer is already running on the tile
+  and in the activity bar throughout.
+- **Pause, resume, cancel.** **Pause download** releases the transfer's slot and
+  retains its downloaded content. **Resume download** starts a fresh private
+  SteamCMD runtime and lets Steam validate and reuse its partial content and
+  manifests. Resuming a scene asks for shared-resource consent again when those
+  assets are missing and no shared-resource job is running. Cancelling discards
+  this job's partial data; removing a waiting request prevents it from starting.
+- **Persistence.** Pending, paused and failed jobs keep their order in
+  `Downloads/Workshop/queue.json` under the app support directory; prerequisite
+  requests use `Downloads/workshop-requests.json`. Quitting pauses active and
+  queued downloads after stopping their child processes, and relaunch restores
+  them as paused, without starting a login or transfer automatically. Checkpoints
+  contain only `steamapps` and `wallpaper-engine` download content; passwords,
+  terminal state and private SteamCMD runtime files are never included.
+  Checkpoint publication retains recoverable pending and previous directories
+  until the new checkpoint is published; resume recovers an interrupted
+  publication and cancel removes all three copies. The separately managed saved
+  sign-in remains subject to **Keep me signed in**. An interrupted process can
+  lose bytes still in transient staging; the persisted job can still be resumed
+  and Steam will redownload any missing content.
+- **Finished jobs.** Failed and cancelled jobs stay visible with a primary **Try
+  again** action; when SteamCMD is not ready it stays disabled beside the setup
+  explanation. Completed jobs collapse behind **Show completed** and can be
+  cleared. Clearing history keeps paused jobs. The same popover also lists pixiv
+  downloads and their pause, resume, retry and cancel actions.
 
 ## Shared scene resources
 
 Scene wallpapers need shared shaders and materials from a purchased Wallpaper
 Engine installation; video wallpapers do not. Scene downloads request explicit
 consent before downloading missing shared resources, and one resource job is
-shared by all waiting scenes. The consent stage of the download dialog
-("Shared resources needed") is a choice between two full-width buttons, each
-carrying its title and the one fact that decides it: **Download from Steam**
-(needs a Steam account that owns Wallpaper Engine and several gigabytes free
-while downloading) and **Use an existing installation** (choose its folder,
-nothing downloads), with **Not now** beneath. Steam downloads the full Windows
-build into temporary storage — hence the space — and only the shared resources
-are kept afterwards. No Windows program is ever run; the Settings page still
-says so. A resource failure does not discard an already downloaded wallpaper;
-scene playback stays unavailable until its resources are installed.
+shared by all waiting scenes. The consent stage of the download dialog ("Shared
+resources needed") is a choice between two full-width buttons, each carrying its
+title and the one fact that decides it: **Download from Steam** (needs a Steam
+account that owns Wallpaper Engine and several gigabytes free while downloading)
+and **Use an existing installation** (choose its folder, nothing downloads), with
+**Not now** beneath. Steam downloads the full Windows build into temporary
+storage — hence the space — and only the shared resources are kept afterwards. No
+Windows program is ever run; the Settings page still says so. A resource failure
+does not discard an already downloaded wallpaper; scene playback stays
+unavailable until its resources are installed.
 
 Scene support is experimental; [web wallpapers](web-wallpapers.md) run in a
 built-in web view; Windows application wallpapers are labeled unsupported.
 
 **Download from Steam…** in **Settings → Library & Steam**, or **Get shared
 resources** in a scene's details, starts the installation; **Locate an
-installation…** (**Use an existing installation** in the dialog) instead points
-at an existing purchased installation. Installation reuses the private
-SteamCMD login and cancellation flow and requests the Windows application with
-`app_update 431960 validate`. Only the validated `assets` tree is retained, at
+installation…** (**Use an existing installation** in the dialog) instead points at
+an existing purchased installation. Installation reuses the private SteamCMD login
+and cancellation flow and requests the Windows application with `app_update
+431960 validate`. Only the validated `assets` tree is retained, at
 `~/Library/Application Support/WallpaperMachine/SceneAssets`; the Windows
 executables are removed together with the temporary installation. Steam must
 confirm that the installation completed before assets are published. An empty or
-incomplete directory is rejected without replacing existing assets, and the
-basic shader and material checks are not a compatibility guarantee for any given
-scene. Once setup finishes, an already-downloaded wallpaper applies without
-restarting the app and without downloading that wallpaper again.
+incomplete directory is rejected without replacing existing assets, and the basic
+shader and material checks are not a compatibility guarantee for any given scene.
+Once setup finishes, an already-downloaded wallpaper applies without restarting
+the app and without downloading that wallpaper again.
+
+Readiness and the assets folder are looked up once, not on every panel update:
+at launch, after assets are located or installed, and whenever the panel comes to
+the front (`WorkshopStore.refreshSceneAssetsReadiness`). Assets that Steam
+installs or removes while the app runs therefore show up when the user returns to
+the panel.
 
 ## Steam sign-in
 
 The first-run guide explains that downloads require a Steam account that owns
-Wallpaper Engine, with registration and store links
-([first-run guide](control-panel.md#first-run)); the download dialog only asks
-for what the current download still needs.
+Wallpaper Engine, with registration and store links ([first-run
+guide](control-panel.md#first-run)); the download dialog only asks for what the
+current download still needs.
 
 The guide can also sign in ahead of any download. `WorkshopStore.requestSignIn`
 retains a `WorkshopDownloadRequest` with id `WorkshopStore.signInRequestID`
-(`steam-sign-in`) that climbs the same ladder as a download — SteamCMD setup,
-then the account — and never the shared-resources stage, then runs
+(`steam-sign-in`) that climbs the same ladder as a download — SteamCMD setup, then
+the account — and never the shared-resources stage, then runs
 `WorkshopDownloader.signIn`: a private SteamCMD session with `+login <account>
-+licenses_for_app 431960 +quit` and no download command (`isSigningInOnly`). Steam's password and Steam
-Guard prompts arrive on the job exactly as for a download and are answered
-through `downloadInput`; with **Keep me signed in** the accepted session is
-saved the same way, so the next download starts silently. The job takes a
-queue slot like any other (`WorkshopDownloadManager.signIn`, at most one at a
-time), succeeds only once Steam confirms the sign-in before quitting, and
-reports "Steam sign-in" as its title; the page hides it from the downloads
-list once it has finished.
++licenses_for_app 431960 +quit` and no download command (`isSigningInOnly`).
+Steam's password and Steam Guard prompts arrive on the job exactly as for a
+download and are answered through `downloadInput`; with **Keep me signed in** the
+accepted session is saved the same way, so the next download starts silently. The
+job takes a queue slot like any other (`WorkshopDownloadManager.signIn`, at most
+one at a time), succeeds only once Steam confirms the sign-in before quitting, and
+reports "Steam sign-in" as its title; the page hides it from the downloads list
+once it has finished.
 
 After authentication, `licenses_for_app` checks the account's active Wallpaper
-Engine license in that same session (the command is also recommended by
-[Valve support](https://github.com/ValveSoftware/steam-for-linux/issues/6218)).
-An active license listing app 431960 confirms ownership; an explicit
-`No active license found for appID 431960` response reports no ownership.
-Missing or unrecognized output stays **unconfirmed**, never a missing purchase.
-The guide shows a purchase link for a non-owner and explains that Pixiv
-downloads, Workshop browsing, and viewing existing Wallpaper Engine wallpapers
-remain available. Both non-owners and unconfirmed accounts can continue setup
-or **Check ownership again**, including after purchasing. Ownership is scoped
-to the current sign-in job, not persisted with credentials; a saved account
-from a previous launch can be checked again. Steam still authorizes each
-actual download, so this advisory check cannot bypass or permanently deny it.
+Engine license in that same session (the command is also recommended by [Valve
+support](https://github.com/ValveSoftware/steam-for-linux/issues/6218)). An active
+license listing app 431960 confirms ownership; an explicit `No active license
+found for appID 431960` response reports no ownership. Missing or unrecognized
+output stays **unconfirmed**, never a missing purchase. The guide shows a purchase
+link for a non-owner and explains that Pixiv downloads, Workshop browsing, and
+viewing existing Wallpaper Engine wallpapers remain available. Both non-owners
+and unconfirmed accounts can continue setup or **Check ownership again**,
+including after purchasing. Ownership is scoped to the current sign-in job, not
+persisted with credentials; a saved account from a previous launch can be checked
+again. Steam still authorizes each actual download, so this advisory check cannot
+bypass or permanently deny it.
 
-**Keep me signed in on this Mac** is enabled by default for Workshop downloads
-and for scene-asset installation. After a successful authentication the app
-preserves the Steam-issued cached credentials and machine-authentication files
-of the last account at
-`~/Library/Application Support/WallpaperMachine/SteamSession`. The next
+**Keep me signed in on this Mac** is enabled by default for Workshop downloads and
+for scene-asset installation. After a successful authentication the app preserves
+the Steam-issued cached credentials and machine-authentication files of the last
+account at `~/Library/Application Support/WallpaperMachine/SteamSession`. The next
 download, including after an app restart, restores only that account's cache and
-pre-fills its login name. Cache directories are restricted to `0700` and files
-to `0600`. Submitted passwords and Steam Guard codes are sent only to the
-private terminal and are never saved. Downloaded content, runtime programs and
-logs are not retained in the sign-in cache. Settings → **Library & Steam** shows
-the account as **Steam account · Signed in as <name>**; **Log out…** (confirmed
+pre-fills its login name. Cache directories are restricted to `0700` and files to
+`0600`. Submitted passwords and Steam Guard codes are sent only to the private
+terminal and are never saved. Downloaded content, runtime programs and logs are
+not retained in the sign-in cache. Settings → **Library & Steam** shows the
+account as **Steam account · Signed in as <name>**; **Log out…** (confirmed
 natively, unavailable while downloads run) or turning the option off removes the
-local cache without signing other Steam devices out. Steam still controls
-expiry, renewal, revocation and any additional security checks, so indefinite
+local cache without signing other Steam devices out. Steam still controls expiry,
+renewal, revocation and any additional security checks, so indefinite
 authentication is not guaranteed.
 
 Authentication state is preserved even when an already-authenticated download
 fails or is cancelled, and a failed authentication does not replace a previously
 saved account. SteamCMD's invalid-cache warning can fall back to a password
 prompt; a terminal cached-credential rejection clears the stale cache before an
-explicit retry. Every download still uses private temporary staging, and the
-child process is stopped before that staging is removed.
+explicit retry. Every download still uses private temporary staging, and the child
+process is stopped before that staging is removed.
 
-The sign-in dialog, and the welcome guide's Steam page, show step-by-step
-Steam Guard help for whichever method Steam asked for, in every shipped
-language. For mobile approval, open the Steam
-mobile app's shield tab for the same account and approve only the sign-in you
-initiated; if Steam asks where the sign-in comes from, choose **Steam Client**.
-For an authenticator or emailed code, enter the current code in the
-app's code field and submit it. Keep the download open; it continues after
-verification. Never disable Steam Guard, and never share passwords,
-verification codes or recovery codes. Valve's
+The sign-in dialog and the welcome guide's Steam page show step-by-step Steam
+Guard help for whichever method Steam asked for (mobile approval, authenticator
+code or emailed code), in every shipped language; the download stays open and
+continues after verification. The help never suggests disabling Steam Guard or
+sharing passwords, verification codes or recovery codes. Valve's
 [mobile-authenticator instructions](https://help.steampowered.com/en/faqs/view/6891-E071-C9D9-0134)
-describe the supported sign-in methods, and
+describe the supported methods, and
 [email-code help](https://help.steampowered.com/en/wizard/HelpWithSteamGuardCode)
 covers delivery delays.
 
@@ -549,35 +533,35 @@ transfer that keeps moving is never cut short. A run that stalls after sign-in
 says it stopped receiving the download; only a stall while signing in points to
 Steam Guard.
 
-After authentication is rejected or times out, **Try again** (or the failed
-tile's retry) starts a new private SteamCMD session for the selected wallpaper or asset installation
-and for the account name still in the form. The prior process is stopped and its
-private staging removed first. Supply a password or a fresh code when Steam
-asks: rejected requests are never reused, approval is never bypassed, and
-retries are never automatic. If Steam reports rate limiting, wait before
+After authentication is rejected or times out, **Try again** (or the failed tile's
+retry) starts a new private SteamCMD session for the selected wallpaper or asset
+installation and for the account name still in the form. The prior process is
+stopped and its private staging removed first. Supply a password or a fresh code
+when Steam asks: rejected requests are never reused, approval is never bypassed,
+and retries are never automatic. If Steam reports rate limiting, wait before
 retrying. Workshop content-access errors are a separate failure and offer no
 authentication retry.
 
 Parenthesized SteamCMD failures distinguish explicit credential rejection, Steam
-Guard, connection/service failures and rate limits, including compact result
-names such as `ServiceUnavailable` and `RateLimitExceeded`. Unrecognised reasons
-do not establish bad credentials: the app asks to check connectivity and export
-[a diagnostics report](diagnostics.md#diagnostics-report) if retries keep failing.
+Guard, connection/service failures and rate limits, including compact result names
+such as `ServiceUnavailable` and `RateLimitExceeded`. Unrecognised reasons do not
+establish bad credentials: the app asks to check connectivity and export [a
+diagnostics report](diagnostics.md#diagnostics-report) if retries keep failing.
 Logs include the failure category, never the raw terminal reason or secrets.
 
-Generic Workshop download failures also explain the purchase requirement:
-buy Wallpaper Engine on Steam or sign in with an account that already owns it,
-then retry. If that account already owns it, check the wallpaper's Workshop
-page for private or removed content. A generic failure does not establish
-which of these caused the download to fail.
+Generic Workshop download failures also explain the purchase requirement: buy
+Wallpaper Engine on Steam or sign in with an account that already owns it, then
+retry. If that account already owns it, check the wallpaper's Workshop page for
+private or removed content. A generic failure does not establish which of these
+caused the download to fail.
 
 ## Completion and recovery
 
 Completed Workshop downloads are validated and moved atomically into the library
 without copying their payload again. Fresh downloads do not request SteamCMD's
 optional extra validation pass. These choices reduce local disk work; network
-throughput still depends on Steam and your connection. Manual file imports
-remain non-destructive copies.
+throughput still depends on Steam and your connection. Manual file imports remain
+non-destructive copies.
 
 A download interrupted by a crash leaves staging behind. The app reclaims only
 staging directories it can prove nothing is writing to.
@@ -585,66 +569,57 @@ staging directories it can prove nothing is writing to.
 ### Workshop presets
 
 A Workshop preset (category **Preset**, "Required items" on its page) is not a
-wallpaper by itself: its `project.json` has no `type`, only `"dependency":
-"<base id>"` and, under `preset`, values for the base's properties, plus any
-files those values point at. After the preset arrives,
+wallpaper by itself: its `project.json` has no `type`, only `"dependency": "<base
+id>"` and, under `preset`, values for the base's properties, plus any files those
+values point at. After the preset arrives,
 `WallpaperImportService.presetBaseToDownload` names the base unless the same
-staging or the library already holds it, and `WorkshopDownloader` fetches it in
-a second SteamCMD pass of the same job, staging and sign-in (status "Downloading
-the wallpaper this preset is based on…"). The importer then assembles one
+staging or the library already holds it, and `WorkshopDownloader` fetches it in a
+second SteamCMD pass of the same job, staging and sign-in (status "Downloading the
+wallpaper this preset is based on…"). The importer then assembles one
 self-contained wallpaper under the preset's id: the base's content (moved from
 staging, or cloned from the library, which stays unchanged), the preset's files
 over it, and the base's manifest with the preset's title, description, tags,
 rating, preview and Workshop id, `dependency` recorded, and each preset value
-written into the base property of the same name (`null` headings and
-undeclared names are ignored). The renderer reads the preset's files where they
-land, beside the base's `scene.pkg`: a scene mounts its folder under its
-package, so a property naming `files/clip.mp4` finds the clip while packaged
-files still win. A base fetched for a preset is not added to the
-library. A preset of a preset, or one naming itself, is rejected without
-publishing anything. Updating a preset reassembles it on the current base; an
-update of the base alone does not reach presets already installed. Importing a
-preset folder works the same way with the base found next to it or in the
-library.
+written into the base property of the same name (`null` headings and undeclared
+names are ignored). The renderer reads the preset's files where they land, beside
+the base's `scene.pkg`: a scene mounts its folder under its package, so a property
+naming `files/clip.mp4` finds the clip while packaged files still win. A base
+fetched for a preset is not added to the library. A preset of a preset, or one
+naming itself, is rejected without publishing anything. Updating a preset
+reassembles it on the current base; an update of the base alone does not reach
+presets already installed. Importing a preset folder works the same way with the
+base found next to it or in the library.
 
 ## Updates
 
 `WorkshopUpdateStore` finds installed Workshop wallpapers (numeric ids) whose
 authors changed them since they were installed. It sends their ids to Steam's
-public details endpoint (`ISteamRemoteStorage/GetPublishedFileDetails`, POST,
-no key and no sign-in, up to 100 ids a request) and compares each item's
+public details endpoint (`ISteamRemoteStorage/GetPublishedFileDetails`, POST, no
+key and no sign-in, up to 100 ids a request) and compares each item's
 `time_updated` with when it was installed here: the moment this app finished
 downloading it, or, for an item it did not download (an import, or a download
-from before installs were recorded), when its `project.json` was last written.
-An import copies files, so an item that was already out of date when imported is
-not caught. A difference of a minute or less counts as the same version.
+from before installs were recorded), when its `project.json` was last written. An
+import copies files, so an item that was already out of date when imported is not
+caught. A difference of a minute or less counts as the same version.
 
-It checks at most once a day on its own, after the library loads and from the
-same six-hourly loop as app updates, unless **Settings → Library & Steam →
-Workshop updates → Check once a day** is off; **Check Now** checks at once. The
-result is kept across launches, and a failed check keeps what was known and says
-why beneath the row.
+It checks at most once a day on its own, after the library loads and from the same
+six-hourly loop as app updates, unless **Settings → Library & Steam → Workshop
+updates → Check once a day** is off; **Check Now** checks at once. The result is
+kept across launches, and a failed check keeps what was known and says why beneath
+the row.
 
-An installed wallpaper with an update wears a download mark on its tile,
-matches **Show only → Update available** in Installed's filters, and says in its
-details when its author changed it, with **Update**. Installed's summary offers
-**Update N wallpapers** while any have updates. An update is an ordinary
-Workshop download (same queue, sign-in and prerequisites); once it has arrived
-whole, the importer swaps the new folder in and the old one out in one step
-(`renamex_np` with `RENAME_SWAP`), so the library never lacks the wallpaper and
-a failure leaves the old version in place; the old folder is removed with the
-download's staging. Only a folder that holds an installed wallpaper is replaced:
-anything else under the item's id is left alone and the download says so. An
-update check still running when the download finishes does not mark it outdated
-again. The item's saved options belong to its id and are kept. A
-display showing it then loads it again: applying alone would find nothing changed,
-so it is removed and applied again through the display's command slot. Moving a
-wallpaper to Trash forgets its update and install record.
-
-## Verification
-
-See [Testing](../testing/README.md) for how download and Workshop behavior is
-exercised, and the [verification log](../testing/verification-log.md) for
-recorded runs.
-
-Back to the [project README](../../README.md).
+An installed wallpaper with an update wears a download mark on its tile, matches
+**Show only → Update available** in Installed's filters, and says in its details
+when its author changed it, with **Update**. Installed's summary offers **Update N
+wallpapers** while any have updates. An update is an ordinary Workshop download
+(same queue, sign-in and prerequisites); once it has arrived whole, the importer
+swaps the new folder in and the old one out in one step (`renamex_np` with
+`RENAME_SWAP`), so the library never lacks the wallpaper and a failure leaves the
+old version in place; the old folder is removed with the download's staging. Only a
+folder that holds an installed wallpaper is replaced: anything else under the
+item's id is left alone and the download says so. An update check still running
+when the download finishes does not mark it outdated again. The item's saved
+options belong to its id and are kept. A display showing it then loads it again:
+applying alone would find nothing changed, so it is removed and applied again
+through the display's command slot. Moving a wallpaper to Trash forgets its update
+and install record.

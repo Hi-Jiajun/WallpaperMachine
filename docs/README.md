@@ -32,7 +32,7 @@ live under `testing/`.
 | [conventions.md](conventions.md) | Code, test, documentation, commit and pull-request rules |
 | [release.md](release.md) | Versioning, release specs, notes generation, CI pipeline, in-app updater contract |
 | [../CHANGELOG.md](../CHANGELOG.md) | Published versions, newest first; written by `scripts/release_notes.py` |
-| [development-tools.md](development-tools.md) | Optional diagnostics and the desktop authorization boundary |
+| [development-tools.md](development-tools.md) | Optional diagnostic tools (Peekaboo, Instruments, `xctrace`), the safe setup check, and when a desktop run needs authorization |
 | [../AGENTS.md](../AGENTS.md) / [../CLAUDE.md](../CLAUDE.md) | Agent rules; CLAUDE.md is a symlink, not a separate policy |
 | [../LICENSING.md](../LICENSING.md) | GPL-2.0-only source policy, Supporter model (free signed download; sponsor place and priority support), Mac App Store questions, component licenses, distribution blockers |
 | [../LICENSE](../LICENSE) | GNU GPL version 2 text, the license of this repository's source |
@@ -47,8 +47,7 @@ live under `testing/`.
 | [testing/manual-smoke.md](testing/manual-smoke.md) | Manual release smoke checklist |
 | [testing/power-benchmark.md](testing/power-benchmark.md) | Configuration manifest, per-process CPU/GPU, whole-machine and package-power measurement, runtime counters, condition matrix and comparison rules for power claims |
 | [testing/verification-log.md](testing/verification-log.md) | Dated verification history, ten newest entries |
-| [testing/archive/verification-log-2026-09.md](testing/archive/verification-log-2026-09.md) | Retired verification entries; historical only |
-| [testing/archive/verification-log-2026-10.md](testing/archive/verification-log-2026-10.md) | Retired October verification entries; historical only |
+| [testing/archive/](testing/archive/) | Retired verification-log entries, one file per month, written by `scripts/log_verification.py`; historical only |
 | [testing/wallpaper-corpus.md](testing/wallpaper-corpus.md) | Local regression corpus checklist |
 
 ## Archive
@@ -64,8 +63,6 @@ file; pass `rg -u` to search them deliberately.
 
 ## Product features
 
-- [Music information](features/media-integration.md) - system Now Playing metadata and covers in scene and web wallpapers.
-
 | Document | Purpose |
 |---|---|
 | [features/control-panel.md](features/control-panel.md) | Panel UX, live preview, playback history, local collections, property presets, image placement, compatibility checks, and local backup/restore |
@@ -75,24 +72,18 @@ file; pass `rg -u` to search them deliberately.
 | [features/spaces.md](features/spaces.md) | Experimental wallpaper/playlist choices by desktop UUID, visit/manual/Focus semantics, scoped poster ownership and verification limits |
 | [features/playlists.md](features/playlists.md) | Per-display rotation and day/night selection, local collection sources, reusable named plans, scheduling and storage |
 | [features/pixiv.md](features/pixiv.md) | pixiv tab: rankings and tag search, saving a page as a still wallpaper, pixiv sign-in and R-18 works |
-| [features/audio-response.md](features/audio-response.md) | Audio-responsive wallpapers |
+| [features/audio-response.md](features/audio-response.md) | Audio response setting, system-audio capture permission, spectrum analysis and what scene and web wallpapers receive |
 | [features/web-wallpapers.md](features/web-wallpapers.md) | HTML/JS wallpapers hosted in a web view, host protocol, limits |
-| [features/media-integration.md](features/media-integration.md) | Now-playing for Web and Scene wallpapers, MediaRemote and AppleScript fallback |
+| [features/media-integration.md](features/media-integration.md) | Now-playing metadata and covers for scene and web wallpapers: the bundled MediaRemote adapter first, AppleScript as fallback |
 | [features/lock-screen.md](features/lock-screen.md) | Experimental animated lock screen and wallpaper-as-screen-saver |
-| [features/appearance.md](features/appearance.md) | Theme and appearance customization |
-| [features/performance.md](features/performance.md) | Video backend, render scale, battery quality profile, scene renderer and optimisation, experimental pacing, shared decode and direct video plane sampling |
+| [features/appearance.md](features/appearance.md) | Theme, accent and tone, the app icon, and brand asset generation |
+| [features/performance.md](features/performance.md) | Energy readout and per-wallpaper ratings, quality and playback settings, video backend, scene renderer and optimisation, experimental switches, renderer memory and background-work rules |
 | [features/diagnostics.md](features/diagnostics.md) | Application log format and load tagging, detailed logging, retention, and the diagnostics report users attach to bug reports |
 
 ## Maintaining these docs
 
-- **One topic per file.** When another document owns a topic, link to it in one
-  sentence rather than restating it.
-- **Naming.** Files under `docs/` are `lowercase-hyphenated.md` with exactly one
-  `#` H1. Feature documents go in `docs/features/`, test documents in
-  `docs/testing/`.
-- **Index.** Every new document must be added to the table above, in the group it
-  belongs to; a removed document must be removed from it. A document that is not
-  listed here does not exist as far as readers are concerned.
-- The remaining rules — grounding claims in the repository, the append-only
-  verification log, and not citing disposable artifact paths as evidence — are in
-  [conventions.md](conventions.md).
+Add every new document to the table for its group and remove deleted ones: a
+document that is not listed here does not exist as far as readers are
+concerned. The writing rules — one topic per file, naming, grounding claims in
+the repository, the verification log, no disposable artifact paths as evidence —
+are in [conventions.md](conventions.md#documentation).

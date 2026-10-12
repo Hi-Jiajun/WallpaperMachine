@@ -16,6 +16,9 @@ the mode:
 | **Rotate wallpapers** | **Wallpapers** (All wallpapers, Favorites, This display's list, or a local collection), **Order** (In order, Shuffle), **How often** (every 5, 10, 15 or 30 minutes, every hour, every 2, 3, 6 or 12 hours, every day, or **Custom**: any whole number of minutes from 1 to 10,080, one week) | After each interval the display moves to the next wallpaper. |
 | **Day and night** | **Day wallpaper**, **Day starts at**, **Night wallpaper**, **Night starts at** | The day wallpaper takes over at the day time and the night wallpaper at the night time. |
 
+A new rotation defaults to every 30 minutes, in order; day starts at 07:00 and night at
+19:00.
+
 For weekday schedules, sunrise/sunset, system appearance or temporary Focus
 playlists, use [Automatic wallpaper selection](automation.md#automatic-selection)
 in the same display section. An automatic wallpaper choice stops its playlist;
@@ -53,11 +56,11 @@ Wallpapers moved to Trash leave every list and every day or night choice.
 
 ### Collections and saved playlists
 
-Installed's **Collections** sidebar creates named local groups without moving or
-copying wallpaper files. Add a selection with **Add to collection…**, or toggle
-membership in a wallpaper's details. A collection can feed more than one display;
-membership changes are read when the next switch is chosen. Removing a wallpaper
-from the library removes it from collections and saved playlists too.
+Local collections are created and filled from Installed (see
+[Local collections](control-panel.md#local-collections)); they hold no wallpaper files.
+A collection can feed more than one display, and membership changes are read when the
+next switch is chosen. Removing a wallpaper from the library removes it from
+collections and saved playlists too.
 
 Each display's Playlist disclosure has **Saved playlist** and **Save as…**.
 Saving keeps a named copy of the mode, source, order, interval and day/night
@@ -108,15 +111,11 @@ later visual defect in a wallpaper that was accepted successfully.
 ## Storage
 
 `PlaylistStore` keeps every display's playlist in the `WallpaperMachine.playlists`
-default (JSON; fields a newer build adds decode with defaults) and each display's
-next change in `WallpaperMachine.playlistNextChange`, so a relaunch neither
-restarts a long interval nor skips a change that fell due while the app was
-closed. Shuffle's round is kept for the running app only.
-
-Builds before custom intervals accept only the menu presets. Such a build
-reading a custom interval falls back to 30 minutes and saves that over it on its
-next playlist change, and its backup restore refuses a backup that contains one
-(playlists or saved plans) as an invalid preference value.
+default (JSON; missing fields decode with defaults, and an interval outside 1–10,080
+minutes falls back to 30) and each display's next change in
+`WallpaperMachine.playlistNextChange`, so a relaunch neither restarts a long interval
+nor skips a change that fell due while the app was closed. Shuffle's round is kept for
+the running app only.
 
 ## Code
 

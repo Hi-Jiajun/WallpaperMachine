@@ -1,382 +1,536 @@
 # Current native coverage
 
-What the Swift test bundle actually asserts, domain by domain. This is the
-inventory behind `python3 scripts/test.py`; the strategy, layers, tiers and
-evidence policy live in [README.md](README.md).
+What the Swift test bundle asserts, one section per `Tests/Unit/<Domain>/`
+folder. This is the inventory behind `python3 scripts/test.py`; the strategy,
+layers, tiers and evidence policy live in [README.md](README.md). Read it to
+find out whether a behavior is already covered before adding a test, and where a
+claim stops: "Not covered" notes name what the tests do not establish. Nothing
+here starts the app, opens a window or touches the desktop.
 
-Read it to find out whether a behavior is already covered before adding a test,
-and to see the exact limits of a claim — several entries end by naming what the
-covered case does *not* establish. Nothing here starts the app, opens a window
-or touches the desktop.
+Entries are class names, so `python3 scripts/test.py --only <Class>` runs one.
+Where a feature document has its own Verification section it owns the detail and
+is linked from the domain; the shared limits are collected at the end.
 
-Swift tests cover, without starting the app:
+## Appearance
 
-- **Library** — complete atomic adoption, concurrent destinations, duplicates,
-  cancellation, and rejection of linked, special, or incomplete content;
-  deletion; scene-asset installation; Workshop presets assembled on a base
-  downloaded with them, installed, or next to them in a Steam library, and
-  rejected without a usable base (`ImportTests`; the second SteamCMD pass is in
-  `DownloaderLifecycleTests`). `ImageImportTests` imports real ImageIO
-  pictures: the still `web` project, the original's bytes kept, the file name
-  kept out of the page, the fit chosen from the shape, a JPEG display copy for a
-  TIFF, an undecodable file refused, **Keep both** keeping the `image-` prefix,
-  and `LibraryImportStore` refusing a second import and rescanning once.
-  `WallpaperImportPickerTests` exercises real child processes: cancellation
-  before launch, reaping after cancellation, cleanup when activation fails,
-  invalid handshakes, and failed exits not being treated as user cancellation.
-  Concurrent helper coverage exercises sixteen main-actor activation handshakes
-  and complete pipe outputs. Picker launch, blocking reads and process reaping run
-  in one GCD worker block, with only activation on the main actor. This avoids
-  blocking Swift's cooperative executor and changing threads around Foundation's
-  run-loop-based `waitUntilExit`; see [Apple's concurrency guidance](https://developer.apple.com/videos/play/wwdc2021/10254/)
-  and [Process.waitUntilExit](https://developer.apple.com/documentation/foundation/process/waituntilexit()).
-  Native picker localization and the real selection-to-parent URL handoff
-  require a separately authorized desktop smoke; these tests open no picker.
-  The Finder/Dock hand-off in `AppDelegate` is not covered (it needs a running app).
-  Collections and named plans cover stable identity, ordered membership, cleanup,
-  detach-on-edit and paused/replaced queued transitions. `WallpaperPresetStoreTests`
-  covers typed applied-property snapshots, portable managed attachments, limits,
-  hidden file exclusion, alias rejection, draft/permission rollback and
-  applied-source retention after deleting a preset. `WallpaperBackupTests` exercises real package export,
-  preview, staged next-launch restore, conflict policy, parser/schema rejection,
-  authorization, plain-text preservation, rollback and interrupted recovery,
-  persistent-only preferences, full-size preset archives and manifest preflight.
-  Image placement tests cover fit-aware geometry, per-display persistence,
-  version-bound single-flight upgrade, actual resource changes and reset races;
-  `StillImagePageRenderingTests` exercises the generated page offscreen.
-  Compatibility checks cover target/content/config generations and truthful
-  unknown states, not complete scene or on-screen compatibility.
-- **Workshop** — search and pagination beneath the UI, committed-query
-  pagination, window-sized pages cut from cached Steam pages (including a size
-  change while a page loads), superseded requests, cancellation, and exact
-  failed-request retry through the real page parser. Two `testLive…` cases fetch
-  Steam's real pages and are opt-in
+- `AppThemeTests` — a chosen theme survives recreation and reset leaves other
+  preferences alone; an invalid change cannot overwrite saved values; a damaged
+  saved accent or an unknown icon does not discard the rest.
+- Offscreen `ControlPanelShellTests` commit the real Appearance controls through
+  the native bridge (mode, accent, tone), reset them and check the saved
+  preferences.
+
+## Automation
+
+`AutomationCommandTests`, `AppAutomationTests`, `HotKeyPreferencesTests`,
+`GlobalHotKeysTests`, `WallpaperAutomationPlannerTests`,
+`WallpaperAutomationStoreTests`, `WallpaperAutomationSchedulerTests`,
+`WallpaperFocusFilterTests` and offscreen `ControlPanelAutomationTests`: rules,
+solar and DST boundaries, appearance selection, Focus recovery and manual
+precedence, editor round trips and preference validation. `WallpaperBackupTests`
+covers rule merging and local recovery-state rollback. What each covers, and what
+needs the running app, is in [automation](../features/automation.md#verification).
+
+## Desktop
+
+### Posters (Mission Control)
+
+`DesktopWallpaperTests` use synthetic renderer pixels, an in-memory workspace,
+unattached `CAMetalLayer`s and injected notification and encoding services:
+
+- Pixels and delivery: JPEG dimensions, channel order and orientation within
+  lossy tolerance; a new wallpaper and the first ready frame reach every Space
+  without visiting it; the newer frame wins whatever order encodes finish in;
+  late frames and encodes from another Space or an old layer are rejected; a
+  frame identical to the poster is neither encoded nor written.
+- Capture timing: a Space change applies the existing poster at once and asks for
+  a fresh frame; settling captures after a new wallpaper and after a resume;
+  periodic captures only while enabled; later captures skip displays that are not
+  presenting.
+- Refusals: a desktop that keeps refusing posters is left alone until the next
+  Space change; a poster that reads back late is confirmed without counting a
+  refusal; a failed Space neither blocks the others nor loses its old poster.
+- Originals and quit: inherited (pathless) selections resolve through the public
+  API before any poster write and are never replaced by an unresolved poster;
+  independent per-Space originals survive; a user's own wallpaper change is not
+  overwritten on restore; quit waits for the native reload, every read-back and
+  in-flight writes, keeps the original when restoration fails persistently, and
+  cannot be blocked forever by an unreachable reference.
+- Retention: frame URLs are immutable and pruned only after every Space updates;
+  displays on the current-Space fallback or with an unreadable Space keep a
+  bounded number of the newest posters.
+
+Not covered: what Mission Control actually shows and its refresh latency, and
+macOS accepting or restoring native selections. Both are on
+[manual-smoke.md](manual-smoke.md). Mechanism: [architecture](../architecture.md).
+
+### Wallpaper activation
+
+`WallpaperActivationRecoveryTests` use a fake renderer bridge: they cover
+application preflight and recovery, not decoded frames or desktop playback.
+Missing, empty and non-file video entries are rejected before any change; an
+original synthetic H.264 Matroska clip applies through Apply and Apply changes
+with either backend preference; decoder failures keep the error and leave the
+library usable for retry; history changes only after a successful activation;
+playback-environment changes (suspend/resume, unload/reload, audio) and library
+refreshes wait for an in-flight apply and the reverse, while explicit Pause still
+interrupts; the first-wallpaper support prompt follows only a successful
+downloaded activation. `UserCommandQueueTests` — commands run in arrival order
+and a newer command in the same slot replaces a waiting one.
+
+### Playback policy
+
+- `WallpaperPresentationPolicyTests` — display sleep and wake, session lock
+  (asked only when it can have changed, re-asked on wake and user switch, a
+  missed unlock clearing at the next evaluation), full occlusion and a covered
+  working area suspending after the settle delay, per-display independence,
+  reconnect handling, retried failed suspends and resumes, and `stop()` resuming
+  every suspended surface.
+- `PlaybackPolicyCompositionTests`, `PlaybackPreferencesTests`,
+  `AppRuleMonitorTests`, `OtherAudioMonitorTests` — how sleep, lock, app rules
+  and other-app audio compose (Stop beats Pause, Keep running ignores audio),
+  defaults and corrupt stored values, running versus frontmost rules, and the
+  other-audio settle.
+- `SystemConditionMonitorTests` use injected Low Power Mode and thermal readings
+  and a private notification center: Low Power Mode acts only once an action is
+  chosen, only serious and critical heat counts, a Focus filter joins the other
+  conditions and survives a new instance, and `stop()` releases every action.
+  `WallpaperFocusFilterTests` pin the filter's default to the choice that lets
+  wallpapers run, since macOS performs it with defaults when a Focus ends.
+- `DisplayRefreshCoalescerTests` — a burst during a refresh is answered by one
+  more; screen changes that leave the displays as they were refresh nothing; a
+  failed refresh is retried. `DisplayTitleResolverTests` — localized display
+  names replace the renderer's label.
+
+Not covered: the real Focus Settings pane and a real Low Power Mode.
+
+### Spaces
+
+`WallpaperSpaceMonitorTests`, the Space scenarios in
+`WallpaperAutomationSchedulerTests`, store and backup migration checks, and
+offscreen `ControlPanelSpaceWallpaperTests`. `DesktopWallpaperTests` covers
+Space-scoped writes, late frames and encodes, replacement gaps and restoration.
+Not covered: real Space transitions and installed desktop behavior; see
+[Spaces](../features/spaces.md).
+
+### Display layouts and transfer
+
+`WallpaperDisplayTransferTests` and `WallpaperDisplayTransferIntegrationTests`
+cover capture of stable display identity, complete validation before any write,
+copy and swap, rollback and recovery (including cancellation and empty
+destinations), one history entry per display and newer manual commands.
+`WallpaperDisplayLayoutStoreTests` (Library) covers bounded persistence, and
+offscreen `ControlPanelDisplayLayoutTests` covers save, rename, apply, delete,
+copy/swap failure feedback, keyboard focus, missing screens and compact locales.
+Not covered: real WindowServer transitions, visible appearance and separate
+per-Space assignments; see
+[display layouts](../features/display-layouts.md#code-and-verification).
+
+## Diagnostics
+
+- `AppLogRouterTests` — lines logged before the bridge keep their time and order
+  and are written when it attaches; overflow is reported, not silent; loads start
+  only once the log is open; concurrent lines all arrive.
+- `DiagnosticsRedactorTests` — home paths in all forms, user and account names
+  as whole tokens only, SteamCMD sign-in names, credential values.
+- `DiagnosticsBundleTests` — newest sessions first (including `-N` suffix order),
+  the byte budget with tail truncation, crash-report prefix, age and count
+  filters, a missing extension log noted, and the zip's actual entries.
+- `RuntimeCountersTests`, `RuntimeDiagnosticsReportTests` and
+  `RuntimeDiagnosticsWindowTests` — counters record only inside an open,
+  self-expiring session, per surface, with a bounded table; the report keeps
+  surface-exclusive and shared work apart, never labels present requests as
+  displayed frames, and states the milliseconds it counted.
+- `EnergyUsageMonitorTests` and `WallpaperEnergyRatingsTests` — coalition
+  readings, contention, before/after comparisons, grades and the rating recorder;
+  two `testKernelCounters…` cases read the test process's real kernel counters.
+
+Log line format, retention and the verbose setting are covered in Rust; see
+[diagnostics](../features/diagnostics.md#verification).
+
+## GitHub
+
+`AppUpdateTests` use fixture JSON, a fake client and isolated `URLSession`
+responses; they never contact GitHub, download a real release or replace the
+running app.
+
+- Checking: version comparison, disk-image asset selection, the manifest path
+  that spends no API request, host allowlisting, SHA-256 digest requirement,
+  rate limits, progress clamping, classified errors and install retry/timeout. A
+  missing latest release is normal only after the repository is confirmed
+  reachable; missing repositories, failed lookups and malformed metadata remain
+  errors, and rechecking clears stale notes and availability.
+- Installing, against real disk images made with `hdiutil`: the app is copied out
+  without following the `Applications` link, a foreign bundle is refused, the
+  image is detached either way, and an app that cannot install in place opens
+  the downloaded image.
+- The offscreen About flow (`ControlPanelShellTests`) checks again from the
+  no-release state before downloading a fixture update.
+
+`WhatsNewTests` — what a launch announces across fresh installs, upgrades that
+skip versions, downgrades and language choice. Not covered: a live release
+check, the published disk image and replacing the app in Applications; these are
+on [manual-smoke.md](manual-smoke.md).
+
+## Library
+
+- `ImportTests` — atomic adoption, duplicates never overwrite, concurrent
+  destinations keep one whole project, cancellation never commits an incomplete
+  project, rejection of traversal, links, special and incomplete content, and a
+  bad sibling not blocking a good one; downloaded projects move whole, an update
+  replaces the installed tree, and Workshop presets are assembled on a base that
+  was downloaded with them, is installed, or sits beside them in a Steam library,
+  and are rejected without a usable base. Fetching a preset's base in the same
+  SteamCMD run is in `DownloaderLifecycleTests`.
+- `ImageImportTests` import real ImageIO pictures as the still `web` project with
+  the original's bytes kept and the file name kept out of the page, the fit
+  chosen from the picture's shape, a JPEG display copy for a TIFF, an undecodable
+  file refused, **Keep both** keeping the `image-` prefix, and
+  `LibraryImportStore` refusing a second import and rescanning once.
+  `StillImagePlacementTests`, `StillImagePageUpgradeTests` and
+  `StillImagePageRenderingTests` (offscreen) cover per-display placement
+  persistence, fit-aware geometry, the version-bound upgrade of generated pages
+  (never overwriting an author edit), actual resource changes and reset races.
+- `WallpaperImportPickerTests` exercise real child processes: cancellation before
+  launch, reaping after cancellation, cleanup when activation fails, invalid
+  handshakes, failed exits not treated as user cancellation, and concurrent
+  helpers. `WallpaperImportStagingTests` — a live claim protects an import and a
+  released one is reclaimed. Not covered: the native picker's localization and
+  the selection-to-parent URL handoff (these tests open no picker), and the
+  Finder/Dock hand-off.
+- `DeletionTests` and `BatchDeletionTests` — only the managed copy goes to the
+  Trash, the source is preserved, traversal and symlinks are rejected, a Trash
+  failure leaves the wallpaper in the library, a batch continues past failures
+  and refreshes once.
+- `WallpaperCollectionStoreTests` — stable identity and ordered membership across
+  reload, rename and deletion; invalid names apply nothing. `NextWallpaperTests`
+  — library order, skipping unsupported wallpapers, wrapping.
+  `WallpaperHistoryStoreTests` — per-display persistence, bounded recent lists,
+  repeated Previous, removal and clearing.
+- `WallpaperPresetStoreTests` — typed applied-property snapshots, portable managed
+  attachments, size limits, alias rejection, draft and permission rollback, and
+  applied-source retention after deleting a preset.
+- `WallpaperBackupTests` — real package export, preview, staged next-launch
+  restore, conflict policy (Keep existing, Replace), parser and schema rejection,
+  authorization, rollback and interrupted recovery, persistent-only preferences,
+  full-size preset archives and manifest preflight. Offscreen
+  `ControlPanelBackupFlowTests` drive the real controls against isolated package
+  writes and open no file panels.
+- `WallpaperCompatibilityTests` — target, content and configuration generations
+  and truthful unknown states. They do not establish complete scene or on-screen
+  compatibility.
+- `LibraryMetricsTests`, `ClientPreferencesTests` — folder size and date measured
+  off the snapshot path, manifest approval and tags, and an explicit defaults
+  suite staying independent of the application's own preferences.
+
+## Localization
+
+`AppLanguageTests` cover the preference store: system matching, persistence, the
+`AppleLanguages` mirror, rejected tags and the snapshot offering every shipped
+language under its own name. The Python catalog checks
+(`scripts/tests/test_panel_localization.py`) keep the registries, catalogs and
+`.xcstrings` naming the same languages and keys; see
+[localization](../localization.md).
+
+## LockScreen
+
+The native-selection and service suites run against a synthetic store and injected
+services. They never mutate LaunchServices or PlugInKit, select a real wallpaper
+or depend on a second physical monitor.
+
+- `LockScreenWallpaperTests` (selection journal) — per-display ownership with
+  independent originals; external Desktop changes survive; a reload failure
+  leaves a recoverable journal; inherited, linked and system-copied selections
+  restore, or stay recoverable after a reload failure; later global Desktop and
+  Idle edits are preserved; malformed baselines are rejected without store
+  writes; an unchanged journal is not rewritten; a concurrent store change keeps
+  the union.
+- `LockScreenWallpaperServiceTests` — activation failure hands the Desktop back
+  to the poster provider; surviving lock screens are not cleared by topology
+  changes; screen-saver-only, lock-only and both modes disable and roll back
+  independently; shared-extension and Idle-only publication failures roll back;
+  stale failure reports are ignored while a current renderer failure restores the
+  selection; one bounded automatic retry repairs a wrong extension copy; shutdown
+  restores native choices before waiting for Desktop restoration.
+- `LockScreenExtensionRegistrationTests` use synthetic app bundles and an
+  injected registry: current-copy selection, duplicate and removed-copy cleanup,
+  symlink aliases, invalid inventory rejection, cancellation, command failures.
+  `LockScreenExtensionDiagnosticsTests`, `LockScreenSurfaceRegistryTests`,
+  `LockScreenIdleExitTests` and `LockScreenFrameBackingTests` (snapshot pixels
+  composited under a Metal layer without a drawable) cover the extension side.
+- `WallpaperPresentationAuthorityTests` — both display/host wake orders, user
+  pause surviving sleep and wake, a lock-screen surface presenting only while
+  locked, and an unlocked one settling for `desktopSettleBudget` before it holds
+  a frame.
+
+Not covered: real lock-screen visual timing, private XPC snapshot transport, live
+registration repair and macOS choosing the intended extension copy; these need an
+authorized runtime check ([lock-screen](../features/lock-screen.md#verification)).
+
+## NativeVideo
+
+- `NativeVideoAdmissionTests` — the frame-rate rules (whole-number and NTSC
+  rates against the target, variable-rate clips judged by their fastest interval,
+  a zero target not meaning unlimited) and refusal of corrupt, missing, audio-only
+  and interlaced content.
+- `NativeVideoWallpaperHostTests` — startup waits for surface readiness, refused
+  wallpapers are handed back to the scene engine with their reason, re-evaluation
+  when the target rate changes, one surface per display, mirrors judged by their
+  group's strictest target, hidden-display and user-pause handling, and posters
+  from replaced surfaces not published. `NativeVideoPlaybackFailureTests` — the
+  reported failure keeps the codes under the localized message and a clip with
+  sound is rebuilt with its picture alone.
+- `SyntheticVideoFixtureTests` cover the generated-clip writer's input-ready
+  waiting. `NativeVideoPlayerMediaTests` drive the real player and are opt-in
+  (`WALLPAPER_MACHINE_MEDIA_TESTS=1`, see
+  [README.md](README.md#opt-in-layers)).
+
+Not covered: first frames presented on a real display.
+
+## Panel
+
+Offscreen `WKWebView` suites share `ControlPanelTestCase` (`PanelFixture`) and
+never order a window on screen. Tests that read rendered labels must pass
+`appLanguage: .english()` (`Tests/Unit/Support/TestAppLanguage.swift`) or a store
+built with explicit `systemLanguages`: the default `AppLanguageStore.shared`
+follows the developer's in-app language choice.
+
+- `ControlPanelShellTests` — the bundled interface loads under its custom scheme,
+  routes `navigate` to Settings and denies a non-allowlisted external URL; the
+  `NSHostingController` accepts 760×560, 960×640 and 1240×800 proposals in every
+  shipped language without forcing a taller window; the panel renders in the
+  controller's language and switches in place, offering every shipped language
+  and refusing an unshipped tag; About/update actions; the top bar stays centered
+  and does not overlap at the minimum width; the first-run guide, background
+  focus isolation, Steam prompt focus, ownership notices and a revealed password
+  that never reaches the HTML; settings keep drafts, disclosure and scroll across
+  snapshots; the Downloads-at-once choice reaches the queue; tabs stay usable
+  after a render throws mid-send.
+- `ControlPanelLibraryTests` — sorting, tile marks, filter sidebar, hold-and-drag
+  selection, the inspector report link, download setup, a rejected download
+  account staying visible, and error dismissal (library and download failures
+  stay suppressed until they recur).
+- `ControlPanelDiscoverTests` — pagination does not navigate with the page number
+  and clamps to Steam's page limit, the grid keeps square tiles in at least three
+  columns, download rings and telemetry, and previews that play without canvas
+  readback and release offscreen images. This does not reproduce a GPU-process
+  hang or prove on-screen smoothness.
+- `ControlPanelSyncTests` (hidden-panel pushes, option fetches, display titles),
+  `ControlPanelSnapshotDeliveryTests` (library reuse during download progress,
+  full fallback for an unknown delta revision), `ControlPanelHostStateTests`
+  (the inspector's per-display host states and exact retry) and
+  `ControlPanelRemediationTests` (crash budget, favorites, placement queue).
+- `ControlPanelWindowSizingTests` — size floor, key-view loop, full-screen layout
+  keeping navigation reachable and restoring windowed bounds, and WebKit's color
+  picker anchor following its control. Not covered: opening the picker, entering
+  a full-screen Space or the live Split View transition.
+- Feature pages that live here and are described under their domain:
+  `ControlPanelAutomationTests`, `ControlPanelBackupFlowTests`,
+  `ControlPanelDisplayLayoutTests`, `ControlPanelPixivTests`,
+  `ControlPanelPlaybackToolsTests`, `ControlPanelPreviewTests`,
+  `ControlPanelSpaceWallpaperTests`.
+- Controller-level suites without a web view: `WebPanelAssetsTests` (thumbnail
+  routes serve only announced previews; the listed core modules and non-English
+  locale catalogs are served, unknown names and traversal refused),
+  `WebPanelAssetPropertiesTests`, `WebPanelCompatibilityTests`,
+  `WebPanelDeliveryStatusTests`, `WebPanelEnergyUsageTests` (sampling only while
+  Settings is visible), `WebPanelExternalLinkTests` (every fixed link in
+  `WebUI/*.js` passes the allowlist), `WebPanelGeneralSettingsTests`,
+  `WebPanelPerformanceSettingsTests` and `WebPanelSceneSettingsTests` (unknown,
+  non-boolean or non-numeric values are refused, out-of-range ones clamped),
+  `WebPanelPropertyLabelTests` (author markup is reduced to text),
+  `WebPanelSupportPromptTests`, `WebPanelWorkshopSourceTests`,
+  `WebPanelWorkshopUpdateTests`, `WebPanelImagePlacementRaceTests` and
+  `WebPanelAssetProvenanceTests`. `WallpaperEditorStateTests` cover locale
+  scaling, invalid raw text and independent drafts; `PropertyImageCacheTests`
+  cover bounded transfers and that author images cannot become a network proxy.
+
+These checks are windowless; they do not prove desktop presentation or animation
+smoothness.
+
+## Pixiv
+
+`Tests/Unit/Pixiv/`, `WebPanelPixivTests` and offscreen `ControlPanelPixivTests`
+cover decoding of pixiv's answer shapes, search and ranking addresses, ratings
+including R-18 and R-18G, request pacing, the session cookie reaching
+`https://www.pixiv.net` only, sign-in, log out, a keychain refusal and expiry
+against an in-memory store, resumable thumbnail and download transport, the
+download queue (concurrency, cancel, retry, shutdown) and packaging (sniffed
+formats, scaled display copies, staging reclaim). None of it reaches pixiv: its
+signed-in answers and the real sign-in page are not covered
+([pixiv](../features/pixiv.md#verification)).
+
+## Playlist
+
+`PlaylistPlannerTests` (candidates, order, shuffle rounds, day/night boundaries),
+`PlaylistStoreTests` (persistence, custom intervals, reordering, plans copied
+across displays and detached on manual edit, cleanup when wallpapers or
+collections go), `PlaylistSchedulerTests` (fake clock, library and activation;
+no renderer: failure cooldowns, paused catch-up, a newer manual command
+outranking a failed automatic switch), `WebPanelPlaylistTests` and offscreen
+`ControlPanelPlaybackToolsTests` (drag and button sorting, keyboard focus,
+stale-drag rejection, escaped history titles, clearing only the target display).
+What each covers: [playlists](../features/playlists.md#verification).
+
+## Preview
+
+`WallpaperPreviewSessionTests` — hidden-load deferral, pause composition,
+replacement and close generation guards, failure teardown, reload, readiness
+timeout and pointer conversion, using injected surfaces.
+`WallpaperPreviewRequestTests` — installed-path bounds, symlink escape, stale
+manifests, resource checks, and copying unapplied values without changing bridge
+state. `WebWallpaperPreviewSurfaceTests` use real offscreen WebKit for typed
+properties, isolated temporary storage and mute. `ControlPanelPreviewTests` drive
+the inspector action without opening a window, and `WallpaperPreviewLayoutTests`
+check the 480-point content view in English, Chinese and Japanese without an
+`NSWindow`. Rust `wallpaper_preview` tests cover read-only draft export and Web
+combo types. Not covered: native window presentation, scene or video first frames
+in that window and OS visibility events.
+
+## Steam
+
+- `SteamCMDSetupTests` — against isolated preferences and directories,
+  `URLProtocol` archives, the real system `tar` and owned child processes:
+  publication and replacement, strict package manifests and both checksums, HTTP
+  encoded versus decoded lengths, duplicate package paths, zip backslash
+  normalization, execute permissions, traversal/link/archive-size boundaries,
+  monotonic progress, network failures, signature-policy blocking, cancellation
+  with no late writes, and retained blocked candidates surviving relaunch. An
+  installation-to-downloader regression runs the published executable through the
+  real PTY downloader and asserts imported manifest and media bytes.
+- `SteamCMDRuntimeValidationTests` (Workshop folder) — arm64 only; Intel-only
+  copies are rejected and need a native reinstall; Mach-O load commands and
+  nested executable dependencies.
+- `SteamCMDApprovalTests` use isolated fixtures: exact SHA-256 receipts, policy
+  failure rejection, stale candidates, changed resources, private copies,
+  quarantine scope and explicit discard. `SteamCMDReportedFailureTests` — which
+  reported reasons count as credential rejection.
+
+Not covered: whether Valve's current distribution passes this Mac's policy. The
+opt-in `SteamCMDLiveInstallTests` check that with a temporary native package
+install and a no-login smoke run (see [README.md](README.md#opt-in-layers)).
+
+## Support
+
+`SupportPromptStoreTests` — a downloaded wallpaper qualifies only after a
+successful activation, a pending prompt survives relaunch and further downloads,
+and a presented prompt never returns. `Support/` also holds the shared fixtures
+(`TemporaryDefaults`, `TestAppLanguage`, bridge snapshots).
+
+## SystemMedia
+
+`AdapterSystemMediaProviderTests`, `SystemMediaTransportTests`,
+`FallbackSystemMediaProviderTests`, `AppleScriptMediaProviderTests`,
+`MediaRemoteMediaProviderTests`, `MediaArtworkTests`, `SceneMediaSinkTests` and
+`SystemMediaEventCodecTests` run against fake streams, injected script results and
+a fake MediaRemote loader. They cover fragmented messages and timeline
+interpolation, consumer lifetime and late callbacks, unexpected exit without a
+restart loop, the adapter-to-AppleScript fallback, artwork caching and
+downscaling, the cleared cover reaching scenes before metadata, and the wire
+format. Not covered: a real player or OS version publishing every field
+([media integration](../features/media-integration.md#verification)).
+
+## UserAssets
+
+`UserAssetStoreTests` — importing a file or directory property into managed
+staging (extension filters, one-level directories, file-count limit, no second
+copy of unchanged bytes), retained files surviving an unavailable source,
+serialized preparation off the main thread with cancellation, authorization
+rollback that cannot revoke a newer selection, and purge that keeps every asset
+the manifest lists. `DirectoryWatcherTests` — a burst settles into one
+notification. `UserAssetPreparationPerformanceTests` — synthetic directory
+preparation and main-actor latency.
+
+## WebWallpaper
+
+`Tests/Unit/WebWallpaper/` runs real offscreen `WKWebView`s and injected hosts,
+with no desktop window. It covers the page contract (`WebWallpaperPageTests`,
+`WebWallpaperLocalRequestTests`), property payloads and file staging
+(`WebWallpaperPropertyPayloadTests`), the author API (`WebWallpaperAuthorAPITests`:
+audio, media, random-file and directory listeners), audio delivery, output and
+single-owner rules (`WebWallpaperAudioMediaTests`, `WebWallpaperAudioOutputTests`,
+`WebWallpaperAudioOwnershipTests`), host lifecycle, crash budget and reload
+recovery (`WebWallpaperHostLifecycleTests`, `WebWallpaperRecoveryTests`),
+suspension (`WebWallpaperSuspensionTests`), pointer routing
+(`WebWallpaperMouseRoutingTests`) and the screen-saver surface
+(`ScreenSaverWebSurfaceTests`). Detail and limits:
+[web wallpapers](../features/web-wallpapers.md#verification).
+
+## Workshop
+
+### Search and sources
+
+- `WorkshopStoreTests` — pagination follows the displayed query until a draft is
+  submitted; a failed page or submission retries its own query; superseded and
+  racing requests cannot publish over a newer search; pages are Steam's own pages
+  served from cache, capped at Steam's page limit, with the next page prefetched;
+  the sidebar defaults match Wallpaper Engine's.
+- `WorkshopTests` — query and tag encoding, sort mapping, the details request and
+  its answers (served, withdrawn and other apps' items). The two `testLive…`
+  cases fetch Steam's real pages and are opt-in
   (`WALLPAPER_MACHINE_NETWORK_TESTS=1`, see
-  [README.md](README.md#opt-in-layers)); the page format itself stays covered
-  offline through `decodePage` against recorded markup. Thumbnail cache: CDN scaling only for Steam image
-  hosts, still-frame JPEG extraction from animated previews (skipping a black
-  fade-in, keeping frame 0 for bright, uniformly dark or still sources), one download per
-  URL under concurrent requests, disk hits across instances, fallback when the
-  CDN refuses scaling, no cache entry after a failed fetch, the concurrency cap
-  and oldest-first pruning; the animated relay returns Steam's bytes on its own
-  lane and refuses single-frame sources without a request; the scheme handler
-  refuses thumbnail and animated ids it has not announced. An offscreen WebKit
-  regression (`ControlPanelDiscoverTests`) checks that Discover tiles load the
-  still first, reveal loaded animations (including authored dark frames) with
-  canvas access unavailable, fall back to the still on animation failure, and
-  skip single-frame previews. It also checks offscreen/hidden source release,
-  cached resume, and returning to Installed without an animation layer. This
-  does not reproduce an actual GPU-process hang or prove on-screen smoothness.
-  Updates: `WorkshopTests` decodes a recorded details answer (served item,
-  withdrawn item, another app's) and checks the request form;
-  `WorkshopUpdateStoreTests` covers what counts as outdated, recorded downloads
-  against `project.json` dates, non-Workshop ids never sent, results kept across
-  a relaunch, a download making an item current, the daily limit and its switch,
-  a failed check keeping what was known, and forgetting deleted items;
-  `ImportTests` covers the swap that replaces an installed tree. The reload of a
-  wallpaper on screen after its update needs a renderer and is not covered.
-  Other sources: `WorkshopSourceTests` covers reading Steam's session cookie,
-  author pages (ids, total, name, and only Steam's sign-in page meaning signed
-  out), a collection's order, collections marked on browse pages over a
-  megabyte, the sidebar's rules on unfiltered pages, the age-rating sampling of
-  collections, a collection's pages, every page of subscriptions sent with the
-  session and read from Steam's subscription rows (issue #29), a page whose
-  entries cannot be read failing instead of passing for empty, and the store's
-  back history, sign-in, a session Steam ended, dropping the list on show when
-  subscriptions have no session, and sign-out, all against a fixture protocol. `WebPanelWorkshopSourceTests`
-  covers the panel's source actions, their validation, sign-in through an
-  injected window and refusing to download a collection. Steam's real sign-in
-  window is not covered.
-- **Pixiv** — decoding of pixiv's ranking, search, page-list, status and
-  profile answers (numbers sent as strings, content types as objects or lists,
-  withheld and members-only entries), ratings including R-18 and R-18G, search
-  and ranking addresses, query sanitising without a sign-in, request pacing,
-  the session cookie reaching `https://www.pixiv.net` only, sign-in, log out,
-  a keychain refusal, and a saved session that pixiv's status reports as signed out
-  (at launch, and after an R-18 ranking is refused) against an in-memory store, the
-  download queue (concurrency, cancel, retry, shutdown) and packaging (sniffed
-  formats, scaled display copies, kept copies, staging reclaim).
-  `WebPanelPixivTests` checks the actions' validation and snapshot without a web
-  view, and the offscreen `ControlPanelPixivTests` drives the tab through the
-  real page with the sign-in window replaced by a closure. None of it reaches
-  pixiv: its signed-in answers and the real sign-in page are not covered.
-- **Downloads** — private terminals per job, transfers side by side up to the
-  slot limit once the first job's sign-in is accepted and saved (siblings start
-  silently while it still transfers), the queue waiting behind a job that is
-  still authenticating or renewing a stale sign-in, serial order without a
-  saved sign-in, a Steam "logged in elsewhere" kick re-queuing the ended job
-  and turning the queue serial, the downloads-at-once ceiling changing mid-queue
-  (raising starts waiting jobs, lowering never stops a running one), persisting
-  across relaunch clamped to 1–6 and reaching Swift from the Settings select as a
-  number, per-job secrets,
-  saved-sign-in handoff to the next job, cancellation, duplicate-click
-  suppression, FIFO handoff after failure/cancel, shutdown without launching
-  queued work, staging reclaim limited to directories nothing is writing to,
-  protection against stale credential rejections erasing a newer session,
-  retained-intent setup/account progression, explicit shared-resource consent
-  including reinstall, resource-job deduplication, account correction, removal
-  preventing resumption, sign-in ownership checks (owned, missing, unconfirmed,
-  split output and switching accounts), and download-speed sampling (see
-  [renderer.md](renderer.md) for the `nettop` streaming detail). The
-  downloader suites share `DownloaderTestCase` (`Tests/Unit/Workshop/`) and
-  split by concern: `DownloaderLifecycleTests`, `DownloaderSessionTests`,
-  `DownloadQueueTests`, `SteamCMDRuntimeValidationTests` and
-  `DownloadTelemetryTests`.
-- **Steam runtime** — SteamCMD setup against isolated preferences/directories,
-  `URLProtocol` archives, real system `tar`, and owned child processes:
-  publication/replacement, invalid discovery, traversal/link/archive-size
-  boundaries, strict package manifests, both checksums, HTTP encoded/decoded
-  lengths, duplicate package paths, real zip backslash normalization, execute
-  permissions, manifest retention, monotonic progress, network failures (including
-  preserving a rejected redirect's original diagnostic when its final response
-  arrives before cancellation), signature-policy blocking, cancellation, and no
-  late writes. Runtime fixtures
-  require arm64, reject Intel-only copies and retire old bootstrap candidates;
-  they exercise canonical macOS path aliases and nested Mach-O executable
-  dependencies. Approval tests use isolated fixtures only: exact SHA-256
-  receipts, signature/policy-failure rejection, stale candidates, changed
-  resources, private copies, quarantine scope, same-path retry/relaunch, and
-  explicit discard. An installation-to-downloader regression launches the
-  published executable through the real PTY downloader and asserts imported
-  manifest and media bytes. Fixtures do not prove that Valve's current
-  distribution passes this Mac's policy; the opt-in `SteamCMDLiveInstallTests`
-  checks that separately using a temporary native package install and no-login
-  smoke run (see [README.md](README.md#opt-in-layers)).
-- **GitHub updates** — fixture JSON, a fake client and isolated URLSession
-  responses: version comparison, disk-image asset selection, host allowlisting,
-  progress clamping, classified errors and install retry/timeout. A missing latest
-  release is normal only after the repository is confirmed reachable; missing
-  repositories, failed lookups and malformed metadata remain errors. Rechecking
-  clears stale release notes/availability and can discover a later release. The
-  offscreen About flow also checks again from the no-release state before
-  downloading a fixture update. The installer is exercised against real disk
-  images made with `hdiutil`: the app is copied out without following the
-  `Applications` link, a foreign bundle is refused, and the image is detached
-  either way; an app that cannot install in place opens the downloaded image. These
-  tests never contact GitHub, download a real release, or replace the running app.
-- **Panel** — the offscreen `WKWebView` suites share `ControlPanelTestCase`
-  (`Tests/Unit/Panel/`) and split by page: `ControlPanelShellTests` (window,
-  language, appearance, About/update, top bar, tabs that stay usable after a
-  render throws mid-send), `ControlPanelLibraryTests`
-  (sorting, tile marks, filter sidebar, download setup, error dismissal),
-  `ControlPanelDiscoverTests` (pagination, grid, download rings, previews) and
-  `ControlPanelSyncTests` (hidden-panel pushes, option fetches, display titles).
-  Offscreen `NSHostingController` layout proposals at 760×560,
-  960×640, and 1240×800 in every shipped language, asserting the root accepts each
-  window width without forcing a taller window; an offscreen `WKWebView`
-  regression that loads the bundled interface under its custom scheme, waits for
-  the native reply bridge, routes a `navigate` message to Settings, and rejects
-  a non-allowlisted external URL; a regression in every shipped language that
-  checks the injected language, rendered navigation/accessibility labels, settings
-  and result summary, plus locale fallback and literal placeholder substitution;
-  a language-switch regression that sends `languageSetting` and confirms the
-  page re-renders in place, the picker offers every shipped language under its
-  own name, and an unshipped tag is refused. Panel tests that read rendered
-  labels must pass `appLanguage: .english()` (`Tests/Unit/Support/TestAppLanguage.swift`)
-  or a store built with explicit `systemLanguages`: the default
-  `AppLanguageStore.shared` follows the developer's in-app language choice, so an
-  implicit store renders another language on a Mac where the app was switched to
-  one and English-wording assertions fail. `Tests/Unit/Localization/` covers
-  the preference store: system matching, persistence, the `AppleLanguages`
-  mirror and rejected tags. Python catalog checks
-  (`scripts/tests/test_panel_localization.py`) require the Swift registry, the
-  `i18n.js` registry, `WebUI/locales/` and both `.xcstrings` to name the same
-  languages, every native key to be translated, every catalog to hold the same
-  keys, and reject duplicate/empty entries, missing direct-call and
-  static-markup translations, and placeholder mismatches; an About-updates regression that checks,
-  downloads, and refuses to install without a window, plus a snapshot mapping of
-  idle/available/ready actions; a `dismissError` regression where a
-  library-refresh failure and a download failure raised through the real
-  download path are reported once, stay suppressed after dismissal, and surface
-  again when the same failure recurs after a successful refresh; and a hidden
-  download fixture that observes password-prompt/downloading transitions.
-  Editor-state tests cover locale-specific scaling, invalid raw text, and
-  independent wallpaper/field drafts.
-  Refinement regressions cover secondary-only global playback and the no-assignment
-  state; 760px settings containment with long native select options and reports;
-  active numeric/search drafts, caret, disclosure and scroll preservation;
-  theme changes without renderer settings and explicit lock-screen unavailability;
-  onboarding background focus isolation and Steam prompt focus transitions;
-  ownership notices, continuing without ownership, and rechecking after purchase;
-  revealed-password retention without a value attribute or HTML echo, followed
-  by submit clearing through the fake Steam runtime; and real native rejection
-  of an anonymous download account with modal feedback, retained intent and
-  late-error isolation after reopening. Non-onboarding page scenarios finish the
-  visible welcome flow first. Guide-replay assertions observe outgoing native
-  requests and inject an unrelated incoming snapshot: snapshot delivery is
-  asynchronous and cannot be used as a count of requests sent by closing the guide.
-  These checks remain windowless; they do not prove
-  desktop presentation or animation smoothness.
-  `ControlPanelWindowSizingTests` also exercises the native chrome offscreen at
-  full-screen, half-screen and minimum panel sizes: navigation hit-testing below
-  an opaque title bar, unobscured content bounds, and restoration of the windowed
-  title-bar layout without resizing the frame. It also checks WebKit's native color
-  picker anchor-coordinate round trip at the top, middle and bottom of the hosted
-  panel after resizing and changing chrome. It does not open the picker, enter a
-  full-screen Space or verify the live Split View transition.
-  `ControlPanelBackupFlowTests` drives real controls and isolated package writes,
-  preserving the library-inclusion and replace-conflict choices and checking that
-  staging/cancellation leave running files untouched. It opens no file panels.
-- **Appearance** — preference recreation, rejection of invalid changes without
-  overwriting saved values, recovery from a damaged saved accent, reset
-  isolation, plus an offscreen appearance regression that commits the real
-  Appearance controls through the native bridge, changes accent/tone, resets,
-  simulates live native appearance changes on a detached view, verifies explicit
-  Light wins over Dark, and reloads through the WebContent recovery path with
-  saved customizations intact.
-- **Desktop posters** — synthetic renderer pixels and an in-memory workspace:
-  JPEG dimensions/channel order/orientation within lossy tolerance, malformed frames,
-  synchronous frame requests (no Apply debounce), first-frame delivery to all
-  Spaces without a Space-change event, stale old-layer completion, automatic
-  retry, a desktop that keeps refusing posters left alone until a Space change
-  while its siblings get every new frame, independent display/Space originals,
-  duplicate-frame suppression,
-  immutable frame URLs with reference-aware cleanup, bounded retention of the
-  newest posters on a current-Space-fallback display and on one with an
-  unreadable Space (whose failure is still reported), a Space change that
-  applies the existing poster at once and asks for a fresh frame, settling
-  captures after a new wallpaper and after a resume, periodic captures only
-  while enabled and only for presenting displays, a frame identical to the
-  poster neither encoded nor written, legacy journal migration,
-  relaunch recovery, external wallpaper changes, and write failures. Topology
-  and native option/path translation use fixtures, including empty
-  inherited/default native selections, rejected native acknowledgements, and
-  unreadable-original errors. Empty per-Space selections resolve through the
-  public API before any poster write, preserving independent display originals
-  even when a write also changes inherited defaults. If no original resolves,
-  synchronization refuses to replace the system wallpaper. A legacy empty
-  journal reports failed restoration and can be repaired from a real original
-  even when the frame is unchanged; relaunch then restores that original.
-  Per-Space originals still take precedence over public-API fallbacks, and
-  external user choices survive restoration. Coordinator tests use unattached
-  `CAMetalLayer`s and injected notification/encoding services. Shutdown fixtures
-  simulate a native provider reload whose persisted PNG is temporarily invisible
-  to the legacy API, delayed persistence after setting the original, permanent
-  write failure followed by retry, and an external user choice during the wait.
-  Native-store reference fixtures cover display/Space scope, inherited fallbacks,
-  linked Desktop choices, and exclusion of Idle and inactive fields.
-- **Wallpaper activation** — `WallpaperActivationRecoveryTests` passes an original
-  synthetic H.264 Matroska clip through both Apply and Apply changes, with
-  Compatibility and Native video preferred. Missing, empty and non-file video
-  entries are rejected before application; injected decoder failures retain the
-  error and leave the library usable for retry. Held-operation regressions cover
-  Apply and Apply changes overlapping display refresh, global/per-display
-  suspend/resume, unload/reload and audio suppression in both arrival orders;
-  automatic updates wait, failed updates release the queue, and explicit Pause
-  remains responsive and preserves the interrupted draft. These tests use a fake renderer
-  bridge: they cover application preflight and recovery, not decoded frames or
-  desktop playback of Workshop content.
-- **Playback conditions** — `SystemConditionMonitorTests` with injected Low Power
-  Mode and thermal readings and a private notification center: Low Power Mode
-  acting only once an action is chosen, only serious and critical heat counting
-  (and staying hot not re-announcing), a Focus filter joining the other
-  conditions, its state surviving a new instance, and `stop()` releasing every
-  action. `WallpaperFocusFilterTests` pins the filter's default to the choice
-  that lets wallpapers run, since macOS performs it with defaults when a Focus
-  ends. The real Focus Settings pane and a real Low Power Mode are not exercised.
-- **Automation** — `AutomationCommandTests`, `AppAutomationTests`,
-  `HotKeyPreferencesTests`, `GlobalHotKeysTests`, `WallpaperAutomationPlannerTests`,
-  `WallpaperAutomationStoreTests`, `WallpaperAutomationSchedulerTests` and offscreen
-  `ControlPanelAutomationTests`: rules, solar/DST boundaries, appearance selection,
-  Focus recovery/manual precedence, editor round trips and preference validation.
-  `WallpaperBackupTests` covers rule merging and local recovery-state rollback.
-  What each covers, and what
-  needs the running app, is in [automation](../features/automation.md#verification).
-- **Playlists** — `PlaylistPlannerTests`, `PlaylistStoreTests`,
-  `PlaylistSchedulerTests` (fake clock, library and activation; no renderer) and
-  `WebPanelPlaylistTests`, plus offscreen `ControlPanelPlaybackToolsTests` for
-  drag/button sorting, keyboard focus and stale-drag rejection; what each covers is listed in
-  [playlists](../features/playlists.md#verification).
-- **Desktop Spaces** — `WallpaperSpaceMonitorTests`, Space scenarios in
-  `WallpaperAutomationSchedulerTests`, store/backup migration checks and offscreen
-  `ControlPanelSpaceWallpaperTests`. `DesktopWallpaperTests` covers scoped writes,
-  late-frame/encode rejection, replacement gaps and restoration; the native-video
-  host exercises request contexts through the coordinator. Actual Space transitions
-  and installed desktop behavior remain unverified; see [Spaces](../features/spaces.md).
-- **Multi-display layouts** — `WallpaperDisplayLayoutStoreTests`,
-  `WallpaperDisplayTransferTests` and `WallpaperDisplayTransferIntegrationTests`
-  cover bounded persistence, complete preflight, copy/swap, recovery including
-  cancellation/empty destinations, history and newer manual commands.
-  Offscreen `ControlPanelDisplayLayoutTests` covers save/rename/apply/delete,
-  copy/swap failure feedback, keyboard focus, missing screens and compact locales;
-  backup and command tests cover portable records and links. Real WindowServer
-  transitions, visible appearance and separate per-Space assignments are not
-  established. See [display layouts](../features/display-layouts.md#code-and-verification).
-- **Wallpaper history** — `WallpaperHistoryStoreTests` covers per-display
-  persistence, bounded recent lists, repeated Previous, removal and clearing.
-  `WallpaperActivationRecoveryTests` checks that a failed Previous leaves its
-  destination available and a no-op reapply adds nothing. The offscreen playback
-  tools tests cover history order, escaped titles, current-state accessibility,
-  clearing only the target display and restoring focus after closing the list.
-- **Live preview** — `WallpaperPreviewSessionTests` exercises hidden-load
-  deferral, pause composition, replacement/close generation guards, failure
-  teardown, reload, readiness timeout and pointer coordinate conversion using
-  injected surfaces. `WallpaperPreviewRequestTests` checks installed-path bounds,
-  symlink escape, stale manifests, resource checks and copying unapplied values
-  without changing bridge state. `WebWallpaperPreviewSurfaceTests` uses real
-  offscreen WebKit for typed properties, independent temporary storage, mute,
-  capture-denial stubs and stop cleanup. `ControlPanelPreviewTests` drives the
-  inspector action without opening a window. `WallpaperPreviewLayoutTests`
-  checks the 480-point content view with English, Chinese and Japanese controls
-  and a full-width selectable error row, without creating an NSWindow.
-  Rust `wallpaper_preview` tests
-  check read-only draft export and Web combo types. Native window presentation,
-  actual scene/video first frames in that window and OS visibility events are
-  not established by these unit tests.
-- **Lock screen** — per-display ownership, independent originals, external
-  Desktop changes, journal recovery after service-reload failure, inherited
-  Space cleanup, system-copied fallback restoration, global linked conflicts,
-  removal and recovery of global Desktop/Idle overrides, independent activation
-  from macOS's linked default (both inherited and explicit per-display choices),
-  exact linked restoration after disable or reload failure, preservation of
-  later global Desktop/Idle edits, complete Desktop/Idle fields in synthesized
-  display and Space overrides when either mode runs alone, and removal of those
-  overrides on recovery while preserving external edits, rejection of malformed
-  linked/inherited baselines without store writes, journal loss or service reload,
-  and a poster-handoff regression covering a pathless original, retention of its
-  poster and recovery journal, and rejection of delayed encoding completions
-  after suspension. `WallpaperPresentationAuthorityTests` covers both display/
-  host wake orders, preserves user pause across sleep/wake, and lets an unlocked
-  lock-screen surface settle for `desktopSettleBudget` before it holds a frame.
-  `LockScreenFrameBackingTests` composites real snapshot pixels under a Metal
-  layer without a drawable and checks snapshot ownership across replacement.
-  `LockScreenWallpaperServiceTests.testDisplayTopologyChangesDoNotClearSurvivingLockScreens`
-  records every published manifest for synthetic display IDs through disconnect,
-  reconnect and primary ordering changes, then checks that explicit disable
-  still clears all scenes. It does not depend on a second physical monitor.
-  Service regressions also restore both saved requests without a lock-screen
-  acknowledgement, retain only the screen-saver selection, propagate pause changes
-  without automatic lock-screen retries, and recover on explicit retry. They cover
-  screen-saver disable/re-enable (including Off during a lock-screen retry before a
-  missing display UUID returns), stale readiness rejection, current renderer failure,
-  and full rollback when the shared extension or Idle-only publication fails.
-  `LockScreenExtensionRegistrationTests` uses synthetic app bundles and an injected
-  registry to cover current-copy selection, duplicate and removed-copy cleanup,
-  retained bundle files, symlink aliases, invalid inventory/bundle rejection,
-  cancellation, command failures and verification of the final registration.
-  Service tests cover registration before either native mode, unchanged refreshes,
-  cancellation before publication, and one bounded retry for a wrong extension
-  copy (including an older configuration version), with restoration on failure.
-  Snapshot refreshes during preparation share its result and cannot reset the
-  retry limit; successful registration still needs a frame acknowledgement.
-  These tests never mutate LaunchServices or PlugInKit; live registration repair
-  and macOS choosing the intended extension still need an authorized runtime check.
-  These tests do not establish real lock-screen visual timing or private XPC
-  snapshot transport. No test selects a real wallpaper.
-- **Diagnostics** — `AppLogRouterTests`: lines logged before the bridge keep
-  their time and order and are written when it attaches, overflow is reported
-  rather than silent, loads start only once the log is open, and concurrent
-  lines all arrive. `DiagnosticsRedactorTests`: home paths in all forms, user
-  and account names as whole tokens only, SteamCMD sign-in names, and
-  credential values without touching `token expired`. `DiagnosticsBundleTests`:
-  newest sessions first including `-N` suffix order, the byte budget with tail
-  truncation, crash-report prefix, age and count filters, a missing extension
-  log noted, and the zip's actual entries. Log line format, retention and the
-  verbose setting are covered in Rust (see
-  [diagnostics.md](../features/diagnostics.md#verification)).
+  [README.md](README.md#opt-in-layers)); the page format stays covered offline
+  through the real parser against fixture markup.
+- `WorkshopSourceTests` (fixture protocol, nothing reaches the network) — Steam's
+  session cookie read and never sent off Steam Community, author pages, a
+  collection's order, collections marked on browse pages, the sidebar's rules on
+  unfiltered pages, age-rating sampling of collections, every subscription page
+  read with the session, a page whose entries cannot be read failing instead of
+  passing for empty, and the store's back history, sign-in, ended session and
+  sign-out. `WebPanelWorkshopSourceTests` (Panel) cover the panel's source
+  actions, sign-in through an injected window and refusing to download a
+  collection. Steam's real sign-in window is not covered.
+- `WorkshopThumbnailCacheTests` — one download per URL under concurrent requests,
+  disk hits across instances, no cache entry after a failed fetch, the concurrency
+  cap, oldest-first pruning, still-frame extraction from animated previews
+  (skipping a black fade-in), and animations relayed on their own lane. The
+  scheme handler refuses ids it has not announced (`WebPanelAssetsTests`).
 
-What native tests do **not** establish: macOS acceptance/restoration of native
-wallpaper selections, live GitHub release install and Applications replacement,
-how Finder draws the disk-image window, Steam CDN throughput, live-account session reuse,
-Mission Control cache refresh, and any visual timing. Those stay on
+### Downloads
+
+`DownloaderTestCase` is shared by `DownloadQueueTests`, `DownloaderLifecycleTests`,
+`DownloaderSessionTests`, `DownloadTelemetryTests`, `SteamCMDRuntimeValidationTests`
+and `WorkshopDownloadPersistenceTests`:
+
+- Queue: private terminals per job; transfers side by side up to the slot limit
+  once the first sign-in is accepted; serial order without a saved sign-in; a
+  "logged in elsewhere" kick re-queuing the job and turning the queue serial; the
+  ceiling changing mid-queue (raising starts waiting jobs, lowering never stops a
+  running one); FIFO handoff after failure or cancel; shutdown never launching
+  queued work. The ceiling is clamped to 1–6, persists across relaunch and
+  reaches Swift from the Settings select as a number.
+- Sign-in and ownership: per-job secrets, saved-sign-in handoff and relaunch
+  without resubmitting secrets, account switching never restoring the previous
+  account's credentials, stale credential rejections not erasing a newer session,
+  ownership checks (owned, missing, unconfirmed, split output), and an anonymous
+  account unable to start a download.
+- Content: staging reclaim limited to directories nothing is writing to,
+  partial content never published on cancel or incomplete download, scene-asset
+  installation keeping only validated assets, pause and checkpoint recovery of
+  content and queue order.
+- `DownloadTelemetryTests` — download-speed sampling, including real `nettop`
+  streaming (detail in [renderer.md](renderer.md)); `DownloaderLifecycleTests`
+  report progress from disk growth against the listed size and stay
+  indeterminate without one.
+- `WorkshopDownloadIntentTests` — a download request retained across setup,
+  account and shared-resource consent, surviving browsing and relaunch, removal
+  preventing resumption, and explicit consent including reinstall.
+
+### Updates
+
+`WorkshopUpdateStoreTests` — what counts as outdated, recorded downloads and
+imports against `project.json` dates, non-Workshop ids never sent, results kept
+across a relaunch, a download making an item current, the daily limit and its
+switch, a failed check keeping what was known, and forgetting deleted items;
+`WebPanelWorkshopUpdateTests` — only an outdated wallpaper is marked and can be
+updated; `ImportTests` covers the swap that replaces an installed tree. Not
+covered: the reload of a wallpaper on screen after its update (needs a
+renderer).
+
+## What native tests do not establish
+
+macOS acceptance and restoration of native wallpaper selections, live GitHub
+release install and Applications replacement, how Finder draws the disk-image
+window, Steam CDN throughput, live-account session reuse, Mission Control cache
+refresh, real audio capture and any visual timing. Those stay on
 [manual-smoke.md](manual-smoke.md).

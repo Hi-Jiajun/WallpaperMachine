@@ -92,20 +92,16 @@ separate live renderer instances. Actual OS transitions still need desktop verif
 | Bridge queue, clean-option checks and final history | `App/ViewModels/BridgeStoreDisplayLayouts.swift` |
 | Panel actions/snapshot | `App/Views/ControlPanel/WebPanelDisplayLayouts.swift` |
 | Settings UI | `WebUI/display-layouts.js`, integrated in `WebUI/settings.js` |
-| Shortcuts | `WallpaperConfigurationIntents.swift`, `AutomationCommand.swift`, `AppDelegate.performAutomation` |
+| Shortcuts and links | `App/Services/Automation/WallpaperConfigurationIntents.swift`, `AutomationCommand.swift`, `AppDelegate.performAutomation` |
 
-`WallpaperDisplayLayoutStoreTests` checks persistence, name/identity/size bounds
-and unavailable references. `WallpaperDisplayTransferTests` covers capture,
-copy/swap, stale preparation, validation before writes, failures after mutation,
-empty restoration, external-choice preservation and cancellation cleanup.
-`WallpaperDisplayTransferIntegrationTests` exercises the real BridgeStore with a
-snapshot-updating test bridge: history, manual-choice callbacks, clean-edit
-preflight, paused playback and a newer queued manual action.
-
-`ControlPanelDisplayLayoutTests` drives an offscreen WKWebView through save,
-rename, apply, delete, copy, swap, failed recovery feedback, Escape/focus return,
-escaped names, unavailable displays and 760-point English/Chinese/Japanese layout.
-`WallpaperBackupTests`, `AutomationCommandTests` and `AppAutomationTests` cover
-backup merging, URL validation and catalogs. These tests create no desktop
-wallpaper windows and do not prove real multi-monitor compositor transitions,
-visible appearance, VoiceOver, Siri or Shortcuts registration.
+The store, transfer and BridgeStore integration suites (`WallpaperDisplayLayoutStoreTests`,
+`WallpaperDisplayTransferTests`, `WallpaperDisplayTransferIntegrationTests`) cover bounded
+persistence, capture, copy/swap, stale preparation, validation before writes, failures after
+mutation, recovery of empty destinations, external-choice preservation, cancellation, history,
+manual-choice callbacks, clean-edit preflight, paused playback and a newer queued manual
+action. `ControlPanelDisplayLayoutTests` drives an offscreen WKWebView through save, rename,
+apply, delete, copy, swap, failed-recovery feedback, focus return, escaped names, unavailable
+displays and the compact English/Chinese/Japanese layout; `WallpaperBackupTests`,
+`AutomationCommandTests` and `AppAutomationTests` cover backup merging and link validation.
+These tests create no desktop wallpaper windows and do not prove real multi-monitor
+compositor transitions, visible appearance, VoiceOver, Siri or Shortcuts registration.

@@ -26,24 +26,21 @@ override is what makes `String(localized:)` — menus, alerts, notifications —
 follow the choice on the next launch; the panel does not need it.
 
 The **Import → Choose files** picker follows the effective language immediately,
-including a choice made in the welcome guide. `WallpaperImportPicker` keeps the
-existing attached sheet when the bundle's launch language matches. Otherwise it
-launches the same executable in `WallpaperImportPickerHelper` mode with a volatile
-`-AppleLanguages` argument. The helper's title, instructions and system file-browser
-controls all resolve in that fresh process; it uses a separate native picker window,
-not a sheet attached to the main process. The parent yields activation before the
-helper shows its picker, then receives the selected URLs as JSON. Cancelling or
-closing the panel stops the owned child; a pipe reaching EOF also dismisses the
-helper if the parent exits. This mode never starts `AppDelegate`, the renderer or
-library services. It preserves the picker filters, multiple selection, directory
-selection and the initiating window's light/dark appearance. Other native dialogs
-and menus still change after quit/reopen.
+including a choice made in the welcome guide. `WallpaperImportPicker` keeps its
+attached sheet when the bundle's launch language already matches. Otherwise it
+launches the same executable in `WallpaperImportPickerHelper` mode
+(`--wallpaper-import-picker`) with a volatile `-AppleLanguages` argument, so the
+title, instructions and system file-browser controls resolve in a fresh process.
+The helper runs before `AppDelegate`, never starts the renderer or library
+services, and returns the selected URLs to the parent as JSON. Other native
+dialogs and menus change after quit/reopen.
 
 ## Layers
 
 | Layer | Strings | Mechanism |
 | --- | --- | --- |
-| Native (menus, dialogs, errors, Info.plist) | `App/Resources/Localizable.xcstrings`, `App/Resources/InfoPlist.xcstrings` | `String(localized:)`; the bundle resolves at launch from the `AppleLanguages` override above |
+| Native (menus, dialogs, errors) | `App/Resources/Localizable.xcstrings` | `String(localized:)`; the bundle resolves at launch from the `AppleLanguages` override above |
+| Info.plist usage text | `App/Resources/InfoPlist.xcstrings` | Excluded from the app target in `project.yml`, because `Info.plist` supplies `NSAudioCaptureUsageDescription` itself; kept complete in every shipped language, which the Python check requires |
 | Import file picker | `App/Resources/Localizable.xcstrings` plus macOS's native file-browser strings | Same-language sheet, or a short-lived helper whose launch language is the current effective app language |
 | Lock-screen extension (`Extension/`) | `Extension/Localizable.xcstrings` | `String(localized:)` against the extension's own bundle, which follows the macOS language list; literals reach it through `WallpaperRuntime.failure(_:)`, and text that is already final (the renderer's own errors) goes through `failure(detail:)` |
 | Web panel (`WebUI/`) | `WebUI/locales/<tag>.js`, one ES module per language, registered in `WebUI/i18n.js` | `t(source, params)` for JavaScript, `data-i18n` / `data-i18n-label` for static markup; `applyStaticText()` refreshes the latter |
@@ -107,15 +104,14 @@ edit it as text rather than re-serialising the JSON.
 
 Use the BCP 47 tag Xcode uses for the locale (`zh-Hant`, `ja`, `de`, `pt-BR`…).
 Every step is checked by `scripts/tests/test_panel_localization.py`, which runs
-first in `python3 scripts/test.py` and fails until the three registries agree
-and the catalogs are complete.
+in the Python stage of `python3 scripts/test.py` and fails until the three
+registries agree and the catalogs are complete.
 
 1. **Native catalogs.** In Xcode, open `App/Resources/Localizable.xcstrings`,
    `App/Resources/InfoPlist.xcstrings` and `Extension/Localizable.xcstrings`,
    add the language and translate every
-   key; each unit must end in the `translated` state. Run
-   `xcodegen generate` afterwards if you edited `project.yml`; the catalogs
-   themselves need no project change.
+   key; each unit must end in the `translated` state. The catalogs need no
+   project change.
 2. **Panel catalog.** Copy `WebUI/locales/zh-Hans.js` to
    `WebUI/locales/<tag>.js` and translate every value. Keep the keys and every
    `{placeholder}` exactly; single-quoted strings, two-space indentation, one
@@ -132,7 +128,7 @@ and the catalogs are complete.
    confirm the picker offers every shipped language.
 6. **Document.** Add the language to
    [Control panel → Language](features/control-panel.md#language) and record the
-   run in the [verification log](testing/verification-log.md).
+   run with `python3 scripts/log_verification.py`.
 
 Adding or changing a string in the app means adding it to every catalog in the
 same change; the Python check fails on a key present in one catalog and missing

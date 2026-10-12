@@ -1,26 +1,28 @@
 # Local wallpaper regression corpus
 
-Status: **partial offscreen corpus; desktop behavior unverified.** The corpus is
-not yet populated and **must not be treated as a passing test suite.** A
-generated renderer matrix and a handful of locally installed scene packages have
-been exercised with `python3 scripts/check_renderer.py`; every case below that
-is not marked as passed offscreen is still outstanding.
+A selection checklist for the private wallpapers that catch renderer regressions
+synthetic fixtures cannot. The corpus is optional and machine-specific: it is
+**not a test suite**, a case with no asset is unverified, and offscreen results
+say nothing about desktop behavior (see
+[README.md](README.md#what-verified-means)). The generated scene matrix in
+`scripts/check_renderer.py` needs no private assets; the checks themselves, the
+probe environment variables and known shader limitations are in
+[renderer.md](renderer.md). What has actually been run is in
+[verification-log.md](verification-log.md).
 
-Private assets stay outside Git. Local paths, SHA-256 hashes and diagnostics
-belong in the run report that `scripts/check_renderer.py` writes to
-`artifacts/renderer/<run>/report.json`, which is Git-ignored and disposable.
-Private before/after GPU frames and crops from individual investigations are
-disposable in the same way. The generated matrix contains no workshop-specific
-rendering rules.
+## Keeping private assets out of Git
 
-See [renderer.md](renderer.md) for the exact checks, probe environment variables
-and known shader limitations, and [verification-log.md](verification-log.md) for
-what has actually been run.
+Two paths are Git-ignored for this purpose:
 
-Select additional assets you own or have permission to use. Record local paths
-and hashes in a local inventory under the Git-ignored `artifacts/` tree, not in
-this public document. Do not reuse real imports for destructive or
-invalid-input tests; use copies.
+- `wallpaper-corpus/` — copies of the assets you own or have permission to use.
+- `docs/testing/wallpaper-corpus.local.md` — your inventory: local paths, hashes,
+  provenance, usage restrictions.
+
+Do not keep the inventory under `artifacts/`; `python3 scripts/clean.py` deletes
+it. Local paths, SHA-256 hashes and diagnostics never go into this public
+document or a tracked doc. `scripts/check_renderer.py` writes the paths and
+hashes it saw to `artifacts/renderer/<run>/report.json`, which is disposable.
+Do not reuse real imports for destructive or invalid-input tests; use copies.
 
 ## Pointing the tests at your local corpus
 
@@ -33,23 +35,28 @@ any machine. Never hardcode a home directory in a test.
 | `WALLPAPER_MACHINE_ASSETS_ROOT` | `~/Library/Application Support/Steam/steamapps/common/wallpaper_engine/assets` | Wallpaper Engine's shipped `assets/shaders` (`crates/shader/tests/pipeline.rs`, and the bridge at runtime) |
 | `WALLPAPER_MACHINE_UNPACK_ROOT` | `upstream/renderer/unpack` | shaders unpacked from workshop packages |
 
-A skipped case is **not** a passing case. Run
+A skipped case is **not** a passing case. From `upstream/renderer`, run
 `cargo test -p shader --test pipeline -- --nocapture` and read the `skipping …`
 lines to see exactly which files are missing before claiming shader coverage.
+Scene projects go through `python3 scripts/check_renderer.py --project
+<path/to/project.json>` (repeatable; `--assets` points at the shared scene
+assets), which compares pooled and isolated allocation pixel for pixel.
 
 ## Cases
 
-| Case | Asset to select | Expected checks | Status |
-| --- | --- | --- | --- |
-| video-basic | Short ordinary video, known dimensions and colors | Playback, fill/match/stretch, orientation, pause/resume | Needs asset |
-| scene-basic | Acheron Black Hole | Pooled/isolated allocation pixel equality | Passed offscreen; desktop/animation unverified |
-| scene-effects | Sparkle multi-character scene | Pooled/isolated equality; paused effect timeline; blink geometry | Passed offscreen; sampled blink cycle inspected; desktop unverified |
-| scene-text-script | Lonely Cat | Fonts, clock/date, pooled/isolated allocation pixel equality | Passed offscreen; live audio/desktop unverified |
-| generated-composites | Eight original synthetic scenes | Transparent input, nested children, hidden parents, transforms, order, pixel assertions | Passed offscreen; no private assets needed |
-| scene-audio | Audio-responsive scene | Response to authorized test audio, quiet-input behavior | Needs asset |
-| invalid-input | Disposable malformed package and missing-resource copy | Useful error, no crash, subsequent valid apply succeeds | Needs fixture |
+The table is what to select and what to check, not a record of what passed.
 
-## What to record per asset
+| Case | Asset to select | Expected checks |
+| --- | --- | --- |
+| video-basic | Short ordinary video, known dimensions and colors | Playback, fill/match/stretch, orientation, pause/resume |
+| scene-basic | Acheron Black Hole | Pooled/isolated allocation pixel equality |
+| scene-effects | Sparkle multi-character scene | Pooled/isolated equality; paused effect timeline; blink geometry |
+| scene-text-script | Lonely Cat | Fonts, clock/date, pooled/isolated allocation pixel equality |
+| generated-composites | The generated scenes built into `check_renderer.py` | Transparent input, nested children, hidden parents, transforms, order, pixel assertions; no private assets |
+| scene-audio | Audio-responsive scene | Response to authorized test audio, quiet-input behavior |
+| invalid-input | Disposable malformed package and missing-resource copy | Useful error, no crash, subsequent valid apply succeeds |
+
+## Inventory entry per asset
 
 - Stable case ID, source URL or provenance, usage/license restrictions.
 - Package hash (or a file-hash inventory for directory assets) and asset version.
@@ -58,19 +65,15 @@ lines to see exactly which files are missing before claiming shader coverage.
 - Reference evidence source: a previous build is a baseline, not proof of
   correctness.
 
-## What to record per authorized desktop run
+## Record of an authorized desktop run
 
-Desktop runs require explicit authorization; see [README.md](README.md) for the
-boundary and [manual-smoke.md](manual-smoke.md) for the checklist.
+Desktop runs require explicit authorization; the boundary is in
+[README.md](README.md#authorization-boundary) and the checklist in
+[manual-smoke.md](manual-smoke.md). The verification-log entry for a run states:
 
-- Date, source revision and dirty state, Release app path, macOS and hardware.
+- Date, source revision and dirty state, app version, macOS and hardware.
 - Case IDs, displays and Spaces, scaling, FPS settings, audio and power
   conditions.
 - Cold/warm cache state, load time, frame timing, CPU/GPU/memory observations.
-- Pass/fail/unverified per check, evidence paths, and the restoration outcome.
-
-Cross-cutting checks, when hardware and authorization permit: multiple displays,
-multiple Spaces and Mission Control posters, sleep/wake, quit and relaunch
-restoration, external wallpaper changes, invalid→valid recovery. A still
-screenshot does not prove animation smoothness or immediate first-frame
-delivery.
+- Pass, fail or unverified per check, what was exercised, and the restoration
+  outcome. Describe the run; do not cite `artifacts/` or `build/` paths.

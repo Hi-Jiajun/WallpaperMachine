@@ -82,7 +82,7 @@ process. The level applies to Swift lines too. The workshop download lines that
 - A file rotates at 5 MB. A session keeps its newest 10 files.
 - At launch, the newest 9 earlier sessions are kept as long as together they
   fit in 100 MB; every older session is removed.
-- **Clear…** in Storage removes every session except a fresh one.
+- **Clear…** on the Logs row in Settings → Storage removes every session except a fresh one.
 
 ### Before the log opens
 
@@ -117,7 +117,7 @@ Everything except `README.txt` passes through `DiagnosticsRedactor` first:
 | The home folder path, including its `/private` and `/System/Volumes/Data` forms | `~` |
 | The macOS short and full user name | `<user>` |
 | The saved Steam account name, and the name in SteamCMD's `Logging in user '…'` | `<account>` |
-| Values of password, token, secret, cookie, session and Steam Guard style keys | `<redacted>` |
+| Values of authorization, cookie, password, secret, session id, Steam Guard, token and similar keys, in `key=value`, `key: value` and JSON forms | `<redacted>` |
 
 Names are replaced only as whole tokens. Wallpaper titles, Workshop IDs and file
 names inside the library are kept: those are what reproduce the problem.
@@ -130,13 +130,12 @@ reproduce.
 ## Verification
 
 - Rust:
-  - `logging::tests`: line format, load tag, session and file retention.
-  - `log_context::tests`: scope nesting, project summary.
+  - `logging::tests` (`upstream/renderer/crates/bridge/src/logging.rs`): line format, load tag, session and
+    file retention.
+  - `log_context::tests` (`upstream/renderer/crates/core/src/log_context.rs`): scope nesting, project summary.
   - `settings_intents::verbose_logging_persists_across_relaunch_and_can_be_turned_off`.
 - Swift: `AppLogRouterTests`, `DiagnosticsRedactorTests`, `DiagnosticsBundleTests`.
 - Not established by tests:
   - that a real scene's renderer lines carry its number on the desktop;
   - the Save panel;
   - Finder reveal.
-
-Back to the [project README](../../README.md).

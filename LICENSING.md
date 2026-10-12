@@ -405,8 +405,9 @@ prefix is `app.wallpapermachine`.
   client.
 - System now-playing metadata uses [ungive/mediaremote-adapter](https://github.com/ungive/mediaremote-adapter)
   at revision `73f14ab1568371e6e3c44063f21c34c5e2712c4d`, BSD-3-Clause, vendored
-  unmodified under `upstream/mediaremote-adapter` and built as an embedded,
-  unlinked framework.
+  under `upstream/mediaremote-adapter` with the `src/adapter/stream.m` changes
+  recorded in `upstream/provenance.json`, and built as an embedded, unlinked
+  framework.
 - The web control panel's icons are copied from [Lucide](https://lucide.dev)
   (ISC License, Copyright (c) Lucide Icons and Contributors); the notice
   travels in the header of `WebUI/icons.js`.

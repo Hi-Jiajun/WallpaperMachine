@@ -3,24 +3,23 @@
 **This checklist is manual and is not automated.** Every item below controls the
 desktop, opens application windows, changes the user's wallpapers, signs in to
 Steam, or grants system permissions, so each run requires an explicit user
-decision. It is not part of routine verification (see
-[README.md](README.md)) and no agent may perform it without an explicit request.
+decision. It is neither routine verification nor a required release gate (see
+[README.md](README.md#authorization-boundary)), and no agent may perform it
+without an explicit request.
 
 Perform the checks yourself when preparing a release, using disposable imports
 where needed. Note any check skipped for unavailable hardware or assets. Restore
-your original wallpaper configuration afterwards.
-
-These visual and OS-integration checks are not proven by passing native tests.
-Keep UI wiring, window behavior, and visible rendering explicitly unverified
-when no manual or explicitly requested desktop check was performed.
+your original wallpaper configuration afterwards. Native tests do not establish
+these visual and OS-integration behaviors; report them unverified when no check
+was run.
 
 ## Launch and window
 
 - [ ] One library window opens, the starter wallpaper is visible, and there are
       no blank floating panels.
 - [ ] Switch between the Discover, pixiv, Installed and Settings tabs and through the
-      six Settings categories: General, Appearance, Displays, Library & Steam,
-      Storage, About.
+      seven Settings categories: Performance, General, Appearance, Displays,
+      Library & Steam, Storage, About.
 - [ ] Command-comma reuses the existing window.
 - [ ] Close the window with its close button and with Command-W, and reopen it
       each time, without quitting or crashing.
@@ -97,9 +96,8 @@ when no manual or explicitly requested desktop check was performed.
 - [ ] Official signed command-line SteamCMD finishes from Install without an
       extra Allow step.
 - [ ] A blocked download remains present across relaunch and retry.
-- [ ] Only confirm Allow This SteamCMD after checking the shown path and
-      fingerprint and understanding the risk, and only when Gatekeeper actually
-      rejects a copy. Global Gatekeeper and signature checks stay enabled;
+- [ ] Only confirm Allow this SteamCMD after checking the shown path and
+      understanding the risk, and only when Gatekeeper actually rejects a copy. Global Gatekeeper and signature checks stay enabled;
       updated bytes require another approval.
 - [ ] An official no-login installation smoke uses a disposable support root and
       the production providers, stops on any Gatekeeper, architecture or signature
@@ -165,8 +163,8 @@ reuse, or visual behavior, which is why these items are manual.
 - [ ] Create multiple Desktops, apply a video, and immediately open Mission
       Control **without** switching Desktops.
 - [ ] Apply a different scene and repeat, including rapid A→B→C changes. All
-      desktop thumbnails update from the new renderer's first frame, with no
-      400 ms debounce or two-second sampling cooldown.
+      desktop thumbnails update from the new renderer's first frame without
+      waiting on a timer.
 - [ ] Check the actual rendered image, not its Workshop cover, including
       Fill/Match/Stretch, scaling and flipping.
 - [ ] Check different and mirrored wallpapers on connected displays,
@@ -190,30 +188,18 @@ reuse, or visual behavior, which is why these items are manual.
 Mission Control posters are sampled still frames, not live animation. Updates
 begin as soon as a rendered frame is available, but rendering, JPEG encoding and
 the system's thumbnail compositor still take time; zero-millisecond visual
-latency cannot be guaranteed. The app uses dynamically resolved
-`CGSCopyManagedDisplaySpaces` and `DesktopPictureSetDisplayForSpace` to target
-all normal desktop Spaces directly, including inactive ones. It restores them on
-eject and quit, preserves full native options and the old journal format, and
-resolves inherited (pathless) originals through the public wallpaper API before
-writing any poster. An inherited Space, or one left on an unjournaled poster,
-uses its display's real original when available. Without a recoverable original,
-poster writes are skipped and a failure is logged; live playback continues.
-Older journals containing only empty originals cannot recover the earlier
-wallpaper: select it again in System Settings once. The poster service
-never switches Spaces, restarts Dock or WallpaperAgent, or edits Apple's
-wallpaper plist. These are non-public APIs: if they are unavailable on a future
-macOS the app logs the limitation and falls back to `NSWorkspace`'s
-current-Space behavior. Originals and posters live under
-`~/Library/Application Support/WallpaperMachine/DesktopPosters`. A Space change
-or wake re-applies the poster that already exists and captures a new frame only
-for a surface that has none. Posters no desktop shows are deleted once every
-Space of their display could be read; on a display with an unreadable Space,
-on the current-Space fallback and for a disconnected display, the four newest
-are kept.
+latency cannot be guaranteed. How the poster service targets Spaces, resolves
+originals and restores them, and which non-public APIs it uses, is in
+[architecture.md](../architecture.md) and, for Space mode,
+[spaces.md](../features/spaces.md#poster-ownership-and-late-frames). Two
+consequences matter while testing: without a recoverable original the poster
+writes are skipped and a failure is logged while live playback continues, and a
+journal from an older build that holds only empty originals cannot restore the
+earlier wallpaper (select it again in System Settings once).
 
 ## Animated lock screen (experimental, opt-in)
 
-- [ ] Enable Animate Lock Screen, then apply wallpaper A and wallpaper B without
+- [ ] Enable Animate lock screen, then apply wallpaper A and wallpaper B without
       visiting other Spaces, and inspect every desktop thumbnail.
 - [ ] Disable the feature: journaled Desktop/Idle entries are restored and
       poster synchronization resumes.
@@ -229,13 +215,11 @@ are kept.
       is reported and ownership-aware restoration runs instead.
 
 macOS refuses screenshots while locked, so the final lock-screen appearance and
-smoothness cannot be captured. Multi-display hardware, long-duration power use,
-sleep/wake and the final settings UI have not received full visual release
-verification.
+smoothness cannot be captured and have to be judged by eye.
 
 ## Audio responsiveness
 
-- [ ] Use an authored audio-reactive scene, leave Audio Response enabled, and
+- [ ] Use an authored audio-reactive scene, leave Audio response enabled, and
       grant system audio recording access.
 - [ ] Play and pause music in another app and check shader, script and particle
       response.
@@ -262,5 +246,5 @@ verification.
       invalid→valid recovery.
 
 Record each authorized desktop run as described in
-[wallpaper-corpus.md](wallpaper-corpus.md), and add the outcome to
-[verification-log.md](verification-log.md).
+[wallpaper-corpus.md](wallpaper-corpus.md#record-of-an-authorized-desktop-run),
+and add the outcome to [verification-log.md](verification-log.md).

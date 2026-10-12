@@ -124,12 +124,11 @@ Property Preset**, and **Open WallpaperMachine**. The latter two configuration
 actions and their searchable entities live in `WallpaperConfigurationIntents.swift`.
 That file also supplies **Apply Display Layout** with a saved-layout picker and
 no display parameter; the layout itself identifies its target screens.
-`WallpaperMachineShortcuts` offers playback, previous, next, wallpaper, playlist
-and property preset application to Siri and Spotlight
-without building a shortcut ("Play or pause WallpaperMachine", "Previous wallpaper
-in WallpaperMachine", "Next wallpaper in WallpaperMachine", "Apply a wallpaper
-with WallpaperMachine"). The actions run in
-the app's own process; if it is not running, macOS starts it first.
+`WallpaperMachineShortcuts` offers play/pause, previous, next and the wallpaper,
+playlist, property preset and display layout actions to Siri and Spotlight without
+building a shortcut ("Next wallpaper in WallpaperMachine", "Apply a wallpaper with
+WallpaperMachine"). The actions run in the app's own process; if it is not running,
+macOS starts it first.
 
 **Previous Wallpaper**, **Next Wallpaper**, **Apply Wallpaper** and **Apply Saved
 Playlist** have an optional **Display** picker.
@@ -168,25 +167,19 @@ display names; Shortcuts supplies name-based pickers without requiring these IDs
 
 ## Verification
 
-`AutomationCommandTests` (every link form, and the ones refused),
-`AppAutomationTests` (waiting for the app, giving up, failures reaching the
-caller), `HotKeyPreferencesTests` (nothing taken by default, persistence, one
-combination per action, a refusal cleared by a change) and `GlobalHotKeysTests`
-(the modifier rule and the key code, modifiers and label a press becomes). A real
-press of a registered shortcut, the Shortcuts app and a link opened from a
-browser need the running app and are not covered by these tests.
+Link parsing and refusals (`AutomationCommandTests`), waiting for the app and failures
+reaching the caller (`AppAutomationTests`), hotkey preferences and the key-code and
+modifier mapping (`HotKeyPreferencesTests`, `GlobalHotKeysTests`), the planner, store and
+scheduler (`WallpaperAutomationPlannerTests`, `WallpaperAutomationStoreTests`,
+`WallpaperAutomationSchedulerTests`: weekday rules, simultaneous events, appearance
+choices, DST, solar offsets crossing midnight, absent polar events, catch-up and retry
+against a fake clock and the real command queue, manual precedence, Focus exit and
+interrupted recovery), native validation and queued manual playlist edits
+(`WebPanelPlaylistTests`), the offscreen rule editor (`ControlPanelAutomationTests`) and
+rule merging and rollback in backups (`WallpaperBackupTests`) each have their own suite;
+the Space tests are listed in [Spaces verification](spaces.md#storage-and-verification).
+The domain inventory is in [coverage](../testing/coverage.md).
 
-`WallpaperAutomationPlannerTests` covers weekday rules, simultaneous events,
-appearance choices, DST, solar offsets crossing midnight and absent polar events.
-`WallpaperAutomationStoreTests` covers persistence, validation and deleted targets.
-`WallpaperAutomationSchedulerTests` uses a fake clock and the real command queue
-for catch-up, failures/retry, manual precedence, Focus exit and interrupted recovery.
-`WebPanelPlaylistTests` checks native validation and queued manual playlist edits;
-`ControlPanelAutomationTests` drives the offscreen WKWebView editor through save,
-edit, cancel, weekday validation, appearance and location changes.
-`WallpaperBackupTests` checks rule merge, excluded transient state and rollback.
-`WallpaperSpaceMonitorTests` and `ControlPanelSpaceWallpaperTests` cover Space
-topology, persistent visit identity and the per-desktop editor; poster and scheduler
-regressions are listed in [Spaces verification](spaces.md#storage-and-verification).
-These tests do not verify actual Focus transitions, system appearance notifications,
+These tests do not verify a real press of a registered shortcut, the Shortcuts app, a
+link opened from a browser, actual Focus transitions, system appearance notifications,
 Siri/Spotlight registration, visible panel layout or desktop playback.

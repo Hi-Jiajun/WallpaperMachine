@@ -1,11 +1,14 @@
 # Audio-responsive wallpapers
 
 Scene wallpapers with authored audio effects and web wallpapers with an audio
-listener can react to sound playing on the Mac.
+listener can react to sound playing on the Mac. This document owns the setting, the
+capture and the analysis; how a web page receives the spectrum is in
+[Web wallpapers](web-wallpapers.md#audio-response), and the now-playing metadata
+feature is separate ([Media integration](media-integration.md)).
 
 ## Enabling it
 
-Select the wallpaper, then turn on **General configuration -> Audio response**
+Select the wallpaper, then turn on **General configuration → Audio response**
 in the inspector. The setting is saved per wallpaper and also applies to that
 wallpaper's mirrored displays.
 
@@ -15,7 +18,7 @@ material or particle emitter, a spectrum shader input, or a script that
 registers audio buffers. A subscribed web page on screen also counts. A scene
 that reads no audio, and every video wallpaper, never starts capture, even with
 the setting on; the effects that would have used it received silence anyway. A
-script that starts reading later starts capture then, after a short warm-up.
+script that starts reading later starts capture then.
 Capture stops when the last such wallpaper stops presenting or is removed.
 Activation errors are reported rather than silently ignored.
 
@@ -29,17 +32,21 @@ audio. Enabling media integration alone does not enable audio response.
 ## Permission
 
 macOS requests system audio recording permission at capture startup. If access
-is denied, grant it in **System Settings -> Privacy & Security -> Screen &
+is denied, grant it in **System Settings → Privacy & Security → Screen &
 System Audio Recording**, then retry the switch.
 
 ## What the input is
 
 The input is sound playing in other apps. It is not the microphone, and it is
 not the wallpaper's own playback. The wallpaper mute and volume controls stay
-independent of audio response. Capture prefers stereo with separately analysed
-left and right channels; a mono fallback supplies the same signal to both. See
-[web audio response](web-wallpapers.md#audio-response) for the capture and
-128-band listener contract.
+independent of audio response.
+
+Capture is a CoreAudio process tap created with
+`initStereoGlobalTapButExcludeProcesses:`, so the left and right channels are analysed by
+separate FFTs. If that initialiser is absent or the created tap reports fewer than two
+channels, capture falls back to a mono tap: left and right are then equal, and nothing
+reports that as stereo. The spectrum's `stereo` flag describes how the PCM was submitted,
+not whether the content happens to differ.
 
 ## What wallpapers receive
 
@@ -62,9 +69,8 @@ Its exact formula is not published; where this differs, it is an estimate.
   wallpaper, so a visualizer that smooths in its script looks as intended and
   one that does not jumps from frame to frame, as it does there.
 
-Web pages still receive values clamped to 0.0–1.0 (see
-[web audio response](web-wallpapers.md#audio-response)); scenes receive them
-as analysed.
+Scenes receive the values as analysed; web pages receive them clamped to 0.0–1.0 (see
+[Web wallpapers](web-wallpapers.md#audio-response)).
 
 ## Supported effect paths
 
@@ -82,11 +88,9 @@ as analysed.
 
 ## Verification
 
-Synthetic offscreen checks cover audio-driven shader color and SceneScript
-scale. Device-free controller and bridge tests cover web-only capture startup,
-permission, shared ownership, suspension and shutdown; offscreen WebKit tests
-cover listener delivery. Live capture and desktop behavior require a separately authorized manual
-check. See [Testing](../testing/README.md) and the
-[verification log](../testing/verification-log.md).
-
-Back to the [project README](../../README.md).
+Synthetic offscreen checks cover the analysis against tone measurements
+(`AudioResponseMonoTest`, see [renderer testing](../testing/renderer.md)), audio-driven
+shader color and SceneScript scale. Device-free controller and bridge tests cover web-only
+capture startup, permission, shared ownership, suspension and shutdown; offscreen WebKit
+tests cover listener delivery. Live capture and desktop behavior require a separately
+authorized manual check.

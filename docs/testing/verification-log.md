@@ -19,11 +19,11 @@ that owns it (renderer behaviour and known-failing tests to
 [renderer.md](renderer.md), build and signing traps to
 [../build.md](../build.md)) and cite it from there.
 
-Retention: this file keeps the ten newest entries. When it grows past that,
-move the oldest entries verbatim into
-[archive/verification-log-2026-09.md](archive/verification-log-2026-09.md)
-(or a new dated archive file) first, and promote anything durable before it
-goes. Trimming is allowed; editing an entry's recorded result is not.
+Retention: this file keeps the ten newest entries. Add an entry with
+`python3 scripts/log_verification.py --title "…" --line "…"`, which prepends it
+and moves whatever falls past ten verbatim into a monthly file under
+[archive/](archive/); promote anything durable before it goes. Editing an
+entry's recorded result is not allowed.
 
 ## 2026-10-12 — Control panel stays closed at login (issue #41)
 
