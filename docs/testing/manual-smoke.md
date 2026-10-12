@@ -199,6 +199,12 @@ reuse, or visual behavior, which is why these items are manual.
 - [ ] Check the Language, Clock Location and Bar Style property menus, and that
       language-row changes survive reopening the app.
 - [ ] When relevant, check each connected display and sleep/wake behavior.
+- [ ] Preview a wallpaper for a portrait or ultrawide display (rotate one, or
+      use a 21:9 or 9:16 display): the window opens with a stage of that shape
+      and black bars, a scene or page lays out as it does on the display, and
+      dragging the window to other shapes keeps the proportions without
+      stretching. Previewing again for a 16:9 display reshapes the stage without
+      resizing the window.
 
 ## Native desktop posters and Mission Control
 

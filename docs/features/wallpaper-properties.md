@@ -14,6 +14,20 @@ display, changes the panel's selection, consumes a playback-history entry or sav
 options. It reads the current property draft, including text still being edited,
 and the target display's scaling options; **Reload preview** reads them again.
 
+The wallpaper is shown on a stage with the proportions of the target display, so a
+portrait, ultrawide or 4:3 display previews with the layout and crop it will get
+instead of a 16:9 frame. The stage is the largest box of that shape inside the
+black area above the controls; a window dragged to another shape keeps the
+proportions and shows bars. A scene's drawable and a page's `innerWidth` and
+`innerHeight` are the stage's, so a scene's crop and a page's layout follow the
+display's proportions. A new window opens at a size that fits the stage on the main screen's
+visible area (at most 1000 points wide and never narrower than the control row
+needs, with a portrait stage getting bars beside it); a window that is already open
+keeps its size when another preview replaces its content, and only the stage
+changes. A display that is not attached, or whose shape cannot be read, previews at
+16:9. Shapes are limited to between 1:4 and 4:1. The stage reproduces the
+display's proportions, not its resolution: a page sees the stage's size in points.
+
 The window has its own **Play/Pause**, sound toggle and reload control, and every
 new preview, including reload, starts muted. Scene and video rendering is capped
 at 30 FPS or the effective lower limit when its inputs are read. Web pages receive

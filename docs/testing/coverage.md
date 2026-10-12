@@ -136,7 +136,8 @@ on the desktop ([manual-smoke.md](manual-smoke.md)).
 - `DisplayRefreshCoalescerTests` — a burst during a refresh is answered by one
   more; screen changes that leave the displays as they were refresh nothing; a
   failed refresh is retried. `DisplayTitleResolverTests` — localized display
-  names replace the renderer's label.
+  names replace the renderer's label; `DisplayGeometry` finds a screen by id or
+  by the title's live id, clamps its shape and has none for an unattached display.
 - `WallpaperWindowAuditorTests` — against injected window observations and
   recorded delays, asserting the reports the auditor makes (fault, window, look,
   repairs done) and pinning the wording of the log lines in one test: a healthy
@@ -564,10 +565,13 @@ manifests, resource checks, and copying unapplied values without changing bridge
 state. `WebWallpaperPreviewSurfaceTests` use real offscreen WebKit for typed
 properties, isolated temporary storage and mute. `ControlPanelPreviewTests` drive
 the inspector action without opening a window, and `WallpaperPreviewLayoutTests`
-check the 480-point content view in English, Chinese and Japanese without an
+check the 480-point content view in English, Chinese and Japanese, the window size
+for 16:9, ultrawide, 4:3 and portrait displays on ordinary and tiny screens, and
+the stage (shape, centring, bars and the surface following it) without an
 `NSWindow`. Rust `wallpaper_preview` tests cover read-only draft export and Web
-combo types. Not covered: native window presentation, scene or video first frames
-in that window and OS visibility events.
+combo types. Not covered: native window presentation, how the stage looks in a
+real window on a portrait or ultrawide display, scene or video first frames in
+that window and OS visibility events.
 
 ## Steam
 

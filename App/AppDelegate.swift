@@ -1613,7 +1613,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 if request.kind == .web { return WebWallpaperPreviewSurface(request: request, generation: generation) }
                 return SceneWallpaperPreviewSurface(request: request)
             })
-            let controller = WallpaperPreviewWindowController(session: session)
+            let controller = WallpaperPreviewWindowController(session: session, displayAspect: { [weak store] displayID in
+                guard let store else { return nil }
+                let title = store.settingsSnapshot.displays.first { $0.displayId == displayID }?.title ?? ""
+                return DisplayGeometry.aspectRatio(displayID: displayID, title: title)
+            })
             controller.onClosed = { [weak self, weak controller] in
                 guard let self, self.previewWindow === controller else { return }
                 self.previewWindow = nil
