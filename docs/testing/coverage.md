@@ -173,9 +173,16 @@ on the desktop ([manual-smoke.md](manual-smoke.md)).
   One case runs the real policy from the tracker's changes.
 - `DisplayRefreshCoalescerTests` — a burst during a refresh is answered by one
   more; screen changes that leave the displays as they were refresh nothing; a
-  failed refresh is retried. `DisplayTitleResolverTests` — localized display
-  names replace the renderer's label; `DisplayGeometry` finds a screen by id or
-  by the title's live id, clamps its shape and has none for an unattached display.
+  failed refresh is retried. A display missing from the screen list waits one
+  fixed, never extended settle (injected clock) before the refresh: a display
+  that returns costs no bridge work and is announced once to the hosts (also when it
+  returns as the wait ends), one that stays away refreshes once and is not announced, and a
+  display added, swapped, moved or promoted to main, a screen without an ID, the
+  first reading and a retry never wait. Not covered: whether real hot-plugs and
+  wakes blip, and whether 0.8 s is long enough. `DisplayTitleResolverTests` —
+  localized display names replace the renderer's label; `DisplayGeometry` finds a
+  screen by id or by the title's live id, clamps its shape and has none for an
+  unattached display.
 - `WallpaperWindowAuditorTests` — against injected window observations and
   recorded delays, asserting the reports the auditor makes (fault, window, look,
   repairs done) and pinning the wording of the log lines in one test: a healthy

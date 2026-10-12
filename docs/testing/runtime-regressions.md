@@ -521,6 +521,22 @@ engine to redo, and when.
   screen, push the whole control panel and ask the window server for the
   session's lock state twice. A failed refresh is still retried on the next
   change.
+- **A display that vanishes for a moment is not closed and reopened** —
+  `DisplayRefreshCoalescerTests` (`testADisplayThatComesBackBeforeTheSettleCausesNoRefresh`,
+  `testADisplayThatStaysAwayRefreshesOnceWhenTheSettleEnds`,
+  `testAFlappingDisplayHoldsOneWaitAndTheSettleIsNeverExtended`,
+  `testAChangeToADisplayThatRemainsRefreshesAtOnce`,
+  `testAnArrivalDuringTheSettleRefreshesAtOnce`,
+  `testADisplayThatComesBackAsTheSettleEndsIsAnnouncedToo`).
+  The bridge closes the wallpaper of a display absent from the screen list, so
+  refreshing at once turned a link renegotiating or a monitor waking into a full
+  scene load or decoder rebuild. Not refreshing for a display that returns also
+  means no snapshot follows, so a window the web or native video host closed
+  during the gap would stay closed; the coalescer announces the return and both
+  hosts reconcile. Only a reading that is the last refresh with displays removed
+  and nothing else moved waits (0.8 s, fixed, never extended); everything else
+  still refreshes at once, so a real unplug refreshes exactly once and a
+  changed remaining display is never left stale.
 - **The lock state is not asked per evaluation** — `WallpaperPresentationPolicyTests.testTheLockStateIsAskedOnlyWhenItCanHaveChanged`,
   `.testASessionLockedBeforeStartIsSuspendedFromTheStart`,
   `.testWakingDisplaysAskForTheLockStateAgain`,

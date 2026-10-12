@@ -301,6 +301,20 @@ setter through optional private CoreGraphics and HIServices symbols, falling bac
   `DisplayDesc::all()` reads from CoreGraphics: the screens in order, main first, and each
   one's display ID, frame, backing scale and refresh rate) as the last successful refresh read
   it refreshes nothing, so an XDR display's stream of EDR headroom changes does no bridge work.
+  A reading that is the last refresh with displays missing and every remaining display exactly
+  as it was waits one fixed 0.8 s before refreshing, because the bridge closes the wallpaper of
+  a display that is not listed and reopens it (a full scene load or decoder rebuild) when the
+  display returns. The wait is never extended, so a display that keeps posting changes cannot
+  hold the refresh off; a reading equal to the last refresh ends it with no bridge work; and
+  any other difference (a display added, moved, rescaled, re-rated or promoted to main)
+  refreshes at once, since the renderer's picture of the displays that remain is stale until it
+  does. A display that returns without a refresh is announced instead (`displayReturned`, once
+  per absence, also when it returns in the turn the wait ends): the web and native video hosts
+  draw on the screens AppKit lists, so a snapshot applied while it was missing closed its
+  window, and with no refresh there is no snapshot to open it again, so both reconcile. The
+  first refresh and the retry of a failed one never wait. A screen without a display
+  ID leaving is an ordinary change. Whether real hot-plugs and wakes produce such blips, and
+  whether 0.8 s covers them, has not been measured on a desktop.
   The Space monitor rereads Spaces only when `DisplayConfiguration` moved, and the presentation
   policy re-evaluates only when a screen frame or working area moved. A refresh reopens a scene
   only when its saved configuration changed: the frame-rate ceiling, transient mute, pause and

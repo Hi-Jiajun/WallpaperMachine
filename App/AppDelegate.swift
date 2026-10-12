@@ -25,7 +25,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var powerOffObserver: NSObjectProtocol?
     /// Set when macOS announces a logout, restart or shutdown, ahead of the quit event.
     private var powerOffNotice = PowerOffNotice()
-    private lazy var displayRefresh = DisplayRefreshCoalescer { [weak self] in
+    private lazy var displayRefresh = DisplayRefreshCoalescer(displayReturned: { [weak self] in
+        guard let self, !self.shutdownInProgress else { return }
+        // A display that went missing for a moment and came back is not refreshed for, and a
+        // snapshot applied meanwhile can have closed its window on the screens AppKit listed
+        // then. The refresh that used to follow the return is what opened it again, so the
+        // hosts that draw per display look again themselves.
+        self.webWallpaperHost?.reconcile()
+        self.nativeVideoHost?.reconcile()
+    }) { [weak self] in
         guard let self else { return false }
         return await self.refreshDisplaysFromSystemEvent()
     }
@@ -781,6 +789,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             NSWorkspace.shared.notificationCenter.removeObserver(powerOffObserver)
             self.powerOffObserver = nil
         }
+        displayRefresh.cancel()
         if let diagnostics {
             self.diagnostics = nil
             Task { await diagnostics.stop() }
