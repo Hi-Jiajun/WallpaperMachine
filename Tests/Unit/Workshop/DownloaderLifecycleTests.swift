@@ -433,6 +433,145 @@ final class DownloaderLifecycleTests: DownloaderTestCase {
     try assertNoStaging(in: root)
   }
 
+  /// A Workshop preset (123456) built on a base wallpaper (654321). The preset always arrives;
+  /// `base` is the shell that runs when SteamCMD is asked for the base. Every request is appended
+  /// to `../invocations`, and a preset found already in the staging leaves `../preset-resumed`.
+  private func makePresetRuntime(base: String) throws -> URL {
+    try makeRuntime(
+      """
+      item=''
+      while [ "$#" -gt 0 ]; do
+          case "$1" in +workshop_download_item) shift; shift; item="$1" ;; esac
+          shift
+      done
+      printf '%s\\n' "$item" >> ../invocations
+      printf 'Waiting for user info...OK\\nDownloading item %s ...\\n' "$item"
+      content="steamapps/workshop/content/431960/$item"
+      if [ "$item" = 123456 ]; then
+          [ -f "$content/project.json" ] && touch ../preset-resumed
+          mkdir -p "$content"
+          printf '{"title":"Purple preset","dependency":"654321","preset":{"speed":7}}' > "$content/project.json"
+          printf 'Success. Downloaded item %s\\n' "$item"
+      else
+          \(base)
+      fi
+      """)
+  }
+
+  private let deliverBase = """
+    mkdir -p "$content"
+    printf '{"title":"Base","type":"video","file":"movie.mp4","general":{"properties":{"speed":{"type":"slider","value":1}}}}' > "$content/project.json"
+    printf 'base-content' > "$content/movie.mp4"
+    printf 'Success. Downloaded item %s\\n' "$item"
+    """
+
+  private let denyBase = "printf 'ERROR! Download item %s failed (Access Denied).\\n' \"$item\"; exit 1"
+
+  private let steamDenied = String(localized: "Steam denied this download. Sign in with an account that owns Wallpaper Engine and has access to this Workshop item.")
+
+  private func invocations(in root: URL) throws -> [String] {
+    try String(contentsOf: root.appendingPathComponent("invocations"), encoding: .utf8)
+      .split(separator: "\n").map(String.init)
+  }
+
+  private func assertNothingInstalled(in root: URL, file: StaticString = #filePath, line: UInt = #line) {
+    for id in ["123456", "654321"] {
+      XCTAssertFalse(
+        FileManager.default.fileExists(atPath: root.appendingPathComponent("Library/\(id)").path),
+        "Neither half of a preset reaches the library when its base is missing", file: file, line: line)
+    }
+  }
+
+  func testFailedBasePassNamesTheBaseAndKeepsTheReason() async throws {
+    let root = try makePresetRuntime(base: denyBase)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let downloader = startDownload(in: root)
+    try await waitForStop(downloader)
+    let message = try XCTUnwrap(downloader.errorMessage)
+    XCTAssertTrue(message.contains("654321"), "The user is told which item did not arrive")
+    XCTAssertTrue(message.contains(steamDenied), "Steam's own reason is not swallowed")
+    XCTAssertNotEqual(message, steamDenied, "It is not the bare reason for an item they never chose")
+    XCTAssertNil(downloader.downloadedID)
+    XCTAssertEqual(try invocations(in: root), ["123456", "654321"])
+    assertNothingInstalled(in: root)
+    try assertNoStaging(in: root)
+  }
+
+  func testFailedPresetPassIsReportedAsItsOwnFailure() async throws {
+    // The first item is the one the user asked for: nothing about a base applies yet.
+    let root = try makeRuntime(
+      """
+      printf 'Waiting for user info...OK\\nDownloading item 123456 ...\\nERROR! Download item 123456 failed (Access Denied).\\n'
+      exit 1
+      """)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let downloader = startDownload(in: root)
+    try await waitForStop(downloader)
+    XCTAssertEqual(downloader.errorMessage, steamDenied)
+  }
+
+  func testBaseThatExitsWithoutConfirmingIsAlsoNamed() async throws {
+    let root = try makePresetRuntime(base: "exit 0")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let downloader = startDownload(in: root)
+    try await waitForStop(downloader)
+    let message = try XCTUnwrap(downloader.errorMessage)
+    XCTAssertTrue(message.contains("654321"))
+    XCTAssertNotEqual(message, steamDenied)
+    assertNothingInstalled(in: root)
+
+    let crashRoot = try makePresetRuntime(base: "exit 3")
+    defer { try? FileManager.default.removeItem(at: crashRoot) }
+    let crashed = startDownload(in: crashRoot)
+    try await waitForStop(crashed)
+    XCTAssertTrue(try XCTUnwrap(crashed.errorMessage).contains("654321"))
+    assertNothingInstalled(in: crashRoot)
+  }
+
+  func testBaseConnectionDropIsRetriedBeforeItIsReported() async throws {
+    let root = try makePresetRuntime(
+      base: "printf 'ERROR! Download item %s failed (Timeout).\\n' \"$item\"; exit 1")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let downloader = startDownload(in: root)
+    try await waitForStop(downloader)
+    XCTAssertEqual(
+      try invocations(in: root), ["123456", "654321", "654321", "654321", "654321"],
+      "The base is retried in place; the preset that already arrived is not fetched again")
+    let message = try XCTUnwrap(downloader.errorMessage)
+    XCTAssertTrue(message.contains("654321"))
+    XCTAssertNotEqual(message, steamDenied)
+    assertNothingInstalled(in: root)
+  }
+
+  func testTryAgainAfterABaseFailureResumesFromTheKeptPreset() async throws {
+    let root = try makePresetRuntime(
+      base: """
+        if [ -f ../base-available ]; then
+            \(deliverBase)
+        else
+            \(denyBase)
+        fi
+        """)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let checkpoint = root.appendingPathComponent("Checkpoint")
+    let first = startDownload(in: root, checkpointDirectory: checkpoint)
+    try await waitForStop(first)
+    XCTAssertNotNil(first.errorMessage)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("preset-resumed").path))
+    assertNothingInstalled(in: root)
+
+    FileManager.default.createFile(atPath: root.appendingPathComponent("base-available").path, contents: nil)
+    let again = startDownload(in: root, checkpointDirectory: checkpoint)
+    try await assertImported(again, in: root, itemID: "123456")
+    XCTAssertTrue(
+      FileManager.default.fileExists(atPath: root.appendingPathComponent("preset-resumed").path),
+      "The preset came back from the kept download, not from a fresh start")
+    XCTAssertEqual(
+      try Data(contentsOf: root.appendingPathComponent("Library/123456/movie.mp4")), Data("base-content".utf8))
+    XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("Library/654321").path))
+    try assertNoStaging(in: root)
+  }
+
   func testMobileApprovalCanAdvanceToIndeterminateDownload() async throws {
     let root = try makeRuntime(
       """

@@ -344,8 +344,11 @@ on [manual-smoke.md](manual-smoke.md).
   projects, after the rescan, are covered too, as is a quit not waiting for a rescan or a
   reload still running and starting none it had not begun. Not covered: the speed
   of comparing a multi-gigabyte project on an external drive, and a display
-  reloading a replaced wallpaper. Fetching a preset's
-  base in the same SteamCMD run is in `DownloaderLifecycleTests`.
+  reloading a replaced wallpaper. Fetching a preset's base in the same
+  SteamCMD run is in `DownloaderLifecycleTests`, with a base that is denied, exits
+  early or keeps dropping the connection reported as the base failing (naming it
+  and keeping Steam's reason), the preset's own failure left as it is, and Try again
+  resuming from the kept preset.
 - `ImageImportTests` import real ImageIO pictures as the still `web` project with
   the original's bytes kept and the file name kept out of the page, the fit
   chosen from the picture's shape, a JPEG display copy for a TIFF, an undecodable

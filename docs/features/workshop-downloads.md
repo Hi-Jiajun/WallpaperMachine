@@ -731,8 +731,12 @@ written into the base property of the same name (`null` headings and undeclared
 names are ignored). The renderer reads the preset's files where they land, beside
 the base's `scene.pkg`: a scene mounts its folder under its package, so a property
 naming `files/clip.mp4` finds the clip while packaged files still win. A base
-fetched for a preset is not added to the library. A preset of a preset, or one
-naming itself, is rejected without publishing anything. Updating a preset
+fetched for a preset is not added to the library. If only the base's pass fails
+(after the automatic retries in [Prompt and retry
+handling](#prompt-and-retry-handling)), the error says the preset downloaded but
+its base (Workshop item N) did not, so nothing was added, and gives Steam's own
+reason; the partial download is kept and Try again picks up from it. A preset of
+a preset, or one naming itself, is rejected without publishing anything. Updating a preset
 reassembles it on the current base; an update of the base alone does not reach
 presets already installed. Importing a preset folder works the same way with the
 base found next to it or in the library.

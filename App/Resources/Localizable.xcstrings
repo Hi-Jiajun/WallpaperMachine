@@ -2774,6 +2774,9 @@
     "This preset is based on Workshop item %@, which is not in your library. Download or import that wallpaper first, then try again." : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "This preset is based on Workshop item %@, which is not in your library. Download or import that wallpaper first, then try again."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このプリセットはワークショップアイテム %@ を元にしていますが、ライブラリにありません。先にその壁紙をダウンロードまたは読み込んでから、もう一度お試しください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "此预设基于创意工坊项目 %@，但它不在你的资源库中。请先下载或导入该壁纸，然后重试。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "此預設集依據工作坊項目 %@，但它不在你的資料庫中。請先下載或匯入該桌布，然後再試一次。"}}}
     },
+    "The preset downloaded, but the wallpaper it is based on (Workshop item %@) did not, so nothing was added to your library. %@" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "The preset downloaded, but the wallpaper it is based on (Workshop item %@) did not, so nothing was added to your library. %@"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "プリセットはダウンロードできましたが、元になっている壁紙（ワークショップアイテム%1$@）がダウンロードできなかったため、ライブラリには何も追加されていません。%2$@"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "预设已下载，但它所基于的壁纸（创意工坊项目 %1$@）没有下载成功，因此没有向壁纸库添加任何内容。%2$@"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "預設集已下載，但它所依據的桌布（工作坊項目 %1$@）沒有下載成功，因此沒有任何內容加入你的桌布庫。%2$@"}}}
+    },
     "Downloading the wallpaper this preset is based on…" : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Downloading the wallpaper this preset is based on…"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このプリセットの元になる壁紙をダウンロード中…"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "正在下载此预设所基于的壁纸…"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "正在下載此預設集所依據的桌布…"}}}
     },

@@ -408,13 +408,13 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
                         try Task.checkCancellation()
                         continue
                     }
-                    if let failure { throw WorkshopFailure(message: failure) }
+                    if let failure { throw passFailure(failure, itemID: passItemID) }
                     guard process?.terminationStatus == 0 else {
                         authenticationFailed = isAuthenticating
                         if isSigningInOnly {
                             throw WorkshopFailure(message: String(localized: "SteamCMD exited before confirming the sign-in. Check the account name and password, approve Steam Guard, and retry."))
                         }
-                        throw WorkshopFailure(message: String(localized: "SteamCMD exited before completing the download. Confirm this account owns Wallpaper Engine, approve Steam Guard, and retry."))
+                        throw passFailure(String(localized: "SteamCMD exited before completing the download. Confirm this account owns Wallpaper Engine, approve Steam Guard, and retry."), itemID: passItemID)
                     }
                     progress = nil
                     receivesNetwork = false
@@ -427,7 +427,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
                         throw WorkshopFailure(message: String(localized: "Steam exited without confirming a complete Wallpaper Engine installation. Retry installing scene assets; existing assets have not been changed."))
                     }
                     if !isInstallingAssets && !isSigningInOnly && !workshopDownloadCompleted {
-                        throw WorkshopFailure(message: String(localized: "Steam exited without confirming a complete Workshop download. Retry; no partial wallpaper has been added to your library."))
+                        throw passFailure(String(localized: "Steam exited without confirming a complete Workshop download. Retry; no partial wallpaper has been added to your library."), itemID: passItemID)
                     }
                     // At most one follow-up: a preset's base is never itself fetched for another.
                     guard !fetchingPresetBase, let followUp, let next = try await followUp(staging) else { break }
@@ -501,6 +501,14 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
                 }.value
             }
         }
+    }
+
+    /// What a failed pass is reported as. The second pass of a preset fetches its base wallpaper: the
+    /// preset has already arrived, but without its base nothing is added, and the user should hear
+    /// that rather than a bare "could not download this wallpaper" about an item they never chose.
+    private func passFailure(_ reason: String, itemID: String?) -> WorkshopFailure {
+        guard fetchingPresetBase, let itemID else { return WorkshopFailure(message: reason) }
+        return WorkshopFailure(message: String(localized: "The preset downloaded, but the wallpaper it is based on (Workshop item \(itemID)) did not, so nothing was added to your library. \(reason)"))
     }
 
     /// Stops a download that cannot fit before SteamCMD starts, instead of letting it stall for
