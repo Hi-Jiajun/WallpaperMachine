@@ -145,13 +145,26 @@ final class WebPanelAssetsTests: XCTestCase {
     return output as Data
   }
 
-  func testServesEveryBundledPanelModule() throws {
+  func testServesEveryBundledPanelFile() throws {
     let assets = WebPanelAssets()
+    // Every file the bundle ships under WebUI/, so a new module that was not allowlisted
+    // fails here rather than as a blank panel.
+    let root = try XCTUnwrap(Bundle.main.resourceURL).appendingPathComponent("WebUI", isDirectory: true)
+    let enumerator = try XCTUnwrap(
+      FileManager.default.enumerator(
+        at: root, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]))
+    let names = try enumerator.compactMap { $0 as? URL }
+      .filter { try $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true }
+      .map { String($0.standardizedFileURL.path.dropFirst(root.standardizedFileURL.path.count + 1)) }
+    XCTAssertTrue(names.contains("index.html"), "\(names)")
     let locales = AppLanguage.supported.map(\.tag).filter { $0 != "en" }.map { "locales/\($0).js" }
     XCTAssertFalse(locales.isEmpty)
-    for name in ["index.html", "panel.js", "pixiv.js", "property-label.js", "settings.js", "theme.js", "icons.js", "i18n.js", "panel.css", "settings.css"] + locales {
+    for name in Set(names + locales) {
       let route = assets.route(try XCTUnwrap(URL(string: "mwe-ui://app/\(name)")))
-      guard case .file(let file)? = route else { return XCTFail("\(name) is not served") }
+      guard case .file(let file)? = route else {
+        XCTFail("\(name) is bundled but not served; allowlist it in WebPanelAssets")
+        continue
+      }
       XCTAssertTrue(file.path.hasSuffix("/WebUI/\(name)"), file.path)
       XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "\(name) is not bundled")
     }
