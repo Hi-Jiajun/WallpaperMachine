@@ -638,6 +638,7 @@ export default {
   'If a wallpaper already exists': '若桌布已存在',
   'Skip duplicates': '略過重複項目',
   'Keep both copies': '保留兩份',
+  'Replace if changed': '有變更時取代',
   'Choose wallpapers': '選擇桌布',
   'Cancel import': '取消匯入',
   '{imported} imported · {skipped} skipped': '已匯入 {imported} 項 · 已略過 {skipped} 項',

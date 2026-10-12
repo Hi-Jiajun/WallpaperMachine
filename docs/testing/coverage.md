@@ -252,9 +252,18 @@ on [manual-smoke.md](manual-smoke.md).
   nothing the library already holds is covered for folders, videos and HTML files
   (a one-byte change across chunk boundaries, a same-length manifest edit, added,
   missing, renamed and resized files and folders, Finder's `.DS_Store` on either
-  side, links in the source and in the library, a preset, an identical folder that
-  is not a wallpaper, and cancelling during the comparison). Not covered: the speed
-  of comparing a multi-gigabyte project on an external drive. Fetching a preset's
+  side, the app's `.mwe-user-assets` bridge in the installed project, links in the source and in the library, a preset, an identical folder that
+  is not a wallpaper, and cancelling during the comparison). **Replace if changed**
+  is covered for a changed folder (the old tree gone, not merged, no staging left),
+  identical content left unswapped, one import mixing changed, identical and new
+  projects, repairing an install that cannot play, refusing a folder without a
+  manifest, a file and a link, a failed swap (a locked folder) keeping the installed
+  project, cancelling, and a single file; the panel's choice naming the policy
+  (anything unknown stays on skip) and `LibraryImportStore` reloading only replaced
+  projects, after the rescan, are covered too, as is a quit not waiting for a rescan or a
+  reload still running and starting none it had not begun. Not covered: the speed
+  of comparing a multi-gigabyte project on an external drive, and a display
+  reloading a replaced wallpaper. Fetching a preset's
   base in the same SteamCMD run is in `DownloaderLifecycleTests`.
 - `ImageImportTests` import real ImageIO pictures as the still `web` project with
   the original's bytes kept and the file name kept out of the page, the fit

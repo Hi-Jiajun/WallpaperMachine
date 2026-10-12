@@ -1138,9 +1138,7 @@ extension WebPanelController {
     guard !imports.isBusy, !importPicker.isPresenting else {
       throw WallpaperActionError(message: String(localized: "An import is already running."))
     }
-    let policy =
-      (request.body["duplicates"] as? String) == "keepBoth"
-      ? WallpaperImportService.DuplicatePolicy.keepBoth : .skip
+    let policy = WallpaperImportService.DuplicatePolicy(panelValue: request.body["duplicates"])
     guard let window = webView?.window else { return }
     // A project's own files stand for its folder (project.json, scene.json, scene.pkg).
     let types: [UTType] =
@@ -1328,6 +1326,18 @@ extension WebPanelController {
       "steamcommunity.com", "store.steampowered.com", "help.steampowered.com", "github.com", "www.gnu.org",
       "support.apple.com", "space.bilibili.com", "www.bilibili.com", "www.pixiv.net",
     ].contains(url.host ?? "")
+  }
+}
+
+extension WallpaperImportService.DuplicatePolicy {
+  /// The policy the import popover's choice names. Anything it does not recognize keeps what the
+  /// library holds: a stale page must never be able to replace an installed wallpaper.
+  init(panelValue: Any?) {
+    switch panelValue as? String {
+    case "keepBoth": self = .keepBoth
+    case "replaceChanged": self = .replaceChanged
+    default: self = .skip
+    }
   }
 }
 

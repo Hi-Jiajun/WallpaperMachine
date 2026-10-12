@@ -6,6 +6,9 @@ actor WallpaperImportService {
     enum DuplicatePolicy: String, CaseIterable, Identifiable, Sendable {
         case skip = "Skip existing"
         case keepBoth = "Keep both copies"
+        /// A project whose id is installed and whose content differs takes the installed one's place;
+        /// identical content is skipped, as with Keep both copies.
+        case replaceChanged = "Replace if changed"
         var id: String { rawValue }
     }
 
@@ -15,6 +18,9 @@ actor WallpaperImportService {
         /// The part of `skipped` that Keep both copies left alone because the library already held
         /// exactly the same content: nothing was copied.
         var identical: [String] = []
+        /// The part of `importedIDs` that took the place of an installed project. Wallpaper options,
+        /// user files and collections are keyed by id, so they stay with the new files.
+        var replacedIDs: [String] = []
         var failures: [String] = []
         var cancelled = false
         /// Folders whose name is not a Workshop id but whose manifest names the item they are
@@ -106,6 +112,7 @@ actor WallpaperImportService {
                         }
                         var id = preferredID
                         var destination = managedRoot.appendingPathComponent(id, isDirectory: true)
+                        var replacing = false
                         if fm.fileExists(atPath: destination.path) {
                             switch try resolveDuplicate(duplicates, candidate: candidate, isDirectory: isDirectory,
                                                         imageExtension: isImage ? ext : nil, installed: destination) {
@@ -119,6 +126,8 @@ actor WallpaperImportService {
                             case .keepBoth:
                                 id += "-" + UUID().uuidString
                                 destination = managedRoot.appendingPathComponent(id, isDirectory: true)
+                            case .replace:
+                                replacing = true
                             }
                         }
                         let staged = staging.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -154,8 +163,21 @@ actor WallpaperImportService {
                         }
                         try validateProject(at: staged)
                         try Task.checkCancellation()
-                        // moveItem never overwrites a concurrently created destination.
-                        try fm.moveItem(at: staged, to: destination)
+                        if replacing {
+                            // The new tree is complete and valid, and swapping it in is one step: the
+                            // library never lacks the wallpaper, and the old tree ends up at `staged`,
+                            // which the `defer` above removes. A failure leaves the installed one.
+                            try requireInstalledProject(destination)
+                            let code = Self.exchange(staged, with: destination)
+                            guard code == 0 else {
+                                throw Self.replaceFailure(id, "\(String(cString: strerror(code))).")
+                            }
+                            report.replacedIDs.append(id)
+                            AppLog.info("import: \(id) replaced with the imported copy")
+                        } else {
+                            // moveItem never overwrites a concurrently created destination.
+                            try fm.moveItem(at: staged, to: destination)
+                        }
                         report.importedIDs.append(id)
                     } catch is CancellationError {
                         throw CancellationError()
@@ -179,6 +201,8 @@ actor WallpaperImportService {
         case skip(identical: Bool)
         /// The candidate is copied under a new id beside the installed item.
         case keepBoth
+        /// The candidate differs from the installed item and takes its place.
+        case replace
     }
 
     /// Decides the fate of a candidate meeting an installed item. An installed item that is not a
@@ -196,7 +220,43 @@ actor WallpaperImportService {
                                   imageExtension: imageExtension) else { return .keepBoth }
             try validateProject(at: installed)
             return .skip(identical: true)
+        case .replaceChanged:
+            // What the library already holds is never copied over itself.
+            if try sameContent(candidate: candidate, installed: installed, isDirectory: isDirectory,
+                               imageExtension: imageExtension) {
+                try validateProject(at: installed)
+                return .skip(identical: true)
+            }
+            // Refused before any byte is copied: replacing a folder that is not a wallpaper
+            // would discard files that are not ours to discard.
+            try requireInstalledProject(installed)
+            return .replace
         }
+    }
+
+    /// Replacing needs an installed wallpaper to replace: a real folder, not a link, holding a
+    /// regular `project.json`. It need not be playable, so a damaged install can be repaired.
+    private func requireInstalledProject(_ installed: URL) throws {
+        guard let folder = try? downloadMetadata(at: installed), folder.st_mode & S_IFMT == S_IFDIR,
+              let manifest = try? downloadMetadata(at: installed.appendingPathComponent("project.json")),
+              manifest.st_mode & S_IFMT == S_IFREG else {
+            throw Self.replaceFailure(installed.lastPathComponent, String(localized: "Its folder in the library has no project.json, so it is not an installed wallpaper."))
+        }
+    }
+
+    nonisolated private static func replaceFailure(_ id: String, _ reason: String) -> ImportError {
+        ImportError(message: String(localized: "Could not replace \(id) with the imported copy: \(reason) The installed version is unchanged."))
+    }
+
+    /// Swaps two folders in one step (`RENAME_SWAP`): `new` takes the place of `installed` and the
+    /// old tree ends up at `new`'s path. 0 on success, else the `errno` that stopped it.
+    nonisolated private static func exchange(_ new: URL, with installed: URL) -> Int32 {
+        let result = new.path.withCString { newPath in
+            installed.path.withCString { installedPath in
+                renamex_np(newPath, installedPath, UInt32(RENAME_SWAP))
+            }
+        }
+        return result == 0 ? 0 : errno
     }
 
     nonisolated static func stagingRoot(forLibrary library: URL) -> URL {
@@ -355,13 +415,8 @@ actor WallpaperImportService {
             }
             // An update swaps the new tree in and the old one out in one step, so the library never
             // lacks the wallpaper and a failure leaves the old version where it was.
-            let result = source.path.withCString { sourcePath in
-                destination.path.withCString { destinationPath in
-                    renamex_np(sourcePath, destinationPath, UInt32(RENAME_SWAP))
-                }
-            }
-            guard result == 0 else {
-                let code = errno
+            let code = Self.exchange(source, with: destination)
+            guard code == 0 else {
                 throw NSError(domain: NSPOSIXErrorDomain, code: Int(code), userInfo: [
                     NSFilePathErrorKey: destination.path,
                     NSLocalizedDescriptionKey: String(localized: "Could not replace Workshop item \(itemID) with its update: \(String(cString: strerror(code))). The installed version is unchanged.")

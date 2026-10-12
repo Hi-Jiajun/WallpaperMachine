@@ -41,6 +41,10 @@ was run.
 - [ ] Import a large project (several GB, ideally from an external drive) twice
       with **Keep both copies**: the second import ends as skipped without a second
       copy in the library, in about the time it takes to read the project once.
+- [ ] Apply an installed project to a display, change a file of its source folder
+      (a different video, say) and import that folder with **Replace if changed**:
+      the display shows the new file without being reapplied, the library holds
+      one folder for it, and a second import of the same folder ends as skipped.
 - [ ] Search for a nonexistent local title, clear the search, and confirm the
       collection returns.
 - [ ] Select a wallpaper and refresh: the selection survives.

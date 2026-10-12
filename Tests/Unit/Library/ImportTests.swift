@@ -990,4 +990,348 @@ final class ImportTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: library.path), ["slow"])
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: library.deletingLastPathComponent().path), ["Library"])
     }
+
+    // MARK: Replace if changed
+
+    private func names(in folder: URL) -> [String] {
+        ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []).sorted()
+    }
+
+    private func text(_ file: URL) -> String? { try? String(contentsOf: file, encoding: .utf8) }
+
+    private func identity(of url: URL) throws -> Int {
+        try XCTUnwrap(FileManager.default.attributesOfItem(atPath: url.path)[.systemFileNumber] as? Int)
+    }
+
+    func testReplaceChangedPutsTheNewFilesWhereTheInstalledProjectWas() async throws {
+        let source = try project("123456")
+        try Data("only in the old copy".utf8).write(to: source.appendingPathComponent("old.txt"))
+        _ = try await importOne(source)
+        try FileManager.default.removeItem(at: source.appendingPathComponent("old.txt"))
+        try Data("only in the new copy".utf8).write(to: source.appendingPathComponent("new.txt"))
+        try Data("newer-content".utf8).write(to: source.appendingPathComponent("movie.mp4"))
+
+        let report = try await importOne(source, policy: .replaceChanged)
+        XCTAssertEqual(report.importedIDs, ["123456"])
+        XCTAssertEqual(report.replacedIDs, ["123456"])
+        XCTAssertTrue(report.skipped.isEmpty)
+        XCTAssertTrue(report.failures.isEmpty, "\(report.failures)")
+        let folder = library.appendingPathComponent("123456")
+        XCTAssertEqual(text(folder.appendingPathComponent("movie.mp4")), "newer-content")
+        XCTAssertEqual(names(in: folder), ["movie.mp4", "new.txt", "project.json"], "the old tree is gone, not merged")
+        XCTAssertEqual(names(in: library), ["123456"])
+        XCTAssertEqual(names(in: library.deletingLastPathComponent()), ["Library"], "no staging copy is left behind")
+        XCTAssertEqual(text(source.appendingPathComponent("movie.mp4")), "newer-content", "the original is untouched")
+    }
+
+    func testReplaceChangedLeavesWhatTheLibraryAlreadyHoldsAlone() async throws {
+        let source = try project("123456")
+        _ = try await importOne(source)
+        let installed = library.appendingPathComponent("123456")
+        let before = try identity(of: installed)
+        let same = try await importOne(source, policy: .replaceChanged)
+        XCTAssertEqual(same.identical, ["123456"])
+        XCTAssertEqual(same.skipped, ["123456"])
+        XCTAssertTrue(same.replacedIDs.isEmpty)
+        XCTAssertTrue(same.importedIDs.isEmpty)
+        XCTAssertTrue(same.failures.isEmpty)
+        XCTAssertEqual(try identity(of: installed), before, "an identical project is not swapped for its own copy")
+
+        // Once replaced, the same source is identical to the library again.
+        try Data("changed-content".utf8).write(to: source.appendingPathComponent("movie.mp4"))
+        let replaced = try await importOne(source, policy: .replaceChanged)
+        XCTAssertEqual(replaced.replacedIDs, ["123456"])
+        let after = try identity(of: installed)
+        let again = try await importOne(source, policy: .replaceChanged)
+        XCTAssertEqual(again.identical, ["123456"])
+        XCTAssertTrue(again.replacedIDs.isEmpty)
+        XCTAssertEqual(try identity(of: installed), after)
+    }
+
+    func testReplaceChangedOnlyReplacesTheChangedProjectsOfOneImport() async throws {
+        let changed = try project("100")
+        let same = try project("200")
+        _ = try await importer.importItems([changed, same], into: library, duplicates: .skip, progress: { _ in })
+        try Data("changed-content".utf8).write(to: changed.appendingPathComponent("movie.mp4"))
+        let fresh = try project("300")
+
+        let report = try await importer.importItems([changed, same, fresh], into: library, duplicates: .replaceChanged,
+                                                    progress: { _ in })
+        XCTAssertEqual(report.importedIDs.sorted(), ["100", "300"])
+        XCTAssertEqual(report.replacedIDs, ["100"], "a project the library lacked is added, not replaced")
+        XCTAssertEqual(report.identical, ["200"])
+        XCTAssertTrue(report.failures.isEmpty, "\(report.failures)")
+        XCTAssertEqual(text(library.appendingPathComponent("100/movie.mp4")), "changed-content")
+        XCTAssertEqual(text(library.appendingPathComponent("200/movie.mp4")), "video-content")
+        XCTAssertEqual(names(in: library), ["100", "200", "300"])
+    }
+
+    func testReplaceChangedRepairsAnInstalledProjectThatCannotPlay() async throws {
+        let source = try project("123456")
+        _ = try await importOne(source)
+        let movie = library.appendingPathComponent("123456/movie.mp4")
+        try FileManager.default.removeItem(at: movie)
+        let report = try await importOne(source, policy: .replaceChanged)
+        XCTAssertEqual(report.replacedIDs, ["123456"], "\(report.failures)")
+        XCTAssertEqual(text(movie), "video-content")
+    }
+
+    func testReplaceChangedNeverTouchesAFolderThatIsNotAnInstalledWallpaper() async throws {
+        let fm = FileManager.default
+        try fm.createDirectory(at: library, withIntermediateDirectories: true)
+        // Files of someone's own, in a folder that happens to carry the id.
+        let notes = library.appendingPathComponent("100")
+        try fm.createDirectory(at: notes, withIntermediateDirectories: false)
+        try Data("my notes".utf8).write(to: notes.appendingPathComponent("notes.txt"))
+        // A file where the folder should be.
+        try Data("not a folder".utf8).write(to: library.appendingPathComponent("200"))
+        // A link to a real wallpaper elsewhere: the link is not the wallpaper, and its target is not the library's.
+        let target = try project("300")
+        let elsewhere = root.appendingPathComponent("elsewhere")
+        try fm.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+        try fm.moveItem(at: target, to: elsewhere.appendingPathComponent("300"))
+        try fm.createSymbolicLink(at: library.appendingPathComponent("300"), withDestinationURL: elsewhere.appendingPathComponent("300"))
+
+        for id in ["100", "200", "300"] {
+            let source = try project(id)
+            try Data("changed-content".utf8).write(to: source.appendingPathComponent("movie.mp4"))
+            let report = try await importOne(source, policy: .replaceChanged)
+            XCTAssertEqual(report.failures.count, 1, id)
+            XCTAssertTrue(report.replacedIDs.isEmpty, id)
+            XCTAssertTrue(report.importedIDs.isEmpty, id)
+            XCTAssertTrue(report.skipped.isEmpty, id)
+        }
+        XCTAssertEqual(names(in: notes), ["notes.txt"])
+        XCTAssertEqual(text(notes.appendingPathComponent("notes.txt")), "my notes")
+        XCTAssertEqual(text(library.appendingPathComponent("200")), "not a folder")
+        XCTAssertEqual(try fm.destinationOfSymbolicLink(atPath: library.appendingPathComponent("300").path),
+                       elsewhere.appendingPathComponent("300").path)
+        XCTAssertEqual(text(elsewhere.appendingPathComponent("300/movie.mp4")), "video-content")
+        XCTAssertEqual(names(in: library.deletingLastPathComponent()), ["Library"], "no staging copy is left behind")
+    }
+
+    func testReplaceChangedStillReportsAnIdenticalProjectThatIsNotAWallpaper() async throws {
+        let source = try project("broken", file: "missing.mp4")
+        try FileManager.default.createDirectory(at: library, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: source, to: library.appendingPathComponent("broken"))
+        let report = try await importOne(source, policy: .replaceChanged)
+        XCTAssertEqual(report.failures.count, 1)
+        XCTAssertTrue(report.skipped.isEmpty)
+        XCTAssertTrue(report.identical.isEmpty)
+        XCTAssertTrue(report.replacedIDs.isEmpty)
+    }
+
+    func testAFailedSwapKeepsTheInstalledProjectAndLeavesNothingBehind() async throws {
+        let fm = FileManager.default
+        let source = try project("123456")
+        _ = try await importOne(source)
+        try Data("changed-content".utf8).write(to: source.appendingPathComponent("movie.mp4"))
+        let installed = library.appendingPathComponent("123456")
+        // A locked folder cannot be exchanged, whatever the reason the system gives.
+        try fm.setAttributes([.immutable: true], ofItemAtPath: installed.path)
+        defer { try? fm.setAttributes([.immutable: false], ofItemAtPath: installed.path) }
+        let report = try await importOne(source, policy: .replaceChanged)
+        try fm.setAttributes([.immutable: false], ofItemAtPath: installed.path)
+
+        XCTAssertEqual(report.failures.count, 1)
+        XCTAssertTrue(report.replacedIDs.isEmpty)
+        XCTAssertTrue(report.importedIDs.isEmpty)
+        XCTAssertEqual(text(installed.appendingPathComponent("movie.mp4")), "video-content")
+        XCTAssertEqual(names(in: installed), ["movie.mp4", "project.json"])
+        XCTAssertEqual(names(in: library.deletingLastPathComponent()), ["Library"], "the new copy is not left in staging")
+    }
+
+    func testCancellingAReplacementLeavesTheInstalledProject() async throws {
+        let source = try largeProject("slow")
+        _ = try await importOne(source)
+        let movie = source.appendingPathComponent("movie.mp4")
+        var changed = try Data(contentsOf: movie)
+        changed[changed.count - 1] ^= 0xFF
+        try changed.write(to: movie)
+        let installed = library.appendingPathComponent("slow/movie.mp4")
+        let original = try Data(contentsOf: installed)
+        let task = Task {
+            try await importer.importItems([source], into: library, duplicates: .replaceChanged, progress: { _ in
+                withUnsafeCurrentTask { $0?.cancel() }
+            })
+        }
+        let report = try await task.value
+        XCTAssertTrue(report.cancelled)
+        XCTAssertTrue(report.replacedIDs.isEmpty)
+        XCTAssertTrue(report.importedIDs.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: installed), original)
+        XCTAssertEqual(names(in: library), ["slow"])
+        XCTAssertEqual(names(in: library.deletingLastPathComponent()), ["Library"])
+    }
+
+    func testReplaceChangedAlsoReplacesAProjectMadeFromASingleFile() async throws {
+        let video = root.appendingPathComponent("My Video.mp4")
+        try Data("video-content".utf8).write(to: video)
+        _ = try await importOne(video)
+        let same = try await importOne(video, policy: .replaceChanged)
+        XCTAssertEqual(same.identical, ["My Video.mp4"])
+        XCTAssertTrue(same.replacedIDs.isEmpty)
+
+        try Data("another video".utf8).write(to: video)
+        let report = try await importOne(video, policy: .replaceChanged)
+        XCTAssertEqual(report.replacedIDs, ["local-My Video.mp4"], "\(report.failures)")
+        XCTAssertEqual(names(in: library), ["local-My Video.mp4"])
+        XCTAssertEqual(text(library.appendingPathComponent("local-My Video.mp4/My Video.mp4")), "another video")
+    }
+
+    func testThePanelsChoiceNamesThePolicyAndAnythingElseKeepsWhatIsInstalled() {
+        typealias Policy = WallpaperImportService.DuplicatePolicy
+        XCTAssertEqual(Policy(panelValue: "skip"), .skip)
+        XCTAssertEqual(Policy(panelValue: "keepBoth"), .keepBoth)
+        XCTAssertEqual(Policy(panelValue: "replaceChanged"), .replaceChanged)
+        // A stale or damaged page can never select the one policy that overwrites.
+        for value in [nil, "", "replace", "Replace if changed", "replaceChanged ", "REPLACECHANGED", 1, true, ["replaceChanged"]] as [Any?] {
+            XCTAssertEqual(Policy(panelValue: value), .skip, "\(String(describing: value))")
+        }
+    }
+
+    @MainActor
+    private func finish(_ imports: LibraryImportStore) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+        while imports.isBusy && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        if imports.isBusy {
+            await imports.shutdown()
+            XCTFail("The import did not finish before the deadline")
+        }
+    }
+
+    @MainActor
+    func testDisplaysReloadOnlyTheProjectsAnImportReplacedAfterTheLibraryRescan() async throws {
+        let changed = try project("100")
+        let same = try project("200")
+        _ = try await importer.importItems([changed, same], into: library, duplicates: .skip, progress: { _ in })
+        try Data("changed-content".utf8).write(to: changed.appendingPathComponent("movie.mp4"))
+        let fresh = try project("300")
+        let imports = LibraryImportStore(library: library)
+        var events: [String] = []
+        imports.refreshLibrary = { events.append("rescan") }
+        imports.reloadReplaced = { events.append("reload " + $0) }
+
+        try imports.start([changed, same, fresh], duplicates: .replaceChanged)
+        try await finish(imports)
+        XCTAssertEqual(imports.report?.replacedIDs, ["100"])
+        XCTAssertNil(imports.failure)
+        XCTAssertEqual(events, ["rescan", "reload 100"], "reloading follows the rescan, and only for the replaced project")
+
+        // Nothing is replaced under the other policies, so nothing is reloaded.
+        try Data("changed again".utf8).write(to: changed.appendingPathComponent("movie.mp4"))
+        events = []
+        try imports.start([changed], duplicates: .skip)
+        try await finish(imports)
+        XCTAssertEqual(imports.report?.skipped, ["100"])
+        XCTAssertEqual(events, ["rescan"])
+        try imports.start([changed], duplicates: .keepBoth)
+        try await finish(imports)
+        XCTAssertEqual(imports.report?.importedIDs.count, 1)
+        XCTAssertEqual(events, ["rescan", "rescan"])
+    }
+
+    /// A callback the test holds suspended until it opens the gate, which then stays open.
+    @MainActor
+    private final class Gate {
+        private var continuation: CheckedContinuation<Void, Never>?
+        private var isOpen = false
+        private(set) var isClosedOnSomeone = false
+
+        func pass() async {
+            guard !isOpen else { return }
+            isClosedOnSomeone = true
+            await withCheckedContinuation { continuation = $0 }
+            isClosedOnSomeone = false
+        }
+
+        func open() {
+            isOpen = true
+            continuation?.resume()
+            continuation = nil
+        }
+    }
+
+    @MainActor
+    private func eventually(_ condition: () -> Bool) async throws -> Bool {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+        while !condition() && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        return condition()
+    }
+
+    @MainActor
+    func testAQuitDoesNotWaitForADisplayStillReloadingAndReloadsNoMore() async throws {
+        let first = try project("100")
+        let second = try project("200")
+        _ = try await importer.importItems([first, second], into: library, duplicates: .skip, progress: { _ in })
+        for source in [first, second] { try Data("changed-content".utf8).write(to: source.appendingPathComponent("movie.mp4")) }
+        let imports = LibraryImportStore(library: library)
+        let gate = Gate()
+        var reloaded: [String] = []
+        imports.refreshLibrary = {}
+        imports.reloadReplaced = { id in
+            reloaded.append(id)
+            await gate.pass()
+        }
+        try imports.start([first, second], duplicates: .replaceChanged)
+        let reloading = try await eventually { gate.isClosedOnSomeone }
+        XCTAssertTrue(reloading, "the import never reached the reload")
+
+        var returned = false
+        let quit = Task { @MainActor in
+            await imports.shutdown()
+            returned = true
+        }
+        let didNotWait = try await eventually { returned }
+        // Opened either way, so a shutdown that does wait cannot outlive the test.
+        gate.open()
+        await quit.value
+        XCTAssertTrue(didNotWait, "shutdown waited for a scene to finish loading, which would spend the quit's whole budget")
+
+        try await finish(imports)
+        XCTAssertEqual(reloaded.count, 1, "no further display is reloaded once the quit has begun: \(reloaded)")
+        XCTAssertNil(imports.failure)
+    }
+
+    @MainActor
+    func testAQuitDuringTheRescanDoesNotWaitForItOrReloadAfterIt() async throws {
+        let changed = try project("100")
+        _ = try await importer.importItems([changed], into: library, duplicates: .skip, progress: { _ in })
+        try Data("changed-content".utf8).write(to: changed.appendingPathComponent("movie.mp4"))
+        let imports = LibraryImportStore(library: library)
+        let gate = Gate()
+        var reloads = 0
+        imports.refreshLibrary = { await gate.pass() }
+        imports.reloadReplaced = { _ in reloads += 1 }
+        try imports.start([changed], duplicates: .replaceChanged)
+        let rescanning = try await eventually { gate.isClosedOnSomeone }
+        XCTAssertTrue(rescanning, "the import never reached the rescan")
+
+        var returned = false
+        let quit = Task { @MainActor in
+            await imports.shutdown()
+            returned = true
+        }
+        let didNotWait = try await eventually { returned }
+        gate.open()
+        await quit.value
+        XCTAssertTrue(didNotWait, "shutdown waited for the rescan")
+
+        try await finish(imports)
+        XCTAssertEqual(reloads, 0, "the app is exiting, so nothing is reloaded after the quit began")
+    }
+
+    @MainActor
+    func testAQuitDuringTheImportStartsNeitherARescanNorAReload() async throws {
+        let source = try project("100")
+        let imports = LibraryImportStore(library: library)
+        var events: [String] = []
+        imports.refreshLibrary = { events.append("rescan") }
+        imports.reloadReplaced = { events.append("reload " + $0) }
+        try imports.start([source], duplicates: .skip)
+        await imports.shutdown()
+        XCTAssertFalse(imports.isBusy)
+        XCTAssertTrue(imports.report?.cancelled == true)
+        XCTAssertEqual(events, [])
+    }
 }

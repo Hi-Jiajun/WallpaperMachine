@@ -391,7 +391,8 @@ popover opens from the activity bar, from the top-bar downloads button while
 downloads exist, and from **Show in downloads** in the inspector. The import
 popover opens from **Import** in the Installed toolbar; imports copy source files
 into the library and leave the originals untouched, with a duplicate policy of
-**Skip duplicates** or **Keep both copies**. Closing a popover, or the window,
+**Skip duplicates**, **Keep both copies** or **Replace if changed**. Closing a
+popover, or the window,
 never cancels work: `LibraryImportStore` runs the import for the app, not for the
 page. Quitting cancels and awaits an active local import.
 
@@ -451,6 +452,27 @@ link or special file, a very large tree, a file that cannot be read or that chan
 while it is read. A preset is assembled on its base, so it never matches the folder
 it came from. The comparison can be cancelled with the import and leaves nothing
 behind.
+
+**Replace if changed** brings in a newer copy of a project that is already installed
+without deleting anything first. It compares the same way, so identical content is
+skipped and reported as before, and a project the library lacks is added. A changed
+one is copied to the import's temporary directory and checked as every import is,
+then swapped with the installed folder in one step (`RENAME_SWAP`): the library never
+lacks the id, the old tree ends up in the temporary directory, which is removed, and
+a failure or a cancel before the swap leaves the installed project exactly as it was.
+The installed item must be a real folder holding a regular `project.json`; a link, a
+file, or a folder without a manifest is reported (`Could not replace <id> …`) and
+left alone, since it is not a wallpaper's to discard. It need not be able to play, so
+a damaged install can be repaired from its source. The wallpaper's saved options,
+user files and collections are keyed by its id and stay with the new files. A
+replaced project counts as imported and is also listed in `Report.replacedIDs`: once
+the library has been rescanned, `LibraryImportStore.reloadReplaced` reloads each one
+on every display showing it (the same reload a Workshop update uses), so the display
+shows the new files rather than what it had loaded. A quit waits for the import's own
+file work to be cancelled and cleaned up, but not for the rescan or a reload, which
+can last as long as a scene takes to load: it starts none that has not begun, and the
+next launch loads what the displays show afresh. The Dock icon and Finder's Open
+With never replace; they stay on **Skip duplicates**.
 
 A local import's temporary directory holds an ownership marker and a live file
 lock. Startup reclaims abandoned marked directories; an unmarked legacy directory

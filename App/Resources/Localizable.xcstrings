@@ -2919,6 +2919,12 @@
     "Could not replace Workshop item %@ with its update: %@. The installed version is unchanged." : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Could not replace Workshop item %@ with its update: %@. The installed version is unchanged."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ワークショップアイテム%@をアップデートで置き換えられませんでした：%@。インストール済みのバージョンは変更されていません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "无法用更新替换创意工坊项目 %@：%@。已安装的版本保持不变。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "無法以更新取代工作坊項目 %@：%@。已安裝的版本維持不變。"}}}
     },
+    "Could not replace %@ with the imported copy: %@ The installed version is unchanged." : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Could not replace %@ with the imported copy: %@ The installed version is unchanged."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "%@を読み込んだコピーで置き換えられませんでした：%@ インストール済みのバージョンは変更されていません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "无法用导入的副本替换 %@：%@ 已安装的版本保持不变。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "無法以匯入的副本取代 %@：%@ 已安裝的版本維持不變。"}}}
+    },
+    "Its folder in the library has no project.json, so it is not an installed wallpaper." : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Its folder in the library has no project.json, so it is not an installed wallpaper."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ライブラリ内のそのフォルダにはproject.jsonがないため、インストール済みの壁紙ではありません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "它在壁纸库中的文件夹没有 project.json，因此不是已安装的壁纸。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "它在桌布庫中的資料夾沒有 project.json，因此不是已安裝的桌布。"}}}
+    },
     "Play or pause wallpapers" : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Play or pause wallpapers"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "壁紙の再生／一時停止"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "播放或暂停壁纸"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "播放或暫停桌布"}}}
     },

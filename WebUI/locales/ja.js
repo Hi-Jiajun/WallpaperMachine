@@ -638,6 +638,7 @@ export default {
   'If a wallpaper already exists': '壁紙がすでに存在する場合',
   'Skip duplicates': '重複をスキップ',
   'Keep both copies': '両方とも残す',
+  'Replace if changed': '変更されていれば置き換える',
   'Choose wallpapers': '壁紙を選択',
   'Cancel import': '読み込みをキャンセル',
   '{imported} imported · {skipped} skipped': '{imported}件読み込み済み · {skipped}件スキップ',
