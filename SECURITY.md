@@ -38,7 +38,7 @@ itself and offers **Restart to Update**; builds from source should follow `main`
 - The control panel's web view: script injection through wallpaper titles,
   Workshop or pixiv data, or messages from another origin.
 - Steam and pixiv sign-ins leaving the Mac, or becoming readable by other apps.
-- The [updater](docs/release.md#what-the-in-app-updater-expects) installing
+- The [updater](docs/features/updates.md#installing) installing
   anything other than a release whose SHA-256 matches.
 - [Diagnostics reports](docs/features/diagnostics.md) that leak what they promise
   to replace: home folder paths, the Mac user name, Steam account names.

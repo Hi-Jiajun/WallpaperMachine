@@ -77,7 +77,7 @@ the original deadline (35 seconds), and only a confirmed activation saves the se
 for the next launch. The extension answers macOS only once that frame exists, and
 WallpaperAgent abandons an extension that has not answered after about 31 seconds
 (observed on macOS 27.2), so a scene must reach its first frame well inside that; see
-[startup costs](../testing/renderer.md#startup-and-staging-buffers).
+[startup costs](../testing/runtime-regressions.md#startup-and-staging-buffers).
 
 ## Use wallpaper as screen saver
 
@@ -249,7 +249,7 @@ both. Wallpaper and screen-saver changes made elsewhere are preserved.
 If the native provider replaced a desktop poster, quit restores the native selection
 first, then waits for WallpaperAgent's asynchronous reload and restores the poster's
 saved original (poster ownership and the quit wait are described in
-[architecture](../architecture.md#desktop-wallpaper-windows-and-private-api-handling)).
+[desktop picture](desktop-picture.md#quitting)).
 If restoration still fails after the wait, quit is cancelled and the error is exposed
 in the menu bar (and native-feature status) so the user can retry. A failed activation
 also restores native selections, but resumes live desktop playback afterward.
@@ -299,7 +299,7 @@ native is left to restore them to.
 Native wallpaper assets are isolated copies, using APFS clones where available, and
 still require additional disk space. Scene and video wallpapers publish the assets
 they reference as immutable `revisions/<fingerprint>/` trees in the exchange
-directory (see [User-selected files](web-wallpapers.md#user-selected-files-and-folders)
+directory (see [User-selected files](user-files.md)
 for chosen files); web projects receive a separate read-grant root containing only
 that project's referenced managed files.
 

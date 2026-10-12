@@ -188,9 +188,9 @@ reuse, or visual behavior, which is why these items are manual.
 Mission Control posters are sampled still frames, not live animation. Updates
 begin as soon as a rendered frame is available, but rendering, JPEG encoding and
 the system's thumbnail compositor still take time; zero-millisecond visual
-latency cannot be guaranteed. How the poster service targets Spaces, resolves
-originals and restores them, and which non-public APIs it uses, is in
-[architecture.md](../architecture.md) and, for Space mode,
+latency cannot be guaranteed. How posters are taken, how originals are resolved
+and restored, and which non-public APIs are involved is in
+[desktop-picture.md](../features/desktop-picture.md) and, for Space mode,
 [spaces.md](../features/spaces.md#poster-ownership-and-late-frames). Two
 consequences matter while testing: without a recoverable original the poster
 writes are skipped and a failure is logged while live playback continues, and a

@@ -62,7 +62,7 @@ unattached `CAMetalLayer`s and injected notification and encoding services:
 
 Not covered: what Mission Control actually shows and its refresh latency, and
 macOS accepting or restoring native selections. Both are on
-[manual-smoke.md](manual-smoke.md). Mechanism: [architecture](../architecture.md).
+[manual-smoke.md](manual-smoke.md). Behavior: [desktop picture](../features/desktop-picture.md).
 
 ### Wallpaper activation
 
@@ -431,6 +431,8 @@ format. Not covered: a real player or OS version publishing every field
 ([media integration](../features/media-integration.md#verification)).
 
 ## UserAssets
+
+Behavior: [user files](../features/user-files.md).
 
 `UserAssetStoreTests` — importing a file or directory property into managed
 staging (extension filters, one-level directories, file-count limit, no second

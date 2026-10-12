@@ -76,7 +76,7 @@ referenced across renderer replacement gaps. Ejecting the current wallpaper rest
 desktop while preserving other desktops' posters, and normal stop/quit restoration still
 restores all original selections using the existing journal and external-change checks. The
 rest of the poster service (how it resolves originals, confirms writes and restores at quit)
-is in [architecture](../architecture.md#desktop-wallpaper-windows-and-private-api-handling).
+is in [desktop picture](desktop-picture.md).
 
 ## Storage and verification
 

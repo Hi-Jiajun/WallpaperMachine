@@ -8,14 +8,15 @@ for them.
 
 ## What the user sees
 
-- [Live preview](control-panel.md#live-preview) runs an installed project in its
+- [Live preview](wallpaper-properties.md#live-preview) runs an installed project in its
   own window and temporary website data store, with independent playback and
   default mute. It never replaces the desktop page or its stored state.
 - Web wallpapers import, download and apply like scene and video wallpapers, and
   their user properties (combos, sliders, colors, text, booleans) are edited in the
   same inspector. Apply pushes the committed values into the running page.
 - Play/Pause, the presentation policy (occluded desktop, display sleep, session
-  lock), display assignment, mirroring, and Space posters apply to web wallpapers
+  lock), display assignment, mirroring, and Space posters
+  ([desktop picture](desktop-picture.md)) apply to web wallpapers
   the same way they apply to renderer wallpapers. Occlusion is per display: a
   window covering the wallpaper on one screen suspends that page and leaves the
   page on another screen running.
@@ -208,119 +209,10 @@ cover. Pages must tolerate absent metadata and timelines.
 
 ## User-selected files and folders
 
-`file` and `directory` wallpaper properties let the page read a file the user chose
-from anywhere on disk. A `WKWebView` only grants `file://` reads below the root passed
-to `loadFileURL(_:allowingReadAccessTo:)`, and that root has to be an ancestor of the
-entry page, so a page can never read outside its own project folder; widening the
-root to a common ancestor would hand every wallpaper the whole application-support
-tree. A symlink placed inside the root is resolved by WebKit and refused, a hard link
-is not. Those two measured facts fix the design:
-
-- **Managed store.** `App/Services/UserAssets/ManagedUserAssetStore.swift` holds the
-  app's own copy of each chosen file under
-  `~/Library/Application Support/WallpaperMachine/UserAssets/` (`WALLPAPER_MACHINE_HOME`
-  relocates it), laid out as `<stableWallpaperId>/<propertyId>/<assetId>/<fileName>`
-  with a `manifest.json` per wallpaper. The manifest, not the wallpaper package, is
-  the system of record: asset id, the user's original path, size, modification time,
-  a SHA-256 content digest, and whether the import was a file or a folder. Keying on
-  the stable wallpaper id rather than the display name or entry file name lets an
-  import survive a Workshop update or a delete-and-re-download. Import clones the
-  file with `clonefile` where the filesystem supports it and copies otherwise; the
-  user's original is never moved, renamed or written to. The modification time is
-  kept in full precision (`modifiedReferenceTime`) so an unchanged selection can skip
-  hashing after relaunch.
-- **Derived bridge.** `App/Services/UserAssets/UserAssetStore.swift` keeps a bridge at
-  `<project>/.mwe-user-assets/<propertyId>/`, a hard link onto the store's copy when
-  the project shares its volume and a byte copy when it does not. It exists only
-  because of the WebKit read-access rule and holds nothing of its own: deleting all of
-  it loses nothing, because the next import rebuilds it from the manifest. Data flows
-  store → bridge only, and the dot directory is the only thing created inside the
-  project. A bridge written by this app carries a hidden `.managed-by` marker naming
-  its wallpaper. A bridge without one, left by an older build, is absorbed into the
-  store once and only when the property's original no longer resolves; nothing in the
-  old location is deleted, the manifest records the migration, and a failed copy
-  leaves the old entry loading as before.
-- **Missing originals.** An asset whose original path no longer resolves but which is
-  still in the store stays usable, served from the store. One that is in neither place
-  is reported as missing (`assetMissing` on the property descriptor), never silently
-  cleared.
-- **Value handed to the page.** The staged absolute path with its leading `/`
-  removed and `%`, `#` and `?` percent-escaped, so the page's `'file:///' + value`
-  resolves. Spaces, non-ASCII, `+`, `&` and `'` stay literal, because a page that
-  treats the value as a plain path must still see them.
-- **Accepted files.** Only image (`jpeg jpg png pnga bmp gif svg webp`) and video
-  (`webm ogg ogv`) extensions are staged, case-insensitively; a property that
-  declares no file type accepts the union of the two, never an arbitrary file. A
-  folder is read one level deep and capped at
-  `UserAssetStore.defaultDirectoryFileLimit` (4096) entries; hitting the cap is
-  reported rather than silently dropping files.
-- **Watching.** A `fetchall` folder is watched with FSEvents, never polled. A burst
-  of changes is debounced into one added/removed diff, which re-stages added or
-  rewritten files, drops the links for removed ones, and reaches the page as
-  `userDirectoryFilesAddedOrChanged` / `userDirectoryFilesRemoved`. An unavailable
-  directory, an unreadable matching file or a failed manifest write preserves the
-  last committed list and bytes; pruning happens only after the new manifest is
-  durable.
-- **Concurrency.** `UserAssetWorker` enumerates, hashes, copies and publishes bridges
-  off the main actor. A newer selection cancels the previous preparation, and one
-  asynchronous turn per managed root and wallpaper serializes preparation,
-  publication, permission changes and purge across store instances, so a stale
-  preparation cannot overwrite a newer selection. Copies publish from private
-  temporary files, so cancellation never deletes another import's copy.
-- **Lifetime.** The store outlives the project, the bridge outlives the process, the
-  in-memory index does not. `WebWallpaperHost` re-imports on next use (which rebuilds
-  a missing bridge) and discards the store handle for a project nothing displays any
-  more. Changing the pick replaces that property's assets in both places; clearing a
-  property removes them from both.
-  `python3 scripts/clean.py --user-assets` removes every `.mwe-user-assets` bridge in
-  the imported library and the Steam workshop folder, which the app rebuilds on next
-  load. `--managed-user-assets` is the destructive one: it deletes the app's own
-  copies, which nothing regenerates. Neither the default pass nor `--all` nor
-  `--derived` reaches either of them.
-- **Storage settings.** Settings → Storage → *Wallpaper files you chose* shows the
-  managed directory, reveals it in Finder, and **Clear unused caches…** reclaims only
-  stored bytes no manifest still lists: an orphaned `assetId` folder, a property the
-  manifest no longer mentions, a wallpaper folder with no manifest. A referenced asset
-  is never a purge candidate, which matters most for the property whose original has
-  gone and whose stored copy is now the only one. A missing manifest is distinct from
-  an unreadable, damaged, foreign or unsupported manifest; the latter blocks purging
-  or replacing that wallpaper's files, is logged and skipped, and the purge continues
-  with the others.
-- **Lock screen and screen saver.** The sandboxed extension
-  (`Extension/WallpaperExtension.entitlements`) cannot read the store or the bridge.
-  For a committed **video or scene** wallpaper, the assets it actually references are
-  republished into the lock-screen exchange directory as their own
-  `revisions/<fingerprint>/` tree and the property values are rewritten to point at
-  that copy; the fingerprint covers the recorded content digests, so an unchanged
-  selection is not copied again, and revisions the published configuration no longer
-  names are collected after each successful publish. Web projects get a separate
-  read-grant root holding only their referenced managed files; see
-  [lock-screen.md](lock-screen.md#storage).
-
-### In the inspector
-
-A `file` property shows a read-only field with the chosen file's own name (never the
-staged path the page reads), a *Choose…* button, a *Clear* button, and the extensions
-the property accepts, taken from its `fileFilter`. An absent filter means the author
-declared no file-type option, which the protocol defines as both kinds it knows, so
-both lists are offered.
-
-A `directory` property adds how many files in the chosen folder the importer would
-take, whether the folder holds more than the import limit, and what the wallpaper does
-with them: a `fetchall` folder is handed to the page whole, an `ondemand` folder is
-one the page picks from itself. The count is the panel's own measurement of the
-chosen folder, applying the importer's screens (first level, accepted extensions, no
-hidden entries, regular files only, readable only), and is kept until the chosen path
-changes. It describes the folder, never the outcome of an import the panel cannot
-observe: a single entry whose link and copy both fail is skipped and logged by the
-importer. A folder that cannot be read is reported as unreadable rather than empty.
-
-Both persist through `setPropertyPath`; *Clear* sends `nil` and the engine writes the
-property's own default back. A choice the app cannot honour (a wallpaper folder that
-is missing or read-only, so nothing can be staged inside it) is reported beside that
-control rather than in the window-wide banner, and the path is not sent. `texture` and
-`scenetexture` properties are a separate kind: they keep the scene texture picker and
-are refused by the path editor.
+`file` and `directory` properties let the user give a page a picture, a clip or a folder of
+them from anywhere on disk. The app keeps its own copy and stages it where WebKit lets the
+page read it; the storage, the value the page receives, folder watching and the inspector
+control are in [user-files.md](user-files.md).
 
 ## Page sound
 
@@ -357,10 +249,10 @@ never substitutes Pause for an unavailable mute.
 The page host is tested against a real offscreen `WKWebView` with no desktop window
 (`Tests/Unit/WebWallpaper/`: module loading, late-listener replay, local request
 metadata, pause composition, suspension, navigation lockdown, forwarded pointer
-events, mouse routing policy), the inspector side in
-`Tests/Unit/Panel/WebPanelAssetPropertiesTests.swift`, and the bridge contract in
+events, mouse routing policy) and the bridge contract in
 `upstream/renderer/crates/bridge/src/tests/` (`apply_options.rs`,
-`file_properties.rs`, `web_audio_media.rs`); the domain inventory is in
+`web_audio_media.rs`); file and directory properties are covered under
+[user files](user-files.md#verification), and the domain inventory is in
 [coverage](../testing/coverage.md). Show Desktop and Space transition smoothness,
 real hover and window-server routing on a desktop, audible output and mirror audio
 handoff need an authorized manual run.

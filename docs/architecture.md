@@ -75,7 +75,7 @@ separate WebKit page or a private Compatibility renderer attached to an ordinary
 view (`App/Bridge/WallpaperPreviewBridge.h` imports the scene C API), never an engine display
 assignment. The bridge's read-only preview export supplies the draft inputs, and preview
 shutdown precedes renderer shutdown. Playback limits are in
-[live preview](features/control-panel.md#live-preview).
+[live preview](features/wallpaper-properties.md#live-preview).
 
 ### Control panel: WKWebView and the JavaScript bridge
 
@@ -209,52 +209,14 @@ and `BridgeStoreDisplayLayouts`; `WallpaperDisplayLayoutStore` owns only saved w
 choices, while playlists, properties and display topology stay with their existing owners. See
 [display layouts](features/display-layouts.md).
 
-Swift keeps the *system* wallpaper consistent with that window:
+Swift keeps the *system* wallpaper consistent with that window. `DesktopWallpaperSync` encodes real
+renderer output into JPEG posters and installs them as the static desktop picture that Mission
+Control shows; `DesktopWallpaperLedger` journals the user's original per-Space wallpaper before the
+first write and restores it on quit; `DesktopSpaceWallpaperAPI` reaches the per-Space getter and
+setter through optional private CoreGraphics and HIServices symbols, falling back to the public
+`NSWorkspace` API. Timing, refusals, macOS 27 behavior and the quit wait are in
+[desktop-picture](features/desktop-picture.md). Two more behaviors sit above the windows:
 
-- **Private desktop-picture API.** `DesktopSpaceWallpaperAPI` `dlopen`s CoreGraphics and
-  HIServices and resolves `_CGSDefaultConnection`, `CGSCopyManagedDisplaySpaces`,
-  `DesktopPictureCopyDisplayForSpace` and `DesktopPictureSetDisplayForSpace`. Every symbol is
-  optional: the initializer fails and the caller falls back to the public `NSWorkspace` API,
-  which is scoped to the visible Space. On macOS 27 the per-Space setter forwards to
-  WallpaperAgent, which applies the write asynchronously and resolves relative image paths
-  inside its own container, so paths are sent absolute there
-  (`DesktopSpaceWallpaperAPI.takesAbsolutePaths`). Its setter returns before the write is
-  applied, so the result is not an acknowledgement; when diagnosing, read back through the
-  API, because the agent's on-disk `Index.plist` can lag its in-memory store until a
-  scheduled write.
-- **Original-wallpaper journal.** `DesktopWallpaperLedger` journals the user's original
-  per-Space `DesktopPicture`, including the opaque native options blob, before anything is
-  replaced. A pathless (inherited) selection or a poster cannot bring the user's wallpaper
-  back, so before any write the ledger resolves each display's first real per-Space original,
-  then its effective image through `NSWorkspace`, then its saved journal, and finally another
-  display's original. With no recoverable original it leaves the system selection untouched and
-  reports the failure through `AppLog`; live playback continues without new posters. Posters no
-  readable desktop shows are deleted, keeping only the newest few on a display where some
-  desktop could not be read. A write that does not read back yet is unconfirmed, not refused:
-  its poster stays and the coordinator synchronizes again after
-  `DesktopWallpaperLedger.confirmationWindow`. A desktop macOS keeps refusing
-  (`DesktopWallpaperLedger.refusalsBeforePause` writes in a row) is left alone until the next
-  Space change or wake rather than rewritten on every snapshot.
-- **Posters.** `DesktopWallpaperSync` encodes real renderer output into a JPEG poster
-  (`DesktopPosterEncoder`) under `<support>/DesktopPosters`, so the static system wallpaper
-  (what Mission Control shows) matches the animated one. A new or changed wallpaper is captured
-  at once and again after `settleCaptureDelays` (3 s and 15 s), as is one that resumes after a
-  pause, a cover or display sleep; a Space change or wake applies the existing poster at once
-  and asks for a fresh frame. **Settings › General › Update the Mission Control picture every
-  5 minutes** (`PlaybackPreferences.refreshesDesktopPicturePeriodically`, off by default) adds a
-  capture every `periodicRefreshInterval`. Settling and periodic captures ask only displays the
-  presentation policy has not suspended, and a frame identical to the current poster is neither
-  encoded again nor rewritten. The experimental [Space selection mode](features/spaces.md)
-  attaches the `WallpaperSpaceMonitor` context to every request; producers echo it and the
-  coordinator rejects late frames, and public-fallback targets, which have no Space identity,
-  cannot accept scoped writes. Poster sync suspends itself while the native lock-screen provider
-  owns the desktop.
-- **Quit.** The native lock-screen service restores its selections first, then the poster
-  service restores the originals: it checks image references in the native store read-only and
-  retries asynchronous restoration for about five seconds while WallpaperAgent reloads. A
-  failure cancels the quit and restarts poster synchronization if the native provider has
-  released the desktop. A poster the store still names after every writable desktop is restored
-  is logged and does not block quit.
 - **Presentation policy.** `WallpaperPresentationPolicy` suspends or unloads presentation when no
   wallpaper pixel can reach a display, without altering the user's play/pause choice. The
   strongest global condition wins: display sleep pauses (`setPresentationSuspended`) or stops

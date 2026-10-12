@@ -8,6 +8,11 @@ a system dialog and renderer content is never loaded into the web view. The
 runtime structure (scheme handler, snapshot, action bridge, crash recovery) is in
 [architecture](../architecture.md#control-panel-wkwebview-and-the-javascript-bridge).
 
+Documented separately: the [first-run guide and support prompt](first-run.md),
+[live preview, properties, presets, image placement and the compatibility
+check](wallpaper-properties.md), [local backup and restore](backup-restore.md), and
+[app updates and What's New](updates.md).
+
 ## Language
 
 The app ships in English, Simplified Chinese (简体中文), Traditional Chinese
@@ -18,14 +23,15 @@ macOS language list) and every shipped language under its own name.
 
 - Choosing a language switches the panel immediately, without a reload, and is
   remembered. The **Import → Choose files** picker follows immediately too,
-  including a language chosen in the welcome guide. Native menus and other
+  including a language chosen in the [welcome guide](first-run.md#first-run). Native menus and other
   dialogs use the new language after fully quitting and reopening the app,
   because macOS fixes a process's localization at launch. Returning to **System
   (Auto)** hands the choice back to macOS.
 - Missing keys fall back to English. Wallpaper titles, descriptions, creator
   names, custom property labels and upstream diagnostic details remain as
   supplied; the panel translates its own labels and recognized Wallpaper Engine
-  UI tokens, not authored prose (see [Properties](#properties)). Steam filter
+  UI tokens, not authored prose (see
+  [Properties](wallpaper-properties.md#properties)). Steam filter
   values and bridge action identifiers do not change when labels are translated.
 
 How the language is resolved, how the layers fit together and how to add a
@@ -39,7 +45,7 @@ language: [Localization](../localization.md).
 | Top bar | Sits in the window's title-bar strip beside the traffic lights: tabs on the left, the product mark and name centered, target-display picker and a downloads button (only while there is download activity) on the right. In windows up to 840px wide the name hides and only the mark stays. Its background drags the window and follows the system double-click action |
 | Browser column | Filter button, search field, sort menu, tile grid, result summary, and on Discover the Workshop pagination with an editable page number. A Discover page is one Steam page of 30 tiles, at most 1,000 pages |
 | Left sidebar | Filters on every library page, mirroring Wallpaper Engine's sidebar: Show only, Type, Age rating, Resolution and Tags tick boxes on Discover; the same boxes minus Resolution (plus Favorites, Active and Update available in Show only) on Installed, applied to the library in the page; the pixiv account and pixiv's own filters on pixiv. The toolbar's Filter button opens and closes it, and that choice is remembered per page across launches |
-| Inspector | Preview, title, kind, creator, actions, tags, and the selected wallpaper's options and properties. Its width is a function of the window width alone and cannot be dragged: 260px at the 760px minimum, growing with the window to 420px from about 1830px (`--inspector-width` in `panel.css`), the same on Discover and Installed. Nothing is stored, so a given window size always yields the same layout. The preview is capped at 220px, or 180px in windows up to 640px tall |
+| Inspector | Preview, title, kind, creator, actions, tags, and the selected wallpaper's options and properties ([wallpaper properties](wallpaper-properties.md)). Its width is a function of the window width alone and cannot be dragged: 260px at the 760px minimum, growing with the window to 420px from about 1830px (`--inspector-width` in `panel.css`), the same on Discover and Installed. Nothing is stored, so a given window size always yields the same layout. The preview is capped at 220px, or 180px in windows up to 640px tall |
 | Activity bar | Global pause/resume, import activity and unseen results, download progress (not a playback timeline). Playback remains available when any display has an assignment, even if the target display is empty; with no assignments it is disabled and reports **No wallpaper playing**. Long summaries truncate visually but keep their full accessible names |
 
 In full-screen mode and either Split View tile, the top bar stays in the content
@@ -85,95 +91,6 @@ named icon button. Errors keep their original details and **Dismiss**;
 **Reconnect** is offered only before the first snapshot or when the native bridge
 is unavailable, not for an ordinary operation failure.
 
-## First run
-
-The first time the panel opens, a guide covers the whole window, top bar included
-(`WebUI/welcome.js` + `welcome.css`; `#welcome` is fixed-position over the app and
-inherits its light/dark surfaces). It is a page, not a modal dialog; the download
-dialog can still open over it for an unrelated job. Background app regions are
-inert while the guide is open, and the body scrolls independently of the footer so
-it stays reachable at the 760×560 minimum. Steps can be jumped to freely except
-while language, appearance, the lock screen, performance or preferences are being
-committed; later pages have **Back**, and decision pages have **Skip**:
-
-1. **Language & appearance.** Radio tiles for the language (**System (Auto)** plus
-   every shipped language under its own name) and the appearance mode (**System
-   (Auto)**, **Light**, **Dark**, each with a drawn miniature). A choice applies at
-   once through the `languageSetting` / `themeSetting` actions, so the page
-   repaints in the chosen language and theme. **Skip** puts back whatever was in
-   force when the guide opened and moves on.
-2. **Steam.** Explains that browsing is free and that downloading needs a Steam
-   account that owns Wallpaper Engine, with **Create a Steam account**
-   (`store.steampowered.com/join/`) and **Buy Wallpaper Engine** beside that
-   explanation. The form takes the account name (login name, not profile name),
-   the password (with a show/hide toggle) and **Keep me signed in on this Mac** (on
-   by default). **Sign in** sends only the account name and the remember choice
-   (`steamSignIn`); the password is held in the page until Steam's own password
-   prompt arrives on the sign-in job and is then submitted through `downloadInput`
-   exactly once. It is never part of a snapshot, the login-start payload or DOM
-   markup. Without SteamCMD the button reads **Install SteamCMD and sign in** and
-   the page installs it first (`setupInstall`, with the Gatekeeper approval and
-   locate-a-copy paths when they apply). Steam Guard is shown with the same guides
-   as the download dialog; **Cancel** stops the session. After sign-in the guide
-   checks Wallpaper Engine ownership and shows **Signed in as …** with the result
-   and **Use a different account** (`logOutSteam`). Non-owners see **Buy Wallpaper
-   Engine** and an explanation that pixiv downloads, Workshop browsing and viewing
-   existing wallpapers remain available; an inconclusive result is labeled
-   unconfirmed. Both offer **Check ownership again** and allow **Continue**, and
-   saved accounts from an earlier run can also be checked. **Skip for now** (or
-   **Skip and cancel sign-in** while a job or setup request is pending) leaves
-   Steam for the first download to ask about. A Steam Guard request arriving on
-   another page marks the Steam step with a shield without changing pages. See
-   [Steam sign-in](workshop-downloads.md#steam-sign-in) for the session itself.
-3. **Performance.** Radio tiles for the **Low**, **Medium** and **High** quality
-   presets (the same pairs as [Settings → Performance](performance.md#quality),
-   shared through `settings.js`), then the **Frame rate limit** slider, whose top
-   reads **No limit** (see
-   [Default per-display frame rate](performance.md#default-per-display-frame-rate)).
-   High, no limit at full render scale, is selected on a fresh install. A preset
-   fills both drafts; moving the slider changes only the limit, and a pair matching
-   no preset leaves every tile unchecked with a **Custom** note. They are drafts:
-   **Continue** sends only what changed as `setting` / `renderScale` and `setting`
-   / `frameRateCap`, **Skip** discards them.
-4. **Preferences.** Launch at login and Keep windows in place when clicking the
-   wallpaper are switches. **On battery** is a menu: Keep running, Reduced quality
-   or Pause. They are drafts: **Continue** commits only the ones that changed
-   (`setting` actions, including `batteryMode`), **Skip** discards them. Launch at
-   login is disabled with its reason while the app is outside Applications.
-   Started at login, the app stays in the menu bar without opening the panel,
-   unless this guide is unfinished or the renderer failed to start
-   (`ControlPanelLaunch`). When renderer settings are unavailable the page says so
-   and disables the controls.
-   The last row, **Animate lock screen** (off by default, marked experimental), is
-   not a draft: like Settings it sends `setting` / `lockScreenEnabled` at once,
-   shows the native status while busy, is disabled when the integration is
-   unavailable, and a refusal leaves the switch off with the reason on the page.
-   **Skip** puts it back to the value it had when the guide opened. During a
-   preference or lock-screen commit, Back, step navigation, Skip and Continue are
-   all disabled so the guide cannot leave a partially submitted operation.
-5. **Tips.** Three one-line tips (Discover, download then double-click to apply,
-   one wallpaper per display), then a compatibility card: not every wallpaper works
-   (videos usually play, scenes are experimental, Application wallpapers cannot
-   run), failures are reported with the inspector's report button, and pull
-   requests are welcome, with **Report an issue** and **Contribute on GitHub**
-   links.
-6. **Start.** A recap of language, appearance and the actual Steam sign-in state.
-   Pending jobs or setup requests offer **Finish sign-in**. Unsaved performance or
-   preference drafts each add a cell with their count and **Review**, which returns
-   to that page without discarding them; closing does not auto-save the drafts.
-   **Browse the Workshop** opens Discover, **Import wallpapers** opens the import
-   popover on Installed, and **Start using the app** simply closes it.
-
-Leaving the guide by any of the closing actions is stored natively
-(`WebPanelController.welcomeSeenKey`, sent as the `welcomeSeen` action and reported
-in every snapshot), so the guide is shown on its own exactly once per Mac.
-**Settings → Library & Steam → Welcome guide → Show again** brings it back from the
-first page; closing it then does not touch the stored flag. Every link passes the
-same external-URL allowlist as every other link in the panel. While the guide is
-open the panel's document-level handlers stay out of `#welcome`, and the download
-dialog does not surface the sign-in job's prompts (the guide answers them). A
-finished sign-in-only job is not listed as a download.
-
 ## Tabs
 
 - **Discover** browses the Steam Workshop. See [Workshop downloads](workshop-downloads.md).
@@ -198,11 +115,12 @@ finished sign-in-only job is not listed as a download.
     one ([Per-wallpaper energy rating](performance.md#per-wallpaper-energy-rating)).
   - **About** leads with the app version (`MARKETING_VERSION` in `project.yml`) and
     the Git revision. **Check for Updates** reads the latest GitHub Release;
-    download and restart-install happen only after confirmation (contract:
-    [release](../release.md#what-the-in-app-updater-expects)). The application
-    menu item **Check for Updates…** opens this section.
-  - **Storage** ends with **Troubleshooting**: Detailed logging and the diagnostics
-    report export. See [Logs and diagnostics reports](diagnostics.md).
+    download and restart-install happen only after confirmation (see
+    [updates](updates.md)). The application menu item **Check for Updates…** opens
+    this section.
+  - **Storage** holds [Backup](backup-restore.md) and ends with
+    **Troubleshooting**: Detailed logging and the diagnostics report export. See
+    [Logs and diagnostics reports](diagnostics.md).
 
 Settings use lightly bounded, keyed groups with dividers between related rows.
 Rows wrap within their available width, and below a 480px content width controls
@@ -225,40 +143,6 @@ on the last native navigation section from the existing library, playback and
 download stores; page-local scrolling, filters, disclosures and uncommitted input
 start fresh. Imports and Workshop downloads run in app-owned stores, so releasing
 the page never cancels them.
-
-## After an update
-
-On the first launch of a newer version, a separate, nonmodal **What’s New** window
-shows the installed version and every release since the last announced version,
-newest first. It opens with a 760 × 720-point content area and resizes down to
-600 × 480. **English / 简体中文** tabs display one translation at a time for every
-release; the initial tab follows the app’s effective language (Settings → General
-→ Language, including **System** matching, not the bundle’s launch-time language):
-Simplified or Traditional Chinese uses Simplified Chinese notes, English or
-Japanese uses English notes. Switching tabs returns to the top of the notes and
-does not change the interface language. Notes come from the bundled
-`CHANGELOG.md`, so they work offline and cannot describe a newer remote release;
-generation and translation are owned by
-[the release pipeline](../release.md#release-notes-and-the-changelog).
-
-**Don’t show this window after updates** saves immediately and suppresses all
-future automatic post-update windows; it does not disable update checks or hide
-the release notes in Settings → About. Closing the window, including Command-W,
-leaves WallpaperMachine running. Ordinary relaunches, fresh installs, downgrades
-and returning to an already announced version do not show the window.
-
-`WhatsNewStore` persists the highest announced version
-(`WallpaperMachine.whatsNew.lastVersion`) and the opt-out in the app’s
-preferences. A Mac with no recorded version that has already completed or skipped
-the welcome guide is treated as an existing user and sees only the installed
-release’s notes, without an invented previous version; a fresh installation and
-the permanent opt-out record the version without a window. When the bundled
-history has no section for the installed version, `announcement` returns nil
-*without* recording the version, so the next launch repeats the check: recording
-on a miss would consume the announcement and a later bundle containing the notes
-would never show them. The bundled history is strict: every `##` heading must be
-a semantic version, so `## Unreleased` or a `##` line inside notes fails the whole
-file and the window does not appear (publishing rejects that file first).
 
 ## Thumbnail corner marks
 
@@ -311,7 +195,8 @@ installed wallpapers the circular play button overlapping the preview is **Apply
 wallpaper** (or **Reapply wallpaper**); **Download** remains a full-width action on
 Discover. The utility row holds **Show in Finder**, favorites and Trash on
 Installed, or **View on Steam Workshop** on Discover. The inspector scrolls
-independently; **Apply changes** and **Revert** stay visible in a fixed footer
+independently; **Apply changes** and **Revert** (see
+[Properties](wallpaper-properties.md#properties)) stay visible in a fixed footer
 while editing.
 
 Below the compatibility note, an installed wallpaper that can run (not
@@ -324,46 +209,6 @@ place with **Report this problem on GitHub**, whose issue also carries the error
 an apply failure stays until an apply succeeds. Nothing is submitted by the app:
 the user edits and sends the issue on GitHub. Neither is shown when the snapshot
 carries no `https` repository URL.
-
-## Live preview
-
-An installed scene, video or Web wallpaper has **Preview wallpaper** in its
-details. It opens one ordinary, resizable **Wallpaper Preview** window; choosing
-another preview replaces that window's content. A preview never applies to a
-display, changes the panel's selection, consumes a playback-history entry or saves
-options. It reads the current property draft, including text still being edited,
-and the target display's scaling options; **Reload preview** reads them again.
-
-The window has its own **Play/Pause**, sound toggle and reload control, and every
-new preview, including reload, starts muted. Scene and video rendering is capped
-at 30 FPS or the effective lower limit when its inputs are read. Web pages receive
-that FPS through the standard wallpaper host protocol; honoring it depends on the
-page, so it is not a WebKit frame-rate guarantee. Hiding, covering or minimizing
-the window, locking the session or sleeping the displays suspends it, and resuming
-visibility preserves an explicit user pause. Closing the window cancels pending
-preparation, removes file watchers and releases its renderer or WebKit page. A
-superseded load cannot replace the newer preview. Load failures stay in the window
-with their reason and a reload action; first-frame or page readiness has a
-30-second budget while visible.
-
-Scene and video previews use a private Compatibility renderer attached to the
-window, independently of the desktop's renderer preference, and scene hover,
-buttons and dragging are scoped to that view. Web previews reuse the wallpaper
-host protocol in a separate, nonpersistent website data store and support ordinary
-in-window interaction; preview storage is discarded on close and is not the
-desktop page's localStorage or signed-in session. File and directory properties
-use the existing managed asset authorization and staging path. Audio response and
-system media information are unavailable in preview and the window says so;
-page-initiated capture, dialogs, new windows and file pickers are declined; a Web
-preview is refused if WebKit cannot establish whole-page mute; scene previews need
-the shared scene resources, just as desktop scenes do. Per-wallpaper energy
-ratings exclude the interval while a preview is open.
-
-`WallpaperPreviewSession` owns the loading and playback lifecycle,
-`WallpaperPreviewLoader` validates the installed paths, manifest and inputs, and
-`WallpaperPreviewWindowController` exists only for an explicit preview action. The
-bridge's read-only `wallpaper_preview` export keeps Web property scalar types and
-never reconciles the desktop.
 
 ## Previous and recently used
 
@@ -382,30 +227,8 @@ playlist changes are included; reapplying an unchanged assignment adds nothing.
 `WallpaperHistoryStore` saves per-display history in the
 `WallpaperMachine.wallpaperHistory` preference. It survives relaunch, is pruned
 when wallpapers are deleted in the app, and remains local to this Mac (it is not
-included in backup packages). History records successful assignment and saving; it
+included in [backup packages](backup-restore.md)). History records successful assignment and saving; it
 does not certify every frame a wallpaper subsequently displays.
-
-## First wallpaper support prompt
-
-After a wallpaper downloaded through Discover or pixiv is successfully applied by
-the user, the panel offers **Feeling good?** once. **Star on GitHub** opens the
-project repository; **Become a Supporter** opens the website's pricing page (the
-Chinese page for either Chinese app language). Both require a click. **Not now**,
-the close button and Escape dismiss the offer.
-
-The download must have finished installing, and applying must have succeeded and
-reported a new active display assignment. Downloads alone, local imports, failed
-applies, startup restoration, playlist changes, automatic update reloads and
-reapplying an already active wallpaper do not qualify. **Apply changes** also
-qualifies when it first enables the downloaded wallpaper on a display.
-
-Eligibility survives quitting between download and apply. If the panel is hidden,
-onboarding or sign-in is open, another dialog is active, or a wallpaper switch is
-in progress, the offer waits; **Hide window after applying a wallpaper** defers
-hiding for this first offer. Only a displayed offer consumes the one-time flag;
-after that it never returns automatically, including after quitting or updating.
-Opening a link neither stars the repository nor makes a payment; the user finishes
-that action in their browser. See [Supporter details](../../SPONSORS.md).
 
 ## Deleting wallpapers
 
@@ -439,7 +262,7 @@ and reinstalling the wallpaper brings the assignment back.
 - Teaching it: while a selection or selection mode is active, the summary row shows
   a tip about the gesture with **Got it**, until the user sweeps across two or more
   tiles or presses **Got it**. That is stored natively (`dragSelectLearned` action
-  and snapshot field, like `welcomeSeen`), because the panel's web storage is not
+  and snapshot field, like `welcomeSeen` in the [first-run guide](first-run.md#first-run)), because the panel's web storage is not
   persistent. Afterwards selection mode keeps a one-line reminder, and the
   **Select** tooltip and each check box's tooltip mention the gesture too.
 
@@ -550,150 +373,6 @@ selected wallpapers through **Add to collection…**, remove selected members, o
 toggle membership in the inspector. A collection filter composes with search and
 the existing filters. Deleting a collection leaves its wallpapers installed.
 Collections can feed [playlists](playlists.md#collections-and-saved-playlists).
-
-## Properties
-
-The inspector's compact **General configuration** section holds mute, volume,
-[Audio response](audio-response.md), and media integration. **Audio and media
-status** expands to show their explanations and delivery status. **Wallpaper
-properties** follows, with the wallpaper's authored controls in their original
-order. **Displays** is collapsed below them and holds per-display playback
-configuration. General, property and display disclosures retain their state across
-snapshot updates.
-
-Property rows place the label on the left and the checkbox, slider/value, combo
-menu or color swatch on the right; text and file editors use the full width below
-the label. A reset icon appears on hover, keyboard focus, or a modified row and
-restores that property's default. Checkboxes use the author's name directly.
-Recognized Wallpaper Engine label tokens (brightness, position, default, and
-similar built-in vocabulary) are localized rather than displayed as `ui_editor_…`
-identifiers.
-
-Authors use HTML labels as a layout surface. `WebUI/property-label.js` parses them
-inertly and reconstructs a small presentation allowlist: headings, paragraphs, line
-breaks, emphasis, font colors, centered content, dividers, links and images. Author
-scripts, styles, embedded documents, form controls, event handlers and panel action
-attributes are discarded. Plain labels remain available for accessibility and
-native file pickers. An empty text property is omitted; a control without a
-readable name uses **Unnamed option**, never the editor's markup-derived id.
-
-Author artwork is loaded only through registered `mwe-ui://property-image/`
-routes. `PropertyImageCache` fetches HTTPS raster images natively from the
-allowlisted image CDNs (`i.ibb.co`, `i.imgur.com`, the supported Steam image hosts
-and QQ's photo-store hosts), rechecks redirects, and rejects credentials, custom
-ports, unregistered routes, oversized images and non-raster content. PNG
-transparency and GIF animation are preserved, and repeated dividers share a
-bounded in-memory cache. At most four author-image transfers run across all hosts;
-a URL's load is shared by its consumers and cancelled when the last one goes away.
-Other image hosts are omitted (alt text is retained). Images remain author-hosted, need network access on a cache miss and are
-not copied into the app bundle. Supported author links use the native external-link
-policy, including Bilibili profile/article pages, and open only when clicked;
-unsupported links keep their text without a clickable action.
-
-Audio, scaling mode and frame rate take effect immediately. Everything else is
-pending until committed:
-
-- **Apply changes** saves pending properties and scaling factors.
-- **Revert** discards pending changes.
-
-Unsubmitted text stays with its wallpaper when navigating between pages. A dirty
-or unsubmitted control shows a localized **Modified** flag outside its
-author-provided label; Reset clears the flag once the property is clean.
-
-A `scenetexture` property's image picker fills the material slot that names it, so
-a wallpaper built around "choose your own picture" shows the picture. The choice
-takes effect on **Apply changes**, which reloads the scene; the picker stores the
-path, not a copy, so moving or deleting the file leaves that slot on the artwork
-the author shipped. A picture outside the app's own storage is not readable from
-the sandboxed lock-screen extension, which keeps the authored texture there.
-
-### Property presets
-
-**Wallpaper properties → Save current…** stores a named preset of the currently
-applied authored properties; pending edits must first be applied or reverted.
-Choose a preset and **Apply**, rename or delete it, or export/import its versioned
-JSON document. Import saves a new preset and never applies it automatically. These
-are wallpaper-specific property presets, not the Performance quality tiers.
-
-Application validates every saved property against current types, limits and
-choices before staging edits. Default markers follow the author's current default.
-File and directory edits join the same draft transaction, and a failed application
-restores draft and selection-permission state. Managed attachments are retained
-independently of the current property under `UserAssets/PresetAssets`; deleting a
-saved preset does not delete a directory still used by an applied wallpaper, and
-ordinary cache cleaning leaves these retained originals alone.
-
-Presets can switch a mode and set fields that mode enables. All values and
-resources are validated first; enabled mode controls are edited before dependent
-fields, and the bridge reevaluates authored conditions after each draft edit. If a
-target field remains disabled, the draft is reverted without applying it.
-
-Portable documents embed up to 32 MB of managed attachments, within a 48 MB
-document limit. Hidden files in retained directories (such as Finder metadata) are
-excluded from portable exports. Preset names accept 1–120 characters. Arbitrary
-external paths do not grant access on import: select external originals through
-the property editor. Missing resources, incompatible author changes, malformed
-documents and filesystem-aliasing filenames are errors, not partially applied
-presets.
-
-### Image placement
-
-App-generated imported pictures and saved pixiv pages show **Position on screen**.
-Drag the preview or use its keyboard/position controls and 100–300% zoom; each
-target display keeps its own placement. **Reset to Image fit** restores the
-Fit/Fill/top-aligned behavior. Original image bytes are unchanged, and changes
-reach the running page through properties without resetting its document. An
-app-generated page from an earlier template is upgraded once, and only if its
-provenance, resources and exact unmodified template match; authored or modified
-HTML is never rewritten.
-
-### Compatibility check
-
-An installed wallpaper's **Compatibility check** reads entry/shared resources and,
-for video, asynchronously checks native admission for the selected display and
-frame-rate constraints. Checks are explicit and version/configuration-bound.
-Unknown scene shader/graph or Web runtime behavior remains **unknown**; readable
-files and video metadata are not proof of a displayed frame. The same card shows
-the actual running backend and fallback reason when the runtime reports them.
-
-## Local backup and restore
-
-**Settings → Storage → Backup** exports a versioned `.wmbackup` directory package
-containing renderer/wallpaper settings, allowlisted preferences (collections,
-plans, presets, favorites, image placements, display layouts, automatic-selection
-rules and solar coordinates included), and retained UserAssets. Handled automatic
-events and temporary Focus recovery state remain local and are cleared on
-successful restore; rollback restores their original values. **Include the
-wallpaper library** also copies installed projects. Login sessions, passwords,
-keychain entries, logs, caches and shared scene resources are excluded, and the
-local scene-assets selection stays local and may need to be selected again. Only
-preferences saved in the app’s persistent domain are included; inherited system
-languages and registered defaults are excluded, including during conflict checks
-and rollback. Export checks the complete manifest size before copying payload
-bytes and supports the full 48 MB preset archive limit.
-
-Choose a backup to preview its contents, conflicts and missing-resource warnings.
-**Keep what is on this Mac** preserves conflicting per-display playlists, their
-deadlines and automatic-selection configurations as whole records; independent
-records can be imported. **Replace with the backup** replaces conflicts. Confirmed
-restoration is staged for the next launch, before stores or the renderer read
-settings; nothing changes in the running session, and the app does not quit or
-restart automatically.
-
-Packages reject traversal, links, special files, ambiguous filenames, changed
-bytes and unsupported configuration schemas. Publication is journaled and rolls
-back on failure. A failed pending restore is shown in Storage and is not retried
-every launch without explicit reconfirmation; **Cancel restore** removes staging.
-Managed resource paths relocate, while ordinary property text stays unchanged.
-Backed-up copies are portable; original external files are read or watched only
-after a matching local authorization or an explicit reselection, so restoring
-metadata alone cannot authorize a wallpaper to read another folder on this Mac.
-Scene texture overrides and authored defaults that had only retained copies are
-rewritten to the exact validated retained file, because the scene renderer opens
-paths directly rather than going through the Web asset host; original paths stay as
-provenance only. A retained directory without a directly usable scene resource, or
-a keep-existing asset tree missing the matching bytes, cannot authorize a scene
-reference and is rejected before publication.
 
 ## Downloads and import
 

@@ -1,7 +1,7 @@
 # Versioning and releases
 
-Version numbers, the pipeline that publishes a build, the notes it writes, and how
-the in-app updater consumes it. Build mechanics live in [build.md](build.md). To cut
+Version numbers, the pipeline that publishes a build, the notes it writes, and what
+the in-app updater expects of a release. Build mechanics live in [build.md](build.md). To cut
 a release, follow the [checklist](#checklist-for-a-release); when one fails, see
 [Recovering a failed release](#recovering-a-failed-release).
 
@@ -212,10 +212,8 @@ set, into the working-tree `CHANGELOG.md` before anything is built. English-only
 or malformed source history fails the run instead of being published.
 
 The marker is a contract: the updater shows everything above it and nothing
-below. The What's New window reads the bundled changelog, not that footer. A
-launch whose bundled history has no section for the installed version does not
-record that version as announced, so a later bundle can still show the window. See
-[After an update](features/control-panel.md#after-an-update).
+below. The What's New window reads the bundled changelog, not that footer; how the
+app announces an update is in [After an update](features/updates.md#after-an-update).
 
 Writing a section is idempotent — rerunning replaces the section for that
 version instead of duplicating it. `--rebuild-changelog` writes a section for every
@@ -466,106 +464,53 @@ not rewritten.
 
 ## What the in-app updater expects
 
-**Settings -> About** is the in-app update surface. It checks the repository's
-latest GitHub Release and, after confirmation, downloads the disk image and
-restart-installs the app from it. **Check for Updates…** in the application menu
-opens that section and starts the same check.
+**Settings → About** installs updates from the repository's latest GitHub Release.
+What the app does with one (when it checks, how it avoids the API quota, download,
+verification, replacing the running app, the What's New window) is in
+[updates](features/updates.md). This section is the publish-side contract: what a
+release has to carry for that to work.
 
-A check reads the release's update manifest, not the REST API: anonymous API
-requests are limited to 60 an hour per public IP, shared with every app and device
-behind that address. `https://github.com/WallpaperMachine/WallpaperMachine/releases/latest/download/WallpaperMachine-update.json`
-is a release asset download: github.com redirects it to the file on the release
-marked Latest (drafts never resolve), and it does not count against that limit. The
-manifest is the release object in the API's shape (`tag_name`, `html_url`,
-`prerelease`, `body`, and one asset with `browser_download_url`, `size` and a
-`sha256:` `digest`), written by `scripts/update_manifest.py` in Build's `publish`
-job, so `GitHubReleaseParser` reads both. Its name is
-`AppUpdateConfiguration.manifestName`; renaming it changes both sides at once.
-The API is asked only when the Latest release has no manifest (404) or an
-unreadable one; a manifest that is rate-limited, fails or redirects off the
-GitHub hosts below is an error, not a reason to spend an API request.
+The update manifest, `WallpaperMachine-update.json`, is an asset of every release.
+`scripts/update_manifest.py` writes it in Build's `publish` job from the tag, the
+notes file that becomes the release body and the image bytes, and
+`scripts/publish_release.py` attaches it. It is the release object in the REST
+API's shape: `tag_name`, `html_url`, `prerelease`, `body` and one asset with
+`name`, `browser_download_url`, `size` and a `sha256:` `digest`. The app reads it
+from `https://github.com/WallpaperMachine/WallpaperMachine/releases/latest/download/WallpaperMachine-update.json`,
+which github.com redirects to the file on the release marked Latest. A draft never
+resolves, and `publish_release.py` makes the release public only after the image,
+sidecar and manifest are uploaded. The name is
+`AppUpdateConfiguration.manifestName`; renaming it changes both sides at once. The
+script refuses a tag that is not `vx.y.z`, a repository that is not `owner/name`
+and an image not named as below.
 
-The app checks at launch once the library has loaded (whether or not it loaded
-cleanly), every six hours after, since a menu-bar app can run for weeks, and on
-**Check for Updates**. Unattended checks only discover updates: one alert offers
-**View Update**, which opens About, or **Later**; downloading still requires
-**Download Update**. Each version prompts once per launch. An update the user has
-already downloaded can offer **Restart to Update**. After **Later**, the status
-menu keeps the available or ready update until the app restarts. The install runs
-the *running* version's code, so a change to the installer reaches users only
-after the update that carries it.
-
-The contract it relies on:
+What a release must satisfy:
 
 - the repository is `WallpaperMachine/WallpaperMachine`
   (`AppUpdateConfiguration.repository`). Builds up to 1.0.0 still ask for
   `bobbyhuang-dev/WallpaperMachine` and reach it only through GitHub's rename
   redirect, so never create a repository at that old path;
-- the release is not a draft or prerelease, and its tag parses as `vx.y.z` (no
+- the release is not a draft or prerelease, and its tag is `vx.y.z` (no
   prerelease suffixes, no `nightly`);
-- the asset named exactly `WallpaperMachine-<x.y.z>-arm64.dmg` — what
+- the disk image is named exactly `WallpaperMachine-<x.y.z>-arm64.dmg` — what
   `AppUpdateConfiguration.assetName(for:)` returns and what `scripts/package.py`
-  produces — is preferred, then another product disk image naming `arm64`, then
-  any product disk image. Only `.dmg` assets qualify: the `.sha256` sidecar, zips,
-  feeds and blockmaps are never downloaded;
-- downloads are restricted to HTTPS on `github.com`, `api.github.com` and the
-  `objects`, `release-assets` and `github-releases` hosts under
-  `githubusercontent.com`, for the manifest as for the image, and the image's
-  `sha256:` digest (from the manifest, or from GitHub when the API is asked) is
-  verified; an image that comes without a usable `sha256:` digest is refused as
-  unverifiable, never installed unchecked;
-- the image is attached read-only and out of sight (`hdiutil attach -nobrowse
-  -readonly -noautoopen`) at a private mount point, its single
-  `WallpaperMachine.app` is copied out with `ditto` without following the
-  `Applications` link, the image is detached whatever happens, and the copy must
-  carry `app.wallpapermachine` and its executable before the restart-install
-  replaces the running app. Preparation runs on a worker actor, reports a busy
-  state and can be canceled; cancellation stops the process, detaches the image
-  and removes its staging directory;
-- the restart-install waits for the app to exit, copies the new app beside the old
-  one as a hidden `.WallpaperMachine.app.update-<pid>`, renames the old one aside,
-  moves the new one in and only then deletes the old one. Any failed step puts the
-  old app back, removes the partial copy and reopens whichever version is in place,
-  so a failed install relaunches the previous version rather than leaving no app.
-  One kernel file lock (the hidden `.WallpaperMachine.app.update.lock`, kept for
-  reuse) owns each destination for the helper's lifetime; the app cancels the
-  helper if quitting times out and enables Retry only after cancellation confirms
-  the old helper has stopped;
-- the installed copy must live in `/Applications` or `~/Applications`, and this
-  user must be able to write both the bundle and its folder. A copy anywhere else,
-  or one a standard account cannot replace (for example installed by an
-  administrator), opens the downloaded image after the download, so Finder shows its
-  drag-to-Applications window for a manual install;
+  produces (`image_name` in `scripts/lib/dmg.py`). The app can fall back to another
+  product `.dmg`, but never downloads the `.sha256` sidecar, zips, feeds or
+  blockmaps;
+- the manifest's asset carries a `sha256:` digest of the image and a
+  `browser_download_url` on github.com, both derived by `update_manifest.py`; the
+  app refuses an image it cannot verify;
 - releases are signed with the project certificate
   ([build.md](build.md#release-signing)), so the replacement keeps the designated
   requirement and macOS keeps the app's privacy permissions;
-- the release body is shown as **What's new** in the About card. Headings become
-  section titles, bullets become lines, Markdown emphasis, code fences and commit
-  links are reduced to their text, the compare link is dropped, and everything
-  from `<!-- release-notes-end -->` onwards is ignored. A body with nothing to
-  say produces no card rather than an empty one.
+- the release body is the English notes above `<!-- release-notes-end -->`
+  ([Release notes and the changelog](#release-notes-and-the-changelog)); the app
+  shows what is above the marker as **What's new** in About and ignores the rest.
 
-A completed check has two normal no-update outcomes: a latest release at or
-below the running version is **Up to date**, and a repository without an eligible
-published release shows **No published update is available yet. You can keep
-using this version.** Both offer **Check Again**. A fresh check clears any
-previous available release and its notes. When `/releases/latest` returns 404 the
-client checks the repository endpoint and requires a valid repository response
-before treating the release as absent; repository 404s, failed requests and
-malformed responses stay errors and are never reported as **Up to date**.
-
-With a manifest a check spends no API request; without one it spends one (two when
-`/releases/latest` is 404). A 403 with `x-ratelimit-remaining: 0`, or a 429, from
-either source is a distinct `rateLimited` error: About shows the reset time from
-`x-ratelimit-reset` (or `retry-after`), and until then every check, automatic or
-**Retry**, fails locally without a request, so retrying can't keep the shared quota
-exhausted.
-
-With no matching asset the app falls back to opening GitHub Releases for a manual
-update. Renaming the image, publishing a prerelease, or attaching only a zip
-silently breaks automatic updates; `Tests/Unit/GitHub/AppUpdateTests.swift`
-pins this behavior, including the exact published image name and an install
-from a real disk image.
+Renaming the image, publishing a prerelease, or attaching only a zip silently
+breaks automatic updates; `Tests/Unit/GitHub/AppUpdateTests.swift` pins this
+behavior, including the exact published image name and an install from a real disk
+image.
 
 ## Recovering a failed release
 

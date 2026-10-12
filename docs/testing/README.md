@@ -5,8 +5,10 @@ How this project is verified, which layer a new test belongs in, and what
 
 - [coverage.md](coverage.md) — what the native tests assert, domain by domain,
   and the limits of each claim.
-- [renderer.md](renderer.md) — headless renderer/GPU checks, probe environment
-  variables, regression areas that must stay covered.
+- [renderer.md](renderer.md) — headless renderer/GPU checks and probe
+  environment variables; the regression areas that must stay covered are in
+  [scene-regressions.md](scene-regressions.md) and
+  [runtime-regressions.md](runtime-regressions.md).
 - [manual-smoke.md](manual-smoke.md) — manual release smoke checklist
   (requires authorization; not automated).
 - [power-benchmark.md](power-benchmark.md) — how power and CPU/GPU comparisons

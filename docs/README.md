@@ -43,7 +43,9 @@ live under `testing/`.
 |---|---|
 | [testing/README.md](testing/README.md) | Test strategy, verification tiers, how to run each layer, evidence policy |
 | [testing/coverage.md](testing/coverage.md) | Domain-by-domain inventory of what the native tests assert, and their limits |
-| [testing/renderer.md](testing/renderer.md) | Headless renderer/GPU checks, probe environment variables, known regressions |
+| [testing/renderer.md](testing/renderer.md) | `check_renderer.py`, headless GPU probes and their environment variables, Rust and C++ test binaries, known limitations |
+| [testing/scene-regressions.md](testing/scene-regressions.md) | Regressions that must stay covered in what a scene looks like and does: cameras, scripts, layers, alpha, text, puppets, shaders |
+| [testing/runtime-regressions.md](testing/runtime-regressions.md) | Regressions that must stay covered at runtime: native Metal, video, continuous playback, frame pacing, audio, host and display, startup |
 | [testing/manual-smoke.md](testing/manual-smoke.md) | Manual release smoke checklist |
 | [testing/power-benchmark.md](testing/power-benchmark.md) | Configuration manifest, per-process CPU/GPU, whole-machine and package-power measurement, runtime counters, condition matrix and comparison rules for power claims |
 | [testing/verification-log.md](testing/verification-log.md) | Dated verification history, ten newest entries |
@@ -65,19 +67,26 @@ file; pass `rg -u` to search them deliberately.
 
 | Document | Purpose |
 |---|---|
-| [features/control-panel.md](features/control-panel.md) | Panel UX, live preview, playback history, local collections, property presets, image placement, compatibility checks, and local backup/restore |
+| [features/control-panel.md](features/control-panel.md) | Panel layout and language, tabs, selection versus apply, target display, filtering and local collections, recently used, deleting, downloads and import |
+| [features/first-run.md](features/first-run.md) | First-run guide and the one-time support prompt after the first downloaded wallpaper |
+| [features/wallpaper-properties.md](features/wallpaper-properties.md) | Inspector properties, live preview, property presets, image placement and the compatibility check |
+| [features/backup-restore.md](features/backup-restore.md) | The Settings → Storage backup package (settings, allowlisted preferences, chosen user files) and restoring it |
+| [features/updates.md](features/updates.md) | In-app update checks, download and verification, installing, and the What's New window |
 | [features/workshop-downloads.md](features/workshop-downloads.md) | Discover, SteamCMD setup, download queue |
 | [features/automation.md](features/automation.md) | Weekday/time/solar/appearance rules, temporary Focus choices, global shortcuts, Shortcuts actions for wallpapers/playlists/presets, and `wallpapermachine://` links |
 | [features/display-layouts.md](features/display-layouts.md) | Saved multi-display wallpaper arrangements, copy/swap, preflight and recovery, Shortcuts, backup and the per-Space boundary |
 | [features/spaces.md](features/spaces.md) | Experimental wallpaper/playlist choices by desktop UUID, visit/manual/Focus semantics, scoped poster ownership and verification limits |
+| [features/desktop-picture.md](features/desktop-picture.md) | The static desktop picture macOS shows (Mission Control, after quit): posters, the journal of originals, refused writes, macOS 27, restoring on quit |
 | [features/playlists.md](features/playlists.md) | Per-display rotation and day/night selection, local collection sources, reusable named plans, scheduling and storage |
 | [features/pixiv.md](features/pixiv.md) | pixiv tab: rankings and tag search, saving a page as a still wallpaper, pixiv sign-in and R-18 works |
 | [features/audio-response.md](features/audio-response.md) | Audio response setting, system-audio capture permission, spectrum analysis and what scene and web wallpapers receive |
 | [features/web-wallpapers.md](features/web-wallpapers.md) | HTML/JS wallpapers hosted in a web view, host protocol, limits |
+| [features/user-files.md](features/user-files.md) | Files and folders chosen for wallpaper properties: the managed copy, its lifetime and cleanup, lock-screen publication and the inspector |
 | [features/media-integration.md](features/media-integration.md) | Now-playing metadata and covers for scene and web wallpapers: the bundled MediaRemote adapter first, AppleScript as fallback |
 | [features/lock-screen.md](features/lock-screen.md) | Experimental animated lock screen and wallpaper-as-screen-saver |
 | [features/appearance.md](features/appearance.md) | Theme, accent and tone, the app icon, and brand asset generation |
-| [features/performance.md](features/performance.md) | Energy readout and per-wallpaper ratings, quality and playback settings, video backend, scene renderer and optimisation, experimental switches, renderer memory and background-work rules |
+| [features/performance.md](features/performance.md) | Energy readout and per-wallpaper ratings, quality and playback settings, video backend, experimental switches, and background work only while it has a consumer |
+| [features/scene-rendering.md](features/scene-rendering.md) | Scene renderer choice (Compatibility or Native Metal preferred), scene render optimisation, skipping frames that would repeat, renderer memory and repeated-work reduction |
 | [features/diagnostics.md](features/diagnostics.md) | Application log format and load tagging, detailed logging, retention, and the diagnostics report users attach to bug reports |
 
 ## Maintaining these docs

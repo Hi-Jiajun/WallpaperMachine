@@ -455,7 +455,7 @@ the panel.
 
 The first-run guide explains that downloads require a Steam account that owns
 Wallpaper Engine, with registration and store links ([first-run
-guide](control-panel.md#first-run)); the download dialog only asks for what the
+guide](first-run.md#first-run)); the download dialog only asks for what the
 current download still needs.
 
 The guide can also sign in ahead of any download. `WorkshopStore.requestSignIn`
