@@ -10,6 +10,9 @@ struct WallpaperEngineApp {
         ProcessSignals.ignoreBrokenPipes()
         if WallpaperImportPickerHelper.runIfRequested() { return }
         if NSClassFromString("XCTestCase") == nil {
+            // First, so a second copy never restores a backup over files the first one is using
+            // and never overwrites the running copy's session record.
+            SingleInstance.claim()
             recordSessionStart()
             do {
                 if let report = try WallpaperBackupService.applyPendingRestore() {

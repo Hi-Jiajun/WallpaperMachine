@@ -144,7 +144,10 @@ not comparable with later ones.
 For an app-level comparison, identify the exact executable PID and sum only its
 resource coalition (the app and its XPC/WebKit helpers), not every WebContent
 process on the machine. Reject windows containing another WallpaperMachine
-instance or a change in the tested presentation state. A closed-panel sample
+instance or a change in the tested presentation state. A second copy opened on
+the same library hands over to the first (or shows an alert when it is another
+copy of the app) instead of running beside it, so only copies given separate
+isolated `WALLPAPER_MACHINE_HOME` directories can run at once. A closed-panel sample
 must remain without an on-screen panel throughout; it is not a playback test.
 
 `proc_pid_rusage` supplies resident bytes and physical-footprint bytes. Report

@@ -23,6 +23,10 @@ was run.
 - [ ] Command-comma reuses the existing window.
 - [ ] Close the window with its close button and with Command-W, and reopen it
       each time, without quitting or crashing.
+- [ ] With the app running, `open -n` the same app: no second copy appears and the
+      first shows its panel. Run a copy from another folder: an alert says another
+      copy is using the library, and the running copy is untouched. After an in-app
+      update the new version starts normally.
 
 ## Appearance
 

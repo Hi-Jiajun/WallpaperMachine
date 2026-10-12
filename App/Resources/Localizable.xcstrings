@@ -3065,6 +3065,12 @@
     },
     "The asset selection failed: %@. Its permissions could not be restored: %@. Refresh before continuing." : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "The asset selection failed: %@. Its permissions could not be restored: %@. Refresh before continuing."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "素材の選択に失敗しました：%@。アクセス許可を元に戻せませんでした：%@。更新してから続行してください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "素材选择失败：%@。无法恢复其访问权限：%@。请刷新后继续。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "素材選擇失敗：%@。無法還原其存取權限：%@。請重新整理後繼續。"}}}
+    },
+    "WallpaperMachine is already running" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine is already running"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachineはすでに起動しています"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 已在运行"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 已在執行中"}}}
+    },
+    "Another copy of WallpaperMachine is using this library. Quit it before opening this one." : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Another copy of WallpaperMachine is using this library. Quit it before opening this one."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "別のWallpaperMachineが同じライブラリを使用しています。そちらを終了してから、このコピーを開いてください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "另一个 WallpaperMachine 副本正在使用同一个壁纸库。请先退出它，再打开这一个。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "另一個 WallpaperMachine 副本正在使用同一個桌布庫。請先結束它，再打開這一個。"}}}
     }
   },
   "version" : "1.0"

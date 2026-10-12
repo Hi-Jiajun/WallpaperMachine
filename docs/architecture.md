@@ -91,6 +91,13 @@ automation schedulers, the web and native-video wallpaper hosts, system media).
   instead of raising SIGPIPE and ending the process unlogged. The handler is a caught no-op,
   not `SIG_IGN`, so children started with `posix_spawn` get the default action back
   ([broken pipes](features/crash-recovery.md#broken-pipes)).
+- **One copy per library.** `SingleInstance.claim()` runs in `WallpaperEngineApp.main` before the
+  backup restore and the session record. It takes an exclusive `flock` on the support folder's
+  `.instance.lock`; a second copy of the same bundle reopens the running one and exits, a copy
+  from another location shows an alert and exits, a copy that finds the first one quitting waits
+  for it, and a lock that cannot be trusted never keeps the app from starting.
+  `applicationShouldTerminate` records `quitting` in the lock and `cancelQuit` puts `running`
+  back ([single instance](features/crash-recovery.md#single-instance)).
 - **Hosted tests.** Under a hosted test run (`NSClassFromString("XCTestCase") != nil`) the
   delegate short-circuits: no services are created against the user's real app-support folder.
 
@@ -196,6 +203,7 @@ Services are grouped by domain under `App/Services/`; each domain has a matching
 | `Diagnostics/` | `RuntimeDiagnosticsSession`, `DiagnosticsBundle`, `SessionLedger`, `EnergyUsageMonitor`, `WallpaperEnergyRecorder`, `MemoryPressureMonitor`, `ProcessFootprint` | Runtime counters, the diagnostics report, how the previous session ended, energy readout, per-wallpaper ratings and memory-pressure logging; see [features/diagnostics.md](features/diagnostics.md) |
 | `GitHub/` | `GitHubReleaseClient`, `AppUpdateStore`, `AppUpdateInstaller`, `WhatsNewStore` | GitHub Releases update check, download, in-place install; which what's-new announcements were shown |
 | `Library/` | `ClientPaths`, `WallpaperImportService`, `LibraryImportStore`, `LibraryCoverStamps`, `WallpaperDeletionService`, `StillImageWallpaper`, `WallpaperBackupService`, `WallpaperCollectionStore`, `WallpaperPresetStore`, `WallpaperHistoryStore` | App-support layout, non-destructive import (run for the app, not the panel page, so Finder and Dock drops import too), still pictures packaged as `web` wallpapers, guarded deletion, collections, presets, history, backup and restore |
+| `Lifecycle/` | `QuitReason`, `QuitSupervisor`, `QuitTimings`, `TerminationSignalRelay`, `ProcessSignals`, `InstanceLock`, `SingleInstance` | Why the app is quitting, the deadline each quit stage gets, SIGTERM and SIGHUP as a quit, broken pipes as write errors, and the one-copy-per-library lock taken before anything else starts with what a second launch does about the copy that owns it; see [features/crash-recovery.md](features/crash-recovery.md) |
 | `Localization/` | `AppLanguage`, `AppLanguageStore` | Shipped-language registry and the language preference; see [localization.md](localization.md) |
 | `LockScreen/` | `LockScreenWallpaperSelection`, `LockScreenWallpaperService`, `LockScreenExtensionRegistration` | System lock-screen selection overrides and configuration publishing |
 | `NativeVideo/` | `NativeVideoAdmission`, `NativeVideoPlayer`, `NativeVideoWallpaperHost`, `NativeVideoWallpaperWindow` | AVFoundation video backend: admission rules (a refusal routes back to the scene engine), player and desktop window |

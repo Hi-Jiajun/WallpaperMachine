@@ -1,4 +1,10 @@
-# Crash recovery: wallpapers held back after repeated crashes
+# Crash recovery
+
+How the app starts, quits and recovers around an unclean exit: the load journal that holds
+back a wallpaper which keeps killing the app, SIGTERM and SIGHUP as a quit, broken pipes
+that no longer end the process, and the lock that keeps two copies from sharing one
+library. Code lives in `App/Services/Lifecycle/` and the bridge crate; the Swift tests are
+in `Tests/Unit/Lifecycle/`.
 
 The saved configuration is replayed at every launch. A wallpaper whose scene kills the
 process while it loads (a renderer fault, an out-of-memory kill, a bad driver state)
@@ -211,6 +217,57 @@ write and not a dead process.
 - It does not log. A broken pipe is reported where the write failed, in that code's own
   error.
 
+## Single instance
+
+Only one copy of the app runs per library. Two copies sharing one folder would
+each restore a backup, replace posters, write the Workshop queue and run a
+renderer against the same wallpapers.
+
+What a user sees when a second copy starts:
+
+- **The same app opened again** (`open -n` or launching the executable directly;
+  an ordinary open already brings the running app forward): the second copy exits
+  and the first comes forward with its control panel, exactly as a Dock click does.
+- **A copy from another location** (for example a downloaded or freshly built app
+  while the installed one is running): an alert says another copy is using this
+  library and asks to quit it first. Nothing else happens; the running copy is
+  left alone.
+- **The first copy is quitting**: the second waits, up to 40 seconds, for the
+  library to come free and then starts normally. That is the longest an interactive
+  quit may take within its budgets (37 s, `QuitSupervisor.Budgets.longestQuit`) and
+  a margin, so a relaunch right after a slow but successful quit still finds the
+  library free. A quit that is cancelled returns the first copy to the running
+  state, so it is not waited for.
+- **An update relaunch** needs nothing special: the installer starts the new
+  version only after the old process has exited, so the library is already free.
+
+### Contract
+
+- The claim is an exclusive `flock` on `<support>/.instance.lock`, taken in
+  `WallpaperEngineApp.main()` before the backup restore, `NSApplication` or any
+  service. Because it is held on an open file description, the kernel releases it
+  on any exit, including a crash or `kill -9`; no lock is ever left stale by its
+  owner. The file is opened `O_CLOEXEC` (and spawned helpers do not inherit it),
+  so a child that outlives the app cannot keep the library locked.
+- The file records `<pid> running` or `<pid> quitting`. `AppDelegate`
+  announces `quitting` as the first step of `applicationShouldTerminate` and goes
+  back to `running` if the quit is cancelled.
+- A second launch waits up to 2 seconds for a running holder (a quit-and-reopen
+  race), up to `longestQuit` plus 3 seconds (40) for a quitting one, then hands over.
+  The wait follows the quit's budgets, so it cannot give up on a holder that is still
+  within them.
+- **A lock must never block launch.** If the lock file cannot be opened or
+  locked, if the recorded pid no longer exists (a descriptor leaked into another
+  process), if nothing readable was recorded, or if the pid now belongs to a
+  program that is not a copy of this app, the app logs a warning and starts without
+  the lock.
+- The claim comes before the session record (`recordSessionStart`), so a second copy that
+  hands over never marks the running copy's session as ended.
+- The lock lives in the support folder, so each isolated `WALLPAPER_MACHINE_HOME`
+  (unit and UI tests, `scripts/check_rust.py`, benchmark runs) has its own lock and
+  copies on separate homes run side by side. The unit-test host and the import
+  picker helper never take it.
+
 ## Limits
 
 - A force quit, a `kill -9`, a second SIGTERM, a power loss or a logout kill during a load
@@ -305,6 +362,13 @@ Device-free, against the fake engine and a temporary support root:
   and its button posts the action, and a refused retry keeps the row and shows the error.
 - `tests::activation_plan`: a held wallpaper gets no scene, web or native-video
   descriptor; `build_owned` names the owner of every scene, mirrors included.
+- `InstanceLockTests` use temporary folders and an injected clock and process table (no
+  sleeping, no windows): acquisition and the recorded holder, a second claim being turned
+  away after the grace, hand-over once the holder releases or is dropped, a quitting holder
+  waited for beyond the grace and through the longest interactive quit, a leaked claim in a
+  surviving child, a dead or unreadable
+  holder not blocking launch, an unusable lock file, the decision table, and the
+  classification of the running holder (same bundle, another copy, another program).
 - `TerminationSignalRelayTests` (real SIGUSR1 and SIGUSR2 raised in the test host, never
   SIGTERM, and `forceDefault` always injected): one signal asks for one quit, a second or the
   deadline forces the default action, back-to-back signals are one request and one force,
@@ -333,3 +397,8 @@ should restore the desktop picture before it exits, `quit: reason=signal` should
 the log, and a second `kill -TERM` during a wedged quit should end it at once; the unit
 tests never send a real SIGTERM. Likewise the unit tests close the reader of a pipe they
 made themselves; they never kill a real import picker helper while the app writes to it.
+
+Single instance needs a desktop run as well: launching a second copy of the same bundle and
+seeing the first activate and show its panel, the alert for a copy from another path, and
+the relaunch after an in-app update. These are in the
+[manual smoke checklist](../testing/manual-smoke.md#launch-and-window).

@@ -40,7 +40,9 @@ App/                               WallpaperMachine application target sources o
     Lifecycle/                     why the app is quitting (QuitReason, the power-off notice), how long each quit stage takes
                                    (QuitTimings), the deadline each stage gets (QuitSupervisor, QuitMode, the exit fuse)
                                    and SIGTERM/SIGHUP as a quit (TerminationSignalRelay);
-                                   ProcessSignals makes a broken pipe a write error
+                                   ProcessSignals makes a broken pipe a write error;
+                                   the one-copy-per-library lock and the second launch's hand-over
+                                   (InstanceLock, SingleInstance)
     Localization/                  AppLanguage.swift: shipped-language registry and the language preference store
     LockScreen/                    lock-screen selection overrides, extension registration and configuration publishing
     NativeVideo/                   AVFoundation video backend: admission, player and host window

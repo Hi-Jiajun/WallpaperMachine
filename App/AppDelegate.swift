@@ -802,6 +802,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         quitMode = mode
         powerOffJoinedQuit = false
         SessionLedger.shared?.markQuitting(reason: QuitReason.ledgerReason(for: reason, signal: signal))
+        // A copy opened while this one quits waits for the library instead of handing over to it.
+        InstanceLock.current?.setPhase(.quitting)
         let panelWasVisible = controlPanelWindow?.isVisible == true
         let whatsNewWasVisible = whatsNewWindow?.isVisible == true
         previewWindow?.session.close()
@@ -952,6 +954,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
         lastError = failure
         shutdownInProgress = false
+        InstanceLock.current?.setPhase(.running)
         SessionLedger.shared?.markRunning()
         // The system was told no, so an earlier announcement no longer applies. The same goes
         // for a signal: the next one asks for a quit again instead of forcing the end.

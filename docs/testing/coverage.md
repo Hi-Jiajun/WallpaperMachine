@@ -394,6 +394,13 @@ on [manual-smoke.md](manual-smoke.md).
   same handler, an ignored SIGPIPE or a handler already in place is left alone, and a child
   started with `posix_spawn` sees the default disposition (the shared `ChildSignalProbe` is
   first shown to see an inherited ignore, as in the relay's test).
+- `InstanceLockTests` use temporary folders, an injected clock and an injected process table:
+  the claim and its recorded holder, a second claim turned away after the grace, hand-over on
+  release, a quitting holder waited for beyond the grace and for as long as the longest
+  interactive quit may take, a claim never inherited by a surviving child, a dead, unreadable
+  or unusable lock never blocking launch, the decision table, and the classification of the
+  running holder. See
+  [crash recovery](../features/crash-recovery.md#single-instance).
 - Not covered: a real quit, logout or restart; `applicationShouldTerminate` itself needs
   the running app (hosted tests short-circuit it), so the alert, the panel coming back, the
   "Quitting…" menu line, the exit fuse's `_exit`, whether macOS shows its cancelled-logout
@@ -401,6 +408,9 @@ on [manual-smoke.md](manual-smoke.md).
   pending, the retry of a user's quit that a logout interrupted, and a real `kill -TERM`
   ending in an ordered quit (including whether the main run loop wakes for it while the
   panel's modal alert is up) are desktop-only observations ([manual smoke](manual-smoke.md#native-desktop-posters-and-mission-control)).
+  The single-instance hand-over is not covered either: activating the first copy, the alert
+  for a copy from another path and the post-update relaunch need a desktop run
+  ([manual smoke](manual-smoke.md#launch-and-window)).
 
 ## Localization
 
