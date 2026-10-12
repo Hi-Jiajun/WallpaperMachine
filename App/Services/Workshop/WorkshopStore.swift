@@ -193,7 +193,7 @@ final class WorkshopStore {
     self.steamCMDSetup = SteamCMDSetupStore(
       downloader: downloader, supportDirectory: supportDirectory,
       defaults: defaults, runtimeProvider: runtimeProvider)
-    downloader.configurePersistence(at: supportDirectory.appendingPathComponent("Downloads/Workshop"))
+    downloader.configurePersistence(at: ClientPaths.workshopDownloadsURL(in: supportDirectory))
     if let data = try? Data(contentsOf: requestFile),
       let saved = try? JSONDecoder().decode([WorkshopDownloadRequest].self, from: data)
     {

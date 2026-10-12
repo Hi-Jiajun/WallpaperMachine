@@ -134,7 +134,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     private static let appProgressPattern = try! NSRegularExpression(pattern: #"progress:\s*(\d+(?:\.\d+)?)\s*\((\d+)\s*/\s*(\d+)\)"#)
     nonisolated private static let sessionLock = NSLock()
 
-    init(sessionDirectory: URL = ClientPaths.supportURL.appendingPathComponent("SteamSession", isDirectory: true),
+    init(sessionDirectory: URL = ClientPaths.steamSessionURL(),
          runtimeProvider: any SteamCMDRuntimeProviding = SteamCMDRuntimeService(),
          networkMonitor: (any ProcessNetworkMonitoring)? = nil, checkpointDirectory: URL? = nil,
          inactivityTimeout: TimeInterval = 300, passTimeout: TimeInterval = 1800,
@@ -291,6 +291,8 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
             var restoredSessionRevision: UInt64?
             do {
                 let prepared = try await runtimeProvider.prepare(executable: executable, staging: staging)
+                // Partial downloads and the restored sign-in live here: keep a running backup away.
+                ClientPaths.excludeFromBackup(staging)
                 claim = Self.claimStaging(staging)
                 if let checkpointDirectory, !signInOnly {
                     try await Task.detached(priority: .utility) {
@@ -1213,6 +1215,10 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         let files = FileManager.default
         let pending = directory.deletingLastPathComponent().appendingPathComponent(".steam-session-\(UUID().uuidString)", isDirectory: true)
         defer { try? files.removeItem(at: pending) }
+        // Flag the copy before it holds a token, and the published folder again below: replacing
+        // a directory can hand back the new one's attributes instead of the old one's.
+        try privateDirectory(pending)
+        ClientPaths.excludeFromBackup(pending)
         guard try copySessionFiles(from: staging, to: pending) else { return false }
         let identity = pending.appendingPathComponent("account")
         try Data(account.utf8).write(to: identity, options: .atomic)
@@ -1223,6 +1229,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         } else {
             try files.moveItem(at: pending, to: directory)
         }
+        ClientPaths.excludeFromBackup(directory)
         return true
     }
 

@@ -1079,6 +1079,14 @@ and `WorkshopDownloadPersistenceTests`:
   clock. `TransferEstimatorTests` cover the pace itself (smoothing, the stall
   floor, counters that start over, the 99-hour cap); the panel's wording of the
   estimate is in `ControlPanelDiscoverTests`.
+- Backup exclusion (`ClientPathsBackupTests`, `DownloaderSessionTests`,
+  `WorkshopDownloadPersistenceTests`, `WallpaperImportStagingTests`): the saved
+  sign-in folder, the staging of a running download or import, the folder of kept
+  partial downloads and `Cache` carry the exclusion flag, also after the sign-in
+  is replaced and on a later launch, and a launch flags the sign-in and download
+  folders an earlier version left unflagged without creating them; the library,
+  user files and scene assets and the support folder itself never do. What Time Machine then skips is not
+  covered (it needs a backup run).
 - `WorkshopDownloadIntentTests` — a download request retained across setup,
   account and shared-resource consent, surviving browsing and relaunch, removal
   preventing resumption, and explicit consent including reinstall. Reinstall from

@@ -482,7 +482,9 @@ work.
   terminal state and private SteamCMD runtime files are never included.
   Checkpoint publication retains recoverable pending and previous directories
   until the new checkpoint is published; resume recovers an interrupted
-  publication and cancel removes all three copies. The separately managed saved
+  publication and cancel removes all three copies. The folder holding the queue
+  and the checkpoints is excluded from Time Machine (see [Steam
+  sign-in](#steam-sign-in)). The separately managed saved
   sign-in remains subject to **Keep me signed in**. An interrupted process can
   lose bytes still in transient staging; the persisted job can still be resumed
   and Steam will redownload any missing content.
@@ -574,7 +576,16 @@ download, including after an app restart, restores only that account's cache and
 pre-fills its login name. Cache directories are restricted to `0700` and files to
 `0600`. Submitted passwords and Steam Guard codes are sent only to the private
 terminal and are never saved. Downloaded content, runtime programs and logs are
-not retained in the sign-in cache. Settings → **Library & Steam** shows the
+not retained in the sign-in cache. The sign-in cache is also marked as excluded
+from Time Machine and other backups of this Mac (`ClientPaths.excludeFromBackup`,
+re-applied each time the cache is replaced), so a restore or a new Mac asks for a
+Steam sign-in again; the same mark covers the staging folders of downloads and
+imports in progress, the partial downloads kept under `Downloads/Workshop` and
+the thumbnail caches under `Cache`. Every launch applies the mark to the sign-in
+and partial-download folders that already exist (`ClientPaths.prepareExcludedFolders`,
+which never creates them), so an update protects what an earlier version left
+behind without waiting for the next download or sign-in. The wallpaper library, retained user files
+and scene assets are backed up as before. Settings → **Library & Steam** shows the
 account as **Steam account · Signed in as <name>**; **Log out…** (confirmed
 natively, unavailable while downloads run) or turning the option off removes the
 local cache without signing other Steam devices out. Steam still controls expiry,

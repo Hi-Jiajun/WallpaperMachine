@@ -150,6 +150,8 @@ final class WorkshopDownloadManager: SteamCMDDownloadActivity {
     }
     do {
       try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+      // Checkpoints below this folder are partial downloads of several gigabytes.
+      ClientPaths.excludeFromBackup(directory)
       try JSONEncoder().encode(saved).write(to: directory.appendingPathComponent("queue.json"), options: .atomic)
       return true
     } catch {
@@ -169,8 +171,7 @@ final class WorkshopDownloadManager: SteamCMDDownloadActivity {
   }
 
   init(
-    sessionDirectory: URL = ClientPaths.supportURL.appendingPathComponent(
-      "SteamSession", isDirectory: true),
+    sessionDirectory: URL = ClientPaths.steamSessionURL(),
     runtimeProvider: any SteamCMDRuntimeProviding = SteamCMDRuntimeService(),
     maximumConcurrentDownloads: Int = WorkshopDownloadManager.defaultConcurrentDownloads,
     networkMonitorFactory: (@MainActor () -> any ProcessNetworkMonitoring)? = nil,

@@ -74,6 +74,8 @@ actor WallpaperImportService {
             .appendingPathComponent(Self.stagingPrefix + UUID().uuidString, isDirectory: true)
         try fm.createDirectory(at: staging, withIntermediateDirectories: false)
         defer { try? fm.removeItem(at: staging) }
+        // The copy in progress is disposable until the swap; a backup would only carry a half-copied project.
+        ClientPaths.excludeFromBackup(staging)
         let claim = try Self.claimStaging(staging)
         defer { close(claim) }
         var report = Report()

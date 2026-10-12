@@ -27,11 +27,12 @@ class DownloaderTestCase: XCTestCase {
     in root: URL, username: String = "localtest", itemID: String = "123456",
     libraryName: String = "Library", rememberSession: Bool = true, item: WorkshopItem? = nil,
     networkMonitor: (any ProcessNetworkMonitoring)? = nil, checkpointDirectory: URL? = nil,
-    freeSpace: (@Sendable (URL) -> Int64?)? = nil, retryDelays: [TimeInterval] = [0, 0, 0]
+    freeSpace: (@Sendable (URL) -> Int64?)? = nil, retryDelays: [TimeInterval] = [0, 0, 0],
+    runtimeProvider: (any SteamCMDRuntimeProviding)? = nil
   ) -> WorkshopDownloader {
     let downloader = WorkshopDownloader(
       sessionDirectory: root.appendingPathComponent("SteamSession"),
-      runtimeProvider: ShellRuntimeProvider(),
+      runtimeProvider: runtimeProvider ?? ShellRuntimeProvider(),
       networkMonitor: networkMonitor ?? FixtureNetworkMonitor(),
       checkpointDirectory: checkpointDirectory,
       freeSpace: freeSpace ?? WorkshopDownloader.systemFreeSpace, retryDelays: retryDelays)
@@ -310,6 +311,28 @@ struct ShellRuntimeProvider: SteamCMDRuntimeProviding {
     else {
       throw WorkshopFailure(message: "The shell runtime fixture is missing or invalid")
     }
+  }
+}
+
+/// Notes, each time the downloader is about to launch SteamCMD, whether its staging directory
+/// is already kept out of backups. The directory is gone once the download ends.
+final class StagingBackupProbe: SteamCMDRuntimeProviding, @unchecked Sendable {
+  private let base = ShellRuntimeProvider()
+  private let lock = NSLock()
+  private var readings: [Bool] = []
+
+  var excludedAtLaunch: [Bool] { lock.withLock { readings } }
+
+  func resolve(executable: URL) throws -> SteamCMDRuntime { try base.resolve(executable: executable) }
+
+  func prepare(executable: URL, staging: URL) async throws -> URL {
+    try await base.prepare(executable: executable, staging: staging)
+  }
+
+  func validate(at root: URL) async throws {
+    try await base.validate(at: root)
+    let excluded = (try? root.resourceValues(forKeys: [.isExcludedFromBackupKey]))?.isExcludedFromBackup
+    lock.withLock { readings.append(excluded == true) }
   }
 }
 
