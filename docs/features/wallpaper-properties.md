@@ -153,3 +153,5 @@ frame-rate constraints. Checks are explicit and version/configuration-bound.
 Unknown scene shader/graph or Web runtime behavior remains **unknown**; readable
 files and video metadata are not proof of a displayed frame. The same card shows
 the actual running backend and fallback reason when the runtime reports them.
+When a check is unavailable and the wallpaper is a Workshop item, the card also
+offers [Reinstall from Workshop…](workshop-downloads.md#reinstall-from-workshop).

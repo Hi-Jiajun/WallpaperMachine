@@ -1121,6 +1121,7 @@ export default {
   // Workshop updates
   'Update available': '有可用的更新',
   'Update': '更新',
+  'Reinstall from Workshop…': '從工作坊重新安裝…',
   'Update 1 wallpaper': '更新 1 張桌布',
   'Update {count} wallpapers': '更新 {count} 張桌布',
   'Download the new versions the Workshop has of your wallpapers': '從工作坊下載這些桌布的新版本',

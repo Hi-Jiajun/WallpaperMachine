@@ -616,10 +616,34 @@ wallpapers** while any have updates. An update is an ordinary Workshop download
 swaps the new folder in and the old one out in one step (`renamex_np` with
 `RENAME_SWAP`), so the library never lacks the wallpaper and a failure leaves the
 old version in place; the old folder is removed with the download's staging. Only a
-folder that holds an installed wallpaper is replaced: anything else under the
-item's id is left alone and the download says so. An update check still running
+folder that holds a wallpaper's `project.json` (a real file, not a link) is replaced:
+anything else under the item's id is left alone and the download says so. The folder
+need not play, which is what lets a reinstall repair it. An update check still running
 when the download finishes does not mark it outdated again. The item's saved
 options belong to its id and are kept. A display showing it then loads it again:
 applying alone would find nothing changed, so it is removed and applied again
 through the display's command slot. Moving a wallpaper to Trash forgets its update
 and install record.
+
+### Reinstall from Workshop
+
+An installed wallpaper whose id is a Workshop number can be downloaded again
+whether or not its author changed it: the inspector's **Reinstall from
+Workshop…** (the circular arrows beside Trash), and the same words under the
+Compatibility check when its **Installed project** or **Entry resources** check
+is unavailable, such as a missing entry file: the installed files are what a
+fresh copy repairs. The lock screen, target display, native video and shared
+scene resources checks never offer it, because a fresh copy of the wallpaper
+leaves those as they are. It asks first (**Reinstall this wallpaper?**), then
+`WorkshopStore.requestReinstall` asks Steam's details endpoint for the item, so
+what is downloaded is what the Workshop serves now, and hands it to the ordinary
+queue. SteamCMD setup, the account, shared scene resources, progress, checkpoints
+and the swap are the update path above, so the old folder is never deleted
+first: it is swapped out when the new one has arrived whole, a failed download
+leaves it in place, and the item's saved options, user files and collections
+(all kept by id) survive. A display showing it loads the new files. An item
+Steam no longer serves (removed or hidden) says so and nothing changes, and an
+Application item is refused. Nothing is offered while a download for the item is
+running or waiting for setup, and asking again then does nothing: the download is
+where to continue it. A damaged copy whose `project.json` no longer parses does
+not appear in the library at all, so it cannot be reinstalled from the panel.

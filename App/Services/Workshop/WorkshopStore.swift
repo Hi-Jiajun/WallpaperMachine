@@ -213,6 +213,37 @@ final class WorkshopStore {
       bridge: bridge)
   }
 
+  /// Downloads an installed Workshop wallpaper again, to repair a damaged copy or take the
+  /// Workshop's current one. It is the update path: the item is asked of Steam, so what is
+  /// downloaded is what Steam serves now, and the new folder replaces the installed one only once
+  /// it has arrived whole, so a failed download leaves the installed copy as it was. Everything
+  /// after the lookup (SteamCMD, account, consent, progress) is an ordinary download.
+  ///
+  /// Nothing happens when a download or a retained request for the item already exists: that is
+  /// where the user continues it.
+  func requestReinstall(id: String, rememberSession: Bool, bridge: BridgeStore) async throws {
+    guard WallpaperImportService.workshopID(id) != nil else {
+      throw WallpaperActionError(message: String(localized: "Choose a valid numeric Workshop item identifier."))
+    }
+    if let job = downloader.download(for: id), job.isPending {
+      showDownload(job)
+      return
+    }
+    guard !downloadRequests.contains(where: { $0.id == id }) else { return }
+    let item = try await service.details(ids: [id]).first { $0.id == id && $0.collectionSize == nil }
+    guard let item else {
+      throw WallpaperActionError(
+        message: String(localized: "Steam no longer serves this wallpaper, so it can’t be reinstalled."))
+    }
+    guard item.kind != .application else {
+      throw WallpaperActionError(
+        message: String(
+          localized:
+            "Choose a valid Workshop wallpaper. Application wallpapers execute Windows programs and cannot be used on macOS."))
+    }
+    requestDownload(item: item, rememberSession: rememberSession, bridge: bridge)
+  }
+
   /// Signs in to Steam without downloading anything, so the account and its saved sign-in are in
   /// place before the first download. Rides the same ladder as a download: SteamCMD must be set
   /// up first, and a running sign-in is shown rather than started twice.

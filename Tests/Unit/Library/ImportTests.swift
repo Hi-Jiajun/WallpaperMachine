@@ -287,6 +287,55 @@ final class ImportTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: update.appendingPathComponent("project.json").path))
     }
 
+    /// A reinstall repairs a copy that no longer plays: one missing its entry file, or whose manifest
+    /// does not parse, is swapped out for the download, and the broken tree ends up in staging.
+    func testReplacingADamagedInstalledProjectPublishesTheDownload() async throws {
+        let damages: [(id: String, damage: (URL) throws -> Void, leftBehind: (URL) -> Bool)] = [
+            ("321", { try FileManager.default.removeItem(at: $0.appendingPathComponent("movie.mp4")) },
+             { !FileManager.default.fileExists(atPath: $0.appendingPathComponent("movie.mp4").path) }),
+            ("322", { try Data("{ not json".utf8).write(to: $0.appendingPathComponent("project.json")) },
+             { (try? Data(contentsOf: $0.appendingPathComponent("project.json"))) == Data("{ not json".utf8) }),
+        ]
+        for (id, damage, leftBehind) in damages {
+            let first = root.appendingPathComponent("download-first-\(id)")
+            _ = try downloadedProject(id, staging: first)
+            try await importer.importDownloadedItem(id, from: first, into: library)
+            try damage(library.appendingPathComponent(id))
+
+            let staging = root.appendingPathComponent("download-reinstall-\(id)")
+            let download = try downloadedProject(id, staging: staging)
+            try Data("reinstalled".utf8).write(to: download.appendingPathComponent("movie.mp4"))
+            try await importer.importDownloadedItem(id, from: staging, into: library, replacing: true)
+
+            let installed = library.appendingPathComponent(id)
+            XCTAssertEqual(try Data(contentsOf: installed.appendingPathComponent("movie.mp4")), Data("reinstalled".utf8), id)
+            let manifest = try XCTUnwrap(JSONSerialization.jsonObject(
+                with: Data(contentsOf: installed.appendingPathComponent("project.json"))) as? [String: Any])
+            XCTAssertEqual(manifest["type"] as? String, "video", id)
+            XCTAssertTrue(leftBehind(download), "The damaged tree goes to staging whole, not deleted first: \(id)")
+        }
+    }
+
+    /// The least a replaceable folder holds is a project.json of its own: a link in its place is
+    /// somebody else's file, and the folder stays where it is.
+    func testAReplacementNeverTakesAFolderWhoseManifestIsALink() async throws {
+        let folder = library.appendingPathComponent("788")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let elsewhere = root.appendingPathComponent("elsewhere.json")
+        try Data("{}".utf8).write(to: elsewhere)
+        try FileManager.default.createSymbolicLink(
+            at: folder.appendingPathComponent("project.json"), withDestinationURL: elsewhere)
+        let staging = root.appendingPathComponent("download-reinstall")
+        let download = try downloadedProject("788", staging: staging)
+        do {
+            try await importer.importDownloadedItem("788", from: staging, into: library, replacing: true)
+            XCTFail("a folder without a project.json of its own must not be replaced")
+        } catch {}
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(
+            atPath: folder.appendingPathComponent("project.json").path), elsewhere.path)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: download.appendingPathComponent("movie.mp4").path))
+    }
+
     func testReplacingWithNothingInstalledStillPublishes() async throws {
         let staging = root.appendingPathComponent("download-new")
         _ = try downloadedProject("456", staging: staging)

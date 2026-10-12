@@ -1121,6 +1121,7 @@ export default {
   // Workshop updates
   'Update available': '有可用更新',
   'Update': '更新',
+  'Reinstall from Workshop…': '从创意工坊重新安装…',
   'Update 1 wallpaper': '更新 1 张壁纸',
   'Update {count} wallpapers': '更新 {count} 张壁纸',
   'Download the new versions the Workshop has of your wallpapers': '下载创意工坊中这些壁纸的新版本',

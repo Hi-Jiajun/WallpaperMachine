@@ -703,6 +703,22 @@ extension WebPanelController {
       }
       workshop.requestDownload(item: item, rememberSession: remembersSession, bridge: store)
       try checkDownloadError()
+    // Reinstalling downloads an installed wallpaper again, whether or not its author changed it,
+    // and swaps it in once it has arrived whole: the same queue, prerequisites and replacement
+    // as an update, so a failed download leaves the installed copy where it is.
+    case "workshopReinstall":
+      let id = try wallpaperID(request)
+      if await confirm(
+        String(localized: "Reinstall this wallpaper?"),
+        detail: String(
+          localized:
+            "WallpaperMachine downloads it again from the Steam Workshop and swaps it in when the download is complete. Your settings for it are kept, and if the download fails the installed copy stays."
+        ),
+        button: String(localized: "Reinstall"))
+      {
+        try await workshop.requestReinstall(id: id, rememberSession: remembersSession, bridge: store)
+        try checkDownloadError()
+      }
     case "workshopUpdateAll":
       for item in workshop.updates.available.values.sorted(by: { $0.title < $1.title })
       where workshop.downloader.download(for: item.id)?.isPending != true {

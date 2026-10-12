@@ -686,7 +686,11 @@ and `WorkshopDownloadPersistenceTests`:
   indeterminate without one.
 - `WorkshopDownloadIntentTests` — a download request retained across setup,
   account and shared-resource consent, surviving browsing and relaunch, removal
-  preventing resumption, and explicit consent including reinstall.
+  preventing resumption, and explicit consent including reinstall. Reinstall from
+  Workshop is covered for an id that is not a Workshop number (Steam is not asked),
+  an item Steam no longer serves (the installed folder untouched), an Application,
+  the current version queued through the ordinary queue, and a repeat while a
+  download runs or waits for setup doing nothing.
 
 ### Updates
 
@@ -695,9 +699,14 @@ imports against `project.json` dates, non-Workshop ids never sent, results kept
 across a relaunch, a download making an item current, the daily limit and its
 switch, a failed check keeping what was known, and forgetting deleted items;
 `WebPanelWorkshopUpdateTests` — only an outdated wallpaper is marked and can be
-updated; `ImportTests` covers the swap that replaces an installed tree. Not
-covered: the reload of a wallpaper on screen after its update (needs a
-renderer).
+updated, and a reinstall needs an installed wallpaper and the user's yes before
+Steam is asked; `ImportTests` covers the swap that replaces an installed tree,
+including a copy missing its entry file or with a manifest that does not parse,
+and a folder whose `project.json` is a link left alone;
+`ControlPanelLibraryTests` covers where the inspector and the Compatibility check
+offer Reinstall from Workshop. Not covered: the reload of a wallpaper on screen
+after its update or reinstall (needs a renderer), and a real reinstall (needs a
+Steam sign-in).
 
 ## What native tests do not establish
 

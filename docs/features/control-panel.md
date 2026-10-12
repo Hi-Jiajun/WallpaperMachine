@@ -228,7 +228,9 @@ creator (Discover), facts (type, size, subscribers), utility actions and tags. F
 installed wallpapers the circular play button overlapping the preview is **Apply
 wallpaper** (or **Reapply wallpaper**); **Download** remains a full-width action on
 Discover. The utility row holds **Show in Finder**, favorites and Trash on
-Installed, or **View on Steam Workshop** on Discover. The inspector scrolls
+Installed (plus **Reinstall from Workshop…** for a Workshop wallpaper; see
+[Reinstall from Workshop](workshop-downloads.md#reinstall-from-workshop)), or
+**View on Steam Workshop** on Discover. The inspector scrolls
 independently; **Apply changes** and **Revert** (see
 [Properties](wallpaper-properties.md#properties)) stay visible in a fixed footer
 while editing.

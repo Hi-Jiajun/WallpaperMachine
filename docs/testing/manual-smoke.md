@@ -53,6 +53,14 @@ was run.
       rescanned, the covers stay as they are with no flicker; after a preview
       file is replaced (import it again with Replace if changed), only that
       tile's cover refreshes.
+- [ ] With a saved Steam sign-in, select an installed Workshop wallpaper and
+      choose **Reinstall from Workshop…** (the circular arrows beside Trash):
+      a sheet asks first and Cancel changes nothing. Confirming shows the
+      download in the queue and, when it completes, the wallpaper keeps its
+      options and a display showing it loads the new files. Delete the entry file
+      from its folder beforehand to see the Compatibility check offer the same
+      button, and Reinstall repair it. Imported pictures and folders with a
+      non-numeric name show no button.
 - [ ] Search for a nonexistent local title, clear the search, and confirm the
       collection returns.
 - [ ] Select a wallpaper and refresh: the selection survives.

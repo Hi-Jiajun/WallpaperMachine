@@ -612,6 +612,12 @@ function moreByAuthor(item) {
   if (!/^\d{17}$/.test(item.creatorID || '') || (source.key === 'creator' && source.id === item.creatorID)) return '';
   return button(t('More by this author'), 'workshopCreator', { id: item.creatorID, name: item.creator }, { className: 'link inspector-author' });
 }
+// An installed Workshop wallpaper (its id is the Workshop's number) can be downloaded again to repair
+// or refresh it, unless it cannot run on macOS or a download for it is under way or waiting for setup.
+function canReinstall(item) {
+  return /^\d+$/.test(item.id) && item.kind !== 'Application'
+    && !state.downloads.some(download => download.id === item.id && download.pending) && !requestByID(item.id);
+}
 function renderInspector(discover) {
   const item = discover ? state.workshop.items.find(item => item.id === state.workshop.selectedID) : state.wallpapers.find(item => item.id === state.selectedID);
   if (!item) { morph($('inspector'), `<div class="inspector-empty"><h2>${escapeHTML(t('Select a wallpaper'))}</h2><p>${escapeHTML(t('Preview, details and options appear here.'))}</p></div>`); return; }
@@ -649,7 +655,7 @@ function renderInspector(discover) {
   const playlistIDs = state.playlists?.[state.targetDisplayID]?.wallpaperIDs || [];
   const inPlaylist = playlistIDs.includes(item.id);
   const playlistToggle = !discover && isInstalled && item.supported !== false ? button('', inPlaylist ? 'playlistRemove' : 'playlistAdd', { id: item.id }, { icon: inPlaylist ? 'listMinus' : 'listPlus', title: inPlaylist ? t('Remove from this display’s playlist') : t('Add to this display’s playlist'), className: `icon-button${inPlaylist ? ' playlist-selected' : ''}`, disabled: !target?.enabled || target.mode === 'mirror' }) : '';
-  const secondary = `${discover ? button(t('View on Steam Workshop'), 'openExternal', { url: `https://steamcommunity.com/sharedfiles/filedetails/?id=${encodeURIComponent(item.id)}` }, { icon: 'external', className: 'wide', title: t('View on Steam Workshop') }) : isInstalled ? button(t('Show in Finder'), 'reveal', { id: item.id }, { icon: 'folder', className: 'wide', title: t('Show in Finder') }) : ''}${!discover && isInstalled ? button('', 'favorite', { id: item.id }, { icon: 'heart', title: state.favorites.includes(item.id) ? t('Remove from favorites') : t('Add to favorites'), className: `icon-button${state.favorites.includes(item.id) ? ' favorite-selected' : ''}` }) : ''}${playlistToggle}${!discover && isInstalled ? button('', 'delete', { id: item.id }, { icon: 'trash', className: 'icon-button danger', title: t('Move wallpaper to Trash') }) : ''}`;
+  const secondary = `${discover ? button(t('View on Steam Workshop'), 'openExternal', { url: `https://steamcommunity.com/sharedfiles/filedetails/?id=${encodeURIComponent(item.id)}` }, { icon: 'external', className: 'wide', title: t('View on Steam Workshop') }) : isInstalled ? button(t('Show in Finder'), 'reveal', { id: item.id }, { icon: 'folder', className: 'wide', title: t('Show in Finder') }) : ''}${!discover && isInstalled ? button('', 'favorite', { id: item.id }, { icon: 'heart', title: state.favorites.includes(item.id) ? t('Remove from favorites') : t('Add to favorites'), className: `icon-button${state.favorites.includes(item.id) ? ' favorite-selected' : ''}` }) : ''}${playlistToggle}${!discover && isInstalled && canReinstall(item) ? button('', 'workshopReinstall', { id: item.id }, { icon: 'refresh', className: 'icon-button', title: t('Reinstall from Workshop…') }) : ''}${!discover && isInstalled ? button('', 'delete', { id: item.id }, { icon: 'trash', className: 'icon-button danger', title: t('Move wallpaper to Trash') }) : ''}`;
   // An installed Workshop wallpaper whose author has changed it since: one click downloads the
   // new version, which replaces this one once it has arrived whole.
   const updating = isInstalled && download?.pending;
@@ -1666,7 +1672,7 @@ const pixiv = createPixivPage({
 const collections = createCollections({ send, render, announce, escapeHTML, icon, button, keyAttr, checked, disabled, busy, filterGroup, selection, filtersCollapsed });
 const presets = createPresets({ send, render, escapeHTML, icon, button, keyAttr, disabled, busy });
 const placement = createPlacement({ send, render, escapeHTML, icon, button, keyAttr, disabled, busy, safeImage });
-const compatibilityCard = createCompatibility({ escapeHTML, icon, button, keyAttr, busy });
+const compatibilityCard = createCompatibility({ escapeHTML, icon, button, keyAttr, busy, canReinstall });
 placement.bind($('inspector'));
 const supportPrompt = createSupportPrompt({
   container: $('support-dialog'), send, escapeHTML, icon, morph,

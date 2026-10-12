@@ -1121,6 +1121,7 @@ export default {
   // Workshop updates
   'Update available': 'アップデートあり',
   'Update': 'アップデート',
+  'Reinstall from Workshop…': 'ワークショップから再インストール…',
   'Update 1 wallpaper': '1個の壁紙をアップデート',
   'Update {count} wallpapers': '{count}個の壁紙をアップデート',
   'Download the new versions the Workshop has of your wallpapers': 'ワークショップにある壁紙の新しいバージョンをダウンロードします',

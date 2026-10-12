@@ -237,11 +237,18 @@ actor WallpaperImportService {
     /// Replacing needs an installed wallpaper to replace: a real folder, not a link, holding a
     /// regular `project.json`. It need not be playable, so a damaged install can be repaired.
     private func requireInstalledProject(_ installed: URL) throws {
-        guard let folder = try? downloadMetadata(at: installed), folder.st_mode & S_IFMT == S_IFDIR,
-              let manifest = try? downloadMetadata(at: installed.appendingPathComponent("project.json")),
-              manifest.st_mode & S_IFMT == S_IFREG else {
+        guard holdsProjectManifest(installed) else {
             throw Self.replaceFailure(installed.lastPathComponent, String(localized: "Its folder in the library has no project.json, so it is not an installed wallpaper."))
         }
+    }
+
+    /// Whether `folder` is a real folder, not a link, holding a regular `project.json`: the least
+    /// that makes it a wallpaper's folder rather than somebody's. It need not be playable.
+    private func holdsProjectManifest(_ folder: URL) -> Bool {
+        guard let metadata = try? downloadMetadata(at: folder), metadata.st_mode & S_IFMT == S_IFDIR,
+              let manifest = try? downloadMetadata(at: folder.appendingPathComponent("project.json")),
+              manifest.st_mode & S_IFMT == S_IFREG else { return false }
+        return true
     }
 
     nonisolated private static func replaceFailure(_ id: String, _ reason: String) -> ImportError {
@@ -374,7 +381,8 @@ actor WallpaperImportService {
 
     /// Consumes a complete item from disposable Steam staging without copying payload bytes.
     /// A valid existing item is left untouched unless `replacing`, when the new tree takes its
-    /// place; the caller remains responsible for staging cleanup.
+    /// place, and then so is a damaged one that still holds its `project.json`; the caller remains
+    /// responsible for staging cleanup.
     ///
     /// A Workshop preset is assembled first: its base's content, the preset's own files on top,
     /// and the base's manifest carrying the preset's title and property values. The base comes
@@ -407,11 +415,10 @@ actor WallpaperImportService {
         try Task.checkCancellation()
         if replacing, let installed = try? downloadMetadata(at: destination), installed.st_mode & S_IFMT == S_IFDIR {
             // Only an installed wallpaper is replaced: the old tree ends up in staging, which the
-            // caller clears, so a folder that is not one is left where it is.
-            do {
-                try validateProject(at: destination)
-            } catch {
-                throw ImportError(message: String(localized: "The library’s folder for Workshop item \(itemID) is not an installed wallpaper, so its update was not put in its place. Move the folder out of the library and download the item again."))
+            // caller clears, so a folder that is not one is left where it is. A damaged one, such as
+            // a copy missing its entry file, still is: replacing is how it gets repaired.
+            guard holdsProjectManifest(destination) else {
+                throw ImportError(message: String(localized: "The library’s folder for Workshop item \(itemID) holds no project.json, so it is not an installed wallpaper and the new copy was not put in its place. Move the folder out of the library and download the item again."))
             }
             // An update swaps the new tree in and the old one out in one step, so the library never
             // lacks the wallpaper and a failure leaves the old version where it was.
@@ -742,10 +749,7 @@ actor WallpaperImportService {
         guard name == "project.json" || name == "scene.json" || file.pathExtension.lowercased() == "pkg",
               let metadata = try? downloadMetadata(at: file), metadata.st_mode & S_IFMT == S_IFREG else { return nil }
         let folder = URL(fileURLWithPath: file.deletingLastPathComponent().path, isDirectory: true)
-        guard let folderMetadata = try? downloadMetadata(at: folder), folderMetadata.st_mode & S_IFMT == S_IFDIR,
-              let manifest = try? downloadMetadata(at: folder.appendingPathComponent("project.json")),
-              manifest.st_mode & S_IFMT == S_IFREG else { return nil }
-        return folder
+        return holdsProjectManifest(folder) ? folder : nil
     }
 
     private func validateProject(at root: URL, requireNonemptyContent: Bool = false) throws {

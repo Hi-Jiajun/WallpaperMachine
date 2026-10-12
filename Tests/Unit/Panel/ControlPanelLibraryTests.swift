@@ -510,6 +510,86 @@ final class ControlPanelLibraryTests: ControlPanelTestCase {
     }
   }
 
+  /// An installed Workshop wallpaper can be downloaded again from its inspector, and from the
+  /// compatibility card when a check found something its files cannot supply. A wallpaper that
+  /// did not come from the Workshop, cannot run on macOS, or already has a download gets neither.
+  func testReinstallIsOfferedOnlyForAnInstalledWorkshopWallpaperWithNoDownloadUnderWay() async throws {
+    try await withPanel { panel in
+      try await panel.finishWelcome()
+      panel.show()
+      try await panel.waitJS("powerProbe.received.length >= 1")
+      let result = try await panel.js("""
+        const base = window.powerProbe.received.at(-1);
+        const wallpaper = (id, kind = 'Video') => ({ id, title: 'W' + id, kind, size: 100, preview: null, active: false, supported: true, tags: [] });
+        const wallpapers = [wallpaper('111'), wallpaper('handmade'), wallpaper('222', 'Application'), wallpaper('333'), wallpaper('444')];
+        const download = id => ({ id, wallpaperID: id, title: 'W' + id, status: '', preview: null, thumbnail: null, account: '', phase: null, progress: null, pending: true, queued: true, paused: false, cancelled: false, error: null });
+        const request = id => ({ id, wallpaperID: id, title: 'W' + id, preview: null, thumbnail: null, account: '', rememberSession: true, stage: 'setup', paused: false });
+        const compat = (id, status = 'unavailable') => ({ wallpaperID: id, displayID: 'primary', checking: false, checks: [{ id: 'entry', title: 'Entry file', status, detail: 'Missing' }] });
+        const show = (id, extra = {}) => {
+          window.wallpaperUI.receive(Object.assign({}, base, { page: 'installed', wallpapers, selectedID: id, targetDisplayID: 'primary', downloads: [], downloadRequests: [], wallpaperCompatibility: compat(id) }, extra));
+          return { inspector: !!document.querySelector('#inspector .inspector-actions [data-action="workshopReinstall"][data-id="' + id + '"]'),
+                   card: !!document.querySelector('#inspector .compat [data-action="workshopReinstall"][data-id="' + id + '"]') };
+        };
+        return { workshop: show('111'), warningOnly: show('111', { wallpaperCompatibility: compat('111', 'warning') }),
+                 handmade: show('handmade'), application: show('222'),
+                 downloading: show('333', { downloads: [download('333')] }),
+                 waiting: show('444', { downloadRequests: [request('444')] }) };
+        """) as? [String: Any]
+      func offered(_ key: String) -> [Bool]? {
+        (result?[key] as? [String: Bool]).map { [$0["inspector"] ?? false, $0["card"] ?? false] }
+      }
+      XCTAssertEqual(offered("workshop"), [true, true], "Both places offer it when a check found something missing")
+      XCTAssertEqual(offered("warningOnly"), [true, false], "A warning alone is not what a fresh copy repairs")
+      XCTAssertEqual(offered("handmade"), [false, false], "Only the Workshop has a copy to download again")
+      XCTAssertEqual(offered("application"), [false, false], "Application wallpapers cannot run on macOS")
+      XCTAssertEqual(offered("downloading"), [false, false], "A download under way is where the user looks")
+      XCTAssertEqual(offered("waiting"), [false, false], "A request waiting for setup is continued, not repeated")
+    }
+  }
+
+  /// The card offers a fresh copy only for what a fresh copy repairs: the installed files. A real
+  /// report for a healthy web wallpaper always carries an unavailable lock-screen check, and a scene
+  /// without shared resources reports those as unavailable; neither is damage in the wallpaper.
+  func testCompatibilityCardOffersReinstallOnlyWhenTheInstalledFilesAreWhatIsUnavailable() async throws {
+    try await withPanel { panel in
+      try await panel.finishWelcome()
+      panel.show()
+      try await panel.waitJS("powerProbe.received.length >= 1")
+      let result = try await panel.js("""
+        const base = window.powerProbe.received.at(-1);
+        const kinds = { web: 'Web', scene: 'Scene', video: 'Video', unknown: 'Unknown' };
+        const ids = { healthyWeb: ['9001', 'web'], sceneWithoutSharedResources: ['9002', 'scene'], videoWithoutNativeAdmission: ['9003', 'video'],
+                      entryMissing: ['9004', 'video'], manifestMissing: ['9005', 'scene'], unknownType: ['9006', 'unknown'] };
+        const wallpapers = Object.values(ids).map(([id, kind]) => ({ id, title: 'W' + id, kind: kinds[kind], size: 100, preview: null, active: false, supported: true, tags: [] }));
+        const check = (id, status) => ({ id, status, title: id, detail: id });
+        const show = (key, checks) => {
+          const id = ids[key][0];
+          window.wallpaperUI.receive(Object.assign({}, base, { page: 'installed', wallpapers, selectedID: id, targetDisplayID: 'primary', downloads: [], downloadRequests: [],
+            wallpaperCompatibility: { wallpaperID: id, displayID: 'primary', checking: false, checks } }));
+          return { inspector: !!document.querySelector('#inspector .inspector-actions [data-action="workshopReinstall"][data-id="' + id + '"]'),
+                   card: !!document.querySelector('#inspector .compat [data-action="workshopReinstall"][data-id="' + id + '"]') };
+        };
+        return {
+          healthyWeb: show('healthyWeb', [check('target', 'ok'), check('lockScreen', 'unavailable'), check('project', 'ok'), check('entry', 'ok'), check('webRuntime', 'unknown')]),
+          sceneWithoutSharedResources: show('sceneWithoutSharedResources', [check('target', 'ok'), check('lockScreen', 'warning'), check('project', 'ok'), check('entry', 'ok'), check('sharedResources', 'unavailable'), check('sceneCapability', 'unknown')]),
+          videoWithoutNativeAdmission: show('videoWithoutNativeAdmission', [check('target', 'ok'), check('lockScreen', 'warning'), check('project', 'ok'), check('entry', 'ok'), check('nativeVideo', 'unavailable')]),
+          entryMissing: show('entryMissing', [check('target', 'ok'), check('lockScreen', 'warning'), check('project', 'ok'), check('entry', 'unavailable'), check('nativeVideo', 'unavailable')]),
+          manifestMissing: show('manifestMissing', [check('target', 'ok'), check('lockScreen', 'warning'), check('project', 'unavailable')]),
+          unknownType: show('unknownType', [check('target', 'ok'), check('lockScreen', 'unavailable'), check('project', 'unavailable'), check('entry', 'ok'), check('capability', 'unavailable')]),
+        };
+        """) as? [String: Any]
+      func offered(_ key: String) -> [Bool]? {
+        (result?[key] as? [String: Bool]).map { [$0["inspector"] ?? false, $0["card"] ?? false] }
+      }
+      XCTAssertEqual(offered("healthyWeb"), [true, false], "A web wallpaper's lock screen is never supported; nothing is damaged")
+      XCTAssertEqual(offered("sceneWithoutSharedResources"), [true, false], "Missing shared resources are fetched separately, not by a fresh copy")
+      XCTAssertEqual(offered("videoWithoutNativeAdmission"), [true, false], "Native video admission depends on the target, not on the files")
+      XCTAssertEqual(offered("entryMissing"), [true, true], "A missing entry file is what a fresh copy repairs")
+      XCTAssertEqual(offered("manifestMissing"), [true, true], "A missing manifest is what a fresh copy repairs")
+      XCTAssertEqual(offered("unknownType"), [true, false], "A fresh copy does not teach macOS a type it has no renderer for")
+    }
+  }
+
   func testRejectedDownloadAccountStaysVisibleAndLateErrorsDoNotLeakIntoReopenedDialog() async throws {
     try await withPanel { panel in
       try await panel.finishWelcome()
