@@ -22,14 +22,15 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         muted: Bool = false,
         admissionKey: UInt64 = 1,
         scalingMode: BridgeScalingMode = .fill,
-        scalingFactor: Double = 1.0
+        scalingFactor: Double = 1.0,
+        mediaPath: String = "/tmp/does-not-need-to-exist/clip.mp4"
     ) -> BridgeNativeVideoWallpaper {
         BridgeNativeVideoWallpaper(
             displayId: displayID,
             startupRevision: 0,
             wallpaperId: id,
             title: "Clip",
-            mediaPath: "/tmp/does-not-need-to-exist/clip.mp4",
+            mediaPath: mediaPath,
             fps: fps,
             admissionFps: admissionFps ?? fps,
             admissionKey: admissionKey,
@@ -47,6 +48,14 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         var stopped = 0
         var admissionProbes: [UInt64] = []
         var refusalSequence: [NativeVideoRefusal?] = []
+        /// Files whose metadata read never returns until the gate opens, from
+        /// the probe numbered `gateFromProbe` (1 is the first) onward.
+        var probeGates: [String: AsyncGate] = [:]
+        var gateFromProbe = 1
+        /// When set, what the bridge offers on the next fetch.
+        var offered: [BridgeNativeVideoWallpaper]?
+        /// Where each probed file was said to live, in the order it was asked.
+        var storageQueries: [String] = []
     }
 
     /// Stands in for the desktop window. The controller's rules are what these
@@ -131,6 +140,11 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
     }
 
     private var surfacesMade: [UInt32: FakeSurface] = [:]
+    private let counters = RuntimeCounters()
+    private let sleeper = ManualSleeper()
+    /// Gates a test left closed, opened again when it ends so no probe task is
+    /// left suspended.
+    private var openedAtTeardown: [AsyncGate] = []
     private var screenFrames: [(id: UInt32, frame: NSRect)] = []
     /// Makes every surface this factory builds fail as its callback is installed.
     private var surfaceFailureOnInstall: String?
@@ -143,23 +157,43 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         /// a retry can be expressed. Falls through to the other two once empty.
         refusalSequence: [NativeVideoRefusal?] = [],
         recorder: Recorder,
-        frameCenter: NotificationCenter = NotificationCenter()
+        frameCenter: NotificationCenter = NotificationCenter(),
+        /// Where the stub says each file lives. Defaults to the internal
+        /// drive so a test never asks the real file system about a path.
+        storage: @escaping @MainActor (URL) -> NativeVideoStoragePolicy.Location = { _ in
+            .internalVolume
+        },
+        /// Fires the metadata read limit by hand (`sleeper`). Tests that do not
+        /// need it get the real clock, whose timer is cancelled as each read
+        /// returns.
+        manualLimits: Bool = false
     ) -> NativeVideoWallpaperHost {
         recorder.refusalSequence = refusalSequence
+        let limits: @Sendable (Duration) async throws -> Void
+        if manualLimits {
+            limits = sleeper.closure
+        } else {
+            limits = { try await Task.sleep(for: $0) }
+        }
         return NativeVideoWallpaperHost(
             fetch: {
                 recorder.fetched += 1
-                return wallpapers
+                return recorder.offered ?? wallpapers
             },
             reject: { id, key, reason in
                 recorder.rejected.append((id: id, key: key, reason: reason))
             },
             screens: { [weak self] in self?.screenFrames ?? [] },
-            refusal: { _, fps in
+            refusal: { url, fps in
                 // The injected decision stands in for the asset probe; the key
                 // is reconstructed from the target rate the host passed, which
                 // is the input the real rule reads.
                 recorder.admissionProbes.append(UInt64(fps))
+                if recorder.admissionProbes.count >= recorder.gateFromProbe,
+                    let gate = recorder.probeGates[url.path]
+                {
+                    await gate.wait()
+                }
                 if !recorder.refusalSequence.isEmpty {
                     return recorder.refusalSequence.removeFirst()
                 }
@@ -174,7 +208,12 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
                 return surface
             },
             frameCenter: frameCenter,
-            counters: RuntimeCounters())
+            counters: counters,
+            sleep: limits,
+            storage: { url in
+                recorder.storageQueries.append(url.path)
+                return storage(url)
+            })
     }
 
     func testStartupWaitsForSurfaceReadinessAndAcknowledgesNewRevisions() async throws {
@@ -232,6 +271,15 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
             (id: 9, frame: NSRect(x: 200, y: 0, width: 200, height: 100)),
         ]
         surfaceFailureOnInstall = nil
+        openedAtTeardown = []
+    }
+
+    override func tearDown() async throws {
+        // A probe still suspended on its gate belongs to a task that would
+        // otherwise outlive the test.
+        openedAtTeardown.forEach { $0.open() }
+        sleeper.fireAll()
+        try await super.tearDown()
     }
 
     func testAWallpaperTheBackendCannotHonourIsHandedBack() async {
@@ -492,6 +540,260 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
             recorder.rejected.count, 2, "each offer is answered; the bridge is what stops offering")
         XCTAssertTrue(host.isEmpty)
         host.shutdown()
+    }
+
+    /// Counts finished reconcile passes and lets a test wait for the nth one
+    /// without polling.
+    @MainActor
+    private final class PassCounter {
+        private(set) var count = 0
+        private var waiters: [(target: Int, continuation: CheckedContinuation<Void, Never>)] = []
+        func record() {
+            count += 1
+            let ready = waiters.filter { $0.target <= count }
+            waiters.removeAll { $0.target <= count }
+            ready.forEach { $0.continuation.resume() }
+        }
+        func wait(for target: Int) async {
+            if count >= target { return }
+            await withCheckedContinuation { waiters.append((target, $0)) }
+        }
+    }
+
+    /// Lets a probe that was given up on, and then released, run to its end.
+    private func letOrphanedProbesReturn(
+        _ host: NativeVideoWallpaperHost, file: StaticString = #filePath, line: UInt = #line
+    ) async {
+        for _ in 0..<1_000 where host.outstandingProbeCountForTest > 0 { await Task.yield() }
+        XCTAssertEqual(host.outstandingProbeCountForTest, 0, file: file, line: line)
+    }
+
+    private func stuckFile(_ recorder: Recorder, path: String = "/tmp/does-not-need-to-exist/clip.mp4")
+        -> AsyncGate
+    {
+        let gate = AsyncGate()
+        recorder.probeGates[path] = gate
+        openedAtTeardown.append(gate)
+        return gate
+    }
+
+    func testAProbeThatNeverReturnsIsAbandonedAndHandedOver() async {
+        // A disk that will not spin up, a share that went away, an evicted
+        // cloud file: the metadata read does not fail, it just never ends.
+        // Without a bound the reconcile pass never ends either, and every
+        // other display's open, close and pause queues behind it.
+        let recorder = Recorder()
+        _ = stuckFile(recorder)
+        let host = makeHost(wallpapers: [], recorder: recorder, manualLimits: true)
+        defer { host.shutdown() }
+        counters.startSession(duration: .seconds(60))
+
+        let pass = Task { await host.apply([wallpaper(admissionKey: 5)]) }
+        await sleeper.waitUntilPending()
+        XCTAssertTrue(recorder.rejected.isEmpty, "the read is still inside its limit")
+        XCTAssertEqual(recorder.presented, 0)
+
+        sleeper.fireNext()
+        await pass.value
+
+        XCTAssertEqual(recorder.rejected.count, 1, "the scene engine takes it")
+        XCTAssertEqual(recorder.rejected.first?.key, 5)
+        XCTAssertTrue(host.isEmpty, "and no window is left behind")
+        XCTAssertEqual(counters.snapshot().total(.nativeVideoProbeTimeout), 1)
+    }
+
+    func testTheTimeLimitFollowsWhereTheFileLives() async {
+        // The reason a single fixed limit would be wrong: 8 seconds hands a
+        // healthy clip on a sleeping external drive to the other backend, and
+        // 60 seconds lets a dead share hold the host for a minute.
+        let recorder = Recorder()
+        let host = makeHost(
+            wallpapers: [], recorder: recorder,
+            storage: { url in
+                switch url.deletingPathExtension().lastPathComponent {
+                case "internal": return .internalVolume
+                case "external": return .removableVolume
+                case "share": return .networkVolume
+                case "cloud": return .dataless
+                default: return .unknown
+                }
+            },
+            manualLimits: true)
+        defer { host.shutdown() }
+        var expected: [Duration] = []
+        for (name, limit) in [
+            ("internal", 8), ("external", 30), ("share", 60), ("cloud", 60), ("unreadable", 30),
+        ] {
+            let path = "/tmp/does-not-need-to-exist/\(name).mp4"
+            _ = stuckFile(recorder, path: path)
+            let pass = Task {
+                await host.apply([wallpaper(admissionKey: UInt64(expected.count + 1), mediaPath: path)])
+            }
+            await sleeper.waitUntilPending()
+            expected.append(.seconds(limit))
+            XCTAssertEqual(sleeper.requested, expected, name)
+            sleeper.fireNext()
+            await pass.value
+        }
+        XCTAssertEqual(recorder.rejected.count, 5)
+    }
+
+    func testATimedOutProbeIsNotRetriedInPassAndNotCached() async {
+        // The retry loop exists for a read that fails. A read that used its
+        // whole budget has nothing left to retry with, and its refusal is not
+        // a verdict about the file: remembering it would make a disk that was
+        // asleep once this host's answer whenever the bridge offers the key
+        // again. (The bridge keeps its own record of the hand-off until the key
+        // changes or the backend is switched; the host's part is to read the
+        // file afresh when it is offered.)
+        let recorder = Recorder()
+        let gate = stuckFile(recorder)
+        let host = makeHost(wallpapers: [], recorder: recorder, manualLimits: true)
+        defer { host.shutdown() }
+        let pass = Task { await host.apply([wallpaper(admissionKey: 5)]) }
+        await sleeper.waitUntilPending()
+        sleeper.fireNext()
+        await pass.value
+        XCTAssertEqual(
+            recorder.admissionProbes.count, 1,
+            "a retry would have made it \(NativeVideoWallpaperHost.admissionAttemptLimit)")
+
+        // The disk wakes: the orphaned read returns, and the same offer is
+        // read again instead of being answered from a remembered refusal.
+        gate.open()
+        await letOrphanedProbesReturn(host)
+        await host.apply([wallpaper(admissionKey: 5)])
+
+        XCTAssertEqual(recorder.admissionProbes.count, 2)
+        XCTAssertEqual(host.activeDisplayIDs, [7], "and this time the clip plays")
+        XCTAssertEqual(recorder.rejected.count, 1, "only the timeout was handed over")
+    }
+
+    func testAStuckFileHasAtMostOneOrphanedProbe() async {
+        // The orphaned read is still blocked on the volume. Another read of
+        // the same file would only add a second blocked call to it, so a new
+        // offer is answered at once with the same unsettled refusal.
+        let recorder = Recorder()
+        let gate = stuckFile(recorder)
+        let host = makeHost(wallpapers: [], recorder: recorder, manualLimits: true)
+        let pass = Task { await host.apply([wallpaper(admissionKey: 5)]) }
+        await sleeper.waitUntilPending()
+        sleeper.fireNext()
+        await pass.value
+        XCTAssertEqual(host.outstandingProbeCountForTest, 1)
+
+        await host.apply([wallpaper(admissionKey: 6)])
+
+        XCTAssertEqual(recorder.admissionProbes.count, 1, "no second read of the stuck file")
+        XCTAssertEqual(sleeper.requested.count, 1, "and no second timer to wait out")
+        XCTAssertEqual(gate.waitingCount, 1)
+        XCTAssertEqual(
+            recorder.rejected.map(\.key), [5, 6], "but each offer is still answered, not ignored")
+        XCTAssertEqual(host.outstandingProbeCountForTest, 1)
+
+        host.shutdown()
+        XCTAssertEqual(
+            host.outstandingProbeCountForTest, 0, "a shut-down host remembers no reads")
+    }
+
+    func testACallerCancelledBeforeARetryReadStartsLeavesNoReadOutstanding() async {
+        // The retry loop swallows the cancellation of its pause and goes on to
+        // the next read, which a cancelled caller is never allowed to start. A
+        // file entered as being read before that would stay so for the session,
+        // and every later offer of it would be refused as still unread.
+        let recorder = Recorder()
+        let host = makeHost(
+            wallpapers: [], refusalSequence: [.preparationFailed("resource busy")],
+            recorder: recorder)
+        defer { host.shutdown() }
+        let pass = Task { await host.apply([wallpaper(admissionKey: 5)]) }
+        for _ in 0..<1_000 where recorder.admissionProbes.isEmpty { await Task.yield() }
+        XCTAssertEqual(recorder.admissionProbes.count, 1, "the first read has returned its failure")
+
+        pass.cancel()
+        await pass.value
+
+        XCTAssertEqual(host.outstandingProbeCountForTest, 0, "no read began, so none is outstanding")
+        XCTAssertTrue(recorder.rejected.isEmpty, "and an abandoned pass is not a refusal")
+
+        await host.apply([wallpaper(admissionKey: 5)])
+
+        XCTAssertEqual(host.activeDisplayIDs, [7], "the next offer reads the file and plays it")
+        XCTAssertEqual(recorder.admissionProbes.count, 2)
+        XCTAssertTrue(recorder.rejected.isEmpty)
+    }
+
+    func testAHungProbeOnOneDisplayDoesNotKeepTheClosesOfOthersWaitingForever() async {
+        // The wedge the bound exists for: display 9's file never answers, and
+        // display 7's wallpaper has meanwhile left the backend. Its player
+        // keeps running behind the read, which is why the wait has a limit,
+        // and it is closed by the very next pass once the limit has passed.
+        let recorder = Recorder()
+        let slow = "/tmp/does-not-need-to-exist/slow.mp4"
+        _ = stuckFile(recorder, path: slow)
+        let host = makeHost(wallpapers: [], recorder: recorder, manualLimits: true)
+        defer { host.shutdown() }
+        let passes = PassCounter()
+        host.onSurfacesChanged = { passes.record() }
+        let playing = wallpaper(displayID: 7, id: "300", admissionKey: 1)
+        let stuck = wallpaper(displayID: 9, id: "301", admissionKey: 2, mediaPath: slow)
+        await host.apply([playing])
+        XCTAssertEqual(host.activeDisplayIDs, [7])
+
+        recorder.offered = [playing, stuck]
+        host.reconcile()
+        await sleeper.waitUntilPending()
+        recorder.offered = [stuck]
+        host.reconcile()
+        XCTAssertEqual(
+            host.activeDisplayIDs, [7],
+            "while the read is inside its limit the pass is occupied, and that is bounded")
+
+        sleeper.fireNext()
+        await passes.wait(for: 3)
+
+        XCTAssertTrue(host.isEmpty, "the player of the wallpaper that left is closed")
+        XCTAssertEqual(recorder.stopped, 1)
+        XCTAssertEqual(recorder.rejected.map(\.key), [2, 2], "display 9 goes to the scene engine")
+        XCTAssertEqual(
+            recorder.admissionProbes.count, 2,
+            "the file was read once and not again by the trailing pass")
+    }
+
+    func testARetryThatHangsIsBoundedToo() async {
+        // Every read in the loop is bounded, not just the first: a read that
+        // fails and a second that hangs must not wedge the pass either.
+        let recorder = Recorder()
+        _ = stuckFile(recorder)
+        recorder.gateFromProbe = 2
+        let host = makeHost(
+            wallpapers: [], refusalSequence: [.preparationFailed("resource busy")],
+            recorder: recorder, manualLimits: true)
+        defer { host.shutdown() }
+
+        let pass = Task { await host.apply([wallpaper(admissionKey: 5)]) }
+        await sleeper.waitUntilPending()
+        sleeper.fireNext()
+        await pass.value
+
+        XCTAssertEqual(recorder.admissionProbes.count, 2, "the hung retry is not retried again")
+        XCTAssertEqual(recorder.rejected.count, 1)
+        XCTAssertTrue(host.isEmpty)
+    }
+
+    func testTheStorageIsOnlyClassifiedWhenTheFileIsActuallyRead() async {
+        // Classifying looks at the file system. A reconcile storm that is
+        // answered from the cache must not touch it.
+        let recorder = Recorder()
+        let host = makeHost(wallpapers: [], recorder: recorder)
+        defer { host.shutdown() }
+
+        await host.apply([wallpaper(admissionKey: 11)])
+        await host.apply([])
+        await host.apply([wallpaper(admissionKey: 11)])
+
+        XCTAssertEqual(recorder.admissionProbes.count, 1)
+        XCTAssertEqual(recorder.storageQueries.count, 1)
     }
 
     func testAKeyRefusedThenSupersededThenOfferedAgainIsReportedAgain() async {

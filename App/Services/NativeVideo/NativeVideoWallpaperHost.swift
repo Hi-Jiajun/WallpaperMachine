@@ -22,6 +22,12 @@ final class NativeVideoWallpaperHost {
     private let makeSurface: @MainActor (URL, NSRect, RuntimeSurfaceKey, Bool) -> NativeVideoSurface
     private let counters: RuntimeCounters
     private let frameCenter: NotificationCenter
+    /// Waits for a duration. Injected so the limits below can be fired by hand
+    /// instead of waited out.
+    private let sleep: @Sendable (Duration) async throws -> Void
+    /// Where a wallpaper's file lives, which sets how long its metadata read
+    /// may take. Injected so the limits can be tested without a slow volume.
+    private let storage: @MainActor (URL) async -> NativeVideoStoragePolicy.Location
 
     private var surfaces: [UInt32: NativeVideoSurface] = [:]
     private var descriptors: [UInt32: BridgeNativeVideoWallpaper] = [:]
@@ -54,6 +60,14 @@ final class NativeVideoWallpaperHost {
     /// greater than one so a single transient error is not a demotion.
     static let admissionAttemptLimit = 3
     static let admissionRetryDelay = Duration.milliseconds(150)
+    /// Files whose metadata read has started and not yet returned, with the
+    /// serial of that read. A read that outlives its limit stays here until it
+    /// finally returns, so the same file is never read twice at once: a volume
+    /// that has stopped answering would otherwise gain one more blocked load
+    /// per offer. Keyed by path because the stuck thing is the file, not the
+    /// offer; the serial stops a late return from clearing a newer read.
+    private var outstandingProbes: [String: UInt64] = [:]
+    private var probeSerial: UInt64 = 0
     private var surfaceGeneration: UInt64 = 0
     private var reconcileInFlight = false
     private var reconcileRequested = false
@@ -74,7 +88,9 @@ final class NativeVideoWallpaperHost {
             @MainActor (URL, NSRect, RuntimeSurfaceKey, Bool) -> NativeVideoSurface
         )? = nil,
         frameCenter: NotificationCenter = .default,
-        counters: RuntimeCounters? = nil
+        counters: RuntimeCounters? = nil,
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        storage: (@MainActor (URL) async -> NativeVideoStoragePolicy.Location)? = nil
     ) {
         self.fetch = fetch
         self.reject = reject
@@ -92,6 +108,8 @@ final class NativeVideoWallpaperHost {
         }
         self.frameCenter = frameCenter
         self.counters = counters ?? .shared
+        self.sleep = sleep
+        self.storage = storage ?? { url in await NativeVideoStoragePolicy.location(of: url) }
     }
 
     convenience init(bridge: WallpaperBridge) {
@@ -113,6 +131,9 @@ final class NativeVideoWallpaperHost {
     }
 
     var surfaceGenerationForTest: UInt64 { surfaceGeneration }
+    /// Metadata reads that have not returned, including ones already given up
+    /// on.
+    var outstandingProbeCountForTest: Int { outstandingProbes.count }
 
     func start() {
         guard posterObserver == nil else { return }
@@ -229,7 +250,7 @@ final class NativeVideoWallpaperHost {
         // Decided before a window exists, so a refusal never shows a black
         // rectangle on the desktop.
         if let refusal = await admission(for: url, wallpaper: wallpaper, load: load) {
-            guard !stopped else { return }
+            guard !stopped, !Task.isCancelled else { return }
             recordState(wallpaper, phase: .failed, message: refusal.reason)
             await handOff(wallpaper: wallpaper, refusal: refusal, load: load)
             return
@@ -313,19 +334,41 @@ final class NativeVideoWallpaperHost {
     /// a verdict. Without that split, one I/O blip would demote a wallpaper
     /// for the rest of the session; without the bound, a file that never loads
     /// would leave the display showing nothing for as long as it is offered.
+    ///
+    /// Every read is also bounded in time, by where the file lives. Admission
+    /// runs inside the one reconcile pass, so a read that never returns — a
+    /// disk that will not spin up, a share that went away, an evicted cloud
+    /// file — would otherwise hold every other display's open, close and pause
+    /// behind it. A read that outlives its limit ends the attempt at once: the
+    /// budget is already spent, so it is neither retried nor cached.
+    ///
+    /// Not caching it is all this host can do about it. The wallpaper is still
+    /// handed to the scene engine, and the bridge holds that hand-off for its
+    /// admission key (see `handOff`), so a disk that was asleep once keeps the
+    /// clip on the scene engine until the key changes or Video playback is
+    /// switched to Compatibility and back. What the host guarantees is that
+    /// the file is read afresh whenever the bridge does offer the key again.
     private func admission(
         for url: URL, wallpaper: BridgeNativeVideoWallpaper, load: UInt64?
     ) async -> NativeVideoRefusal? {
         if let cached = admissionCache[wallpaper.admissionKey] { return cached }
+        // At most one read per file. The earlier one is still blocked, and
+        // starting another would only add a second blocked call on the same
+        // volume.
+        if outstandingProbes[url.path] != nil { return Self.probeStillPending }
+        let location = await storage(url)
+        guard !stopped, !Task.isCancelled else { return Self.probeAbandoned }
+        let limit = NativeVideoStoragePolicy.metadataProbeDeadline(location)
         // `admissionFps` is the strictest target across this display's mirror
         // group, not this display's own. A mirror cannot fall back on its own
         // — the engine only ever gives it a scene by copying its source's — so
         // the group is judged together, against the member that constrains it
         // most. Probing `fps` here would let a 60 fps clip accepted for a
         // 60 fps source play unchecked on a 30 fps mirror.
-        var decision = await refusal(url, wallpaper.admissionFps)
+        var read = await boundedProbe(
+            url: url, wallpaper: wallpaper, location: location, limit: limit, load: load)
         var attempt = 1
-        while let unsettled = decision, !unsettled.isSettled,
+        while !read.abandoned, let unsettled = read.decision, !unsettled.isSettled,
             attempt < Self.admissionAttemptLimit
         {
             attempt += 1
@@ -334,16 +377,86 @@ final class NativeVideoWallpaperHost {
                     + "retrying (\(attempt)/\(Self.admissionAttemptLimit))", load: load)
             try? await Task.sleep(for: Self.admissionRetryDelay)
             guard !stopped else { return unsettled }
-            decision = await refusal(url, wallpaper.admissionFps)
+            read = await boundedProbe(
+                url: url, wallpaper: wallpaper, location: location, limit: limit, load: load)
         }
-        admissionCache[wallpaper.admissionKey] = decision
+        // Not a verdict about the file: the next offer starts afresh.
+        if read.abandoned { return read.decision }
+        admissionCache[wallpaper.admissionKey] = read.decision
         admissionCacheOrder.append(wallpaper.admissionKey)
         while admissionCacheOrder.count > Self.admissionCacheLimit {
             admissionCache.removeValue(forKey: admissionCacheOrder.removeFirst())
         }
-        return decision
+        return read.decision
     }
 
+    /// One metadata read, given up on after `limit`.
+    ///
+    /// `abandoned` means the read neither answered nor failed in time, so its
+    /// refusal says nothing about the file and must be neither retried nor
+    /// remembered. The read itself is not killed — it may be blocked where
+    /// cancellation cannot reach — so it stays in `outstandingProbes` until it
+    /// returns on its own, and no second read of that file starts meanwhile.
+    ///
+    /// The file is entered in `outstandingProbes` by the read itself, when it
+    /// starts, not by this method before the race. A caller that is already
+    /// cancelled gets `.cancelled` back without the read ever running, and an
+    /// entry made for a read that never began would have nothing to remove it:
+    /// every later offer of that file would be refused as still being read.
+    private func boundedProbe(
+        url: URL, wallpaper: BridgeNativeVideoWallpaper,
+        location: NativeVideoStoragePolicy.Location, limit: Duration, load: UInt64?
+    ) async -> (decision: NativeVideoRefusal?, abandoned: Bool) {
+        let path = url.path
+        probeSerial += 1
+        let serial = probeSerial
+        let refusal = self.refusal
+        let fps = wallpaper.admissionFps
+        let outcome = await NativeVideoDeadline.race(limit, sleep: sleep) { [weak self] in
+            self?.outstandingProbes[path] = serial
+            let decision = await refusal(url, fps)
+            if self?.outstandingProbes[path] == serial { self?.outstandingProbes[path] = nil }
+            return decision
+        }
+        switch outcome {
+        case let .value(decision):
+            return (decision, false)
+        case .cancelled:
+            return (Self.probeAbandoned, true)
+        case .timedOut:
+            guard !stopped else { return (Self.probeAbandoned, true) }
+            let reason = "the metadata read did not finish within \(limit.components.seconds) s "
+                + "(\(location.label))"
+            counters.record(
+                .nativeVideoProbeTimeout,
+                for: RuntimeSurfaceKey(kind: .desktopNativeVideo, displayID: wallpaper.displayId))
+            AppLog.warn(
+                "native video wallpaper \(wallpaper.wallpaperId): \(reason); giving up on it "
+                    + "and not reading this file again until that read returns", load: load)
+            return (.preparationFailed(reason), true)
+        }
+    }
+
+    /// Answers for an offer whose file already has a read that has not
+    /// returned. Unsettled, like the timeout it follows from.
+    private static let probeStillPending = NativeVideoRefusal.preparationFailed(
+        "an earlier metadata read of this file has not returned")
+    private static let probeAbandoned = NativeVideoRefusal.preparationFailed(
+        "the metadata read was abandoned")
+
+    /// Gives a wallpaper back to the scene engine.
+    ///
+    /// Every hand-off is reported to the bridge the same way, whatever caused
+    /// it. The bridge records it as a refusal of this admission key and holds
+    /// it for the rest of the session, so that a wallpaper the player cannot
+    /// honour never passes back and forth between the two backends. It lets go
+    /// only when the key changes (the file, or the target frame rate it was
+    /// judged at) or when Video playback is switched to Compatibility and back;
+    /// nothing here retries on the host's own initiative. Whether the cause was
+    /// settled (`NativeVideoRefusal.isSettled`) decides only what this host
+    /// remembers: a settled verdict is kept, so the key is answered at once if
+    /// the bridge offers it again, and an unsettled one is not, so the clip is
+    /// tried afresh then.
     private func handOff(
         wallpaper: BridgeNativeVideoWallpaper, refusal: NativeVideoRefusal, load: UInt64?
     ) async {
@@ -450,6 +563,7 @@ final class NativeVideoWallpaperHost {
         descriptors.removeAll()
         admissionCache.removeAll()
         admissionCacheOrder.removeAll()
+        outstandingProbes.removeAll()
     }
 
     /// Answers a desktop poster request from the player that is already

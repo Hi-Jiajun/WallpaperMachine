@@ -60,6 +60,11 @@ enum RuntimeCounter: String, CaseIterable, Sendable {
     /// The native backend refused a wallpaper and handed it to the scene
     /// engine.
     case nativeVideoRefused
+    /// Reading a clip's metadata did not finish within the limit for its
+    /// storage, so the host stopped waiting and handed the wallpaper over. A
+    /// count on an internal drive means the read is genuinely stuck; on a
+    /// network share or an evicted cloud file it may only be slow.
+    case nativeVideoProbeTimeout
     /// A poster request was answered by a one-shot image generator instead of
     /// the item that is playing, which is a second decode of a few frames.
     /// Either the playing item produced no frame in time, or the clip is

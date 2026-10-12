@@ -573,6 +573,24 @@ need an authorized runtime check
   posters from replaced surfaces not published. `NativeVideoPlaybackFailureTests` — the
   reported failure keeps the codes under the localized message and a clip with
   sound is rebuilt with its picture alone.
+- The metadata-read bound, in the host suite with a hand-fired clock
+  (`ManualSleeper`) and a read held open by a gate: a read that never returns is
+  abandoned after the limit for its storage (8, 30 or 60 seconds, per class) and the
+  wallpaper is handed over with a reason that says the read did not finish; the
+  timeout is not retried in the pass, not cached by the host (the bridge holds the
+  hand-off for the session, which only its own `native_video_routing` tests pin: no
+  test joins the two), and counted as
+  `nativeVideoProbeTimeout`; each retry is bounded too; the same file has at most one
+  read outstanding and is answered at once while it is, and a pass cancelled before a
+  retry's read begins leaves no read outstanding; a close queued behind the
+  stuck pass happens in the next one; and the storage is only classified when a file
+  is actually read. `NativeVideoDeadlineTests` — the race itself: the operation,
+  the timer or the caller's cancellation wins, the caller is always released, the
+  loser's timer is cancelled, and a late result of a read that nothing cancels is
+  dropped. `NativeVideoStoragePolicyTests` — the classification order over every
+  combination of volume flags (an unreadable flag is never taken as internal), the
+  deadlines growing with slower storage, a missing file reading as unknown, and a
+  classification that never returns counting as unknown after 2 seconds.
 - `NativeVideoLayoutTests` — where the picture goes under Fit, Fill, Stretch,
   Original size and a scale factor: the rectangles equal the numbers the
   renderer's own `ComputeWallpaperScalingLayout` gives (Original size is one video
@@ -610,9 +628,12 @@ need an authorized runtime check
   stays 0).
 
 Not covered: first frames presented on a real display, the Mission Control
-or other-Space poster of a rotated clip as macOS shows it, and a side-by-side of
+or other-Space poster of a rotated clip as macOS shows it, a side-by-side of
 Fit, Original size and a scale factor on a real display against Compatibility
-(including the composition cost of a large factor).
+(including the composition cost of a large factor), and a genuinely stuck volume (a
+sleeping external disk, an unreachable share, an evicted cloud file) with the hand-off
+reason it produces in **In use now**: the limits and rules are covered, but no test
+blocks a real `AVAsset` load.
 
 ## Panel
 

@@ -486,6 +486,29 @@ the renderer's own layout code (see [coverage](../testing/coverage.md#nativevide
 How a very large factor affects composition cost on a real display has not been
 measured.
 
+Reading a clip's metadata before it plays is bounded in time, because a file on a
+disk that has gone to sleep, a share that stopped answering or an iCloud or File
+Provider file that was evicted can keep a read waiting indefinitely, and that read
+runs in the same pass that opens, closes and pauses every other display's video. The
+limit follows where the file lives: 8 seconds on the internal drive, 30 seconds on an
+external drive or when the volume cannot be identified (long enough for a hard disk
+to spin up), and 60 seconds on a network volume or a cloud-backed file. A read that
+runs out of time hands the wallpaper to Compatibility like any other refusal, and
+**In use now** says the metadata read did not finish and what kind of storage it was
+waiting on. It is not retried within the pass and is not remembered by the app as a
+verdict on the file, so a clip that is offered natively again is read afresh; but
+while the first read is still blocked, that file is not read a second time, so one
+stuck file never holds more than one blocked call. The hand-off itself lasts for the
+session: the bridge records the refusal against the clip's file and target frame rate
+and does not offer them natively again, so a clip handed over by a slow disk stays on
+Compatibility until its file or its target frame rate changes, or **Video playback**
+is switched to Compatibility and back to **Native video preferred**. Nothing retries
+it on its own, since the bridge never passes a wallpaper back and forth between
+backends. A diagnostic recording counts these as `nativeVideoProbeTimeout`; a count on
+the internal drive means the read is stuck, while on a share or a cloud file it may
+only be slow. The same bound applies to a read that fails and is retried: each of the
+three attempts gets the whole limit.
+
 When the clip's audio output cannot start (no output device, or one that will not
 start), AVFoundation fails the whole clip, muted or not, and reports only
 `AVErrorUnknown`. Native playback then rebuilds the clip from its video track alone
