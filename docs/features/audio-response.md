@@ -98,7 +98,7 @@ Scenes receive the values as analysed; web pages receive them clamped to 0.0–1
 | Path | Notes |
 | --- | --- |
 | Shader spectrum effects | Authored audio-reactive shaders |
-| Web `wallpaperRegisterAudioListener()` | 64 bands per channel, one shared delivery pump capped at 30 Hz |
+| Web `wallpaperRegisterAudioListener()` | 64 bands per channel, one shared delivery pump capped at 30 Hz; a cleared spectrum keeps arriving through silence (every poll for 1.5 s, then once a second) so pages that smooth per callback finish decaying ([details](web-wallpapers.md#audio-response)) |
 | SceneScript `engine.registerAudioBuffers()` | 16, 32 and 64 bands |
 | Particle emitters | Box and sphere emitters with audio frequency, bounds and exponent settings |
 

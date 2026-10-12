@@ -315,9 +315,9 @@ separately.
 
 The listener receives a 128-float array: indices 0–63 the left channel, 64–127 the
 right, low index first within a channel. Delivery is capped at 30 Hz, skips
-generations the analyser did not recompute, and happens only while the page has a
-registered listener, the user has audio response enabled for that wallpaper, and the
-page is not suspended. One shared poller (`WebWallpaperAudioPump`) serves every
+generations the analyser did not recompute (the exception is silence, below), and
+happens only while the page has a registered listener, the user has audio response
+enabled for that wallpaper, and the page is not suspended. One shared poller (`WebWallpaperAudioPump`) serves every
 display and does not exist while nothing is subscribed; the system capture tap is
 opened and closed from that same demand, and a page counts as a consumer only once
 it has subscribed. Mute and volume do not affect it: a silenced wallpaper still
@@ -326,6 +326,23 @@ spectrum entry point (`owe_audio_current_spectrum_128`); the official protocol s
 values may occasionally exceed 1.0 and tells pages to clamp themselves, so this is a
 documented deviation. How the spectrum is computed is in
 [audio-response.md](audio-response.md#what-wallpapers-receive).
+
+**Silence.** When the sound stops, the analyser publishes one all-zero spectrum and
+then no more, so a visualizer that smooths in its callback would freeze part-way
+through its decay. The pump therefore repeats an all-zero spectrum
+(`WebWallpaperSilenceCadence`): on every poll for 1.5 s after the last new spectrum
+(at most 45 extra calls, enough for a decay to finish), then once a second until sound
+returns, the pages leave, or the wallpaper is paused or suspended. The one-second beat
+also gives a page that starts listening during silence its first frame within a
+second. Only exactly-zero spectra repeat, because the renderer maps everything at or
+below -48 dB to 0; a spectrum with signal is delivered once, never replayed. While the
+repeats flow, **Audio and media status** keeps saying the page is receiving frames:
+they are valid frames, and the status counts a frame as current for two seconds. If the
+capture tap keeps delivering silent audio, the analyser produces a new all-zero
+spectrum on every cycle and nothing changes. Whether Wallpaper Engine keeps calling a
+listener through silence is not documented (its page says about 30 callbacks per second
+and says nothing about silence), so parity is claimed only for pages that smooth per
+callback.
 
 ## Media integration
 
@@ -405,7 +422,8 @@ first-frame grace and edits shown while paused, navigation lockdown, forwarded p
 policy, changed-only property delivery, frame pacing against a fake display
 cadence and in a real page with the rate a slow or full-refresh page draws at, render
 scale on `devicePixelRatio` including the
-resize rebuild of a canvas page) and the bridge contract in
+resize rebuild of a canvas page, the audio pump with its silence cadence on a
+hand-moved clock) and the bridge contract in
 `upstream/renderer/crates/bridge/src/tests/` (`apply_options.rs`,
 `quality_settings.rs`, `web_audio_media.rs`); file and directory properties are
 covered under [user files](user-files.md#verification), and the domain inventory is in
@@ -421,4 +439,7 @@ does a pass over real Workshop pages from the
 object on every edit. How soft a page looks at 75% and 50%, the real GPU and
 WebContent savings on WebGL, Spine and three.js pages (an A/B with
 `scripts/power_benchmark.py`), pages that read `devicePixelRatio` once, and pages
-that mix it into CSS pixel math also need an authorized desktop run.
+that mix it into CSS pixel math also need an authorized desktop run. So does a real
+smoothing visualizer (bars that decay per callback) after the system audio stops, and
+a comparison with Wallpaper Engine's own behavior in silence if a Windows reference is
+ever available.
