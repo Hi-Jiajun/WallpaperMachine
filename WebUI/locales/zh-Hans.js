@@ -1307,6 +1307,9 @@ export default {
   'This video cannot be read here, so it cannot be checked.': '无法在此读取该视频，因此无法检查。',
   'Reading the video took too long.': '读取视频耗时过长。',
   'The video changed while it was being checked. Look again.': '检查期间视频发生了变化，请重新检查。',
+  'Set scale factor to ×{factor}': '将缩放系数设为 ×{factor}',
+  'Scale factor is set to ×{factor}. Choose Apply changes to keep it, or Revert to undo.': '缩放系数已设为 ×{factor}。选择“应用修改”以保留，或选择“还原”以撤销。',
+  'Fills in this display’s Scale factor. Nothing is saved until you choose Apply changes.': '填入此显示器的缩放系数。在选择“应用修改”之前不会保存。',
 
   // Saved playlists and collection sources (Settings: displays)
   'Collection “{name}”': '合集“{name}”',

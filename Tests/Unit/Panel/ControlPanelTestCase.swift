@@ -117,6 +117,11 @@ class LayoutSnapshotBridge: WallpaperBridge {
     if failLabelLanguages { throw CancellationError() }
     onLabelLanguages?(locales)
   }
+  /// Scale-factor edits the panel sends, in order.
+  @MainActor var scalingFactorCalls: [(wallpaperId: String, displayId: String, factor: Double)] = []
+  /// Stands in for the engine's reply to a scale-factor edit. Without one the usual bundle is
+  /// returned, which needs the wallpaper's options in the snapshot.
+  @MainActor var scalingFactorReply: (@MainActor (_ wallpaperId: String, _ displayId: String, _ factor: Double) throws -> BridgeWallpaperMutationBundle)?
 
   override func setBatteryMode(mode: BridgeBatteryMode) async throws -> BridgeSnapshotBundle {
     try await reply { $0.batteryModeCalls.append(mode) }
@@ -145,6 +150,19 @@ class LayoutSnapshotBridge: WallpaperBridge {
     releaseHeldCalls.append(wallpaperId)
     if let releaseHeldFailure { throw releaseHeldFailure }
     return try reply { _ in }
+  }
+
+  override func editScalingFactor(wallpaperId: String, displayId: String, factor: Double) async throws -> BridgeWallpaperMutationBundle {
+    try await recordScalingFactor(wallpaperId: wallpaperId, displayId: displayId, factor: factor)
+  }
+
+  @MainActor private func recordScalingFactor(wallpaperId: String, displayId: String, factor: Double) throws -> BridgeWallpaperMutationBundle {
+    scalingFactorCalls.append((wallpaperId, displayId, factor))
+    if let scalingFactorReply { return try scalingFactorReply(wallpaperId, displayId, factor) }
+    guard let bundle = bundleProvider?() ?? snapshot, let options = bundle.wallpaperOptions else { throw CancellationError() }
+    return BridgeWallpaperMutationBundle(
+      app: bundle.app, library: bundle.library, wallpaperOptions: options,
+      monitorInformation: bundle.monitorInformation, settings: bundle.settings)
   }
 
   @MainActor private func reply(_ record: @MainActor (LayoutSnapshotBridge) -> Void) throws -> BridgeSnapshotBundle {

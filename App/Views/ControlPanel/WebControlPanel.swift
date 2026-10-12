@@ -73,6 +73,8 @@ final class WebPanelController: NSObject, WKNavigationDelegate {
   let imagePlacement: StillImagePlacementStore
   let compatibility: WallpaperCompatibilityStore
   let letterbox: VideoLetterboxStore
+  /// The scale factor the Black bars card last set, while it can still be waiting in the draft.
+  var letterboxStaged: LetterboxStagedFactor?
   var imagePlacementRequestSequence: UInt64 = 0
   var imagePlacementRequests: [String: UInt64] = [:]
   /// Tests pass a closure so choosing an app does not open a panel. Nil uses the sheet.

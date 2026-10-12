@@ -1307,6 +1307,9 @@ export default {
   'This video cannot be read here, so it cannot be checked.': 'このビデオはここでは読み込めないため、確認できません。',
   'Reading the video took too long.': 'ビデオの読み込みに時間がかかりすぎました。',
   'The video changed while it was being checked. Look again.': '確認中にビデオが変更されました。もう一度確認してください。',
+  'Set scale factor to ×{factor}': 'スケール倍率を×{factor}に設定',
+  'Scale factor is set to ×{factor}. Choose Apply changes to keep it, or Revert to undo.': 'スケール倍率を×{factor}に設定しました。保持するには「変更を適用」、取り消すには「元に戻す」を選んでください。',
+  'Fills in this display’s Scale factor. Nothing is saved until you choose Apply changes.': 'このディスプレイのスケール倍率を入力します。「変更を適用」を選ぶまで保存されません。',
 
   // Saved playlists and collection sources (Settings: displays)
   'Collection “{name}”': 'コレクション「{name}」',

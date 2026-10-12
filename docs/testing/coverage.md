@@ -404,7 +404,9 @@ on [manual-smoke.md](manual-smoke.md).
   all-black pictures; skipped in the routine gate, so the bar edges measured on real
   decoder output are not covered unless it is run.
   `VideoLetterboxStoreTests` — results per library revision, one probe at a time,
-  cancellation writing nothing, the 16-entry bound. They do not show how the factor
+  cancellation writing nothing, the 16-entry bound, and confirming a result against
+  the file before it is acted on (a replaced file drops it, a newer check landing
+  meanwhile refuses it). They do not show how the factor
   looks on a real display, nor real wallpapers with burnt-in subtitles, fades or
   anamorphic pixels.
 - `LibraryMetricsTests`, `ClientPreferencesTests` — folder size and date measured
@@ -845,7 +847,8 @@ follows the developer's in-app language choice.
 - Feature pages that live here and are described under their domain:
   `ControlPanelAutomationTests`, `ControlPanelBackupFlowTests`,
   `ControlPanelDisplayLayoutTests`, `ControlPanelLetterboxTests` (the Black bars
-  card drawn in the real page for an installed video only), `ControlPanelPixivTests`,
+  card drawn in the real page for an installed video only, with its Set scale factor
+  button sending one scale-factor edit), `ControlPanelPixivTests`,
   `ControlPanelPlaybackToolsTests`, `ControlPanelPreviewTests`,
   `ControlPanelSpaceWallpaperTests`.
 - Controller-level suites without a web view: `WebPanelAssetsTests` (thumbnail
@@ -855,11 +858,20 @@ follows the developer's in-app language choice.
   `WebPanelLetterboxTests` (the Black bars snapshot never starts a probe, only an
   installed video on an enabled independent display can be checked, the suggested
   factor follows the target display without a second probe, results read as idle
-  after a library refresh), `WebPanelDeliveryStatusTests`,
+  after a library refresh; staging records exactly the factor recomputed from the
+  stored bars and the display's size whatever the request carries, whichever video
+  backend plays the clip, and refuses, with no call, a stale selection or display, a
+  mirror, a mode other than Fill, a result without bars or from before a refresh, a
+  factor already set or larger, a replaced file, which also drops the result, and a
+  selection that moves while the file is confirmed; the line about unsaved changes
+  follows only the factor the card set, so a saved factor with an unrelated dirty
+  draft stays quiet, as does one that was applied and then followed by another edit,
+  reverted, retyped, or left and returned to),
+  `WebPanelDeliveryStatusTests`,
   `WebPanelEnergyUsageTests` (sampling only while Settings is visible),
-  `WebPanelExternalLinkTests` (every fixed link in `WebUI/*.js` passes the allowlist), `WebPanelGeneralSettingsTests` (the Login
-  Items note and button, and that returning to the panel re-reads the status only
-  while approval is pending),
+  `WebPanelExternalLinkTests` (every fixed link in `WebUI/*.js` passes the allowlist),
+  `WebPanelGeneralSettingsTests` (the Login Items note and button, and that returning
+  to the panel re-reads the status only while approval is pending),
   `WebPanelHiddenPropertyTests` (a property a visibility rule hides is not given
   to the page, its folder is not measured and its pending text is dropped),
   `WebPanelPerformanceSettingsTests` and `WebPanelSceneSettingsTests` (unknown,

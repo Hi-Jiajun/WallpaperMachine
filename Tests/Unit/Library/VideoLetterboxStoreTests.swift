@@ -162,4 +162,78 @@ final class VideoLetterboxStoreTests: XCTestCase {
     XCTAssertEqual(store.phase(for: "w2", revision: 1), .idle)
     guard case .done = store.phase(for: "w1", revision: 1) else { return XCTFail("w1 was checked again and stays") }
   }
+
+  func testConfirmedReportHandsBackTheResultOnlyWhileTheFileIsTheOneThatWasMeasured() async throws {
+    let store = makeStore()
+    await store.check(wallpaperID: "a", displayID: "7", libraryRevision: 1)
+    guard case .done(let measured) = store.phase(for: "a", revision: 1) else { return XCTFail("Expected a finished check") }
+    let confirmed = try await store.confirmedReport(wallpaperID: "a", displayID: "7", libraryRevision: 1)
+    XCTAssertEqual(confirmed, measured)
+    XCTAssertEqual(store.phase(for: "a", revision: 1), .done(measured), "confirming does not consume it")
+
+    try Data("a different, longer video file".utf8).write(to: video)
+    do {
+      _ = try await store.confirmedReport(wallpaperID: "a", displayID: "7", libraryRevision: 1)
+      XCTFail("A replaced file must not be confirmed")
+    } catch let error as VideoLetterboxStore.Confirmation {
+      XCTAssertEqual(error, .fileChanged)
+    }
+    XCTAssertEqual(store.phase(for: "a", revision: 1), .idle, "the old measurement is dropped")
+  }
+
+  func testConfirmedReportRefusesWhatWasNeverMeasuredAtThisRevision() async throws {
+    let calls = Calls()
+    let store = makeStore(frames: { _ in
+      if calls.next() == 0 { throw VideoLetterboxProbe.Failure.noVideoTrack }
+      return LetterboxFixtures.frames(top: 23, bottom: 23)
+    })
+    func assertNotChecked(_ id: String, revision: UInt64, _ why: String, line: UInt = #line) async {
+      do {
+        _ = try await store.confirmedReport(wallpaperID: id, displayID: "7", libraryRevision: revision)
+        XCTFail("Must refuse: \(why)", line: line)
+      } catch let error as VideoLetterboxStore.Confirmation {
+        XCTAssertEqual(error, .notChecked, why, line: line)
+      } catch {
+        XCTFail("Unexpected \(error): \(why)", line: line)
+      }
+    }
+    await assertNotChecked("a", revision: 1, "nothing was checked")
+    await store.check(wallpaperID: "a", displayID: "7", libraryRevision: 1)
+    await assertNotChecked("a", revision: 1, "the check failed")
+    await store.check(wallpaperID: "a", displayID: "7", libraryRevision: 1)
+    await assertNotChecked("a", revision: 2, "a result from an older library revision describes files that may be gone")
+    await assertNotChecked("b", revision: 1, "another wallpaper")
+    _ = try await store.confirmedReport(wallpaperID: "a", displayID: "7", libraryRevision: 1)
+  }
+
+  func testConfirmedReportRefusesWhenANewCheckLandsWhileTheFileIsBeingFound() async throws {
+    let frames = Calls()
+    let entries = Calls()
+    let url = video!
+    var store: VideoLetterboxStore!
+    store = makeStore(
+      frames: { _ in
+        // The first measurement finds side bars, the one made during the confirmation top and bottom.
+        frames.next() == 0 ? LetterboxFixtures.frames(left: 40, right: 40) : LetterboxFixtures.frames(top: 23, bottom: 23)
+      },
+      entry: { _, _ in
+        // The second resolution is the confirmation's own.
+        if entries.next() == 1 { await store.check(wallpaperID: "a", displayID: "7", libraryRevision: 1) }
+        return url
+      })
+    await store.check(wallpaperID: "a", displayID: "7", libraryRevision: 1)
+    do {
+      _ = try await store.confirmedReport(wallpaperID: "a", displayID: "7", libraryRevision: 1)
+      XCTFail("The result that was asked for has been replaced")
+    } catch let error as VideoLetterboxStore.Confirmation {
+      XCTAssertEqual(error, .notChecked)
+    }
+    guard case .done(let report) = store.phase(for: "a", revision: 1), case .bars(let bars) = report.verdict else {
+      return XCTFail("The newer check keeps its result")
+    }
+    XCTAssertGreaterThan(bars.top, 0)
+    XCTAssertEqual(bars.left, 0)
+    store.onChange = nil
+    store = nil
+  }
 }

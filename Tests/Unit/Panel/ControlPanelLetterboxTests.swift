@@ -3,7 +3,8 @@ import XCTest
 @testable import WallpaperMachine
 
 /// The Black bars card in the real page: drawn from the snapshot's `videoLetterbox`, only for an
-/// installed video. Offscreen; the frames come from an injected source, so nothing is decoded.
+/// installed video, with the button that fills in the display's Scale factor. Offscreen; the frames
+/// come from an injected source, so nothing is decoded.
 @MainActor
 final class ControlPanelLetterboxTests: ControlPanelTestCase {
   func testCardShowsTheMeasuredBarsAndTheFactorForTheTargetDisplayOnlyForAVideo() async throws {
@@ -40,6 +41,35 @@ final class ControlPanelLetterboxTests: ControlPanelTestCase {
       // 23 of 180 rows a side on a 16:9 display: 180 / 134 plus half a percent, rounded up.
       try await panel.expectJS("return \(card).textContent.includes('With Fill on this display, a scale factor of ×1.35 hides them.')", equals: true)
       try await panel.expectJS("return \(card).textContent.includes('Look again')", equals: true)
+
+      // Setting the factor: offered with what it does, whichever video backend plays the clip,
+      // and then done through the same call as the Displays section's field.
+      let stage = "\(card).querySelector('[data-action=\"videoLetterboxStage\"]')"
+      try await panel.expectJS("return \(stage).textContent.includes('Set scale factor to ×1.35')", equals: true)
+      try await panel.expectJS("return \(stage).disabled", equals: false)
+      try await panel.expectJS("return \(card).textContent.includes('Nothing is saved until you choose Apply changes.')", equals: true)
+      store.settingsSnapshot.videoBackend = "native_preferred"
+      try await panel.expectJS("return \(stage).disabled", equals: false)
+
+      fixture.bridge.scalingFactorReply = { [store] _, display, factor in
+        var options = try XCTUnwrap(store.wallpaperOptionsSnapshot)
+        options.displayConfigurations = [
+          BridgeDisplayConfigRow(displayId: display, title: "Display", enabled: true, scalingMode: .fill,
+                                 scalingFactor: factor, targetFps: 30, maxFps: 60, muted: false, volume: 1,
+                                 dirty: true, canRestoreDefaults: true)
+        ]
+        options.dirty = true
+        return BridgeWallpaperMutationBundle(
+          app: store.appSnapshot, library: store.librarySnapshot, wallpaperOptions: options,
+          monitorInformation: store.monitorInformationSnapshot, settings: store.settingsSnapshot)
+      }
+      _ = try await panel.js("\(stage).click()")
+      try await panel.waitJS("\(card).textContent.includes('Scale factor is set to ×1.35. Choose Apply changes to keep it, or Revert to undo.')")
+      XCTAssertEqual(fixture.bridge.scalingFactorCalls.count, 1)
+      XCTAssertEqual(fixture.bridge.scalingFactorCalls.first?.wallpaperId, "clip")
+      XCTAssertEqual(fixture.bridge.scalingFactorCalls.first?.displayId, "primary")
+      XCTAssertEqual(try XCTUnwrap(fixture.bridge.scalingFactorCalls.first?.factor), 1.35, accuracy: 0.0001)
+      try await panel.expectJS("return \(stage) === null", equals: true)
 
       store.appSnapshot.selectedWallpaperId = "scene"
       store.wallpaperOptionsSnapshot = BridgeSnapshotFixtures.options(wallpaperId: "scene", kind: .projectScene)

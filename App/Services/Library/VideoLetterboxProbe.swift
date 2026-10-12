@@ -89,6 +89,12 @@ actor VideoLetterboxProbe {
                   verdict: LetterboxDetector.verdict(frames: luma, thresholds: thresholds))
   }
 
+  /// The file's present stamp, or nil when it cannot be read. Run here, not on the main actor, so
+  /// the store can confirm a result still describes the file without touching the disk itself.
+  func currentStamp(of url: URL) -> VideoFileStamp? {
+    try? VideoFileStamp(url: url)
+  }
+
   /// The fractions of the clip at which frames are taken, away from the ends where fades live.
   static let samplePositions: [Double] = [0.1, 0.3, 0.5, 0.7, 0.9]
   /// Frames are decoded no larger than this on either side: bars show at any size.

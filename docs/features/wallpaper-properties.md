@@ -252,6 +252,8 @@ the bars in each and reports what most of them agree on. The check is read-only:
 nothing is applied, rewritten or saved. Results are held in memory for the last
 16 wallpapers checked and read as not checked again after a library refresh or a
 restart; selecting another wallpaper cancels a check that is still running.
+Acting on a result is a separate click, described under
+[Set scale factor](#set-scale-factor).
 
 - **No black bars found**, or **Black bars found** with their size as a share of the
   picture on each side. Bars on both ends of one axis, or all four sides, are
@@ -261,8 +263,7 @@ restart; selecting another wallpaper cancels a check that is still running.
   the engine's Fill layout (a 21:9 display already crops the top and bottom of a
   16:9 video, so the card may say Fill already does it), is rounded up to two
   decimals and carries half a percent of overscan. In any other scaling mode the
-  bars are reported and no factor is named. Setting the factor is the display's
-  **Scale factor** field; the card changes nothing.
+  bars are reported and no factor is named.
 - **Uneven** bars (one side only, or lopsided) get no factor, because a centred
   zoom would also cut picture. Bars that add up to more than 45% of an axis are
   treated as unreliable and nothing is suggested.
@@ -272,11 +273,40 @@ restart; selecting another wallpaper cancels a check that is still running.
   readable there), the file has no video track, reading takes longer than 20
   seconds, or the file changed while it was being read.
 
+#### Set scale factor
+
+When a factor is named, **Set scale factor to ×N** fills in the target display's
+**Scale factor** with it. The click goes through the same bridge call as the
+Displays section's field, so it joins the pending changes: **Apply changes** saves
+it and **Revert** restores the saved factor, and like typing in that field it is
+previewed on the display while the wallpaper is playing there. The page sends only
+the wallpaper and display; the factor is recomputed in Swift from the stored bars,
+the clip's proportions and the display's size at the moment of the click, so
+nothing the page sends can change it.
+
+The click is refused, and changes nothing, when the card no longer matches what is
+selected and configured: another wallpaper or display, a mirror or disabled
+display, a mode other than Fill, a result from before a library refresh, or a
+display that already has the factor or a larger one (the user's own larger factor
+is never lowered). Before it acts, the app re-reads the video file's size, date
+and identity; if the file was replaced since the check, the result is dropped, the
+click reports that the video changed, and the card goes back to offering a new
+look.
+
+Both video backends apply the scale factor with the same Fill layout ([Video
+backend](performance.md#video-backend)), so the button does not depend on which one
+plays the clip. Once the display holds the factor the card drops the button. It adds
+the line about Apply changes and Revert only for the factor this card set, and only
+while that factor is still waiting in the unsaved draft: the app remembers what it
+set, and forgets it when the draft is applied or reverted, the factor is edited, or
+another wallpaper or display is shown. A factor that was already saved never gets the
+line, however many other edits the wallpaper has pending. The numbers on the card come
+from the snapshot, not from what the page did last. The lock-screen configuration
+carries the display's scale factor as well; no routine test exercises that path.
+
 Sampled evidence is not proof: a scene that keeps a black border through all five
 samples looks like bars, burnt-in subtitles shorten a bar in the frames that carry
 them, and the thresholds are this app's own, exercised on generated H.264 clips
 and not on a corpus of real wallpapers. Anamorphic (non-square pixel) clips can be
 a percent or two off, which the overscan covers. Mirror displays hold their own
-scale factor and are not covered. Both video backends apply the scale factor with
-the same Fill layout, so the named factor crops the same bars on either
-([Video backend](performance.md#video-backend)).
+scale factor and are not covered.

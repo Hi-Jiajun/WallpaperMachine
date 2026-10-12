@@ -74,6 +74,34 @@ final class VideoLetterboxStore {
     await task.value
   }
 
+  /// Why a stored result cannot back an action.
+  enum Confirmation: Error, Equatable {
+    /// There is no finished result for the wallpaper at this library revision.
+    case notChecked
+    /// The file is no longer the one that was examined; the result has been dropped.
+    case fileChanged
+  }
+
+  /// The finished result for a wallpaper, after proving the file on disk is still the one it
+  /// describes. A replaced file drops the result, so the card reads as not checked again.
+  func confirmedReport(wallpaperID: String, displayID: String, libraryRevision: UInt64) async throws -> VideoLetterboxProbe.Report {
+    guard case .done(let report) = phase(for: wallpaperID, revision: libraryRevision) else { throw Confirmation.notChecked }
+    let url = try await entry(wallpaperID, displayID)
+    let stamp = await probe.currentStamp(of: url)
+    // Both awaits can outlast a newer check, a library refresh or a selection change.
+    guard case .done(let current) = phase(for: wallpaperID, revision: libraryRevision), current == report else {
+      throw Confirmation.notChecked
+    }
+    guard stamp == report.stamp else {
+      AppLog.warn("Black bar result for \(wallpaperID) dropped: the video file changed since it was checked")
+      records.removeValue(forKey: wallpaperID)
+      order.removeAll { $0 == wallpaperID }
+      touch()
+      throw Confirmation.fileChanged
+    }
+    return report
+  }
+
   func cancelAll() { cancelRunning() }
 
   private func cancelRunning() {
@@ -133,14 +161,10 @@ final class VideoLetterboxStore {
   }
 
   private static func describe(_ verdict: LetterboxDetector.Verdict) -> String {
-    func percent(_ value: Double) -> String { String(format: "%.1f%%", value * 100) }
-    func bars(_ value: LetterboxDetector.Bars) -> String {
-      "top \(percent(value.top)) bottom \(percent(value.bottom)) left \(percent(value.left)) right \(percent(value.right))"
-    }
     switch verdict {
     case .none: return "no bars"
-    case .bars(let value): return "bars: \(bars(value))"
-    case .uneven(let value): return "uneven bars: \(bars(value))"
+    case .bars(let value): return "bars: \(value.summary)"
+    case .uneven(let value): return "uneven bars: \(value.summary)"
     case .indeterminate(let reason): return "indeterminate: \(reason)"
     }
   }

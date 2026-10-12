@@ -3100,6 +3100,9 @@
     },
     "Another copy of WallpaperMachine is using this library. Quit it before opening this one." : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Another copy of WallpaperMachine is using this library. Quit it before opening this one."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "別のWallpaperMachineが同じライブラリを使用しています。そちらを終了してから、このコピーを開いてください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "另一个 WallpaperMachine 副本正在使用同一个壁纸库。请先退出它，再打开这一个。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "另一個 WallpaperMachine 副本正在使用同一個桌布庫。請先結束它，再打開這一個。"}}}
+    },
+    "The video changed since it was checked. Look for black bars again." : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "The video changed since it was checked. Look for black bars again."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "確認したあとでビデオが変更されました。もう一度黒帯を確認してください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "视频在检查之后发生了变化。请重新检查黑边。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "影片在檢查之後發生了變化。請再次檢查黑邊。"}}}
     }
   },
   "version" : "1.0"

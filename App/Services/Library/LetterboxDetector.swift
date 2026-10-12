@@ -24,6 +24,12 @@ enum LetterboxDetector {
 
     static let zero = Bars(top: 0, bottom: 0, left: 0, right: 0)
     var widest: Double { max(top, bottom, left, right) }
+
+    /// The four sides as percentages of the picture, for the log.
+    var summary: String {
+      func percent(_ value: Double) -> String { String(format: "%.1f%%", value * 100) }
+      return "top \(percent(top)) bottom \(percent(bottom)) left \(percent(left)) right \(percent(right))"
+    }
   }
 
   struct Thresholds: Equatable, Sendable {

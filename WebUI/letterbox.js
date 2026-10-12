@@ -1,8 +1,9 @@
 // The inspector's Black bars card for an installed video: an explicit check that samples a few
 // frames of the file for bars baked into the picture, and what Fill with a scale factor would do
 // about them on the target display. Everything shown comes from the snapshot's `videoLetterbox`
-// (a state, a reason code, the measured bars and a suggestion native computed for this display);
-// the page chooses the words and decides nothing about the video.
+// (a state, a reason code, the measured bars, a suggestion native computed for this display and
+// whether it can be staged); the page chooses the words and decides nothing about the video.
+// Staging sends only which wallpaper and display: native recomputes the factor itself.
 import { t } from './i18n.js';
 
 // A status glyph per outcome, drawn in the compatibility card's colours.
@@ -85,10 +86,27 @@ export function createLetterbox({ escapeHTML, icon, button, keyAttr, busy }) {
     }
     const label = data.state === 'idle' || checking ? t('Look for black bars') : t('Look again');
     const check = button(label, 'videoLetterboxCheck', args, { className: 'link', icon: 'refresh', disabled: checking || !targetOK || busy('videoLetterboxCheck', args), title: targetOK ? '' : t('Choose an enabled, independent target display to check this wallpaper') });
+    const [stageButton, stageNote] = staging(item, data, args, targetOK);
     return `<section class="inspector-section"><details open ${keyAttr(`letterbox-${item.id}`)}><summary><span class="compat-heading">${escapeHTML(t('Black bars'))}</span>${icon('chevronRight', 14)}</summary><div class="section-content compat">`
       + `<p class="muted"><small>${escapeHTML(t('Some videos have black bars baked into the picture. Looking samples a few frames of the file; nothing is changed.'))}</small></p>`
       + body
-      + `<div class="actions">${check}</div></div></details></section>`;
+      + `<div class="actions">${stageButton}${check}</div>${stageNote}</div></details></section>`;
+  }
+
+  // The button that fills in the display's Scale factor with the suggested one, and the line under
+  // it: what it does, or that the factor is now in the draft. The factor named on
+  // the button and in the line comes from the snapshot, never from what the page last did.
+  function staging(item, data, args, targetOK) {
+    const stage = data.state === 'bars' && data.suggestion?.kind === 'factor' ? data.stage : null;
+    if (!stage) return ['', ''];
+    const note = (text, key, live = false) => `<p class="muted"${live ? ' role="status"' : ''} ${keyAttr(`${key}-${item.id}`)}><small>${escapeHTML(text)}</small></p>`;
+    if (stage.applied) {
+      if (!stage.pending) return ['', ''];
+      return ['', note(t('Scale factor is set to ×{factor}. Choose Apply changes to keep it, or Revert to undo.', { factor: factor(data.current?.scalingFactor) }), 'letterbox-staged', true)];
+    }
+    const suggested = factor(data.suggestion.factor);
+    const stageButton = button(t('Set scale factor to ×{factor}', { factor: suggested }), 'videoLetterboxStage', args, { className: 'link', icon: 'slidersVertical', disabled: !targetOK || !stage.available || busy('videoLetterboxStage', args) });
+    return [stageButton, note(t('Fills in this display’s Scale factor. Nothing is saved until you choose Apply changes.'), 'letterbox-stage-note')];
   }
 
   return { sync, section };
