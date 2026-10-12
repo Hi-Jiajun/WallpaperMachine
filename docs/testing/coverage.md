@@ -1047,7 +1047,13 @@ and `WorkshopDownloadPersistenceTests`:
 - `DownloadTelemetryTests` — download-speed sampling, including real `nettop`
   streaming (detail in [renderer.md](renderer.md)); `DownloaderLifecycleTests`
   report progress from disk growth against the listed size and stay
-  indeterminate without one.
+  indeterminate without one, never let the bytes shown fall (a shrinking tree, a
+  restarted network meter, a SteamCMD relaunch inside the run, which then moves
+  on from where it was even when its own meter stays below that), and give a time
+  left only after four seconds of history and not at the 99% cap, on an injected
+  clock. `TransferEstimatorTests` cover the pace itself (smoothing, the stall
+  floor, counters that start over, the 99-hour cap); the panel's wording of the
+  estimate is in `ControlPanelDiscoverTests`.
 - `WorkshopDownloadIntentTests` — a download request retained across setup,
   account and shared-resource consent, surviving browsing and relaunch, removal
   preventing resumption, and explicit consent including reinstall. Reinstall from

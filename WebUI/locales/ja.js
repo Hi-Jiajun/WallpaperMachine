@@ -144,6 +144,7 @@ export default {
   ' (disabled)': '（無効）',
   'Network speed: {speed}': 'ネットワーク速度：{speed}',
   '{received} of {expected}': '{received} / {expected}',
+  '{time} left': '残り{time}',
 
   // First-wallpaper support prompt
   'Feeling good?': '気に入りましたか？',

@@ -54,6 +54,7 @@ final class WorkshopDownload: Identifiable {
   var bytesReceived: Int64? { isQueued ? nil : worker.bytesReceived }
   var bytesExpected: Int64? { isQueued ? nil : worker.bytesExpected }
   var bytesPerSecond: Double? { isQueued ? nil : worker.bytesPerSecond }
+  var secondsRemaining: Int? { isQueued ? nil : worker.secondsRemaining }
 
   /// A job that only signs in and downloads nothing.
   var isSignIn: Bool { id == WorkshopDownloadManager.signInID }

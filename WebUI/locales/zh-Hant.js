@@ -144,6 +144,7 @@ export default {
   ' (disabled)': '（已停用）',
   'Network speed: {speed}': '網路速度：{speed}',
   '{received} of {expected}': '{received} / {expected}',
+  '{time} left': '剩餘{time}',
 
   // First-wallpaper support prompt
   'Feeling good?': '感覺不錯？',

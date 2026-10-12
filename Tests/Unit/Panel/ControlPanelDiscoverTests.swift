@@ -616,6 +616,88 @@ final class ControlPanelDiscoverTests: ControlPanelTestCase {
     await workshop.steamCMDSetup.shutdown()
   }
 
+  func testDownloadTimeLeftShowsWhenEveryRunningJobHasAnEstimate() async throws {
+    let fixture = makeStore()
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "web-time-left-\(UUID().uuidString)")
+    let defaults = try TemporaryDefaults.make(for: self).defaults
+    defer { try? FileManager.default.removeItem(at: root) }
+    let workshop = WorkshopStore(
+      downloader: WorkshopDownloadManager(sessionDirectory: root), supportDirectory: root,
+      defaults: defaults)
+    let controller = WebPanelController(
+      store: fixture.store, navigation: ControlPanelNavigation(), workshop: workshop,
+      defaults: defaults,
+      appLanguage: .english())
+    let web = controller.makeWebView()
+    defer { controller.stop() }
+    web.setFrameSize(NSSize(width: 960, height: 640))
+    let deadline = Date().addingTimeInterval(15)
+    while !controller.isReady && Date() < deadline {
+      try await Task.sleep(for: .milliseconds(50))
+    }
+    XCTAssertTrue(controller.isReady)
+    guard controller.isReady else { return }
+    let base =
+      try await web.callAsyncJavaScript(
+        "return await window.webkit.messageHandlers.native.postMessage({action:'ready'})",
+        arguments: [:], in: nil, contentWorld: .page) as? [String: Any]
+    XCTAssertNotNil(base)
+    guard let base else { return }
+    controller.stop()
+
+    let result =
+      try await web.callAsyncJavaScript(
+        """
+        const waitFor = async predicate => {
+          const deadline = Date.now() + 5000;
+          while (!predicate()) {
+            if (Date.now() > deadline) throw new Error('Time left did not settle');
+            await new Promise(resolve => setTimeout(resolve, 20));
+          }
+        };
+        const job = (id, extra = {}) => Object.assign({
+          id, wallpaperID: id, title: id, status: 'Downloading Workshop files…', preview: null, account: 'fixture',
+          progress: 0.4, pending: true, queued: false, bytesReceived: 400, bytesExpected: 1000, bytesPerSecond: 600000,
+          secondsRemaining: null, authenticating: false, cancelled: false, error: null, prompt: null,
+          securePrompt: false, challenge: null, warning: null }, extra);
+        const push = downloads => window.wallpaperUI.receive(Object.assign({}, base, { downloads, downloadRequests: [] }));
+        const activity = document.getElementById('activity-bar');
+        const queue = document.getElementById('queue-popover');
+        push([job('one')]);
+        document.querySelector('#top-actions [data-action="openDownloads"]').click();
+        await waitFor(() => !queue.hidden);
+        const both = text => activity.textContent.includes(text) && queue.textContent.includes(text);
+        const neither = text => !activity.textContent.includes(text) && !queue.textContent.includes(text);
+        const none = neither(' left');
+        push([job('one', { secondsRemaining: 45 })]);
+        const seconds = both('45 sec left');
+        push([job('one', { secondsRemaining: 600 })]);
+        const minutes = both('10 min left');
+        push([job('one', { secondsRemaining: 9000 })]);
+        const hours = both('2.5 hr left');
+        push([job('one', { secondsRemaining: null })]);
+        const cleared = neither(' left');
+        push([job('one', { secondsRemaining: 600 }), job('two', { secondsRemaining: 120 })]);
+        const slowest = activity.textContent.includes('2 downloading') && activity.textContent.includes('10 min left')
+          && !activity.textContent.includes('2 min left');
+        push([job('one', { secondsRemaining: 600 }), job('two', { secondsRemaining: null })]);
+        const unknownJob = activity.textContent.includes('2 downloading') && !activity.textContent.includes(' left');
+        return {none, seconds, minutes, hours, cleared, slowest, unknownJob};
+        """, arguments: ["base": base], in: nil, contentWorld: .page) as? [String: Any]
+    XCTAssertEqual(result?["none"] as? Bool, true, "No estimate means no time left on screen")
+    XCTAssertEqual(result?["seconds"] as? Bool, true, "Under a minute and a half reads in seconds, on both surfaces")
+    XCTAssertEqual(result?["minutes"] as? Bool, true, "Minutes follow")
+    XCTAssertEqual(result?["hours"] as? Bool, true, "Past an hour and a half it reads in hours")
+    XCTAssertEqual(result?["cleared"] as? Bool, true, "An estimate that goes away is removed, not left stale")
+    XCTAssertEqual(result?["slowest"] as? Bool, true, "Several jobs finish when the slowest does")
+    XCTAssertEqual(
+      result?["unknownJob"] as? Bool, true,
+      "A running job without an estimate keeps the batch from promising one")
+    XCTAssertNil(web.window, "This regression must not open a desktop window")
+    await workshop.steamCMDSetup.shutdown()
+  }
+
   func testDiscoverPreviewsPlayWithoutCanvasReadbackAndReleaseOffscreenImages() async throws {
     let fixture = makeStore()
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(

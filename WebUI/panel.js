@@ -122,7 +122,14 @@ function speed(value) {
   return `${(value / 1000 ** exponent).toLocaleString(undefined, { maximumFractionDigits: 1 })} ${units[exponent]}`;
 }
 function rate(value) { const pace = speed(value); return pace ? t('Network speed: {speed}', { speed: pace }) : ''; }
-function transfer(item, { includePercent = true } = {}) { const percent = Number.isFinite(item?.progress) ? `${Math.round(clamp(item.progress) * 100)}%` : ''; const received = bytes(item?.bytesReceived); const expected = bytes(item?.bytesExpected); const amount = received && expected ? t('{received} of {expected}', { received, expected }) : received; return [includePercent ? percent : '', amount, rate(item?.bytesPerSecond)].filter(Boolean).join(' · '); }
+// Seconds under a minute and a half, minutes under an hour and a half, then hours with one decimal.
+function duration(seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '';
+  const [value, unit] = seconds < 90 ? [Math.round(seconds), 'second'] : seconds < 5400 ? [Math.round(seconds / 60), 'minute'] : [Math.round(seconds / 360) / 10, 'hour'];
+  try { return new Intl.NumberFormat(language(), { style: 'unit', unit, unitDisplay: 'short', maximumFractionDigits: 1 }).format(value); } catch { return ''; }
+}
+function timeLeft(seconds) { const time = duration(seconds); return time ? t('{time} left', { time }) : ''; }
+function transfer(item, { includePercent = true } = {}) { const percent = Number.isFinite(item?.progress) ? `${Math.round(clamp(item.progress) * 100)}%` : ''; const received = bytes(item?.bytesReceived); const expected = bytes(item?.bytesExpected); const amount = received && expected ? t('{received} of {expected}', { received, expected }) : received; return [includePercent ? percent : '', amount, rate(item?.bytesPerSecond), timeLeft(item?.secondsRemaining)].filter(Boolean).join(' · '); }
 
 // Keyed reconciliation keeps loaded preview images, open disclosures and active fields alive.
 function morph(parent, html) {
@@ -1031,8 +1038,10 @@ function queueState() {
   const progress = measured.length ? clamp(measured.reduce((sum, item) => sum + clamp(item.progress), 0) / measured.length) : null;
   const percent = progress === null ? null : Math.round(progress * 100);
   const speed = active.reduce((sum, item) => sum + (Number.isFinite(item.bytesPerSecond) ? item.bytesPerSecond : 0), 0);
+  // The batch is done when its slowest job is, so one job without an estimate leaves the batch without one.
+  const remaining = active.length && active.every(item => Number.isFinite(item.secondsRemaining)) ? timeLeft(Math.max(...active.map(item => item.secondsRemaining))) : '';
   const count = requests.length + active.length + queued.length;
-  const summary = active.length > 1 ? [t('{count} downloading', { count: active.length }), percent !== null ? `${percent}%` : '', speed > 0 ? rate(speed) : ''].filter(Boolean).join(' · ') : running ? [running.status || t('Downloading'), percent !== null ? `${percent}%` : '', rate(running.bytesPerSecond)].filter(Boolean).join(' · ') : requests.length ? t(requests.length === 1 ? '{count} download needs setup' : '{count} downloads need setup', { count: requests.length }) : queued.length ? t('{count} waiting to download', { count: queued.length }) : downloads.length ? t(downloads.length === 1 ? '{count} download' : '{count} downloads', { count: downloads.length }) : t('No downloads');
+  const summary = active.length > 1 ? [t('{count} downloading', { count: active.length }), percent !== null ? `${percent}%` : '', speed > 0 ? rate(speed) : '', remaining].filter(Boolean).join(' · ') : running ? [running.status || t('Downloading'), percent !== null ? `${percent}%` : '', rate(running.bytesPerSecond), remaining].filter(Boolean).join(' · ') : requests.length ? t(requests.length === 1 ? '{count} download needs setup' : '{count} downloads need setup', { count: requests.length }) : queued.length ? t('{count} waiting to download', { count: queued.length }) : downloads.length ? t(downloads.length === 1 ? '{count} download' : '{count} downloads', { count: downloads.length }) : t('No downloads');
   return { downloads, requests, active, queued, attention, progress, percent, count, summary };
 }
 function queueButton() {

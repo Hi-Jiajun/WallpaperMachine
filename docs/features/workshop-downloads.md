@@ -273,6 +273,23 @@ measured network speed; the last percent is claimed only by Steam's own success
 line, then validation and import follow. An item Steam lists without a size keeps
 the spinning arc and the speed; if `nettop` is unavailable the tree alone is used.
 
+The figure only moves forward. Each launch of SteamCMD starts its own network
+meter, and the staged tree can weigh less later than it did earlier, so the bytes
+and percentage shown never drop below the most the run has shown. After a relaunch
+inside a run the new meter counts only what it fetches, so it is added to what was
+shown when it started (still capped by the tree): the bar holds its place at the
+relaunch and moves on with the first new bytes, even when Steam has little left to
+fetch. Beside the
+speed, the queue rows, the inspector and the activity bar say how long is left
+(for example "4 min left"). The estimate is the bytes gained over the last 20
+seconds, smoothed so one burst does not swing it, and it stays hidden until four
+seconds of history exist, while the pace is under 1 KB/s, at the 99% cap, and for
+an item listed without a size. Seconds show under a minute and a half, minutes
+under an hour and a half, then hours; the figure is capped at 99 hours. With
+several downloads running the activity bar shows the slowest job's time, and only
+when every running job has an estimate. The shared scene resources use SteamCMD's
+own byte counters for the same estimate.
+
 Downloads never subscribe on Steam, and a download applies nothing unless you
 chose [Download and apply](#download-and-apply). Otherwise use **Show in
 library**, then Apply — see [Control panel](control-panel.md#selection-versus-apply).
@@ -418,9 +435,9 @@ work.
   session the runtime preparation, whether a saved sign-in was restored, each
   status change, the sign-in handoff and SteamCMD's exit status, so a stalled
   batch can be diagnosed from **Show download logs**.
-- **Activity bar.** It carries the running job's status, percentage and speed, or
-  the batch's count, mean percentage and summed speed while several run. The queue
-  footer states the slot rule.
+- **Activity bar.** It carries the running job's status, percentage, speed and
+  time left, or the batch's count, mean percentage, summed speed and slowest time
+  left while several run. The queue footer states the slot rule.
 - **Prompts.** Passwords and Steam Guard codes belong to that exact job; the
   dialog seeds the account per request, so switching requests cannot submit
   another one's sign-in. A submitted secret is cleared from the field immediately

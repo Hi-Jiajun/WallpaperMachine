@@ -548,7 +548,207 @@ final class DownloaderLifecycleTests: DownloaderTestCase {
       XCTAssertNil(downloader.progress)
       XCTAssertNil(downloader.bytesReceived)
       XCTAssertNil(downloader.bytesExpected)
+      XCTAssertNil(downloader.secondsRemaining, "Nothing to compare with means no time left to claim")
       await downloader.shutdown()
+    } catch { await downloader.shutdown(); throw error }
+  }
+
+  /// Watches `bytesReceived` while the downloader reads its network meter `readings` more times,
+  /// which it does every 200 ms and after each of its half-second disk samples, and returns the
+  /// lowest figure shown meanwhile.
+  private func lowestBytesShown(
+    by downloader: WorkshopDownloader, over readings: Int, monitor: FixtureNetworkMonitor
+  ) async throws -> Int64? {
+    let target = monitor.receivedReadings + readings
+    var lowest: Int64?
+    try await waitUntil {
+      if let shown = downloader.bytesReceived { lowest = min(lowest ?? shown, shown) }
+      return monitor.receivedReadings >= target || !downloader.isRunning
+    }
+    return lowest
+  }
+
+  func testProgressNeverMovesBackwardsWhenTheTreeShrinks() async throws {
+    // Steam can move chunks about, so the staged tree may weigh less later than it did earlier.
+    let root = try makeRuntime("""
+      printf 'Waiting for user info...OK\\nDownloading item 123456 ...\\n'
+      mkdir -p steamapps/workshop/downloads/431960/123456
+      head -c 1024 /dev/zero > steamapps/workshop/downloads/431960/123456/part1
+      touch ../first-written
+      while [ ! -f ../release-shrink ]; do sleep 0.02; done
+      rm steamapps/workshop/downloads/431960/123456/part1
+      head -c 256 /dev/zero > steamapps/workshop/downloads/431960/123456/part2
+      touch ../shrunk
+      while [ ! -f ../release-grow ]; do sleep 0.02; done
+      head -c 1536 /dev/zero > steamapps/workshop/downloads/431960/123456/part3
+      touch ../grown
+      IFS= read -r finish
+      """)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let sizedItem = WorkshopItem(id: "123456", title: "Disk fixture", creator: "Test", summary: "", previewURL: nil, tags: ["Video"], size: 2048, subscriptions: 0)
+    let monitor = FixtureNetworkMonitor()
+    let downloader = startDownload(in: root, item: sizedItem, networkMonitor: monitor)
+    do {
+      try await waitUntil { downloader.bytesReceived == 1024 }
+      XCTAssertEqual(downloader.progress, 0.5)
+      try Data().write(to: root.appendingPathComponent("release-shrink"))
+      try await waitUntil { FileManager.default.fileExists(atPath: root.appendingPathComponent("shrunk").path) }
+      let lowest = try await lowestBytesShown(by: downloader, over: 6, monitor: monitor)
+      XCTAssertEqual(lowest, 1024, "A tree that weighs less than before must not pull the bytes back")
+      XCTAssertEqual(downloader.progress, 0.5)
+      // Only more than was already shown moves it again.
+      try Data().write(to: root.appendingPathComponent("release-grow"))
+      try await waitUntil { downloader.bytesReceived == 1792 }
+      XCTAssertEqual(downloader.progress, 0.875)
+      await downloader.shutdown()
+    } catch { await downloader.shutdown(); throw error }
+  }
+
+  func testProgressNeverMovesBackwardsWhenTheNetworkMeterStartsOver() async throws {
+    let root = try makeRuntime("""
+      printf 'Waiting for user info...OK\\nDownloading item 123456 ...\\n'
+      mkdir -p steamapps/workshop/downloads/431960/123456
+      head -c 2048 /dev/zero > steamapps/workshop/downloads/431960/123456/movie.mp4
+      IFS= read -r finish
+      """)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let sizedItem = WorkshopItem(id: "123456", title: "Disk fixture", creator: "Test", summary: "", previewURL: nil, tags: ["Video"], size: 2048, subscriptions: 0)
+    let monitor = FixtureNetworkMonitor()
+    monitor.received = 1536
+    let downloader = startDownload(in: root, item: sizedItem, networkMonitor: monitor)
+    do {
+      try await waitUntil { downloader.bytesReceived == 1536 }
+      // A new process counts its own traffic from zero.
+      monitor.received = 100
+      let lowest = try await lowestBytesShown(by: downloader, over: 6, monitor: monitor)
+      XCTAssertEqual(lowest, 1536, "A meter that restarts must not pull the bytes back")
+      XCTAssertEqual(downloader.progress, 0.75)
+      monitor.received = 1792
+      try await waitUntil { downloader.bytesReceived == 1792 }
+      XCTAssertEqual(downloader.progress, 0.875)
+      await downloader.shutdown()
+    } catch { await downloader.shutdown(); throw error }
+  }
+
+  func testProgressSurvivesSteamCMDRelaunchingWithinTheRun() async throws {
+    // Exit status 42 makes the downloader launch SteamCMD again in the same staging, which
+    // announces the item once more and starts a fresh network meter.
+    let root = try makeRuntime("""
+      printf 'Waiting for user info...OK\\nDownloading item 123456 ...\\n'
+      mkdir -p steamapps/workshop/downloads/431960/123456
+      if [ -f ../second-pass ]; then
+          touch ../second-launch
+          IFS= read -r finish
+      else
+          head -c 1536 /dev/zero > steamapps/workshop/downloads/431960/123456/part1
+          touch ../first-launch
+          while [ ! -f ../release-first ]; do sleep 0.02; done
+          exit 42
+      fi
+      """)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let sizedItem = WorkshopItem(id: "123456", title: "Disk fixture", creator: "Test", summary: "", previewURL: nil, tags: ["Video"], size: 2048, subscriptions: 0)
+    let monitor = FixtureNetworkMonitor()
+    monitor.received = 1536
+    let downloader = startDownload(in: root, item: sizedItem, networkMonitor: monitor)
+    do {
+      try await waitUntil { downloader.bytesReceived == 1536 }
+      monitor.received = 0
+      try Data().write(to: root.appendingPathComponent("second-pass"))
+      try Data().write(to: root.appendingPathComponent("release-first"))
+      try await waitUntil { monitor.startedPIDs.count == 2 }
+      XCTAssertEqual(downloader.bytesReceived, 1536, "The bar keeps its place through the relaunch")
+      XCTAssertEqual(downloader.progress, 0.75)
+      let lowest = try await lowestBytesShown(by: downloader, over: 6, monitor: monitor)
+      XCTAssertEqual(lowest, 1536, "The second process starts counting from zero; the figure shown must not")
+      XCTAssertEqual(downloader.progress, 0.75)
+      XCTAssertNil(downloader.secondsRemaining, "A relaunch has no pace of its own until bytes move again")
+      await downloader.shutdown()
+    } catch { await downloader.shutdown(); throw error }
+  }
+
+  func testProgressAdvancesAgainAfterARelaunchEvenBelowWhatWasAlreadyShown() async throws {
+    // The first process dropped at three quarters. Steam resumes and fetches only the last
+    // quarter, so the second process's meter never reaches what was shown before it: the bar
+    // has to carry on from where it was, not wait at that figure until Steam reports success.
+    let root = try makeRuntime("""
+      printf 'Waiting for user info...OK\\nDownloading item 123456 ...\\n'
+      mkdir -p steamapps/workshop/downloads/431960/123456
+      if [ -f ../second-pass ]; then
+          head -c 1024 /dev/zero > steamapps/workshop/downloads/431960/123456/part2
+          touch ../second-launch
+          IFS= read -r finish
+      else
+          head -c 3072 /dev/zero > steamapps/workshop/downloads/431960/123456/part1
+          touch ../first-launch
+          while [ ! -f ../release-first ]; do sleep 0.02; done
+          exit 42
+      fi
+      """)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let sizedItem = WorkshopItem(id: "123456", title: "Disk fixture", creator: "Test", summary: "", previewURL: nil, tags: ["Video"], size: 4096, subscriptions: 0)
+    let monitor = FixtureNetworkMonitor()
+    monitor.received = 3072
+    let downloader = startDownload(in: root, item: sizedItem, networkMonitor: monitor)
+    do {
+      try await waitUntil { downloader.bytesReceived == 3072 }
+      monitor.received = 0
+      try Data().write(to: root.appendingPathComponent("second-pass"))
+      try Data().write(to: root.appendingPathComponent("release-first"))
+      try await waitUntil { monitor.startedPIDs.count == 2 }
+      try await waitUntil { FileManager.default.fileExists(atPath: root.appendingPathComponent("second-launch").path) }
+      // The new meter has seen 512 bytes, far below the 3072 already shown.
+      monitor.received = 512
+      try await waitUntil { downloader.bytesReceived == 3584 }
+      XCTAssertEqual(downloader.progress, 0.875, "Bytes fetched after the relaunch move the bar past its old place")
+      monitor.received = 1024
+      try await waitUntil { downloader.bytesReceived == 4096 }
+      XCTAssertEqual(downloader.progress, 0.99, "Bytes alone stop short of completion")
+      await downloader.shutdown()
+    } catch { await downloader.shutdown(); throw error }
+  }
+
+  func testSecondsRemainingFollowsTheMeasuredPaceAndSaysNothingAtTheCap() async throws {
+    let root = try makeRuntime("""
+      printf 'Waiting for user info...OK\\nDownloading item 123456 ...\\n'
+      mkdir -p steamapps/workshop/downloads/431960/123456
+      head -c 6000000 /dev/zero > steamapps/workshop/downloads/431960/123456/movie.mp4
+      touch ../allocated
+      IFS= read -r finish
+      """)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let sizedItem = WorkshopItem(id: "123456", title: "Disk fixture", creator: "Test", summary: "", previewURL: nil, tags: ["Video"], size: 6_000_000, subscriptions: 0)
+    let monitor = FixtureNetworkMonitor()
+    monitor.received = 0
+    // The estimate is measured on the downloader's clock, so the test decides how long a second is.
+    var clock = Date(timeIntervalSinceReferenceDate: 0)
+    let downloader = WorkshopDownloader(
+      sessionDirectory: root.appendingPathComponent("SteamSession"),
+      runtimeProvider: ShellRuntimeProvider(), networkMonitor: monitor, now: { clock },
+      freeSpace: { _ in nil })
+    downloader.start(
+      item: sizedItem, username: "localtest", executable: root.appendingPathComponent("runtime/steamcmd"),
+      library: root.appendingPathComponent("Library"), rememberSession: false, onImported: {})
+    do {
+      try await waitUntil { FileManager.default.fileExists(atPath: root.appendingPathComponent("allocated").path) }
+      try await waitUntil { downloader.bytesReceived == 0 }
+      XCTAssertNil(downloader.secondsRemaining, "A single reading has no pace")
+      clock = Date(timeIntervalSinceReferenceDate: 2)
+      monitor.received = 2_000_000
+      try await waitUntil { downloader.bytesReceived == 2_000_000 }
+      XCTAssertNil(downloader.secondsRemaining, "Two seconds of history is too little to promise anything")
+      clock = Date(timeIntervalSinceReferenceDate: 4)
+      monitor.received = 4_000_000
+      try await waitUntil { downloader.bytesReceived == 4_000_000 }
+      XCTAssertEqual(downloader.secondsRemaining, 2, "2 MB left at 1 MB/s")
+      // The last byte is claimed by Steam alone: at the cap there is nothing left to estimate.
+      clock = Date(timeIntervalSinceReferenceDate: 5)
+      monitor.received = 6_000_000
+      try await waitUntil { downloader.bytesReceived == 6_000_000 }
+      XCTAssertEqual(downloader.progress, 0.99)
+      XCTAssertNil(downloader.secondsRemaining)
+      await downloader.shutdown()
+      XCTAssertNil(downloader.secondsRemaining)
     } catch { await downloader.shutdown(); throw error }
   }
 

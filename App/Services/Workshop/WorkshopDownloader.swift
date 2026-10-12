@@ -30,6 +30,12 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     private(set) var bytesReceived: Int64?
     private(set) var bytesExpected: Int64?
     private(set) var bytesPerSecond: Double?
+    /// Seconds until the transfer in progress finishes at its recent pace, or nil while there is
+    /// no trustworthy pace (the first seconds, a crawl, the last bytes, nothing measurable).
+    var secondsRemaining: Int? {
+        guard isRunning, receivesNetwork, let received = bytesReceived, let expected = bytesExpected else { return nil }
+        return estimator.secondsRemaining(remaining: expected - received)
+    }
     private(set) var prompt: Prompt?
     private(set) var steamGuardChallenge: SteamGuardChallenge?
     var canRetryAuthentication: Bool { authenticationFailed && !isRunning }
@@ -84,6 +90,14 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     @ObservationIgnored private var expectedBytes: Int64?
     @ObservationIgnored private var diskSampleTask: Task<Void, Never>?
     @ObservationIgnored private var lastDiskSample = Date.distantPast
+    @ObservationIgnored private var estimator = TransferEstimator()
+    /// The most bytes this run has shown. Each SteamCMD launch starts its own network meter and the
+    /// tree can shrink as Steam moves chunks about, so what is shown never drops below it.
+    @ObservationIgnored private var receivedFloor: Int64 = 0
+    /// What the run had shown when the current network meter started. A relaunched SteamCMD
+    /// resumes from Steam's partial manifests and its meter counts only the bytes still to come,
+    /// so the figure shown is this baseline plus the meter, never the meter alone.
+    @ObservationIgnored private var receivedBaseline: Int64 = 0
     private(set) var isAuthenticating = true
     private static let failurePattern = try! NSRegularExpression(pattern: #"(?:failed|error!?)\s*\(([^)\r\n]+)\)"#)
     private static let appProgressPattern = try! NSRegularExpression(pattern: #"progress:\s*(\d+(?:\.\d+)?)\s*\((\d+)\s*/\s*(\d+)\)"#)
@@ -199,6 +213,9 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         networkStarted = false
         self.expectedBytes = expectedBytes
         lastDiskSample = .distantPast
+        receivedFloor = 0
+        receivedBaseline = 0
+        estimator.reset()
         endedBySessionConflict = false
         signInHandedOff = false
         prompt = nil
@@ -277,6 +294,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
                                 if !networkStarted {
                                     networkMonitor.start(processID: process.processIdentifier)
                                     networkStarted = true
+                                    receivedBaseline = receivedFloor
                                 }
                                 bytesPerSecond = networkMonitor.rate(at: ProcessInfo.processInfo.systemUptime)
                                 noteTransfer(networkMonitor.bytesReceived(), on: .network)
@@ -340,6 +358,9 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
                     fetchingPresetBase = true
                     workshopDownloadCompleted = false
                     self.expectedBytes = nil
+                    receivedFloor = 0
+                    receivedBaseline = 0
+                    estimator.reset()
                     phase = .requesting
                     status = String(localized: "Downloading the wallpaper this preset is based on…")
                 }
@@ -712,9 +733,18 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
             steamGuardChallenge = nil
             isAuthenticating = false
             receivesNetwork = true
-            bytesReceived = nil
-            bytesExpected = nil
-            progress = nil
+            // A relaunch counts from a new network anchor. What was already shown stays on screen
+            // until the new meter passes it, and no pace is claimed in the meantime.
+            estimator.reset()
+            if receivedFloor > 0, let expected = expectedBytes, expected > 0 {
+                bytesReceived = receivedFloor
+                bytesExpected = expected
+                progress = min(0.99, Double(receivedFloor) / Double(expected))
+            } else {
+                bytesReceived = nil
+                bytesExpected = nil
+                progress = nil
+            }
             phase = .transferring
             status = fetchingPresetBase ? String(localized: "Downloading the wallpaper this preset is based on…")
                 : String(localized: "Downloading Workshop files…")
@@ -776,6 +806,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
                 if receivesNetwork {
                     bytesReceived = received
                     bytesExpected = total
+                    estimator.add(bytes: received, at: now().timeIntervalSinceReferenceDate)
                 }
             }
         }
@@ -788,6 +819,8 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     /// arrive, which the network figure cannot overstate; compressed chunks make the network figure
     /// run a little behind, which the tree cannot overstate. The tree is walked off the UI actor at
     /// most twice a second; a sample is applied only while the transfer it measured is still on.
+    /// What is shown never falls below the most this run has shown, however either measure moves,
+    /// and a relaunch carries on from there instead of waiting for the new meter to catch up.
     private func sampleWorkshopDisk(in staging: URL) {
         guard !isInstallingAssets, let expected = expectedBytes, expected > 0, diskSampleTask == nil,
               Date().timeIntervalSince(lastDiskSample) >= 0.5 else { return }
@@ -798,9 +831,12 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
             diskSampleTask = nil
             guard isRunning, receivesNetwork, failure == nil else { return }
             noteTransfer(onDisk, on: .disk)
-            // Without a working network meter the tree alone is still better than nothing.
-            let arrived = networkMonitor.bytesReceived().map { min($0, onDisk) } ?? onDisk
-            let received = min(arrived, expected)
+            // Without a working network meter the tree alone is still better than nothing. The
+            // meter counts from its own start, so a relaunch adds what was shown before it.
+            let arrived = networkMonitor.bytesReceived().map { min($0 + receivedBaseline, onDisk) } ?? onDisk
+            let received = max(receivedFloor, min(arrived, expected))
+            receivedFloor = received
+            estimator.add(bytes: received, at: now().timeIntervalSinceReferenceDate)
             bytesReceived = received
             bytesExpected = expected
             // Only Steam's own success line claims completion; bytes alone stop at 99%.
