@@ -705,6 +705,15 @@ final class BridgeStore {
         apply(bundle)
     }
 
+    /// Stages the authored default for every property except the files and folders the user chose,
+    /// which are saved as they are picked and keep their own Clear. Revert undoes it.
+    func restoreAllPropertyDefaultsAsync(wallpaperId: String) async throws {
+        beginWallpaperEdit(wallpaperId)
+        defer { endWallpaperEdit(wallpaperId) }
+        let bundle = try await bridge.restoreAllPropertyDefaults(wallpaperId: wallpaperId)
+        apply(bundle)
+    }
+
     func setDisplayEnabledAsync(displayId: String, enabled: Bool) async throws {
         let bundle = try await bridge.setDisplayEnabled(displayId: displayId, enabled: enabled)
         apply(bundle)

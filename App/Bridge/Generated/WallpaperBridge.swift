@@ -863,6 +863,16 @@ public protocol WallpaperBridgeProtocol : AnyObject {
     func reportHostWallpaperStartup(displayId: UInt32, wallpaperId: String, startupRevision: UInt64, nativeAdmissionKey: UInt64?, ready: Bool) async throws  -> BridgeSnapshotBundle
     
     /**
+     * Stages the authored default for every property of the wallpaper except
+     * the files and folders the user chose; cancelling the options undoes it.
+     *
+     * # Errors
+     *
+     * Returns an error when the wallpaper id is unknown.
+     */
+    func restoreAllPropertyDefaults(wallpaperId: String) async throws  -> BridgeWallpaperMutationBundle
+    
+    /**
      * # Errors
      *
      * Returns an error when the wallpaper or property id is unknown.
@@ -2183,6 +2193,31 @@ open func reportHostWallpaperStartup(displayId: UInt32, wallpaperId: String, sta
             completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
             freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeBridgeSnapshotBundle.lift,
+            errorHandler: FfiConverterTypeBridgeError.lift
+        )
+}
+    
+    /**
+     * Stages the authored default for every property of the wallpaper except
+     * the files and folders the user chose; cancelling the options undoes it.
+     *
+     * # Errors
+     *
+     * Returns an error when the wallpaper id is unknown.
+     */
+open func restoreAllPropertyDefaults(wallpaperId: String)async throws  -> BridgeWallpaperMutationBundle {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wallpaper_bridge_fn_method_wallpaperbridge_restore_all_property_defaults(
+                    self.uniffiClonePointer(),
+                    FfiConverterString.lower(wallpaperId)
+                )
+            },
+            pollFunc: ffi_wallpaper_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeBridgeWallpaperMutationBundle.lift,
             errorHandler: FfiConverterTypeBridgeError.lift
         )
 }
@@ -9668,6 +9703,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_report_host_wallpaper_startup() != 52458) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_restore_all_property_defaults() != 2827) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_restore_property_default() != 28754) {

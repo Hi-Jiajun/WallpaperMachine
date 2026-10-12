@@ -95,6 +95,23 @@ class LayoutSnapshotBridge: WallpaperBridge {
     try await recordLabelLanguages(locales)
   }
 
+  /// The wallpapers the panel asked to restore every default for, in order. `restoreAllProvider`
+  /// answers with the state the engine would report afterwards.
+  @MainActor var restoreAllCalls: [String] = []
+  @MainActor var restoreAllProvider: (@MainActor (String) -> BridgeWallpaperMutationBundle)?
+
+  override func restoreAllPropertyDefaults(wallpaperId: String) async throws
+    -> BridgeWallpaperMutationBundle
+  {
+    try await restoreAll(wallpaperId)
+  }
+
+  @MainActor private func restoreAll(_ id: String) throws -> BridgeWallpaperMutationBundle {
+    restoreAllCalls.append(id)
+    guard let provider = restoreAllProvider else { throw CancellationError() }
+    return provider(id)
+  }
+
   @MainActor private func recordLabelLanguages(_ locales: [String]) throws {
     labelLanguageCalls.append(locales)
     if failLabelLanguages { throw CancellationError() }

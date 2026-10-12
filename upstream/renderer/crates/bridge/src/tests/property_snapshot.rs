@@ -1,4 +1,9 @@
-use crate::{BridgeErrorKind, BridgePropertyKind, BridgePropertyValue, BridgeWallpaperOptionsSnapshot, WallpaperBridge};
+use wallpaper_core::{DisplayDesc, DisplayIdentity, DisplaySnapshotEntry};
+
+use crate::{
+    BridgeErrorKind, BridgePropertyKind, BridgePropertyValue, BridgeWallpaperOptionsSnapshot,
+    WallpaperBridge, api::BridgeBuilder, engine::FakeEngineFacade, paths::BridgePaths,
+};
 
 fn assert_f64_close(actual: f64, expected: f64) {
     assert!(
@@ -725,4 +730,188 @@ async fn a_project_without_a_label_table_is_unaffected_by_the_language() {
     let snapshot = bridge.wallpaper_options_snapshot("100".to_string()).await.unwrap();
     assert_eq!(snapshot.properties[0].label_html, "ui_mode");
     assert_eq!(snapshot.properties[0].combo_options[0].label, "ui_fast");
+}
+
+const RESTORE_ALL_PROJECT: &str = r#"{
+    "type":"web",
+    "title":"Web",
+    "file":"index.html",
+    "general":{"properties":{
+        "flag":{"type":"bool","value":false,"text":"Flag","order":1},
+        "size":{"type":"slider","value":10,"min":0,"max":100,"step":1,"precision":0,"text":"Size","order":2},
+        "mode":{"type":"combo","value":"a","text":"Mode","order":3,"options":[
+            {"label":"A","value":"a"},{"label":"B","value":"b"}]},
+        "title":{"type":"textinput","value":"hello","text":"Title","order":4},
+        "gate":{"type":"bool","value":false,"text":"Gate","order":5},
+        "extra":{"type":"bool","value":false,"text":"Extra","order":6,"condition":"gate.value"},
+        "clip":{"type":"file","fileType":"video","text":"Clip","order":7}
+    }}
+}"#;
+
+/// A bridge with a web wallpaper applied on one display, so the committed
+/// config (what the page is given) can be told apart from the editor's draft.
+async fn applied_restore_all_bridge(home: &std::path::Path) -> WallpaperBridge {
+    let engine = FakeEngineFacade::default();
+    let desc =
+        DisplayDesc::with_identity(7, DisplayIdentity::default(), 0, 0, 1920, 1080, 1.0)
+            .with_refresh_rate(60);
+    engine.set_snapshot(vec![DisplaySnapshotEntry {
+        identity: DisplayIdentity::default(),
+        desc,
+        handle: None,
+        accepts_pointer_input: false,
+        paused: false,
+        window_active: true,
+        assignment: None,
+    }]);
+    let bridge = BridgeBuilder::new(engine)
+        .with_state(crate::actor::state::BridgeActorState::default())
+        .with_paths(BridgePaths::for_home(home))
+        .build()
+        .expect("tokio runtime and config load for wallpaper bridge");
+    bridge
+        .inject_scene_project_for_test("100", "Web", RESTORE_ALL_PROJECT)
+        .await;
+    bridge
+        .set_display_config_enabled("100".into(), "7".into(), true)
+        .await
+        .unwrap();
+    bridge.apply_wallpaper_options("100".into(), true).await.unwrap();
+    bridge
+}
+
+async fn committed_page_values(bridge: &WallpaperBridge) -> serde_json::Value {
+    let web = bridge.web_wallpapers().await.unwrap();
+    let properties: serde_json::Value = serde_json::from_str(&web[0].properties_json).unwrap();
+    let value = |id: &str| properties[id]["value"].clone();
+    serde_json::json!({
+        "flag": value("flag"), "size": value("size"), "mode": value("mode"),
+        "title": value("title"), "extra": value("extra"), "clip": value("clip"),
+    })
+}
+
+fn row<'a>(
+    snapshot: &'a BridgeWallpaperOptionsSnapshot,
+    id: &str,
+) -> &'a crate::BridgePropertyDescriptor {
+    snapshot
+        .properties
+        .iter()
+        .find(|property| property.id == id)
+        .unwrap_or_else(|| panic!("{id} should be offered"))
+}
+
+#[tokio::test]
+async fn restore_all_stages_every_default_until_reverted() {
+    let home = tempfile::tempdir().expect("home");
+    let bridge = applied_restore_all_bridge(home.path()).await;
+    let id = || "100".to_string();
+    let edit = |property: &str, value: BridgePropertyValue| {
+        let bridge = &bridge;
+        let property = property.to_string();
+        async move { bridge.edit_property("100".to_string(), property, value).await.unwrap() }
+    };
+
+    // Values the wallpaper is really using: edited, applied, then a file chosen
+    // (which is saved the moment it is picked). `extra` is set while its gate is
+    // open and left behind a closed one, so it carries an override nobody can see.
+    edit("flag", BridgePropertyValue::Bool { value: true }).await;
+    edit("size", BridgePropertyValue::Number { value: 42.0 }).await;
+    edit("mode", BridgePropertyValue::String { value: "b".into() }).await;
+    edit("title", BridgePropertyValue::String { value: "changed".into() }).await;
+    edit("gate", BridgePropertyValue::Bool { value: true }).await;
+    edit("extra", BridgePropertyValue::Bool { value: true }).await;
+    edit("gate", BridgePropertyValue::Bool { value: false }).await;
+    bridge.apply_wallpaper_options(id(), true).await.unwrap();
+    bridge
+        .set_property_path(id(), "clip".into(), Some("/chosen/clip.webm".into()))
+        .await
+        .unwrap();
+    let before = bridge.wallpaper_options_snapshot(id()).await.unwrap();
+    assert!(!before.dirty, "everything above is committed");
+    let hidden = row(&before, "extra");
+    assert!(!hidden.enabled && hidden.dirty, "the override behind the closed gate is reported");
+    let committed_before = committed_page_values(&bridge).await;
+    assert_eq!(committed_before["size"], 42.0);
+    assert_eq!(committed_before["extra"], true);
+
+    let staged = bridge
+        .restore_all_property_defaults(id())
+        .await
+        .unwrap()
+        .wallpaper_options;
+
+    for (property, default) in [
+        ("flag", BridgePropertyValue::Bool { value: false }),
+        ("size", BridgePropertyValue::Number { value: 10.0 }),
+        ("mode", BridgePropertyValue::String { value: "a".into() }),
+        ("title", BridgePropertyValue::String { value: "hello".into() }),
+    ] {
+        let restored = row(&staged, property);
+        assert_eq!(restored.value, default, "{property} should show its authored default");
+        assert!(!restored.dirty, "{property} should no longer read as modified");
+    }
+    let clip = row(&staged, "clip");
+    assert_eq!(
+        clip.value,
+        BridgePropertyValue::String { value: "/chosen/clip.webm".into() },
+        "a chosen file belongs to its own Clear, not to restore all"
+    );
+    assert!(staged.dirty, "restoring is staged, so Apply and Revert are offered");
+    assert_eq!(
+        committed_page_values(&bridge).await,
+        committed_before,
+        "nothing reaches the wallpaper before Apply"
+    );
+
+    // The override behind the closed gate went too: it stops reading as modified
+    // while still hidden, and opening the gate shows the default.
+    assert!(!row(&staged, "extra").enabled && !row(&staged, "extra").dirty);
+    let opened = edit("gate", BridgePropertyValue::Bool { value: true }).await.wallpaper_options;
+    assert_eq!(row(&opened, "extra").value, BridgePropertyValue::Bool { value: false });
+    assert!(!row(&opened, "extra").dirty);
+
+    let reverted = bridge
+        .cancel_wallpaper_options(id())
+        .await
+        .unwrap()
+        .wallpaper_options;
+    assert!(!reverted.dirty);
+    assert_eq!(reverted.properties, before.properties);
+    assert_eq!(row(&reverted, "size").value, BridgePropertyValue::Number { value: 42.0 });
+    assert!(row(&reverted, "size").dirty, "the Modified state comes back with the value");
+
+    bridge.restore_all_property_defaults(id()).await.unwrap();
+    bridge.apply_wallpaper_options(id(), true).await.unwrap();
+    let applied = bridge.wallpaper_options_snapshot(id()).await.unwrap();
+    assert!(!applied.dirty);
+    assert!(applied.properties.iter().filter(|property| property.id != "clip").all(|property| !property.dirty));
+    let committed = committed_page_values(&bridge).await;
+    assert_eq!(committed["size"], 10.0);
+    assert_eq!(committed["flag"], false);
+    assert_eq!(committed["mode"], "a");
+    assert_eq!(committed["title"], "hello");
+    assert_eq!(committed["extra"], false);
+    assert_eq!(committed["clip"], "/chosen/clip.webm");
+}
+
+#[tokio::test]
+async fn restore_all_is_a_no_op_when_nothing_differs_and_refuses_unknown_wallpapers() {
+    let home = tempfile::tempdir().expect("home");
+    let bridge = applied_restore_all_bridge(home.path()).await;
+    let before = bridge.wallpaper_options_snapshot("100".into()).await.unwrap();
+
+    let after = bridge
+        .restore_all_property_defaults("100".into())
+        .await
+        .unwrap()
+        .wallpaper_options;
+    assert_eq!(after, before);
+    assert!(!after.dirty);
+
+    let error = bridge
+        .restore_all_property_defaults("missing".into())
+        .await
+        .expect_err("an unknown wallpaper has no properties to restore");
+    assert_eq!(error.kind(), BridgeErrorKind::InvalidInput);
 }

@@ -260,6 +260,113 @@ final class WebPanelPropertyLabelTests: XCTestCase {
     XCTAssertNil(hair["heading"] as? String, "Only a group is a heading")
   }
 
+  func testRestoreAllIsOfferedOnlyWhenSomethingDiffersFromDefault() async throws {
+    let context = try Context()
+    defer { context.tearDown() }
+    func options(
+      slider: Bool = false, file: Bool = false, supported: Bool = true, hiddenText: Bool = false,
+      hiddenFile: Bool = false
+    ) throws -> [String: Any] {
+      context.store.wallpaperOptionsSnapshot = BridgeSnapshotFixtures.options(
+        wallpaperId: "scene-1", kind: .projectScene, supported: supported,
+        properties: [
+          Self.property(id: "size", kind: .slider, labelHtml: "Size", dirty: slider),
+          Self.property(id: "title", kind: .textInput, labelHtml: "Title"),
+          Self.property(
+            id: "clip", kind: .file, labelHtml: "Clip", dirty: file,
+            value: .string(value: "/chosen/clip.webm")),
+          // Rows a visibility rule hides: the page is never given them.
+          Self.property(
+            id: "secret", kind: .textInput, labelHtml: "Secret", dirty: hiddenText, enabled: false),
+          Self.property(
+            id: "vault", kind: .file, labelHtml: "Vault", dirty: hiddenFile,
+            value: .string(value: "/chosen/vault.webm"), enabled: false),
+        ])
+      return try XCTUnwrap(context.controller.snapshot()["options"] as? [String: Any])
+    }
+    let clean = try options()
+    let sliderEdited = try options(slider: true)
+    let fileChosen = try options(file: true)
+    let hiddenOnly = try options(hiddenText: true)
+    let hiddenFileOnly = try options(hiddenFile: true)
+    let unsupported = try options(slider: true, supported: false)
+    guard let (web, base) = try await loadedPage(context) else { return }
+
+    let result =
+      try await web.callAsyncJavaScript(
+        """
+        const show = options => window.wallpaperUI.receive(Object.assign({}, base, {
+          page: 'installed', selectedID: 'scene-1',
+          wallpapers: [{ id: 'scene-1', title: 'Scene one', kind: 'Scene', preview: null, active: false, supported: true, tags: [] }],
+          options }));
+        const settled = async (predicate, what) => {
+          const deadline = Date.now() + 5000;
+          while (!predicate()) {
+            if (Date.now() > deadline) throw new Error(`The inspector did not settle: ${what}`);
+            await new Promise(resolve => setTimeout(resolve, 20));
+          }
+        };
+        const button = () => document.querySelector('#inspector [data-action="restoreAllProperties"]');
+        const modified = id => Boolean(document.querySelector(`#inspector [data-key="${id}"] .field-flag`));
+        const log = {};
+
+        show(clean);
+        await settled(() => button() && document.querySelector('#inspector [data-key="clip"]'), 'clean');
+        log.clean = { disabled: button().disabled };
+
+        show(sliderEdited);
+        await settled(() => modified('size'), 'slider edited');
+        log.slider = { disabled: button().disabled };
+
+        show(fileChosen);
+        await settled(() => !modified('size') && modified('clip'), 'file chosen');
+        log.file = { disabled: button().disabled };
+
+        show(hiddenOnly);
+        await settled(() => !modified('clip') && button().disabled === false, 'hidden value modified');
+        log.hidden = { disabled: button().disabled, listed: Boolean(document.querySelector('#inspector [data-key="secret"]')) };
+
+        show(hiddenFileOnly);
+        await settled(() => button().disabled, 'hidden file chosen');
+        log.hiddenFile = { disabled: button().disabled, listed: Boolean(document.querySelector('#inspector [data-key="vault"]')) };
+
+        show(unsupported);
+        await settled(() => modified('size') && document.querySelector('#inspector .notice.warning'), 'unsupported');
+        log.unsupported = { disabled: button().disabled };
+
+        show(clean);
+        await settled(() => !modified('clip') && !modified('size'), 'clean again');
+        const title = document.querySelector('#inspector [data-key="title"] input[data-input="property"]');
+        title.value = 'typed, not sent yet';
+        title.dispatchEvent(new Event('input', { bubbles: true }));
+        await settled(() => modified('title'), 'draft');
+        log.draft = { disabled: button().disabled, modified: modified('title') };
+        return log;
+        """,
+        arguments: [
+          "base": base, "clean": clean, "sliderEdited": sliderEdited, "fileChosen": fileChosen,
+          "hiddenOnly": hiddenOnly, "hiddenFileOnly": hiddenFileOnly, "unsupported": unsupported,
+        ], in: nil, contentWorld: .page) as? [String: [String: Bool]]
+    let log = try XCTUnwrap(result)
+
+    XCTAssertEqual(log["clean"]?["disabled"], true, "Nothing differs from the defaults")
+    XCTAssertEqual(log["slider"]?["disabled"], false, "A modified slider can be restored")
+    XCTAssertEqual(
+      log["file"]?["disabled"], true,
+      "A chosen file keeps its own Clear, so it alone gives restore all nothing to do")
+    XCTAssertEqual(
+      log["hidden"]?["disabled"], false,
+      "A modified value behind a rule that hides its row still reaches the wallpaper, so it can be restored")
+    XCTAssertEqual(log["hidden"]?["listed"], false, "The page is not given the hidden row")
+    XCTAssertEqual(
+      log["hiddenFile"]?["disabled"], true, "A hidden file keeps its own Clear as well")
+    XCTAssertEqual(log["hiddenFile"]?["listed"], false)
+    XCTAssertEqual(
+      log["unsupported"]?["disabled"], true, "A wallpaper that cannot be rendered has no staging")
+    XCTAssertEqual(log["draft"]?["modified"], true)
+    XCTAssertEqual(log["draft"]?["disabled"], false, "Text not yet sent counts as a change")
+  }
+
   func testEngineTokensBecomeReadableWords() {
     let words: [(token: String, label: String)] = [
       ("ui_editor_properties_pivot_offset_x", "Pivot offset x"),
@@ -458,13 +565,15 @@ final class WebPanelPropertyLabelTests: XCTestCase {
   }
 
   static func property(
-    id: String, kind: BridgePropertyKind = .text, labelHtml: String
+    id: String, kind: BridgePropertyKind = .text, labelHtml: String, dirty: Bool = false,
+    value: BridgePropertyValue? = nil, enabled: Bool = true
   ) -> BridgePropertyDescriptor {
     BridgePropertyDescriptor(
-      id: id, kind: kind, labelHtml: labelHtml, value: kind == .bool ? .bool(value: true) : .empty,
+      id: id, kind: kind, labelHtml: labelHtml,
+      value: value ?? (kind == .bool ? .bool(value: true) : .empty),
       defaultValue: .empty, slider: nil,
-      comboOptions: [], fileFilter: nil, directoryMode: nil, dirty: false,
-      canRestoreDefaults: false, enabled: true, assetManaged: false, assetMissing: false,
+      comboOptions: [], fileFilter: nil, directoryMode: nil, dirty: dirty,
+      canRestoreDefaults: false, enabled: enabled, assetManaged: false, assetMissing: false,
       assetSourcePath: nil)
   }
 

@@ -846,7 +846,12 @@ function renderOptions(options, collectionsSection = '') {
   const lock = state.busy || busy('apply', { id }) || busy('revert', { id });
   const properties = (options.properties || []).map(property => renderProperty(id, property, lock)).join('');
   // Presets count unsent page drafts as dirty too, as the Apply changes footer does.
-  const dirty = Boolean(options.dirty) || [...drafts.keys()].some(key => key.startsWith(`${id}\u0000`));
+  const unsent = [...drafts.keys()].some(key => key.startsWith(`${id}\u0000`));
+  const dirty = Boolean(options.dirty) || unsent;
+  // A chosen file or folder is saved as it is picked and keeps its own Clear, so only the rest can be restored.
+  // A value behind a rule that hides its row can be too, though the page is not given the row.
+  const restorable = unsent || Boolean(options.hiddenModified) || (options.properties || []).some(property => property.dirty && property.kind !== 'file' && property.kind !== 'directory');
+  const restoreAll = button(t('Restore all defaults'), 'restoreAllProperties', { id }, { className: 'link', icon: 'refresh', title: t('Stages the default for every property except chosen files and folders. Revert undoes it.'), disabled: lock || !options.supported || !restorable });
   return `${!options.supported ? `<section class="inspector-section"><p class="notice warning">${escapeHTML(t('This wallpaper cannot be rendered on this Mac.'))}</p></section>` : ''}
     <section class="inspector-section"><details open ${keyAttr(`general-${id}`)}><summary>${escapeHTML(t('General configuration'))}${icon('chevronRight', 14)}</summary><div class="section-content general-controls">
       <label class="check-label inspector-check">${icon('volume')}<span>${escapeHTML(t('Mute wallpaper audio'))}</span><input type="checkbox" data-change="wallpaperSetting" data-id="${escapeHTML(id)}" data-setting="muted"${checked(options.muted)}${disabled(lock)}></label>
@@ -854,7 +859,7 @@ function renderOptions(options, collectionsSection = '') {
       ${renderAudioAndMedia(options, lock)}
     </div></details></section>
     <section class="inspector-section"><details${options.displays?.length ? ' open' : ''} ${keyAttr(`displays-${id}`)}><summary>${escapeHTML(t('Displays'))}${icon('chevronRight', 14)}</summary><div class="section-content">${(options.displays || []).map(display => `<details class="display-options" open ${keyAttr(display.id)}><summary>${escapeHTML(display.title)}${icon('chevronRight', 13)}</summary><div class="section-content"><label class="check-label"><input type="checkbox" data-change="displayConfig" data-id="${escapeHTML(id)}" data-display-id="${escapeHTML(display.id)}" data-setting="enabled"${checked(display.enabled)}${disabled(lock)}>${escapeHTML(t('Enabled'))}</label><label class="field">${escapeHTML(t('Scaling mode'))}<select data-change="displayConfig" data-id="${escapeHTML(id)}" data-display-id="${escapeHTML(display.id)}" data-setting="scalingMode"${disabled(lock)}>${selectOptions([['none', t('Original size')], ['stretch', t('Stretch')], ['match', t('Fit')], ['fill', t('Fill')]], display.scalingMode)}</select></label><label class="field">${escapeHTML(t('Scale factor'))}<input type="number" min="${Number.MIN_VALUE}" step="any" value="${Number(display.scalingFactor)}" data-change="displayConfig" data-id="${escapeHTML(id)}" data-display-id="${escapeHTML(display.id)}" data-setting="scalingFactor"${disabled(lock)}></label><label class="field">${escapeHTML(t('Frame rate'))}<input type="number" min="1" max="${Number(display.maxFps) || 240}" step="1" value="${Number(display.fps)}" data-change="displayConfig" data-id="${escapeHTML(id)}" data-display-id="${escapeHTML(display.id)}" data-setting="fps"${disabled(lock)}></label>${(() => { const limited = performanceLimitedFps(display.fps, state.settings || {}); return limited == null ? '' : `<p class="muted field-note"><small>${escapeHTML(t('Limited to {fps} fps by Performance settings', { fps: limited }))}</small> ${button(t('Open Performance'), 'openPerformance', {}, { className: 'link' })}</p>`; })()}${button(t('Remove from display'), 'eject', { id, displayID: display.id }, { className: 'link', disabled: lock })}</div></details>`).join('') || `<p class="muted">${escapeHTML(t('Apply this wallpaper to a display to configure playback.'))}</p>`}</div></details></section>${collectionsSection}
-    ${properties ? `<section class="inspector-section"><details open ${keyAttr(`properties-${id}`)}><summary>${escapeHTML(t('Wallpaper properties'))}${icon('chevronRight', 14)}</summary><div class="section-content wallpaper-properties">${presets.section({ id }, { dirty })}${properties}</div></details></section>` : ''}`;
+    ${properties ? `<section class="inspector-section"><details open ${keyAttr(`properties-${id}`)}><summary>${escapeHTML(t('Wallpaper properties'))}${icon('chevronRight', 14)}</summary><div class="section-content wallpaper-properties">${presets.section({ id }, { dirty })}<div class="property-tools" ${keyAttr(`property-tools-${id}`)}>${restoreAll}</div>${properties}</div></details></section>` : ''}`;
 }
 function renderInspectorSave(options) {
   const id = options.id;
@@ -1345,6 +1350,7 @@ async function handleAction(action, data, element) {
     case 'showInstalled': await deliver('navigate', { page: 'installed' }); await deliver('select', { id }); return;
     case 'clearProperty': await deliver('property', { id, propertyID: data.propertyId, value: '' }); return;
     case 'restoreProperty': drafts.delete(draftKey(id, data.propertyId)); await deliver(action, { id, propertyID: data.propertyId }); return;
+    case 'restoreAllProperties': for (const key of [...drafts.keys()]) if (key.startsWith(`${id}\u0000`)) drafts.delete(key); await deliver(action, { id }); return;
     case 'revert': for (const key of drafts.keys()) if (key.startsWith(`${id}\u0000`)) drafts.delete(key); await deliver(action, { id }); return;
     case 'activate': case 'reapplyWallpaper':
       try { await deliver(action, { id }); activationFailures.delete(id); } catch (error) { activationFailures.set(id, error?.message || String(error)); throw error; } finally { render(); }

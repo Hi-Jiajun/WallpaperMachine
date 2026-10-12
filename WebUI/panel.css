@@ -603,6 +603,9 @@ button.property-reset { width: var(--control-height-compact); min-width: var(--c
 .property-label hr { border: 0; border-top: 1px solid var(--line-strong); margin: 14px 0; }
 .property-label p { margin: 8px 0; }
 .property-description { font-size: 13px; line-height: 1.4; }
+/* Beside the presets above the controls rather than next to Apply, so a stray click on Apply never restores. */
+.property-tools { display: flex; justify-content: flex-end; }
+.property-tools button.link { font-size: 12px; }
 .property-group { margin: 14px 0 2px; padding-bottom: 4px; border-bottom: 1px solid var(--divider); font-size: 12px; font-weight: 600; color: var(--text); }
 .property-group:first-child { margin-top: 2px; }
 .property-label center { display: block; text-align: center; }

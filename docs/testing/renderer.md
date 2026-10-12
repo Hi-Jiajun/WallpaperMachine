@@ -360,7 +360,10 @@ cargo test -p shader --test pipeline -- --nocapture
   visibility with synthetic ids, and fail-open behavior for unreadable rules,
   and a wallpaper's own `general.localization` tables following the language the
   host sets (whole-label matches only, English fallback, no change to the draft,
-  no effect on a project without a table);
+  no effect on a project without a table), and the staged Restore all defaults
+  (every default shown but not committed, a chosen file kept, a value behind a
+  hidden row reported as modified and then cleared, Revert bringing every value back, Apply persisting the
+  defaults, an unknown wallpaper refused);
   `project::condition` also pins the input bounds (length, nesting, list size) and
   that hostile input returns an error instead of recursing, and
   `project::localization` pins the table bounds (languages, tokens, text size,

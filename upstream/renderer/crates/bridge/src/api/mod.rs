@@ -68,7 +68,8 @@ use crate::{
             GetLibrarySnapshot, GetLockScreenScenes, GetWallpaperPreview, GetMonitorInformationSnapshot,
             GetSettingsSnapshot, GetWallpaperOptionsSnapshot, GetWebWallpapers, InitialFrameReady,
             GetNativeVideoWallpapers, PollMousePosition, RejectNativeVideo, RendererCounters,
-            RefreshDisplays, RefreshLibrary, ReleaseHeldWallpaper, RestorePropertyDefault,
+            RefreshDisplays, RefreshLibrary, ReleaseHeldWallpaper, RestoreAllPropertyDefaults,
+            RestorePropertyDefault,
             SelectWallpaper,
             SetAudioResponseEnabled, SetDisplayConfigEnabled, SetDisplayEnabled, SetDisplayMode,
             SetDisplayPresentationSuspended,
@@ -2197,6 +2198,21 @@ impl WallpaperBridge {
                 wallpaper_id,
                 property_id,
             })
+            .await
+    }
+
+    /// Stages the authored default for every property of the wallpaper except
+    /// the files and folders the user chose; cancelling the options undoes it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the wallpaper id is unknown.
+    pub async fn restore_all_property_defaults(
+        &self,
+        wallpaper_id: String,
+    ) -> Result<BridgeWallpaperMutationBundle, BridgeError> {
+        self.actor
+            .ask(RestoreAllPropertyDefaults { wallpaper_id })
             .await
     }
 

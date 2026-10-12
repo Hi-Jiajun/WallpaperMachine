@@ -425,6 +425,8 @@ export default {
   'Unnamed option': '名称未設定のオプション',
   'Reset': 'リセット',
   'Restore default: {name}': 'デフォルトに戻す：{name}',
+  'Restore all defaults': 'すべてデフォルトに戻す',
+  'Stages the default for every property except chosen files and folders. Revert undoes it.': '選択したファイルとフォルダを除くすべてのプロパティについて、デフォルト値に戻す変更を準備します。「元に戻す」で取り消せます。',
   'Modified': '変更済み',
   'Scheme color': 'スキームカラー',
   'Hint': 'ヒント',

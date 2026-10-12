@@ -365,6 +365,10 @@ pub struct RestorePropertyDefault {
     pub property_id: String,
 }
 
+pub struct RestoreAllPropertyDefaults {
+    pub wallpaper_id: String,
+}
+
 pub struct ApplyWallpaperOptions {
     pub wallpaper_id: String,
     /// The user chose this (Apply, a click on a tile, Try again), as opposed

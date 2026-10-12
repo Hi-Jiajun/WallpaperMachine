@@ -923,6 +923,11 @@ extension WebPanelController {
       "volume": value.volume, "muted": value.muted,
       "audioResponseEnabled": value.audioResponseEnabled,
       "mediaIntegrationEnabled": value.mediaIntegrationEnabled,
+      // The page is not given a property a rule hides, yet its modified value still reaches the
+      // wallpaper, so Restore all defaults needs to know of it. A chosen file keeps its own Clear.
+      "hiddenModified": value.properties.contains {
+        !$0.enabled && $0.dirty && $0.kind != .file && $0.kind != .directory
+      },
       "displays": value.displayConfigurations.map { row -> [String: Any] in
         [
           "id": row.displayId, "title": titles.title(row.title, displayId: row.displayId),

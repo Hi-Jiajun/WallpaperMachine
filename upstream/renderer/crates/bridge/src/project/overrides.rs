@@ -2,7 +2,7 @@
 //! (`BTreeMap<String, PropertyValue>`) and the flat JSON string that
 //! `SceneDesc.property_override_json` consumes.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::{ProjectModel, ProjectProperty, PropertyKind, PropertyMetadata, PropertyValue};
 
@@ -71,6 +71,18 @@ impl ProjectModel {
             .into_iter()
             .map(|(id, value)| (id, value.to_json()))
             .collect();
+    }
+
+    /// The properties whose value is a path the user picked. Each is stored
+    /// beside a copy the app keeps, so it is saved the moment it is chosen
+    /// instead of waiting for Apply.
+    #[must_use]
+    pub fn user_asset_property_ids(&self) -> BTreeSet<String> {
+        self.properties
+            .iter()
+            .filter(|property| matches!(property.kind, PropertyKind::File | PropertyKind::Directory))
+            .map(|property| property.id.clone())
+            .collect()
     }
 
     fn property(&self, id: &str) -> Option<&ProjectProperty> {

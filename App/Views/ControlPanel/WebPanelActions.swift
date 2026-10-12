@@ -456,6 +456,8 @@ extension WebPanelController {
     case "restoreProperty":
       try await store.restorePropertyDefaultAsync(
         wallpaperId: try wallpaperID(request), propertyId: try request.string("propertyID"))
+    case "restoreAllProperties":
+      try await store.restoreAllPropertyDefaultsAsync(wallpaperId: try wallpaperID(request))
     case "choosePropertyFile":
       let id = try wallpaperID(request)
       let propertyID = try request.string("propertyID")

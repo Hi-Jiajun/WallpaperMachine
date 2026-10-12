@@ -425,6 +425,8 @@ export default {
   'Unnamed option': '未命名選項',
   'Reset': '重設',
   'Restore default: {name}': '還原預設值：{name}',
+  'Restore all defaults': '全部還原預設值',
+  'Stages the default for every property except chosen files and folders. Revert undoes it.': '為除所選檔案和資料夾外的每個屬性暫存預設值。「還原」可取消此動作。',
   'Modified': '已修改',
   'Scheme color': '配色方案顏色',
   'Hint': '提示',

@@ -537,6 +537,9 @@ follows the developer's in-app language choice.
   full fallback for an unknown delta revision), `ControlPanelHostStateTests`
   (the inspector's per-display host states and exact retry) and
   `ControlPanelRemediationTests` (crash budget, favorites, placement queue).
+- `ControlPanelRestoreAllTests` — Restore all defaults through the live panel: the
+  click reaches the native action, the page shows the defaults the bridge staged
+  with Apply changes offered, and text typed but not sent is dropped.
 - `ControlPanelWindowSizingTests` — size floor, key-view loop, full-screen layout
   keeping navigation reachable and restoring windowed bounds, WebKit's color
   picker anchor following its control, the move-to-active-Space collection
@@ -570,7 +573,9 @@ follows the developer's in-app language choice.
   `ui_` tokens become readable words in labels and combo choices, a curated
   phrase wins, option values stay untouched, and a catalog phrase is translated;
   a group record reaches the page as a heading in its place among the controls and
-  a group with no words is dropped),
+  a group with no words is dropped; Restore all defaults is offered when a listed
+  value, a hidden one or text not yet sent differs from the default, but not for a
+  chosen file alone or a wallpaper that cannot be rendered),
   `WebPanelSupportPromptTests`, `WebPanelWorkshopSourceTests`,
   `WebPanelWorkshopUpdateTests`, `WebPanelImagePlacementRaceTests` and
   `WebPanelAssetProvenanceTests`. `WallpaperEditorStateTests` cover locale

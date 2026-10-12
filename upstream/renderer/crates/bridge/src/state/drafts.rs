@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use wallpaper_core::project::ScalingMode;
 
 use crate::{
@@ -331,6 +333,21 @@ impl WallpaperOptionsDraft {
 
     pub fn restore_property_default(&mut self, id: &str) {
         self.current.property_overrides.remove(id);
+    }
+
+    /// Stages the authored default for every property except those in `keep`,
+    /// hidden and stale overrides included. Nothing else in the draft moves,
+    /// and the committed config is untouched, so cancelling brings every value
+    /// back.
+    ///
+    /// `keep` holds the file and directory properties: a chosen path is written
+    /// to the committed config the moment it is picked, beside the copy the app
+    /// keeps of it, so dropping it from a draft alone would leave the two out of
+    /// step. Clearing one stays its own action.
+    pub fn restore_all_property_defaults(&mut self, keep: &BTreeSet<String>) {
+        self.current
+            .property_overrides
+            .retain(|id, _| keep.contains(id));
     }
 
     pub fn cancel(&mut self) {

@@ -164,6 +164,18 @@ Unsubmitted text stays with its wallpaper when navigating between pages. A dirty
 or unsubmitted control shows a localized **Modified** flag outside its
 author-provided label; Reset clears the flag once the property is clean.
 
+**Restore all defaults**, a link above the controls beside the presets, stages
+the authored default of every property at once instead of one reset icon at a
+time. It is pending like any other edit: **Apply changes** keeps it and **Revert**
+brings back every value and **Modified** flag. It also drops text not yet sent and
+values behind a rule that currently hides their property, but not display
+settings, audio or presets. A chosen file or folder is left alone, because it is
+saved the moment it is picked; each keeps its own **Clear**. The link is disabled
+while nothing but such files and folders differs from the defaults and no text is
+waiting, and while the wallpaper cannot be rendered. A modified value behind a
+rule that currently hides its property counts as a difference, since it still
+reaches the wallpaper, so the link is enabled for it even though no row shows it.
+
 A `scenetexture` property's image picker fills the material slot that names it, so
 a wallpaper built around "choose your own picture" shows the picture. The choice
 takes effect on **Apply changes**, which reloads the scene; the picker stores the

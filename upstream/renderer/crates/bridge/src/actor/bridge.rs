@@ -35,7 +35,8 @@ use crate::{
             GetNativeVideoWallpapers, ReconcileFailed, RefreshDisplays, RefreshLibrary,
             ReleaseHeldWallpaper, RejectNativeVideo, RendererCounters,
             ReplaceLibraryForTest,
-            ReplaceWallpaperConfigForTest, RestorePropertyDefault, SelectWallpaper,
+            ReplaceWallpaperConfigForTest, RestoreAllPropertyDefaults, RestorePropertyDefault,
+            SelectWallpaper,
             SetAudioResponseEnabled, SetBatteryQualityProfile, SetContentPacingEnabled,
             SetDisplayConfigEnabled, SetDisplayEnabled, SetDisplayMode,
             SetDisplayPresentationSuspended,
@@ -4747,6 +4748,26 @@ impl<E: EngineFacade + Clone> Message<RestorePropertyDefault> for BridgeActor<E>
         self.state
             .wallpaper_draft_mut(&msg.wallpaper_id)?
             .restore_property_default(&msg.property_id);
+        self.bump_generation();
+        self.wallpaper_bundle(msg.wallpaper_id)
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<RestoreAllPropertyDefaults> for BridgeActor<E> {
+    type Reply = messages::WallpaperMutationReply;
+
+    async fn handle(
+        &mut self,
+        msg: RestoreAllPropertyDefaults,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let keep = self
+            .state
+            .project_model(&msg.wallpaper_id)?
+            .user_asset_property_ids();
+        self.state
+            .wallpaper_draft_mut(&msg.wallpaper_id)?
+            .restore_all_property_defaults(&keep);
         self.bump_generation();
         self.wallpaper_bundle(msg.wallpaper_id)
     }
