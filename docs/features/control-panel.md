@@ -191,6 +191,12 @@ download stores; page-local scrolling, filters, disclosures and uncommitted inpu
 start fresh. Imports and Workshop downloads run in app-owned stores, so releasing
 the page never cancels them.
 
+The panel opens on the Space you are on rather than switching you to the Space it was
+last left on, and so do What's New, the wallpaper preview and the Steam and pixiv sign-in
+windows. A minimized panel comes back from the Dock when it is opened from the status
+menu, the Dock icon or Command-comma, or when the app is activated; the green button still
+offers full screen. The wallpaper itself keeps playing on every Space as before.
+
 ## Thumbnail corner marks
 
 Installed and Discover show status marks at the thumbnail's upper-left corner:

@@ -716,9 +716,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     func applicationDidBecomeActive(_ notification: Notification) {
         guard !shutdownInProgress, !shutdownComplete,
-              let window = controlPanelWindow, !window.isVisible else { return }
+              let window = controlPanelWindow, !window.isVisible || window.isMiniaturized else { return }
         NSApp.setActivationPolicy(.regular)
-        window.makeKeyAndOrderFront(nil)
+        ControlPanelWindow.bringForward(window)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -1599,6 +1599,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             // Installing a controller can resize the window to its content view's fitting size.
             window.setContentSize(WhatsNewViewController.defaultContentSize)
             window.center()
+            ControlPanelWindow.moveToActiveSpace(window)
             whatsNewWindow = window
             NSApp.setActivationPolicy(.regular)
             window.makeKeyAndOrderFront(nil)
@@ -1615,7 +1616,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
         if let controlPanelWindow {
             ControlPanelWindow.constrainToScreen(controlPanelWindow)
-            controlPanelWindow.makeKeyAndOrderFront(nil)
+            ControlPanelWindow.bringForward(controlPanelWindow)
             NSApp.activate(ignoringOtherApps: true)
             return
         }

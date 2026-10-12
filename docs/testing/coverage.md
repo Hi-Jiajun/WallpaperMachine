@@ -526,9 +526,13 @@ follows the developer's in-app language choice.
   (the inspector's per-display host states and exact retry) and
   `ControlPanelRemediationTests` (crash budget, favorites, placement queue).
 - `ControlPanelWindowSizingTests` — size floor, key-view loop, full-screen layout
-  keeping navigation reachable and restoring windowed bounds, and WebKit's color
-  picker anchor following its control. Not covered: opening the picker, entering
-  a full-screen Space or the live Split View transition.
+  keeping navigation reachable and restoring windowed bounds, WebKit's color
+  picker anchor following its control, the move-to-active-Space collection
+  behavior (existing full-screen and cycle flags kept, all-Spaces dropped) and
+  fronting that restores only a minimized window. Not covered: opening the
+  picker, entering a full-screen Space, the live Split View transition, real Space
+  switching and Dock restore, or that What's New, preview and sign-in windows call
+  the helper; those are on [manual-smoke.md](manual-smoke.md).
 - Feature pages that live here and are described under their domain:
   `ControlPanelAutomationTests`, `ControlPanelBackupFlowTests`,
   `ControlPanelDisplayLayoutTests`, `ControlPanelPixivTests`,

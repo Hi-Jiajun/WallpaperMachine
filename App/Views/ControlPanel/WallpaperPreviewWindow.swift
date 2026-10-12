@@ -89,6 +89,7 @@ final class WallpaperPreviewWindowController: NSWindowController, NSWindowDelega
         window.acceptsMouseMovedEvents = true
         window.title = String(localized: "Wallpaper Preview")
         window.contentMinSize = CGSize(width: min(480, size.width), height: min(320, size.height))
+        ControlPanelWindow.moveToActiveSpace(window)
         window.center()
         window.contentView = makeContentView(size: size)
         for name in [NSApplication.didHideNotification, NSApplication.didUnhideNotification] {

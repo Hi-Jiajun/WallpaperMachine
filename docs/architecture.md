@@ -54,6 +54,15 @@ automation schedulers, the web and native-video wallpaper hosts, system media).
 
 - **Activation policy.** `.accessory` while no control-panel, What's New or preview window is
   open, `.regular` while one is.
+- **Spaces and minimizing.** The four ordinary windows (control panel, What's New, wallpaper
+  preview, web sign-in) call `ControlPanelWindow.moveToActiveSpace`, which inserts
+  `.moveToActiveSpace` into their collection behavior, so opening one shows it on the Space the
+  person is on instead of switching back to the Space it was left on. It inserts and removes
+  flags and never assigns them, so full-screen capability and cycle flags survive, and it drops
+  `.canJoinAllSpaces`, which AppKit rejects beside it. Wallpaper, overlay and probe windows keep
+  their all-Spaces behavior. `ControlPanelWindow.bringForward` restores a minimized panel
+  before fronting it; `showControlPanel` (menu bar, Dock click, Command-comma) and
+  `applicationDidBecomeActive` use it.
 - **Menus.** The status item (`rebuildMenu`) offers Control Panel, playback and
   wallpaper-navigation actions, **Lock Screen** and Exit. Lock Screen calls the private
   `SACLockScreenImmediate` in login.framework, resolved with `dlsym` and left out when missing

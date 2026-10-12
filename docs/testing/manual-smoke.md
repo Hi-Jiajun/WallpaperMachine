@@ -21,6 +21,12 @@ was run.
       seven Settings categories: Performance, General, Appearance, Displays,
       Library & Steam, Storage, About.
 - [ ] Command-comma reuses the existing window.
+- [ ] Move the panel to another Space (or a desktop with another app full screen) and
+      choose Control Panel from the status menu: it appears on the Space you are on,
+      and the green button still offers full screen. Minimize the panel, then choose
+      Control Panel from the status menu, click the Dock icon, and Command-Tab to the
+      app: each brings it back from the Dock. Repeat the Space check with What's New,
+      a wallpaper preview and a Steam or pixiv sign-in window.
 - [ ] Close the window with its close button and with Command-W, and reopen it
       each time, without quitting or crashing.
 - [ ] With the app running, `open -n` the same app: no second copy appears and the
