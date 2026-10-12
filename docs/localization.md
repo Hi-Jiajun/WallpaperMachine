@@ -77,7 +77,12 @@ to Steam, wallpaper titles, descriptions, creator names, custom property labels
 and upstream diagnostic text. The exception to custom property labels is the
 text a wallpaper translates itself: a label or choice that is exactly a token in
 its own `general.localization` table follows the app language, falling back to
-that table's English and then to the author's string. Two labels are ours rather than the author's and
+that table's English and then to the author's string. A built-in `ui_` token that no
+table resolves is shown as English words derived from it (`ui_editor_effect_opacity_title`
+becomes Opacity), translated only when the same phrase is a catalog key; the rest stay
+English in the other languages. The curated phrases in `enginePropertyLabels`
+(`WebUI/panel.js`) reach `t()` through a table lookup, so each one needs an entry in
+every catalog, which `test_panel_localization.py` checks. Two labels are ours rather than the author's and
 are translated: the Wallpaper Engine editor's own token for the scheme colour it
 adds to every scene, and the **Unnamed option** stand-in for a control whose
 label was pure decoration. The property labels the app itself writes into the

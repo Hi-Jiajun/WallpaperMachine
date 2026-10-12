@@ -41,6 +41,15 @@ def catalog_entries(path):
             for key, value in re.findall(rf"^  ({LITERAL}): ({LITERAL}),$", source, re.MULTILINE)]
 
 
+def engine_property_labels():
+    """The phrases of `enginePropertyLabels` in `WebUI/panel.js`, which t() looks up by value."""
+    source = (ROOT / "WebUI/panel.js").read_text()
+    start = source.index("const enginePropertyLabels = {")
+    body = source[start:source.index("\n};", start)]
+    return [ast.literal_eval(value)
+            for value in re.findall(rf"^  \w+: ({LITERAL}),$", body, re.MULTILINE)]
+
+
 def swift_languages():
     source = (ROOT / "App/Services/Localization/AppLanguage.swift").read_text()
     body = source[source.index("static let supported"):]
@@ -140,6 +149,15 @@ class PanelLocalizationTests(unittest.TestCase):
         for tag, entries in self.catalogs.items():
             with self.subTest(tag=tag):
                 self.assertEqual(sorted(keys - dict(entries).keys()), [])
+
+    def test_engine_property_labels_are_translated(self):
+        # The curated phrases for Wallpaper Engine's built-in label tokens reach t() through a
+        # table lookup, so the literal-call check above cannot see them.
+        phrases = engine_property_labels()
+        self.assertTrue(phrases, "no phrases found in enginePropertyLabels")
+        for tag, entries in self.catalogs.items():
+            with self.subTest(tag=tag):
+                self.assertEqual(sorted(set(phrases) - dict(entries).keys()), [])
 
     def test_every_catalog_covers_the_same_keys(self):
         # A shipped language is complete: a key any catalog knows, every catalog knows.

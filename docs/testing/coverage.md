@@ -431,7 +431,8 @@ list sent, the open inspector read again and relabelled, a read that finishes
 after another wallpaper opened dropped, and a refused request never undoing the
 language choice. The Python catalog checks
 (`scripts/tests/test_panel_localization.py`) keep the registries, catalogs and
-`.xcstrings` naming the same languages and keys; see
+`.xcstrings` naming the same languages and keys, and every phrase of the panel's
+built-in label table translated in every catalog; see
 [localization](../localization.md).
 
 ## LockScreen
@@ -565,7 +566,9 @@ follows the developer's in-app language choice.
   Retry on a stopped scene refuses an id that names no enabled display, is
   disabled while it runs, and reloads that display (or, for a mirror, the display
   it mirrors) from a click on the real page),
-  `WebPanelPropertyLabelTests` (author markup is reduced to text),
+  `WebPanelPropertyLabelTests` (author markup is reduced to text; built-in
+  `ui_` tokens become readable words in labels and combo choices, a curated
+  phrase wins, option values stay untouched, and a catalog phrase is translated),
   `WebPanelSupportPromptTests`, `WebPanelWorkshopSourceTests`,
   `WebPanelWorkshopUpdateTests`, `WebPanelImagePlacementRaceTests` and
   `WebPanelAssetProvenanceTests`. `WallpaperEditorStateTests` cover locale

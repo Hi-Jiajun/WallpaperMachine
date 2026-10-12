@@ -955,7 +955,7 @@ extension WebPanelController {
           "min": property.slider?.min ?? 0, "max": property.slider?.max ?? 1,
           "step": property.slider?.step ?? 0.01,
           "options": property.comboOptions.map {
-            ["label": $0.label, "value": propertyValue($0.value)]
+            ["label": engineTokenLabel($0.label) ?? $0.label, "value": propertyValue($0.value)]
           },
         ]
         guard property.kind == .file || property.kind == .directory else { return row }
@@ -1012,6 +1012,7 @@ extension WebPanelController {
   static func plainLabel(_ html: String) -> String {
     // The editor writes this token in place of the scheme colour it adds to every scene.
     if html == "ui_browse_properties_scheme_color" { return String(localized: "Scheme color") }
+    if let words = engineTokenLabel(html) { return words }
     let spaced = html.replacingOccurrences(
       of: "<(br|hr|/p|/div|/li|/tr|/h[1-6])\\b[^>]*>", with: " ",
       options: [.regularExpression, .caseInsensitive])
@@ -1044,6 +1045,41 @@ extension WebPanelController {
   /// building a snapshot never touches the disk. A `.png` that is an APNG shows as a still.
   static func previewAnimates(_ file: URL) -> Bool {
     ["gif", "webp", "apng"].contains(file.pathExtension.lowercased())
+  }
+
+  /// Leading words of a built-in token that name the editor screen it came from, not the thing.
+  private static let engineTokenAreaWords: Set<String> = [
+    "editor", "browse", "settings", "workshop", "properties", "user", "scene", "options", "tags",
+    "type", "effect", "preset", "layer", "importer", "gizmo", "context", "menu", "modal", "welcome",
+  ]
+  /// Trailing words that only say the token was a heading or caption.
+  private static let engineTokenGenericWords: Set<String> = ["title", "label", "text"]
+  private static let engineTokenMaxLength = 96
+
+  /// The words for one of Wallpaper Engine's own `ui_…` label tokens, which a project that
+  /// carries no text for them leaves as the label or combo choice. Nil for anything else:
+  /// author prose, markup, or a token too long to be the editor's. Presentation only; the
+  /// stored label and the choice's value are never rewritten. The words are English; the
+  /// panel translates them when the same phrase is a catalog entry.
+  static func engineTokenLabel(_ text: String) -> String? {
+    let token = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard token.utf8.count <= engineTokenMaxLength, token.hasPrefix("ui_") else { return nil }
+    let body = token.dropFirst(3)
+    guard !body.isEmpty,
+      body.unicodeScalars.allSatisfy({
+        $0.isASCII && ($0 == "_" || $0.properties.isAlphabetic || ("0"..."9").contains($0))
+      })
+    else { return nil }
+    var words = body.split(separator: "_").map(String.init)
+    while words.count > 1, engineTokenAreaWords.contains(words[0].lowercased()) {
+      words.removeFirst()
+    }
+    while words.count > 1, let last = words.last, engineTokenGenericWords.contains(last.lowercased()) {
+      words.removeLast()
+    }
+    guard !words.isEmpty else { return nil }
+    let joined = words.joined(separator: " ")
+    return joined.prefix(1).uppercased() + joined.dropFirst()
   }
 
   static func workshopItem(_ value: WorkshopItem) -> [String: Any] {

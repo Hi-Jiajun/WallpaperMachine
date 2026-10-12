@@ -909,9 +909,11 @@ function assetProperty(id, property, fieldID, unavailable, name) {
     + (property.error ? `<p class="notice error" role="alert">${escapeHTML(property.error)}</p>` : '');
 }
 function renderProperty(id, property, lock) {
-  const token = property.labelHTML || property.label;
+  const token = String(property.labelHTML || property.label || '').trim();
   const engineLabel = Object.hasOwn(enginePropertyLabels, token) ? enginePropertyLabels[token]
-    : packagedStill(id) && packagedPropertyLabels.includes(token) ? token : null;
+    : packagedStill(id) && packagedPropertyLabels.includes(token) ? token
+    // Any other built-in token arrives as words from the app; the same phrase in the catalog is translated.
+    : engineToken.test(token) && property.label ? property.label : null;
   const presentation = engineLabel ? { ...property, label: t(engineLabel), labelHTML: '' } : property;
   const name = presentation.label || t('Unnamed option');
   const label = renderPropertyLabel(presentation);
@@ -941,7 +943,9 @@ function renderProperty(id, property, lock) {
 // are translated for those wallpapers, which the library knows by their id.
 const packagedPropertyLabels = ['Image fit', 'Background color'];
 const packagedStill = (id) => /^(pixiv|image)-/.test(id);
-// Wallpaper Engine's built-in label tokens are UI vocabulary, not author prose.
+// Wallpaper Engine's built-in label tokens are UI vocabulary, not author prose. A token with no
+// phrase below is shown as the English words the app derives from it (at most 96 characters, as there).
+const engineToken = /^ui_[A-Za-z0-9_]{1,93}$/;
 const enginePropertyLabels = {
   ui_browse_properties_scheme_color: 'Scheme color',
   ui_editor_properties_alert_tip: 'Hint',
@@ -956,6 +960,10 @@ const enginePropertyLabels = {
   ui_settings_enable_media_integration_support: 'Media integration',
   ui_editor_script_snippets: 'Script snippets',
   ui_editor_preset_stars_title: 'Stars',
+  // Where the derived words are not the intended phrase.
+  ui_editor_properties_pivot_offset_x: 'Pivot offset X',
+  ui_editor_properties_pivot_offset_y: 'Pivot offset Y',
+  ui_editor_properties_use_24h_format: 'Use 24-hour format',
 };
 
 const clamp = (value) => Math.max(0, Math.min(1, Number(value)));

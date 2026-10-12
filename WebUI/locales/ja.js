@@ -438,6 +438,17 @@ export default {
   'Size': 'サイズ',
   'Script snippets': 'スクリプトスニペット',
   'Stars': '星',
+  'Color': '色',
+  'Opacity': '不透明度',
+  'Scale': 'スケール',
+  'Speed': '速度',
+  'Strength': '強度',
+  'Texture': 'テクスチャ',
+  'Font': 'フォント',
+  'Date': '日付',
+  'Pivot offset X': 'ピボットオフセットX',
+  'Pivot offset Y': 'ピボットオフセットY',
+  'Use 24-hour format': '24時間表示を使う',
 
   // Download stages and dialog
   'Waiting for SteamCMD setup.': 'SteamCMDのセットアップを待っています。',

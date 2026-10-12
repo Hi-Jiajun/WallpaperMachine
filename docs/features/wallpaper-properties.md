@@ -80,7 +80,15 @@ the label. A reset icon appears on hover, keyboard focus, or a modified row and
 restores that property's default. Checkboxes use the author's name directly.
 Recognized Wallpaper Engine label tokens (brightness, position, default, and
 similar built-in vocabulary) are localized rather than displayed as `ui_editor_…`
-identifiers.
+identifiers. A built-in token without such a phrase is shown as sentence-cased
+English words, never as the identifier: the `ui_` prefix, the editor-area words
+that begin it (`editor`, `properties`, `effect`, `context`, `menu` and similar) and
+a trailing `title`, `label` or `text` are dropped, so `ui_editor_effect_opacity_title`
+reads **Opacity**. The same applies to a combo choice. Only a label or choice that
+is exactly such a token (surrounding space ignored, at most 96 characters) is
+rewritten; author prose that merely mentions one is left alone, and the stored
+label and the choice's value are unchanged. The words are English, and the panel
+translates them whenever the same phrase is already a catalog entry.
 
 A wallpaper may carry its own translations in `general.localization`: a table per
 Wallpaper Engine language code (`en-us`, `zh-chs`, `zh-cht`, `ja-jp`) that maps

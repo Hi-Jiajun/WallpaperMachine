@@ -438,6 +438,17 @@ export default {
   'Size': '大小',
   'Script snippets': '脚本片段',
   'Stars': '星星',
+  'Color': '颜色',
+  'Opacity': '不透明度',
+  'Scale': '缩放',
+  'Speed': '速度',
+  'Strength': '强度',
+  'Texture': '纹理',
+  'Font': '字体',
+  'Date': '日期',
+  'Pivot offset X': '轴心偏移 X',
+  'Pivot offset Y': '轴心偏移 Y',
+  'Use 24-hour format': '使用 24 小时制',
 
   // Download stages and dialog
   'Waiting for SteamCMD setup.': '等待 SteamCMD 设置。',
