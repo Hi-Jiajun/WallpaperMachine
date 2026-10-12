@@ -291,6 +291,7 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         surface: RuntimeSurfaceKey = RuntimeSurfaceKey(kind: .desktopWeb, displayID: 0),
         counters: RuntimeCounters? = nil,
         persistentData: Bool = true,
+        inspectable: Bool = false,
         rendersAtDisplayRefresh: Bool = false,
         recovery: RecoveryPolicy = RecoveryPolicy(),
         timing: Timing = Timing(),
@@ -353,9 +354,16 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         } else {
             AppLog.warn("WebKit window occlusion control unavailable; web wallpapers use system scheduling")
         }
-        #if DEBUG
-            webView.isInspectable = true
-        #endif
+        webView.isInspectable = inspectable
+    }
+
+    /// Whether Safari's Web Inspector may attach to this page. The owner decides
+    /// (see `WebWallpaperInspection`); it can change while the page runs.
+    var isInspectable: Bool { webView.isInspectable }
+
+    func setInspectable(_ enabled: Bool) {
+        guard webView.isInspectable != enabled else { return }
+        webView.isInspectable = enabled
     }
 
     func load() {

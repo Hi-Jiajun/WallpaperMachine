@@ -60,7 +60,8 @@ final class WebWallpaperHostLifecycleTests: XCTestCase {
       try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
       try "<!doctype html><script>window.contentVersion = 1</script>".write(
         to: root.appendingPathComponent("index.html"), atomically: true, encoding: .utf8)
-      defaults = TemporaryDefaults.makeForCurrentTest().defaults
+      let defaults = TemporaryDefaults.makeForCurrentTest().defaults
+      self.defaults = defaults
       let model = model
       host = WebWallpaperHost(fetch: { model.served },
         screens: { [(UInt32(7), NSRect(x: 0, y: 0, width: 320, height: 200))] },
@@ -70,7 +71,9 @@ final class WebWallpaperHostLifecycleTests: XCTestCase {
           model.subscriptions.append(subscribed)
           if model.refuseAudio && subscribed { throw CancellationError() }
         }, imagePlacement: StillImagePlacementStore(defaults: defaults, library: root),
-        pointerMonitor: PointerMonitor(), pageTiming: pageTiming, audioClock: { model.clock },
+        pointerMonitor: PointerMonitor(), pageTiming: pageTiming,
+        inspectionEnabled: { WebWallpaperInspection.isEnabled(defaults: defaults) },
+        audioClock: { model.clock },
         contentRevision: { model.revision }, makeSurface: { frame, page in
           let surface = Surface(frame, page, attached: attachedSurfaces)
           model.surfaces.append(surface)
@@ -522,6 +525,44 @@ final class WebWallpaperHostLifecycleTests: XCTestCase {
       try await Task.sleep(for: .milliseconds(25))
     }
     XCTFail("the page's devicePixelRatio is \(String(describing: seen)), expected \(expected)")
+  }
+
+  func testTogglingInspectionReachesRunningPages() async throws {
+    let fixture = try Fixture()
+    defer { fixture.close() }
+    fixture.host.start()
+    WebWallpaperInspection.setEnabled(false, defaults: fixture.defaults, center: fixture.center)
+    await fixture.host.apply([fixture.descriptor])
+    let page = try XCTUnwrap(fixture.model.surfaces.last?.page)
+    XCTAssertFalse(page.isInspectable, "a wallpaper opened while inspection is off cannot be attached to")
+
+    WebWallpaperInspection.setEnabled(true, defaults: fixture.defaults, center: fixture.center)
+    try await wait { page.isInspectable }
+
+    WebWallpaperInspection.setEnabled(false, defaults: fixture.defaults, center: fixture.center)
+    try await wait { !page.isInspectable }
+    XCTAssertEqual(fixture.model.surfaces.count, 1, "the page is not reloaded to follow the setting")
+  }
+
+  func testAWallpaperOpenedWhileInspectionIsOnIsInspectableFromTheStart() async throws {
+    let fixture = try Fixture()
+    defer { fixture.close() }
+    WebWallpaperInspection.setEnabled(true, defaults: fixture.defaults, center: fixture.center)
+    await fixture.host.apply([fixture.descriptor])
+    let first = try XCTUnwrap(fixture.model.surfaces.last?.page)
+    XCTAssertTrue(first.isInspectable)
+    try await wait { first.isLoaded }
+
+    // A replacement page is made under the current choice, not the old one.
+    WebWallpaperInspection.setEnabled(false, defaults: fixture.defaults, center: fixture.center)
+    try "<!doctype html><script>window.contentVersion = 2</script>".write(
+      to: fixture.root.appendingPathComponent("index.html"), atomically: true, encoding: .utf8)
+    fixture.model.revision += 1
+    await fixture.host.apply([fixture.descriptor])
+    XCTAssertEqual(fixture.model.surfaces.count, 2)
+    let second = try XCTUnwrap(fixture.model.surfaces.last?.page)
+    XCTAssertFalse(second === first)
+    XCTAssertFalse(second.isInspectable)
   }
 
   func testASuspendedPageAnswersPosterRequestsFromItsSuspensionPoster() async throws {

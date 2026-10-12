@@ -506,6 +506,8 @@ extension WebPanelController {
         playback.refreshesDesktopPicturePeriodically = try request.boolean("value")
       case "hideAfterActivating":
         defaults.set(try request.boolean("value"), forKey: Self.hideAfterActivatingKey)
+      case "inspectWebWallpapers":
+        WebWallpaperInspection.setEnabled(try request.boolean("value"), defaults: defaults)
       case "workshopUpdateChecks":
         workshop.updates.checksAutomatically = try request.boolean("value")
       case "concurrentDownloads":

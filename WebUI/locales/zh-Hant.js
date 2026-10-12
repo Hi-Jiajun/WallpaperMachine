@@ -969,6 +969,8 @@ export default {
   'Troubleshooting': '疑難排解',
   'Detailed logging': '詳細記錄',
   'Records extra detail from now on, including after a restart. Turn it off when you are done.': '從現在起記錄更多細節，重新啟動後仍會持續。完成後請將其關閉。',
+  'Allow inspecting web wallpapers': '允許檢查網頁桌布',
+  'Lets Safari’s Develop menu attach to the web wallpapers running on this Mac so you can debug a page. Turn it off when you are done.': '允許 Safari 的「開發」選單連接到此 Mac 上執行的網頁桌布，以便除錯頁面。完成後請將其關閉。',
   'Diagnostics report': '診斷報告',
   'Export…': '匯出…',
   'Saves recent logs, the lock screen log, macOS crash, resource, spin and hang reports, which wallpapers were loading when WallpaperMachine quit unexpectedly, and a system summary as one .zip file to attach to a bug report. Home folder paths, your Mac user name and Steam account names are replaced.': '將最近的記錄檔、鎖定畫面記錄、macOS 的當機、資源、卡頓（spin）與無回應（hang）報告、WallpaperMachine 意外結束時正在載入的桌布記錄，以及系統摘要儲存為單一 .zip 檔案，方便附加到錯誤回報中。個人專屬資料夾路徑、你的 Mac 使用者名稱和 Steam 帳號名稱都會被替換。',

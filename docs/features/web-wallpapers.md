@@ -34,6 +34,12 @@ for them.
   often as the [frame-rate limit](#frame-rate-limit) when that is lower (never below
   10), always ending on the position where the pointer stopped; presses, drags, releases,
   scrolls and exits are never delayed or dropped.
+- A page can be debugged in Safari. **Settings → Storage → Troubleshooting → Allow
+  inspecting web wallpapers** lets Safari's **Develop** menu list the wallpaper
+  pages running on this Mac (turn on *Show features for web developers* in Safari's
+  settings first) and open the Web Inspector on one. It is off in a release build
+  until the user turns it on, takes effect on running pages without a reload and is
+  not part of a backup. See [inspecting a web wallpaper](diagnostics.md#inspecting-a-web-wallpaper).
 - On macOS 26+, **Use wallpaper as screen saver** can present web and still-image
   projects through the native extension. It uses committed properties and isolated
   file copies, without audio, capture or interaction. See
@@ -442,6 +448,10 @@ never substitutes Pause for an unavailable mute.
 - The `fetch`/`XMLHttpRequest` fixes for project files reach the page and every frame
   it embeds, not web workers: a `fetch` made inside a worker still gets WebKit's
   status 0 and no `Content-Type` for a local file.
+- Inspection covers the desktop pages and the live preview only. The screen saver,
+  the lock-screen extension and the control panel are never attachable through this
+  setting, and an inspected page's JavaScript is open to anyone using this Mac's
+  Safari while it is on.
 - Nonzero WebAudio gain is not controlled by the native media-volume interface;
   whole-page Mute still applies where WebKit exposes it.
 - A paused wallpaper's WebAudio is muted (`WebWallpaperAudioOwnership` gives a paused
@@ -461,7 +471,7 @@ cadence and in a real page with the rate a slow or full-refresh page draws at, t
 rebuilt when a frame rate crosses a fast display's refresh with its render scale, pause,
 limit and pointer rate carried over, render scale on `devicePixelRatio` including the
 resize rebuild of a canvas page, the audio pump with its silence cadence on a
-hand-moved clock) and the bridge contract in
+hand-moved clock, the inspection switch on running, new and preview pages) and the bridge contract in
 `upstream/renderer/crates/bridge/src/tests/` (`apply_options.rs`,
 `quality_settings.rs`, `web_audio_media.rs`); file and directory properties are
 covered under [user files](user-files.md#verification), and the domain inventory is in
@@ -482,4 +492,6 @@ that mix it into CSS pixel math also need an authorized desktop run. So does a r
 smoothing visualizer (bars that decay per callback) after the system audio stops, and
 a comparison with Wallpaper Engine's own behavior in silence if a Windows reference is
 ever available. A real Workshop page that hosts its player in an iframe needs an authorized
-desktop run, as does a page that makes its local requests from a worker.
+desktop run, as does a page that makes its local requests from a worker. That
+Safari's Develop menu lists a desktop wallpaper page and attaches to it in a release
+build, and drops it again when the switch goes off, also needs one.

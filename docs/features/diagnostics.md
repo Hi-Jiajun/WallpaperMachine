@@ -488,6 +488,27 @@ scene was replaced while the check waited). The summary counts `gave_up`,
 them as well as for a repair. A check that fails to reach the bridge writes
 `wake check (…) failed: …` and is not retried.
 
+## Inspecting a web wallpaper
+
+**Settings → Storage → Troubleshooting → Allow inspecting web wallpapers** lets
+Safari's Web Inspector attach to the pages of [web wallpapers](web-wallpapers.md)
+running on this Mac, so a Workshop page that renders wrong or logs errors can be
+debugged. In Safari, turn on *Show features for web developers* (Settings →
+Advanced), then pick the page from the **Develop** menu's submenu for this Mac.
+
+- Off in a release build until the user turns it on; a debug build starts with it
+  on. An explicit choice, either way, is kept in `UserDefaults`
+  (`WallpaperMachine.inspectWebWallpapers`) and survives a relaunch. It is not part
+  of a [backup](backup-restore.md): diagnostic state does not travel to another Mac.
+- A change reaches the pages that are already running without reloading them, and a
+  wallpaper or live preview opened later follows the current value. Each change is
+  logged (`web wallpaper inspection enabled|disabled`).
+- It covers desktop web pages and the preview in the inspector. The screen saver, the
+  lock-screen extension and the control panel are not governed by it.
+- While it is on, anything that can use this Mac's Safari can read the page's
+  JavaScript context, including data the page keeps in `localStorage`. Turn it off
+  when the debugging is done.
+
 ## Verification
 
 - Rust:
@@ -515,7 +536,14 @@ them as well as for a repair. A check that fails to reach the bridge writes
   formatting, and the real footprint read of the test process, which grows when the
   process touches memory).
   `WallpaperReapplyTests` (the `reapply:` lines).
+  `WebWallpaperInspectionTests` (an explicit choice wins over the build default and
+  announces itself; a page is attachable only when its owner says so), and the
+  running, new and preview page cases in `WebWallpaperHostLifecycleTests` and
+  `WebWallpaperPreviewSurfaceTests`; `WebPanelGeneralSettingsTests` for the setting
+  and its snapshot value.
 - Not established by tests:
+  - that Safari's Develop menu lists a desktop wallpaper page and attaches in a
+    release build;
   - that a real scene's renderer lines carry its number on the desktop;
   - the unreadable-folder note on a Mac whose account is not in `_analyticsusers`
     (the test uses a path that cannot be listed);

@@ -662,7 +662,9 @@ following (`WebWallpaperRenderScaleTests`, plus the render-scale cases of
 `WebWallpaperHostLifecycleTests`), pointer routing
 (`WebWallpaperMouseRoutingTests`), pointer-move pacing and coalescing
 (`WebWallpaperMoveThrottleTests`, and the interval a page asks for in
-`WebWallpaperPageTests`) and the screen-saver surface
+`WebWallpaperPageTests`), the opt-in Web Inspector switch
+(`WebWallpaperInspectionTests`, plus the running and new page cases of
+`WebWallpaperHostLifecycleTests`) and the screen-saver surface
 (`ScreenSaverWebSurfaceTests`). Detail and limits:
 [web wallpapers](../features/web-wallpapers.md#verification).
 

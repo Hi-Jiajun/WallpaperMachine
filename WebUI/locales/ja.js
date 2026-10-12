@@ -969,6 +969,8 @@ export default {
   'Troubleshooting': 'トラブルシューティング',
   'Detailed logging': '詳細なログ',
   'Records extra detail from now on, including after a restart. Turn it off when you are done.': '今後は再起動後も含めて、より詳細な情報を記録します。作業が終わったらオフにしてください。',
+  'Allow inspecting web wallpapers': 'Web壁紙のインスペクトを許可',
+  'Lets Safari’s Develop menu attach to the web wallpapers running on this Mac so you can debug a page. Turn it off when you are done.': 'Safariの「開発」メニューから、このMacで実行中のWeb壁紙に接続してページをデバッグできるようにします。作業が終わったらオフにしてください。',
   'Diagnostics report': '診断レポート',
   'Export…': '書き出す…',
   'Saves recent logs, the lock screen log, macOS crash, resource, spin and hang reports, which wallpapers were loading when WallpaperMachine quit unexpectedly, and a system summary as one .zip file to attach to a bug report. Home folder paths, your Mac user name and Steam account names are replaced.': '最近のログ、ロック画面のログ、macOSのクラッシュ・リソース・スピン・ハングのレポート、WallpaperMachineが予期せず終了したときに読み込み中だった壁紙の記録、システムの概要を1つの.zipファイルに保存し、不具合報告に添付できるようにします。ホームフォルダのパス、Macのユーザ名、Steamのアカウント名は置き換えられます。',

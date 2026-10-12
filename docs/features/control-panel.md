@@ -153,8 +153,10 @@ the state as a disabled line. See [crash recovery](crash-recovery.md).
     [updates](updates.md)). The application menu item **Check for Updates…** opens
     this section.
   - **Storage** holds [Backup](backup-restore.md) and ends with
-    **Troubleshooting**: Detailed logging and the diagnostics report export. See
-    [Logs and diagnostics reports](diagnostics.md).
+    **Troubleshooting**: Detailed logging, *Allow inspecting web wallpapers*
+    (Safari's Web Inspector on the running pages) and the diagnostics report
+    export. See [Logs and diagnostics reports](diagnostics.md) and
+    [inspecting a web wallpaper](diagnostics.md#inspecting-a-web-wallpaper).
 
 Settings use lightly bounded, keyed groups with dividers between related rows.
 Rows wrap within their available width, and below a 480px content width controls

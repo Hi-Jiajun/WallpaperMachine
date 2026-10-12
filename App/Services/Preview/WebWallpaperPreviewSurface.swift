@@ -13,13 +13,16 @@ final class WebWallpaperPreviewSurface: NSObject, WallpaperPreviewSurface, WKUID
     private var fetchAll = Set<String>()
     private var stopped = false
 
+    /// `inspectable` is read once: a preview lives for a few minutes at most, and
+    /// the next one opened honors whatever the preference is by then.
     init(request: WallpaperPreviewRequest, generation: UInt64,
-         counters: RuntimeCounters? = nil, assets: UserAssetStore? = nil) {
+         counters: RuntimeCounters? = nil, assets: UserAssetStore? = nil,
+         inspectable: Bool = WebWallpaperInspection.isEnabled()) {
         self.request = request
         self.assets = assets ?? UserAssetStore(projectURL: request.projectURL, wallpaperId: request.wallpaperID)
         page = WebWallpaperPage(projectURL: request.projectURL, entryFile: request.entryFile,
             surface: RuntimeSurfaceKey(kind: .preview, displayID: 0, generation: generation),
-            counters: counters, persistentData: false)
+            counters: counters, persistentData: false, inspectable: inspectable)
         let content = NSView(frame: CGRect(x: 0, y: 0, width: 960, height: 540))
         content.wantsLayer = true
         content.layer?.backgroundColor = NSColor.black.cgColor

@@ -39,6 +39,10 @@ final class WebWallpaperHost {
     }
     private var descriptors: [UInt32: BridgeWebWallpaper] = [:]
     private var posterObserver: NSObjectProtocol?
+    private var inspectionObserver: NSObjectProtocol?
+    /// Whether pages may be attached to Safari's Web Inspector, read when a page
+    /// is made and again whenever the preference changes.
+    private let inspectionEnabled: @MainActor () -> Bool
     private var imagePlacementObserver: NSObjectProtocol?
     private var placementDirtyDisplays = Set<UInt32>()
     private var reconcileInFlight = false
@@ -126,6 +130,7 @@ final class WebWallpaperHost {
         imagePlacement: StillImagePlacementStore? = nil,
         pointerMonitor: (any WebWallpaperPointerMonitoring)? = nil,
         pageTiming: WebWallpaperPage.Timing = .init(),
+        inspectionEnabled: @escaping @MainActor () -> Bool = { WebWallpaperInspection.isEnabled() },
         audioClock: @escaping @MainActor () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         contentRevision: @escaping @MainActor () -> UInt64 = { 0 },
         makeSurface: @escaping @MainActor (NSRect, WebWallpaperPage) -> any WebWallpaperSurface = {
@@ -136,6 +141,7 @@ final class WebWallpaperHost {
         self.makeSurface = makeSurface
         self.pointerMonitorOverride = pointerMonitor
         self.pageTiming = pageTiming
+        self.inspectionEnabled = inspectionEnabled
         self.audioClock = audioClock
         self.contentRevision = contentRevision
         self.screens = screens ?? { Self.systemScreens() }
@@ -281,6 +287,13 @@ final class WebWallpaperHost {
             MainActor.assumeIsolated { self?.answerPosterRequest(notification) }
         }
         stopped = false
+        // The center is the one that carries poster requests, so a test that
+        // injects it also owns what reaches the host.
+        inspectionObserver = frameCenter.addObserver(
+            forName: WebWallpaperInspection.didChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.applyInspection() }
+        }
         imagePlacementObserver = NotificationCenter.default.addObserver(
             forName: StillImagePlacementStore.didChangeNotification, object: imagePlacement, queue: .main
         ) { [weak self] note in
@@ -414,8 +427,8 @@ final class WebWallpaperHost {
                     kind: .desktopWeb, displayID: displayID, generation: surfaceGeneration)
                 let page = WebWallpaperPage(
                     projectURL: projectURL, entryFile: wallpaper.entryFile,
-                    surface: surface, counters: counters, rendersAtDisplayRefresh: rendersAtDisplayRefresh,
-                    timing: pageTiming)
+                    surface: surface, counters: counters, inspectable: inspectionEnabled(),
+                    rendersAtDisplayRefresh: rendersAtDisplayRefresh, timing: pageTiming)
                 let load = AppLog.beginLoad("web", project: wallpaper.projectPath, detail: """
                     wallpaper \(wallpaper.wallpaperId) “\(wallpaper.title)” entry \(wallpaper.entryFile), \
                     \(DiagnosticEnvironment.display(displayID)), fps \(wallpaper.fps)\
@@ -634,6 +647,12 @@ final class WebWallpaperHost {
         mouse.setActive(live)
     }
 
+    /// Brings every running page in line with the preference without a reload.
+    private func applyInspection() {
+        let enabled = inspectionEnabled()
+        for window in windows.values { window.page.setInspectable(enabled) }
+    }
+
     func shutdown() {
         stopped = true
         applyGeneration &+= 1
@@ -641,6 +660,10 @@ final class WebWallpaperHost {
         if let posterObserver {
             frameCenter.removeObserver(posterObserver)
             self.posterObserver = nil
+        }
+        if let inspectionObserver {
+            frameCenter.removeObserver(inspectionObserver)
+            self.inspectionObserver = nil
         }
         if let imagePlacementObserver {
             NotificationCenter.default.removeObserver(imagePlacementObserver)

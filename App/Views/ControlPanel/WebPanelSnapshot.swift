@@ -547,6 +547,7 @@ extension WebPanelController {
       "refreshDesktopPicture": playback.refreshesDesktopPicturePeriodically,
       "hotkeys": hotKeyRows,
       "hideAfterActivating": hidesAfterActivating,
+      "inspectWebWallpapers": WebWallpaperInspection.isEnabled(defaults: defaults),
       "lockScreenEnabled": lock?.isRequested ?? false, "lockScreenAvailable": lock != nil,
       "lockScreenBusy": lock?.isBusy ?? false, "lockScreenStatus": lock?.status
         ?? (LockScreenConfiguration.isSupportedBySystem

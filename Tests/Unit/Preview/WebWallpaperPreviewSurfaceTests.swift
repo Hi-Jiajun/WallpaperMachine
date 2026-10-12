@@ -25,14 +25,14 @@ final class WebWallpaperPreviewSurfaceTests: XCTestCase {
 
     override func tearDownWithError() throws { try FileManager.default.removeItem(at: root) }
 
-    private func makeSurface(generation: UInt64) throws -> WebWallpaperPreviewSurface {
+    private func makeSurface(generation: UInt64, inspectable: Bool = false) throws -> WebWallpaperPreviewSurface {
         let request = try WallpaperPreviewRequest(.init(wallpaperId: "preview", title: "Preview", kind: .webpage,
             projectPath: project.path, entryFile: "index.html", assetsPath: project.path,
             propertiesJson: #"{"message":{"type":"textinput","value":"Unapplied text"},"choice":{"type":"combo","value":2}}"#,
             fps: 30, scalingMode: .fill, scalingFactor: 1, volume: 0.5))
         let assets = UserAssetStore(projectURL: project, wallpaperId: "preview",
             managed: ManagedUserAssetStore(root: root.appendingPathComponent("UserAssets")))
-        return WebWallpaperPreviewSurface(request: request, generation: generation, assets: assets)
+        return WebWallpaperPreviewSurface(request: request, generation: generation, assets: assets, inspectable: inspectable)
     }
 
     private func waitForProperties(_ surface: WebWallpaperPreviewSurface) async throws {
@@ -43,6 +43,14 @@ final class WebWallpaperPreviewSurfaceTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(20))
         }
         throw WallpaperPreviewFailure(message: "Fixture properties did not arrive")
+    }
+
+    func testAPreviewCanBeAttachedToByTheInspectorOnlyWhenAllowed() throws {
+        let closed = try makeSurface(generation: 1)
+        let open = try makeSurface(generation: 2, inspectable: true)
+        defer { closed.stop(); open.stop() }
+        XCTAssertFalse(closed.page.webView.isInspectable)
+        XCTAssertTrue(open.page.webView.isInspectable)
     }
 
     func testWebPreviewIsMutedIsolatedAndDeliversTypedPropertiesWithoutAWindow() async throws {
