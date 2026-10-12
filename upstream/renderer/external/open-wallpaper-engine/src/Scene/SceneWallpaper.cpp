@@ -351,6 +351,7 @@ public:
         CMD_POINTER_INPUT_CHANGED,
         CMD_USER_SHORTCUT,
         CMD_AUDIO_REQUIREMENT_CHANGED,
+        CMD_RENDER_FAILED,
         CMD_NO
     };
 
@@ -382,6 +383,7 @@ public:
                 CASE_CMD(POINTER_INPUT_CHANGED);
                 CASE_CMD(USER_SHORTCUT);
                 CASE_CMD(AUDIO_REQUIREMENT_CHANGED);
+                CASE_CMD(RENDER_FAILED);
             case CMD::CMD_NO: break;
                 // No `default`, for the same reason the render handler has
                 // none: a command that is posted and never dispatched is
@@ -398,6 +400,9 @@ public:
     /// Reports scene `generation`'s audio requirement. Generations increase
     /// with every scene commit on the render thread.
     void sendAudioRequirement(uint64_t generation, bool requires_audio);
+    /// Tells the host's render-failure callback that a scene which had drawn
+    /// stopped after a failed frame. Posts only: it runs on the render thread.
+    void sendRenderFailure();
     /// The listener a committed scene's runtime runs when it first marks
     /// itself as reading audio, on whatever thread that happens. It only posts.
     std::function<void()> audioRequirementReporter(uint64_t generation);
@@ -419,6 +424,7 @@ private:
     MHANDLER_CMD(POINTER_INPUT_CHANGED);
     MHANDLER_CMD(USER_SHORTCUT);
     MHANDLER_CMD(AUDIO_REQUIREMENT_CHANGED);
+    MHANDLER_CMD(RENDER_FAILED);
 
 private:
     bool m_inited { false };
@@ -439,6 +445,7 @@ private:
     UserShortcutCallback                 m_user_shortcut_callback;
     bool                                 m_accepts_pointer_input { true };
     AudioRequirementCallback             m_audio_requirement_callback;
+    RenderFailureCallback                m_render_failure_callback;
     /// Latest committed scene generation seen here, and whether that scene
     /// reads audio. Only the main looper touches these.
     uint64_t                             m_audio_requirement_generation { 0 };
@@ -475,6 +482,9 @@ public:
         CMD_BEGIN_SURFACE_RECONFIGURE,
         CMD_FINISH_SURFACE_RECONFIGURE,
         CMD_POSTER_REQUEST,
+#ifdef WESCENE_BUILD_TESTS
+        CMD_INJECT_FRAME_FAILURE,
+#endif
         CMD_NO
     };
     MainHandler& main_handler;
@@ -529,6 +539,9 @@ public:
                 CASE_CMD(FINISH_SURFACE_RECONFIGURE);
                 CASE_CMD(POSTER_REQUEST);
                 CASE_CMD(SET_RENDER_SCALE);
+#ifdef WESCENE_BUILD_TESTS
+                CASE_CMD(INJECT_FRAME_FAILURE);
+#endif
             case CMD::CMD_NO: break;
                 // No `default`. Every command is named, so the compiler
                 // reports the next one that is added and not dispatched —
@@ -925,6 +938,30 @@ private:
         m_health.ClearStop();
     }
 
+    /// A frame failed and nobody asked for the stop. Counts it, latches the
+    /// reason the host reads, stops rendering and, for a scene that had drawn
+    /// before, tells the host so it can rebuild the surface.
+    ///
+    /// `reached_draw` is whether the failure came from the draw itself rather
+    /// than from building the graph, which has already reported its own.
+    /// A scene that never presented a frame does not call back: the host is
+    /// still waiting for that first frame and has its own timeout and rollback
+    /// for it, and a recovery of its own would race that wait. The call is a
+    /// post, so it never runs host code on this thread, and it is made after
+    /// rendering has stopped so the host cannot observe a still-running
+    /// surface.
+    void failFrame(bool reached_draw) {
+        counters.Add(OWE_RC_RENDER_FAILURES);
+        if (reached_draw) {
+            m_health.NoteFrameFailed();
+        } else {
+            m_health.NoteGraphFailed();
+        }
+        suspendRendering();
+        if (reached_draw && m_scene != nullptr && m_scene->first_frame_ok)
+            main_handler.sendRenderFailure();
+    }
+
     /// Runs the frame clock exactly when there is something for it to drive:
     /// a loaded scene, rendering not blocked, and no pause asked for. Before
     /// a scene lands, and after a load that never delivered one, there is
@@ -1228,13 +1265,7 @@ private:
                 m_health.NoteFrameCompleted();
                 if (presented) m_health.NotePresented();
             } else {
-                counters.Add(OWE_RC_RENDER_FAILURES);
-                if (reached_draw) {
-                    m_health.NoteFrameFailed();
-                } else {
-                    m_health.NoteGraphFailed();
-                }
-                suspendRendering();
+                failFrame(reached_draw);
             }
 
             m_scene->shaderValueUpdater->FrameEnd();
@@ -1494,6 +1525,14 @@ private:
             break;
         }
     }
+#ifdef WESCENE_BUILD_TESTS
+    /// What a draw that fails after the scene has drawn does, without needing
+    /// the GPU to fail.
+    MHANDLER_CMD(INJECT_FRAME_FAILURE) {
+        failFrame(true);
+        refreshFrameDemand();
+    }
+#endif
     MHANDLER_CMD(BEGIN_SURFACE_RECONFIGURE) {
         std::shared_ptr<std::promise<bool>> promise;
         if (! msg->findObject("promise", &promise) || promise == nullptr) {
@@ -1763,6 +1802,12 @@ SceneWallpaperInputTestAccess::ConsumeMouseButtons(SceneWallpaper& wallpaper) {
     const auto snapshot =
         wallpaper.m_main_handler->renderHandler()->consumeMouseButtonSnapshot();
     return { snapshot.down, snapshot.pressed, snapshot.released };
+}
+
+void SceneWallpaperInputTestAccess::InjectFrameFailure(SceneWallpaper& wallpaper) {
+    CreateMsgWithCmd(wallpaper.m_main_handler->renderHandler(),
+                     RenderHandler::CMD::CMD_INJECT_FRAME_FAILURE)
+        ->post();
 }
 
 std::shared_ptr<Scene>
@@ -2136,6 +2181,11 @@ MHANDLER_CMD_IMPL(MainHandler, SET_PROPERTY) {
                 m_audio_requirement_callback = std::move(*cb);
                 if (m_audio_requirement_callback) m_audio_requirement_callback(m_requires_audio);
             }
+        } else if (property == PROPERTY_RENDER_FAILURE_CALLBACK) {
+            std::shared_ptr<RenderFailureCallback> cb;
+            if (msg->findObject("value", &cb) && cb != nullptr) {
+                m_render_failure_callback = std::move(*cb);
+            }
         } else if (property == PROPERTY_SPEED) {
             float speed { 1.0f };
             if (msg->findFloat("value", &speed)) {
@@ -2201,6 +2251,10 @@ MHANDLER_CMD_IMPL(MainHandler, AUDIO_REQUIREMENT_CHANGED) {
     if (next == m_requires_audio) return;
     m_requires_audio = next;
     if (m_audio_requirement_callback) m_audio_requirement_callback(next);
+}
+
+MHANDLER_CMD_IMPL(MainHandler, RENDER_FAILED) {
+    if (m_render_failure_callback) m_render_failure_callback();
 }
 
 bool MainHandler::applyConfig(SceneWallpaperConfig config) {
@@ -2460,6 +2514,12 @@ void MainHandler::sendAudioRequirement(uint64_t generation, bool requires_audio)
     msg->setObject("generation", std::make_shared<uint64_t>(generation));
     msg->setBool("requires_audio", requires_audio);
     msg->post();
+}
+
+void MainHandler::sendRenderFailure() {
+    auto self = weak_from_this().lock();
+    if (self == nullptr) return;
+    CreateMsgWithCmd(self, MainHandler::CMD::CMD_RENDER_FAILED)->post();
 }
 
 std::function<void()> MainHandler::audioRequirementReporter(uint64_t generation) {

@@ -2,6 +2,7 @@
 
 use crate::{
     DisplayDesc, DisplaySelector, WallpaperAssignment,
+    engine::surface_recovery::{RecoveryReason, RecoveryStep},
     media::audio::AudioVolume,
     project::{ScalingMode, SceneDesc, SceneHandle, SceneResult},
 };
@@ -17,6 +18,40 @@ pub(super) struct NativeAudioRequirementChanged {
     pub handle: SceneHandle,
     pub renderer_instance: std::sync::Arc<()>,
     pub requires_audio: bool,
+}
+
+/// A renderer's report that its scene, which had drawn, failed a frame and
+/// stopped.
+pub(super) struct NativeRenderFailed {
+    pub handle: SceneHandle,
+    pub renderer_instance: std::sync::Arc<()>,
+}
+
+/// A recovery attempt the failure ladder scheduled for itself, delivered after
+/// its delay. Carries the renderer it was scheduled for, so an attempt that
+/// outlives its renderer (the wallpaper was replaced meanwhile) does nothing.
+pub(super) struct RecoverSurfaceAttempt {
+    pub handle: SceneHandle,
+    pub renderer_instance: std::sync::Arc<()>,
+    pub step: RecoveryStep,
+    pub number: usize,
+}
+
+/// A look at a renderer that recovery rebuilt, which the engine schedules for
+/// itself because that renderer reports no failure until it has drawn. Carries
+/// the renderer it was scheduled for, like [`RecoverSurfaceAttempt`], and when
+/// the rebuild finished.
+pub(super) struct SettleRecoveredSurface {
+    pub handle: SceneHandle,
+    pub renderer_instance: std::sync::Arc<()>,
+    pub number: usize,
+    pub rebuilt_at: std::time::Instant,
+}
+
+/// A recovery asked for from outside the renderer's own report.
+pub struct RecoverSurface {
+    pub display_id: u32,
+    pub reason: RecoveryReason,
 }
 
 /// One `engine.openUserShortcut` request from a wallpaper.
@@ -36,6 +71,9 @@ pub(super) struct PollMouseState {
 
 #[cfg(test)]
 pub(super) struct TakePointerNotificationsForTest;
+
+#[cfg(test)]
+pub(super) struct TakeRenderFailuresForTest;
 
 pub struct Ping;
 

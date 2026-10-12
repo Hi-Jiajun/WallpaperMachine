@@ -8,11 +8,19 @@ use crate::{
     display::state::DisplayKey,
     engine::{
         FirstFrameCallback, actor::EngineActor,
-        messages::{NativeAudioRequirementChanged, NativePointerInputChanged, NativeUserShortcutRequested},
+        messages::{
+            NativeAudioRequirementChanged, NativePointerInputChanged, NativeRenderFailed,
+            NativeUserShortcutRequested,
+        },
+        surface_recovery::{RecoveryStep, SurfaceRecovery},
     },
     media::audio::AudioVolume,
-    owe::backend::{
-        AudioRequirementCallback, OweBackend, OweScene, PointerInputCallback, UserShortcutCallback,
+    owe::{
+        backend::{
+            AudioRequirementCallback, OweBackend, OweScene, PointerInputCallback,
+            RenderFailureCallback, UserShortcutCallback,
+        },
+        scene_demand::SurfaceHealth,
     },
     project::{ScalingMode, SceneDesc, SceneHandle, SerdeValudeExt},
     render::RendererSurfaceCounters,
@@ -107,6 +115,54 @@ impl AudioRequirementRelay {
 }
 
 impl Drop for AudioRequirementRelay {
+    fn drop(&mut self) { self.stop(); }
+}
+
+/// Carries the renderer's "this scene had drawn and has now stopped after a
+/// failed frame" report off the native main looper, the same way as the audio
+/// requirement: the looper only signals, and this task delivers to the engine
+/// actor. A burst coalesces into one delivery, which is right: the renderer
+/// stays stopped until it is rebuilt, so one report says everything a second
+/// would. The instance token ties a report to the renderer object that made
+/// it, so a late report from a renderer that was since rebuilt is ignored.
+struct RenderFailureRelay {
+    renderer_instance: Arc<()>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl RenderFailureRelay {
+    fn new(
+        actor: WeakActorRef<EngineActor>,
+        handle: SceneHandle,
+    ) -> Result<(Self, RenderFailureCallback), EngineError> {
+        let runtime = tokio::runtime::Handle::try_current().map_err(|error| {
+            EngineError::Platform(format!("render failure relay requires actor runtime: {error}"))
+        })?;
+        let renderer_instance = Arc::new(());
+        let instance = renderer_instance.clone();
+        let (sender, mut receiver) = tokio::sync::watch::channel(());
+        let callback: RenderFailureCallback = Arc::new(move || { sender.send_replace(()); });
+        let task = runtime.spawn(async move {
+            while receiver.changed().await.is_ok() {
+                receiver.borrow_and_update();
+                let Some(actor) = actor.upgrade() else { break };
+                let result = actor
+                    .tell(NativeRenderFailed { handle, renderer_instance: instance.clone() })
+                    .send()
+                    .await;
+                drop(actor);
+                if result.is_err() {
+                    break;
+                }
+            }
+        });
+        Ok((Self { renderer_instance, task }, callback))
+    }
+
+    fn stop(&self) { self.task.abort(); }
+}
+
+impl Drop for RenderFailureRelay {
     fn drop(&mut self) { self.stop(); }
 }
 
@@ -251,6 +307,39 @@ impl NativePointerInputState {
     }
 }
 
+/// The internal rasterization scale a runtime last set on its renderer.
+///
+/// A live renderer property that nothing else stores: not the descriptor, not
+/// [`SceneRuntimeState`]. A renderer object the engine opens by itself (a
+/// recovery rebuild, a wallpaper switch, a resolution change) therefore starts
+/// at native size, and unless it is told the scale again the wallpaper comes
+/// back drawing at full resolution while the panel still reports the reduced
+/// one. Kept apart from [`SceneRuntimeState`] on purpose: that state outlives
+/// the runtime and seeds the next one, so a scale remembered across a close
+/// would override whatever the bridge holds by then.
+#[derive(Clone, Copy, Debug)]
+struct RenderScale(f64);
+
+impl RenderScale {
+    /// What a renderer rasterizes at before anyone sets a scale.
+    const NATIVE: f64 = 1.0;
+
+    /// Sends `scale` and, once the renderer took it, remembers it. A refused
+    /// scale leaves the one in force untouched.
+    fn set(&mut self, scale: f64, send: impl FnOnce(f64) -> Result<(), EngineError>) -> Result<(), EngineError> {
+        send(scale)?;
+        self.0 = scale;
+        Ok(())
+    }
+
+    /// Hands the scale in force to a renderer that was just opened. A scale at
+    /// native size is what a new renderer already has, so nothing is sent.
+    fn restore(self, send: impl FnOnce(f64) -> Result<(), EngineError>) -> Result<(), EngineError> {
+        if (self.0 - Self::NATIVE).abs() <= f64::EPSILON { return Ok(()); }
+        send(self.0)
+    }
+}
+
 pub struct SceneRuntime {
     last_media: Option<crate::media::MediaPollResult>,
     /// Last descriptor used to configure the renderer scene.
@@ -265,6 +354,12 @@ pub struct SceneRuntime {
     pointer_relay: PointerInputRelay,
     shortcut_relay: UserShortcutRelay,
     audio_relay: AudioRequirementRelay,
+    failure_relay: RenderFailureRelay,
+    /// What has been tried to bring this renderer's surface back, and what is
+    /// left of the budget. Belongs to the renderer's wallpaper: a different
+    /// wallpaper starts with a fresh one, a rebuild done by recovery itself
+    /// keeps it.
+    surface_recovery: SurfaceRecovery,
     /// Whether the renderer's committed scene reads system audio, as it last
     /// reported. Starts `false` for every renderer object: a rebuilt renderer
     /// has a new scene that has not said anything yet.
@@ -276,6 +371,9 @@ pub struct SceneRuntime {
     scaling_factor: f64,
     /// Renderer-surface override. Changing this rebuilds the renderer object.
     render_resolution: Option<(u32, u32)>,
+    /// Internal rasterization scale, handed again to every renderer this
+    /// runtime opens, whoever asked for the rebuild.
+    render_scale: RenderScale,
     /// Runtime audio-response state, preserved across scene reconciliation.
     audio_response_enabled: bool,
     /// Runtime media-integration state, preserved across scene reconciliation.
@@ -382,6 +480,7 @@ impl SceneRuntime {
         let (pointer_relay, pointer_callback) = PointerInputRelay::new(actor.clone(), handle)?;
         let (shortcut_relay, shortcut_callback) = UserShortcutRelay::new(actor.clone(), handle)?;
         let (audio_relay, audio_callback) = AudioRequirementRelay::new(actor.clone(), handle)?;
+        let (failure_relay, failure_callback) = RenderFailureRelay::new(actor.clone(), handle)?;
         let renderer = backend.open_scene(
             desc,
             window.metal_layer_ptr(),
@@ -395,6 +494,7 @@ impl SceneRuntime {
             Some(pointer_callback),
             Some(shortcut_callback),
             Some(audio_callback),
+            Some(failure_callback),
         )?;
         let descriptor_state = SceneRuntimeState::try_from(desc)?;
         let mut runtime = Self {
@@ -407,11 +507,14 @@ impl SceneRuntime {
             pointer_relay,
             shortcut_relay,
             audio_relay,
+            failure_relay,
+            surface_recovery: SurfaceRecovery::default(),
             requires_audio: false,
             actor,
             scaling_mode: state.scaling_mode,
             scaling_factor: state.scaling_factor,
             render_resolution: state.render_resolution,
+            render_scale: RenderScale(RenderScale::NATIVE),
             audio_response_enabled: state.audio_response_enabled,
             media_integration_enabled: state.media_integration_enabled,
             paused: state.paused,
@@ -475,8 +578,11 @@ impl SceneRuntime {
     /// reparses the project and reopens any video, which a quality control the
     /// user drags must never do. The renderer resizes its own targets in
     /// place.
+    ///
+    /// The scale is remembered, so a renderer this runtime opens later (a
+    /// recovery rebuild included) is handed it again.
     pub fn set_render_scale(&mut self, scale: f64) -> Result<(), EngineError> {
-        self.renderer.set_render_scale(scale)
+        self.render_scale.set(scale, |scale| self.renderer.set_render_scale(scale))
     }
 
     pub fn set_paused(&mut self, paused: bool) -> Result<(), EngineError> {
@@ -567,6 +673,7 @@ impl SceneRuntime {
             inheritance,
         );
         let old_display = self.desc.display.clone();
+        let render_scale = self.render_scale;
         let first_frame_callback = self.renderer_first_frame_callback();
         let (pointer_relay, pointer_callback) = PointerInputRelay::new(self.actor.clone(), self.handle)?;
         // Both open paths, or a wallpaper switch on this display would
@@ -574,6 +681,8 @@ impl SceneRuntime {
         let (shortcut_relay, shortcut_callback) =
             UserShortcutRelay::new(self.actor.clone(), self.handle)?;
         let (audio_relay, audio_callback) = AudioRequirementRelay::new(self.actor.clone(), self.handle)?;
+        let (failure_relay, failure_callback) =
+            RenderFailureRelay::new(self.actor.clone(), self.handle)?;
         let window = self.window.as_mut().ok_or_else(|| {
             EngineError::Platform("wallpaper window is already closed".to_string())
         })?;
@@ -601,6 +710,7 @@ impl SceneRuntime {
             Some(pointer_callback),
             Some(shortcut_callback),
             Some(audio_callback),
+            Some(failure_callback),
         ) {
             Ok(renderer) => renderer,
             Err(error) => {
@@ -611,7 +721,13 @@ impl SceneRuntime {
                 return Err(error);
             }
         };
-        if let Err(error) = state.apply_to(&mut renderer, &descriptor_state) {
+        // A new renderer rasterizes at native size whichever wallpaper it
+        // opens, so the scale in force is handed over with the rest of the
+        // runtime state rather than left for the next quality change.
+        if let Err(error) = state
+            .apply_to(&mut renderer, &descriptor_state)
+            .and_then(|()| render_scale.restore(|scale| renderer.set_render_scale(scale)))
+        {
             let _ = renderer.close();
             let _ = window.update_display(old_display);
             return Err(error);
@@ -625,6 +741,10 @@ impl SceneRuntime {
         // The new renderer's scene has not reported yet; the old one's
         // requirement must not keep the system-audio tap open for it.
         drop(std::mem::replace(&mut self.audio_relay, audio_relay));
+        // A report from the renderer being replaced must not be taken for the
+        // new one's, and the new one has failed nothing yet.
+        drop(std::mem::replace(&mut self.failure_relay, failure_relay));
+        self.surface_recovery = SurfaceRecovery::default();
         self.requires_audio = false;
         self.pointer_input = NativePointerInputState::new(self.pointer_relay.renderer_instance.clone());
         old_relay.stop();
@@ -735,6 +855,63 @@ impl SceneRuntime {
         Ok(())
     }
 
+    /// Brings a surface that stopped drawing back, by `step`. Returns the step
+    /// that actually did it: a reconfigure that fails (the device is gone, the
+    /// layer cannot be swapped) falls straight through to a rebuild rather than
+    /// leaving the scene stopped until the next rung is due.
+    ///
+    /// Either way the wallpaper keeps its runtime state, including a pause, so
+    /// recovering never plays what the user paused, and the render scale in
+    /// force, so it never comes back at a resolution the user turned down. A
+    /// rebuild gives the scene a new renderer and therefore a new instance, but
+    /// not a new budget.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error of the last thing tried.
+    pub fn recover_surface(
+        &mut self,
+        backend: OweBackend,
+        step: RecoveryStep,
+    ) -> Result<RecoveryStep, EngineError> {
+        if step == RecoveryStep::Reconfigure {
+            match self.reconfigure_for_display(backend, self.desc.display.clone()) {
+                Ok(()) => return Ok(RecoveryStep::Reconfigure),
+                Err(error) => log::warn!(
+                    "[wallpaper-core engine] display {} surface reconfigure failed, \
+                     rebuilding the renderer instead: {error}",
+                    self.desc.display.display_id
+                ),
+            }
+        }
+        // The budget belongs to the wallpaper, not to the renderer object this
+        // is about to replace.
+        let budget = std::mem::take(&mut self.surface_recovery);
+        let result = self.replace_wallpaper(backend, &self.desc.clone());
+        self.surface_recovery = budget;
+        result.map(|()| RecoveryStep::Rebuild)
+    }
+
+    /// Whether `instance` names the renderer this runtime holds now.
+    pub fn owns_renderer(&self, instance: &Arc<()>) -> bool {
+        self.window.is_some() && Arc::ptr_eq(&self.failure_relay.renderer_instance, instance)
+    }
+
+    /// The token that names this runtime's current renderer object, for work
+    /// scheduled against it.
+    pub fn renderer_instance(&self) -> Arc<()> { self.failure_relay.renderer_instance.clone() }
+
+    /// The number of the load that opened the current renderer, for log lines.
+    pub fn load_id(&self) -> u64 { self.renderer.load_id() }
+
+    pub fn display_id(&self) -> u32 { self.desc.display.display_id }
+
+    pub fn surface_recovery_mut(&mut self) -> &mut SurfaceRecovery { &mut self.surface_recovery }
+
+    /// The surface's frame-loop health right now; `None` when the renderer
+    /// returned no reading.
+    pub fn surface_health(&self) -> Option<SurfaceHealth> { self.renderer.surface_health() }
+
     pub fn set_audio_response_enabled(&mut self, enabled: bool) -> Result<(), EngineError> {
         self.renderer.set_audio_response_enabled(enabled)?;
         self.audio_response_enabled = enabled;
@@ -817,6 +994,7 @@ impl SceneRuntime {
         self.pointer_relay.stop();
         self.shortcut_relay.stop();
         self.audio_relay.stop();
+        self.failure_relay.stop();
         self.requires_audio = false;
         let backend_result = self.renderer.close();
         if let Some(mut window) = self.window.take() {
@@ -1305,6 +1483,169 @@ mod tests {
         callback(false);
     }
 
+    async fn wait_render_failures(
+        actor: &kameo::actor::ActorRef<EngineActor>,
+        count: usize,
+    ) -> Vec<Arc<()>> {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let mut seen = Vec::new();
+            while seen.len() < count {
+                seen.extend(
+                    actor
+                        .ask(crate::engine::messages::TakeRenderFailuresForTest)
+                        .await
+                        .unwrap(),
+                );
+                tokio::task::yield_now().await;
+            }
+            seen
+        })
+        .await
+        .expect("the relay should deliver a render failure to the actor")
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_render_failure_reaches_the_actor_tagged_with_its_renderer_and_a_burst_is_one_report() {
+        let (prepared, actor) = prepared_empty_actor();
+        let actor_ref = prepared.actor_ref().clone();
+        let (relay, callback) =
+            RenderFailureRelay::new(actor_ref.downgrade(), SceneHandle::new(3)).unwrap();
+        // The native callback is synchronous and never blocks, whatever the
+        // actor is doing: a burst raised before the actor runs is one report.
+        callback();
+        callback();
+        callback();
+        let join = prepared.spawn(actor);
+
+        let delivered = wait_render_failures(&actor_ref, 1).await;
+        assert!(Arc::ptr_eq(&delivered[0], &relay.renderer_instance));
+        // An actor that finds no scene behind the report does nothing with it
+        // and stays up to serve the next one.
+        callback();
+        let again = wait_render_failures(&actor_ref, 1).await;
+        assert!(Arc::ptr_eq(&again[0], &relay.renderer_instance));
+        assert_eq!(
+            actor_ref
+                .ask(crate::engine::messages::TakeRenderFailuresForTest)
+                .await
+                .unwrap()
+                .len(),
+            0,
+            "three calls before the actor ran must not become three reports"
+        );
+
+        relay.stop();
+        actor_ref.stop_gracefully().await.unwrap();
+        actor_ref.wait_for_shutdown().await;
+        drop(join.await.unwrap().unwrap());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn two_renderers_for_one_scene_report_under_different_instances() {
+        let (prepared, actor) = prepared_empty_actor();
+        let actor_ref = prepared.actor_ref().clone();
+        let handle = SceneHandle::new(3);
+        let (old, old_callback) = RenderFailureRelay::new(actor_ref.downgrade(), handle).unwrap();
+        let (new, new_callback) = RenderFailureRelay::new(actor_ref.downgrade(), handle).unwrap();
+        assert!(
+            !Arc::ptr_eq(&old.renderer_instance, &new.renderer_instance),
+            "a rebuilt renderer must not answer to its predecessor's token"
+        );
+        let join = prepared.spawn(actor);
+
+        old_callback();
+        let late = wait_render_failures(&actor_ref, 1).await;
+        new_callback();
+        let current = wait_render_failures(&actor_ref, 1).await;
+        assert!(Arc::ptr_eq(&late[0], &old.renderer_instance));
+        assert!(Arc::ptr_eq(&current[0], &new.renderer_instance));
+
+        old.stop();
+        new.stop();
+        actor_ref.stop_gracefully().await.unwrap();
+        actor_ref.wait_for_shutdown().await;
+        drop(join.await.unwrap().unwrap());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_stopped_relay_reports_nothing_more() {
+        let (prepared, actor) = prepared_empty_actor();
+        let actor_ref = prepared.actor_ref().clone();
+        let (relay, callback) =
+            RenderFailureRelay::new(actor_ref.downgrade(), SceneHandle::new(3)).unwrap();
+        let join = prepared.spawn(actor);
+        let aborted = relay.task.abort_handle();
+
+        drop(relay);
+        callback();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !aborted.is_finished() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("a dropped relay should end its task");
+        tokio::task::yield_now().await;
+        assert!(
+            actor_ref
+                .ask(crate::engine::messages::TakeRenderFailuresForTest)
+                .await
+                .unwrap()
+                .is_empty(),
+            "a renderer that was closed must not report a failure"
+        );
+
+        actor_ref.stop_gracefully().await.unwrap();
+        actor_ref.wait_for_shutdown().await;
+        drop(join.await.unwrap().unwrap());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn recovery_asked_for_a_display_with_no_scene_finds_nothing_to_heal() {
+        use crate::engine::surface_recovery::{RecoveryOutcome, RecoveryReason};
+        let (prepared, actor) = prepared_empty_actor();
+        let actor_ref = prepared.actor_ref().clone();
+        let join = prepared.spawn(actor);
+
+        for reason in [RecoveryReason::RenderFailure, RecoveryReason::Stalled] {
+            let outcome = actor_ref
+                .ask(crate::engine::messages::RecoverSurface { display_id: 9, reason })
+                .await
+                .unwrap();
+            assert_eq!(outcome, RecoveryOutcome::NoScene);
+        }
+        // A scheduled attempt whose scene is gone ends quietly and leaves the
+        // engine serving.
+        actor_ref
+            .tell(crate::engine::messages::RecoverSurfaceAttempt {
+                handle: SceneHandle::new(9),
+                renderer_instance: Arc::new(()),
+                step: crate::engine::surface_recovery::RecoveryStep::Reconfigure,
+                number: 1,
+            })
+            .send()
+            .await
+            .unwrap();
+        actor_ref.ask(crate::engine::messages::Ping).await.unwrap();
+        // So does the look at a rebuilt renderer whose scene is gone: it must
+        // not schedule another look at nothing.
+        actor_ref
+            .tell(crate::engine::messages::SettleRecoveredSurface {
+                handle: SceneHandle::new(9),
+                renderer_instance: Arc::new(()),
+                number: 2,
+                rebuilt_at: std::time::Instant::now(),
+            })
+            .send()
+            .await
+            .unwrap();
+        actor_ref.ask(crate::engine::messages::Ping).await.unwrap();
+
+        actor_ref.stop_gracefully().await.unwrap();
+        actor_ref.wait_for_shutdown().await;
+        drop(join.await.unwrap().unwrap());
+    }
+
     #[test]
     fn relay_without_runtime_returns_error() {
         let (prepared, _actor) = prepared_empty_actor();
@@ -1504,6 +1845,74 @@ mod tests {
         let state = runtime_state(None);
 
         assert!(!state.paused);
+    }
+
+    /// What a renderer opened right now would be told.
+    fn sent_to_new_renderer(scale: RenderScale) -> Option<f64> {
+        let mut sent = None;
+        scale
+            .restore(|value| {
+                sent = Some(value);
+                Ok(())
+            })
+            .expect("a renderer that takes the scale reports no error");
+        sent
+    }
+
+    fn set_accepted(scale: &mut RenderScale, value: f64) {
+        scale.set(value, |_| Ok(())).expect("the renderer took the scale");
+    }
+
+    #[test]
+    fn a_rebuilt_renderer_is_handed_the_reduced_scale_the_runtime_was_given() {
+        // A recovery rebuild opens a renderer that starts at native size. The
+        // user's reduced scale has to reach it, or the wallpaper comes back
+        // drawing four times the pixels while the panel still says 50%.
+        let mut scale = RenderScale(RenderScale::NATIVE);
+        assert_eq!(sent_to_new_renderer(scale), None, "nothing was ever turned down");
+
+        set_accepted(&mut scale, 0.5);
+
+        assert_eq!(sent_to_new_renderer(scale), Some(0.5));
+        assert_eq!(
+            sent_to_new_renderer(scale),
+            Some(0.5),
+            "every rebuild needs it, not just the first one after the change"
+        );
+    }
+
+    #[test]
+    fn a_scale_turned_back_up_to_native_size_is_not_sent_again() {
+        let mut scale = RenderScale(RenderScale::NATIVE);
+        set_accepted(&mut scale, 0.5);
+        set_accepted(&mut scale, RenderScale::NATIVE);
+
+        assert_eq!(sent_to_new_renderer(scale), None, "a new renderer is already at native size");
+    }
+
+    #[test]
+    fn a_scale_the_renderer_refused_does_not_replace_the_one_in_force() {
+        let mut scale = RenderScale(RenderScale::NATIVE);
+        set_accepted(&mut scale, 0.5);
+
+        let refused = scale.set(0.25, |_| Err(EngineError::InvalidInput("refused".to_string())));
+
+        assert!(refused.is_err());
+        assert_eq!(
+            sent_to_new_renderer(scale),
+            Some(0.5),
+            "the renderer is still drawing at the scale it accepted"
+        );
+    }
+
+    #[test]
+    fn a_new_renderer_that_cannot_take_the_scale_fails_the_rebuild() {
+        let mut scale = RenderScale(RenderScale::NATIVE);
+        set_accepted(&mut scale, 0.5);
+
+        let result = scale.restore(|_| Err(EngineError::Platform("renderer closed".to_string())));
+
+        assert!(result.is_err(), "the caller has to roll the rebuild back, not keep a wrong-sized renderer");
     }
 
     fn runtime_state(property_override_json: Option<&str>) -> SceneRuntimeState {

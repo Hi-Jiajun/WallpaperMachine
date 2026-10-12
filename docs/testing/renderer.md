@@ -413,7 +413,17 @@ picture through a real swapchain on a `CAMetalLayer` no window owns. In
 `surfaceHealth()` across the 1000 ms window: with the skip on, frames completed
 tracks the draws that ran while frames presented stays flat and no stop is
 latched. That is the semantic a liveness check relies on: skipped frames are
-completed, not presented. The native
+completed, not presented. `ADrawFailureAfterTheFirstFrameIsReportedOnceAndASurfaceRebuildHealsIt`
+runs the renderer's own failure routine through a test-only seam
+(`SceneWallpaperInputTestAccess::InjectFrameFailure`, compiled only with
+`WESCENE_BUILD_TESTS`) on a scene that has drawn: the render-failure callback
+fires once, the stop latches as `FrameFailed`, the clock stops, a surface
+reconfigure like the host's clears the stop and frames resume with the failure
+count kept, and the next failure reports again.
+`ADrawFailureBeforeTheFirstFrameIsCountedButNotReported` pins that a scene that
+has not presented yet counts the failure and does not call back. The seam
+replaces only the failure, not its consequences; a real swapchain failure is not
+produced. The native
 Metal backend adds `metal_backend_test` (capability and graph gate, no device
 needed), `metal_scene_draw_smoke` (author shaders and same-frame intermediates
 drawn and read back, plus target reuse, dynamic-geometry upload, sprite-sheet

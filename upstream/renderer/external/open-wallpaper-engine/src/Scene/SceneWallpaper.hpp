@@ -31,6 +31,15 @@ using UserShortcutCallback = std::function<void(std::string_view, std::string_vi
 /// later report raises it; a report from a scene that was since replaced is
 /// dropped. Optional: a host that never installs it keeps working unchanged.
 using AudioRequirementCallback = std::function<void(bool)>;
+/// Reports that a scene which had drawn at least once failed a frame and
+/// stopped drawing (a swapchain, acquire, present or submit the surface could
+/// not take). Runs on the main looper, once per failure, with no payload: the
+/// surface health reading says what failed. Never replayed on install, and
+/// never raised for a failure before the first presented frame, which the host
+/// already finds through its own first-frame wait. Optional: a host that never
+/// installs it keeps working unchanged, and the stop stays visible through
+/// `surfaceHealth()`.
+using RenderFailureCallback = std::function<void()>;
 
 constexpr std::string_view PROPERTY_SOURCE                    = "source";
 constexpr std::string_view PROPERTY_ASSETS                    = "assets";
@@ -58,6 +67,7 @@ constexpr std::string_view PROPERTY_FIRST_FRAME_CALLBACK   = "first_frame_callba
 constexpr std::string_view PROPERTY_POINTER_INPUT_CALLBACK = "pointer_input_callback";
 constexpr std::string_view PROPERTY_USER_SHORTCUT_CALLBACK = "user_shortcut_callback";
 constexpr std::string_view PROPERTY_AUDIO_REQUIREMENT_CALLBACK = "audio_requirement_callback";
+constexpr std::string_view PROPERTY_RENDER_FAILURE_CALLBACK     = "render_failure_callback";
 
 #include "Core/NoCopyMove.hpp"
 class MainHandler;
@@ -201,6 +211,11 @@ struct SceneWallpaperInputTestAccess {
 #if defined(__APPLE__)
     static SceneWallpaper& FromNative(owe_scene_wallpaper&);
 #endif
+    /// Runs, on the render thread, the routine a failed draw runs: the failure
+    /// is counted and latched, rendering stops, and the host's render-failure
+    /// callback is told. A real presentation failure cannot be produced
+    /// without breaking the GPU, so this is how the consequence is exercised.
+    static void InjectFrameFailure(SceneWallpaper&);
 };
 #endif
 } // namespace wallpaper

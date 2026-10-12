@@ -5,8 +5,10 @@ mod messages;
 mod runtime;
 mod snapshot;
 mod state;
+mod surface_recovery;
 
 pub use audio_requirement::AudioRequirementCallback;
+pub use surface_recovery::{RecoveryOutcome, RecoveryReason, RecoveryStep};
 use std::{
     collections::HashSet,
     sync::{Arc, Mutex},
@@ -665,6 +667,29 @@ impl WallpaperEngine {
         suspended_displays: Vec<u32>,
     ) -> Result<(), EngineError> {
         self.ask_actor(messages::SetAllPaused { paused, suspended_displays }).await
+    }
+
+    /// Brings back the surface of the scene on `display_id` after it stopped
+    /// drawing, by the next rung of that scene's recovery ladder (a surface
+    /// reconfigure, then a renderer rebuild), without waiting.
+    ///
+    /// The engine heals a scene that reports a failed frame on its own; this is
+    /// for the callers that know something it does not, such as the check
+    /// after a wake ([`RecoveryReason::Stalled`]). A request spends the scene's
+    /// current budget and is refused once it is spent, so a caller cannot loop;
+    /// loading the wallpaper afresh gives the scene a new renderer and a new
+    /// budget. Paused scenes stay paused.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error of the attempt when it failed. The next rung is then
+    /// already scheduled, unless the budget is spent.
+    pub async fn recover_surface(
+        &self,
+        display_id: u32,
+        reason: RecoveryReason,
+    ) -> Result<RecoveryOutcome, EngineError> {
+        self.ask_actor(messages::RecoverSurface { display_id, reason }).await
     }
 
     /// Turns renderer counting on or off for the whole process.

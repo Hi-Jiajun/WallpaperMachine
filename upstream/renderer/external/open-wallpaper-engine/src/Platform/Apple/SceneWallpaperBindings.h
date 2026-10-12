@@ -29,6 +29,8 @@ typedef void (*owe_pointer_input_callback)(void* user_data, bool accepts_pointer
 typedef void (*owe_pointer_input_callback_drop)(void* user_data);
 typedef void (*owe_audio_requirement_callback)(void* user_data, bool requires_audio);
 typedef void (*owe_audio_requirement_callback_drop)(void* user_data);
+typedef void (*owe_render_failure_callback)(void* user_data);
+typedef void (*owe_render_failure_callback_drop)(void* user_data);
 
 /*
  * One `engine.openUserShortcut` request: the property the wallpaper named and
@@ -170,6 +172,23 @@ int owe_scene_wallpaper_set_user_shortcut_callback(
 int owe_scene_wallpaper_set_audio_requirement_callback(
     owe_scene_wallpaper* scene, owe_audio_requirement_callback callback, void* user_data,
     owe_audio_requirement_callback_drop drop_user_data);
+
+/*
+ * Reports, on the native main looper, that a scene which had already presented
+ * a frame failed one and stopped drawing (a swapchain, acquire, present or
+ * submit the surface could not take). One call per failure, no payload: the
+ * surface health reading says what failed, and rendering stays stopped until
+ * the host rebuilds the surface (begin/finish_surface_reconfigure) or the scene.
+ * Not replayed when installed, and not raised for a failure before the first
+ * presented frame, which the host's own first-frame wait already covers.
+ * Optional: a host that does not install it is unaffected. Requires an
+ * initialized scene. Success transfers user_data ownership to drop_user_data;
+ * failure does not. Replacing/clearing keeps old userdata alive until its last
+ * queued/in-flight callback is released. A null callback clears notifications.
+ */
+int owe_scene_wallpaper_set_render_failure_callback(
+    owe_scene_wallpaper* scene, owe_render_failure_callback callback, void* user_data,
+    owe_render_failure_callback_drop drop_user_data);
 
 /* Direct mouse/pointer forwarding to SceneWallpaper. Coordinates are normalized canvas space. */
 int owe_scene_wallpaper_mouse_input(owe_scene_wallpaper* scene, double x, double y);

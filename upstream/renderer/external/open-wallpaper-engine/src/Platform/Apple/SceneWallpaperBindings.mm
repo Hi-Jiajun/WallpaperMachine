@@ -347,6 +347,23 @@ struct AudioRequirementCallbackRegistration {
     }
 };
 
+struct RenderFailureCallbackRegistration {
+    owe_render_failure_callback callback { nullptr };
+    void* user_data { nullptr };
+    owe_render_failure_callback_drop drop_user_data { nullptr };
+
+    RenderFailureCallbackRegistration(owe_render_failure_callback callback, void* user_data)
+        : callback(callback), user_data(user_data) {}
+
+    ~RenderFailureCallbackRegistration() {
+        if (drop_user_data != nullptr) drop_user_data(user_data);
+    }
+
+    void operator()() const {
+        if (callback != nullptr) callback(user_data);
+    }
+};
+
 int finish_with_error_noexcept(const char* message) noexcept {
     try {
         return finish_with_error(message);
@@ -363,6 +380,7 @@ struct owe_scene_wallpaper {
     std::shared_ptr<PointerInputCallbackRegistration> pointer_input_callback;
     std::shared_ptr<UserShortcutCallbackRegistration> user_shortcut_callback;
     std::shared_ptr<AudioRequirementCallbackRegistration> audio_requirement_callback;
+    std::shared_ptr<RenderFailureCallbackRegistration> render_failure_callback;
 };
 
 #ifdef WESCENE_BUILD_TESTS
@@ -655,6 +673,32 @@ extern "C" int owe_scene_wallpaper_set_audio_requirement_callback(
         return 0;
     } catch (...) {
         return finish_with_error_noexcept("failed to register audio-requirement callback");
+    }
+}
+
+extern "C" int owe_scene_wallpaper_set_render_failure_callback(
+    owe_scene_wallpaper* scene,
+    owe_render_failure_callback callback,
+    void* user_data,
+    owe_render_failure_callback_drop drop_user_data)
+{
+    try {
+        clear_last_error();
+        if (!valid_scene(scene)) return finish_with_error("scene must not be null");
+        if (!scene->scene.inited()) return finish_with_error("scene must be initialized");
+
+        // Keep drop unarmed until the registration is installed, as the other
+        // callbacks do: a failure here must not consume user_data.
+        auto registration =
+            std::make_shared<RenderFailureCallbackRegistration>(callback, user_data);
+        auto forwarder = std::make_shared<wallpaper::RenderFailureCallback>(
+            [registration]() { (*registration)(); });
+        scene->scene.setPropertyObject(wallpaper::PROPERTY_RENDER_FAILURE_CALLBACK, forwarder);
+        registration->drop_user_data = drop_user_data;
+        scene->render_failure_callback = std::move(registration);
+        return 0;
+    } catch (...) {
+        return finish_with_error_noexcept("failed to register render-failure callback");
     }
 }
 

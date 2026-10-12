@@ -104,6 +104,34 @@ struct PosterProbe
     }
 };
 
+/// Stands in for the host's render-failure relay: counts the reports and lets a
+/// test wait for the next one.
+struct FailureProbe
+{
+    std::mutex              mutex;
+    std::condition_variable changed;
+    int                     reports { 0 };
+
+    std::shared_ptr<RenderFailureCallback> Callback()
+    {
+        return std::make_shared<RenderFailureCallback>([this] {
+            std::scoped_lock lock(mutex);
+            ++reports;
+            changed.notify_all();
+        });
+    }
+    bool WaitForReports(int count)
+    {
+        std::unique_lock lock(mutex);
+        return changed.wait_for(lock, 5s, [&] { return reports >= count; });
+    }
+    int Reports()
+    {
+        std::scoped_lock lock(mutex);
+        return reports;
+    }
+};
+
 void WriteText(const std::filesystem::path& path, const std::string& text)
 {
     std::filesystem::create_directories(path.parent_path());
@@ -229,6 +257,12 @@ public:
 
     SceneWallpaper& wallpaper() { return m_wallpaper; }
     PosterProbe&    poster() { return *m_poster; }
+
+    bool FirstFrameSeen()
+    {
+        std::scoped_lock lock(m_mutex);
+        return m_first_frame;
+    }
 
     std::vector<PresentedFrame> Presented() const
     {
@@ -645,4 +679,79 @@ TEST_F(UnchangedPresent, OutputChangesOnAHeldVideoFramePresentOnceEach)
         running.wallpaper().setPropertyInt32(PROPERTY_FILLMODE,
                                              static_cast<int32_t>(FillMode::STRETCH));
     });
+}
+
+// A surface that has been drawing and then fails a frame stops, says so, and
+// tells the host once; the host heals it by rebuilding the surface. The failure
+// itself is injected, because a real presentation failure cannot be produced
+// without breaking the GPU, but everything after it is the production routine:
+// the same latch, the same stopped clock, the same callback and the same
+// surface reconfigure the host runs.
+TEST_F(UnchangedPresent, ADrawFailureAfterTheFirstFrameIsReportedOnceAndASurfaceRebuildHealsIt)
+{
+    const auto project = WriteStaticScene(root_ / "scene");
+    // Declared first, so it outlives the renderer whose callback points at it.
+    FailureProbe probe;
+    RunningWallpaper running(project, root_ / "run");
+    ASSERT_TRUE(running.WaitForFirstFrame());
+    running.wallpaper().setPropertyObject(PROPERTY_RENDER_FAILURE_CALLBACK, probe.Callback());
+    std::this_thread::sleep_for(300ms);
+    ASSERT_EQ(running.wallpaper().surfaceHealth().stop_reason, SurfaceStopReason::Running);
+    EXPECT_EQ(probe.Reports(), 0) << "installing the callback must not replay anything";
+
+    SceneWallpaperInputTestAccess::InjectFrameFailure(running.wallpaper());
+    ASSERT_TRUE(probe.WaitForReports(1)) << "the host was never told the scene stopped";
+
+    // Stopped, and saying why.
+    const auto stopped = running.wallpaper().surfaceHealth();
+    EXPECT_EQ(stopped.stop_reason, SurfaceStopReason::FrameFailed);
+    EXPECT_EQ(stopped.failed_frames, 1u);
+    // The clock is stopped: nothing completes after the report, and the report
+    // is not repeated for a surface that is already down.
+    std::this_thread::sleep_for(400ms);
+    const auto later = running.wallpaper().surfaceHealth();
+    EXPECT_EQ(later.frames_completed, stopped.frames_completed)
+        << "a stopped surface kept drawing";
+    EXPECT_EQ(probe.Reports(), 1);
+
+    // Rebuilding the surface, as the host does, ends the stop and restarts the
+    // clock. The count of failed frames is history and stays.
+    ASSERT_TRUE(running.Resize(1280, 720));
+    EXPECT_EQ(running.wallpaper().surfaceHealth().stop_reason, SurfaceStopReason::Running);
+    std::this_thread::sleep_for(500ms);
+    const auto healed = running.wallpaper().surfaceHealth();
+    EXPECT_GT(healed.frames_completed, later.frames_completed + 5)
+        << "the rebuilt surface never started drawing again";
+    EXPECT_EQ(healed.stop_reason, SurfaceStopReason::Running);
+    EXPECT_EQ(healed.failed_frames, 1u);
+    EXPECT_EQ(probe.Reports(), 1) << "a healthy surface reported a failure";
+
+    // The report re-arms with the surface: the next failure is a new report.
+    SceneWallpaperInputTestAccess::InjectFrameFailure(running.wallpaper());
+    ASSERT_TRUE(probe.WaitForReports(2));
+    EXPECT_EQ(running.wallpaper().surfaceHealth().stop_reason, SurfaceStopReason::FrameFailed);
+}
+
+// A scene that has not yet shown a frame is still inside the host's first-frame
+// wait, which has its own timeout and rollback; a recovery of its own would race
+// that wait. The failure is still counted for anyone who reads the health.
+TEST_F(UnchangedPresent, ADrawFailureBeforeTheFirstFrameIsCountedButNotReported)
+{
+    const auto project = WriteStaticScene(root_ / "scene");
+    FailureProbe probe;
+    RunningWallpaper running(project, root_ / "run");
+    running.wallpaper().setPropertyObject(PROPERTY_RENDER_FAILURE_CALLBACK, probe.Callback());
+    // Posted before the scene can have compiled and drawn anything.
+    if (running.FirstFrameSeen()) GTEST_SKIP() << "the scene had already drawn";
+    SceneWallpaperInputTestAccess::InjectFrameFailure(running.wallpaper());
+
+    const auto deadline = std::chrono::steady_clock::now() + 5s;
+    while (running.wallpaper().surfaceHealth().failed_frames == 0 &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(5ms);
+    }
+    ASSERT_EQ(running.wallpaper().surfaceHealth().failed_frames, 1u)
+        << "the injected failure never ran";
+    std::this_thread::sleep_for(400ms);
+    EXPECT_EQ(probe.Reports(), 0) << "a scene that never presented called the host back";
 }

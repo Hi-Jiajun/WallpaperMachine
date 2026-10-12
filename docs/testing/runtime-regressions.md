@@ -399,6 +399,32 @@ device.
   display outrank a stop, an unread surface is `unknown` and never `stopped`).
   A genuine presentation failure cannot be produced without a desktop, so the latch
   is covered through its setter, not through MoltenVK.
+- **A scene that fails after drawing is healed within a budget, once and visibly** —
+  `wallpaper-core` `engine::surface_recovery::tests` pin the ladder with injected
+  instants (an in-place surface rebuild after 0.5 s, then two renderer rebuilds after 2 s
+  and 8 s), the rolling minute (a failure after a quiet minute starts again, one inside it
+  does not), giving up without scheduling anything, a failure while an attempt is
+  pending being ignored without spending the budget, a stall check not buying back a spent
+  one, a lost attempt not blocking recovery for good, and the look at a rebuilt renderer
+  (`settle`: drawing, stopped before drawing, still waiting, and left alone after the limit,
+  with a stop outranking a presented frame) feeding a rebuild that stopped before it drew to
+  the next rung and then to giving up.
+  `runtime::tests` cover the relay: a burst raised before the actor runs is one report, a
+  report names the renderer that made it so a rebuilt renderer ignores its predecessor's,
+  a closed renderer reports nothing, and a request for a display with no scene, or a look at
+  a rebuilt renderer whose scene is gone, heals nothing and leaves the engine serving.
+  They also pin the render scale a rebuild carries over (`RenderScale`): a renderer opened
+  by recovery, a wallpaper switch or a resolution change is handed the reduced scale in force
+  (a new renderer starts at full size), a scale turned back up to full size is not sent again,
+  a scale the renderer refused does not replace the one in force, and a new renderer that
+  cannot take it fails the rebuild so it is rolled back. Whether a live rebuilt scene really
+  rasterizes at the reduced size needs a real window and is not covered. `owe::backend::render_failure_callback_tests` pin
+  that a rejected registration hands the callback back to be dropped exactly once and that
+  a panicking callback does not unwind into C++. In the renderer,
+  `UnchangedPresent.ADrawFailureAfterTheFirstFrameIsReportedOnceAndASurfaceRebuildHealsIt`
+  and `...BeforeTheFirstFrameIsCountedButNotReported`. The engine's reaction to a report
+  on a live scene needs a real window and is not covered by an automated test, and no
+  genuine presentation failure is produced anywhere.
 
 ## Audio
 

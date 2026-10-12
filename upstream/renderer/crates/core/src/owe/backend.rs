@@ -53,6 +53,10 @@ pub type UserShortcutCallback = Arc<dyn Fn(String, String) + Send + Sync + 'stat
 /// committed scene starts at `false`; a replaced scene's late report never
 /// arrives.
 pub type AudioRequirementCallback = Arc<dyn Fn(bool) + Send + Sync + 'static>;
+/// Told, on the native main looper, that a scene which had drawn failed a frame
+/// and stopped. One call per failure and no payload; never replayed on install
+/// and never raised for a failure before the first presented frame.
+pub type RenderFailureCallback = Arc<dyn Fn() + Send + Sync + 'static>;
 
 impl OweBackend {
     /// Initializes access to the statically linked backend.
@@ -94,6 +98,7 @@ impl OweBackend {
         pointer_input_callback: Option<PointerInputCallback>,
         user_shortcut_callback: Option<UserShortcutCallback>,
         audio_requirement_callback: Option<AudioRequirementCallback>,
+        render_failure_callback: Option<RenderFailureCallback>,
     ) -> Result<OweScene, EngineError> {
         let display = &desc.display;
         let load = crate::log_context::begin_load(
@@ -127,6 +132,7 @@ impl OweBackend {
             raw: Some(raw),
             render_initialized: false,
             registration: None,
+            load,
         };
         call_status("owe_scene_wallpaper_set_log_scope", || unsafe {
             sys::owe_scene_wallpaper_set_log_scope(raw.as_ptr(), load)
@@ -136,6 +142,7 @@ impl OweBackend {
         scene.set_pointer_input_callback(pointer_input_callback)?;
         scene.set_user_shortcut_callback(user_shortcut_callback)?;
         scene.set_audio_requirement_callback(audio_requirement_callback)?;
+        scene.set_render_failure_callback(render_failure_callback)?;
         scene.apply_scene_config(desc)?;
         scene.set_scaling_mode(scaling_mode)?;
         scene.set_scaling_factor(scaling_factor)?;
@@ -380,6 +387,9 @@ pub struct OweScene {
     /// is dropped without an explicit close must still withdraw, or a reader
     /// could follow a pointer into freed memory.
     registration: Option<(crate::SceneRegistry, u64)>,
+    /// The load this renderer belongs to, so a line logged about it later
+    /// (a recovery, say) can carry the same `load#N` as the lines that opened it.
+    load: u64,
 }
 
 // SAFETY: The pointer is an owned renderer token. Rust mutates it behind the
@@ -839,6 +849,53 @@ impl OweScene {
             drop(unsafe { Box::<AudioRequirementCallback>::from_raw(user_data.cast()) });
         }
         result
+    }
+
+    /// Installs the sink for "this scene had drawn and has now stopped after a
+    /// failed frame". `None` clears it. Not replayed on install.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EngineError`] if the scene is closed or OWE rejects the
+    /// registration.
+    pub fn set_render_failure_callback(
+        &mut self,
+        callback: Option<RenderFailureCallback>,
+    ) -> Result<(), EngineError> {
+        let raw = self.raw_ptr()?;
+        let user_data = callback.map_or(std::ptr::null_mut(), |callback| {
+            Box::into_raw(Box::new(callback)).cast::<c_void>()
+        });
+        let result = call_status("owe_scene_wallpaper_set_render_failure_callback", || unsafe {
+            sys::owe_scene_wallpaper_set_render_failure_callback(
+                raw.as_ptr(),
+                if user_data.is_null() { None } else { Some(owe_render_failure_callback) },
+                user_data,
+                if user_data.is_null() { None } else { Some(owe_render_failure_callback_drop) },
+            )
+        });
+        if result.is_err() && !user_data.is_null() {
+            // Failed registration never consumes the caller's userdata.
+            drop(unsafe { Box::<RenderFailureCallback>::from_raw(user_data.cast()) });
+        }
+        result
+    }
+
+    /// The number of the load that opened this renderer; see
+    /// [`crate::log_context`].
+    #[must_use]
+    pub fn load_id(&self) -> u64 {
+        self.load
+    }
+
+    /// The surface's frame-loop health right now, or `None` when the scene is
+    /// closed or the renderer returned no reading.
+    #[must_use]
+    pub fn surface_health(&self) -> Option<crate::owe::scene_demand::SurfaceHealth> {
+        let raw = self.raw?;
+        // SAFETY: `raw` is this scene's own live pointer for as long as `self`
+        // holds it, and the read is a set of relaxed atomic loads.
+        unsafe { super::scene_registry::read_surface_health(raw.as_ptr().cast()) }
     }
 
     pub fn set_mouse_position(&mut self, x: f64, y: f64) -> Result<(), EngineError> {
@@ -1306,6 +1363,27 @@ unsafe extern "C-unwind" fn owe_audio_requirement_callback_drop(user_data: *mut 
     }));
 }
 
+unsafe extern "C-unwind" fn owe_render_failure_callback(user_data: *mut c_void) {
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        if !user_data.is_null() {
+            // SAFETY: produced by `OweScene::set_render_failure_callback` from
+            // `Box<RenderFailureCallback>`, owned by C++ until
+            // `owe_render_failure_callback_drop`.
+            let callback = unsafe { &*user_data.cast::<RenderFailureCallback>() };
+            callback();
+        }
+    }));
+}
+
+unsafe extern "C-unwind" fn owe_render_failure_callback_drop(user_data: *mut c_void) {
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        if !user_data.is_null() {
+            // SAFETY: C++ calls this exactly once per transferred box.
+            drop(unsafe { Box::<RenderFailureCallback>::from_raw(user_data.cast()) });
+        }
+    }));
+}
+
 fn copy_c_string(value: *const c_char) -> Option<String> {
     if value.is_null() {
         return None;
@@ -1329,7 +1407,7 @@ mod registration_tests {
         call_status("owe_scene_wallpaper_new", || unsafe {
             sys::owe_scene_wallpaper_new(&raw mut raw)
         }).unwrap();
-        OweScene { raw: Some(NonNull::new(raw).unwrap()), render_initialized: false, registration: None }
+        OweScene { raw: Some(NonNull::new(raw).unwrap()), render_initialized: false, registration: None, load: 0 }
     }
 
     #[test]
@@ -1366,7 +1444,7 @@ mod pointer_callback_tests {
         let dropped = Arc::new(AtomicUsize::new(0));
         let witness = DropWitness(dropped.clone());
         let callback: PointerInputCallback = Arc::new(move |_| { let _ = &witness; });
-        let mut scene = OweScene { raw: None, render_initialized: false, registration: None };
+        let mut scene = OweScene { raw: None, render_initialized: false, registration: None, load: 0 };
         assert!(scene.set_pointer_input_callback(Some(callback)).is_err());
         assert_eq!(dropped.load(Ordering::SeqCst), 1);
     }
@@ -1391,5 +1469,103 @@ mod pointer_callback_tests {
         }
         assert_eq!(observed.load(Ordering::SeqCst), 1);
         assert_eq!(dropped.load(Ordering::SeqCst), 1);
+    }
+}
+
+#[cfg(test)]
+mod render_failure_callback_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct DropWitness(Arc<AtomicUsize>);
+
+    impl Drop for DropWitness {
+        fn drop(&mut self) { self.0.fetch_add(1, Ordering::SeqCst); }
+    }
+
+    fn callback_with(dropped: &Arc<AtomicUsize>, called: &Arc<AtomicUsize>) -> RenderFailureCallback {
+        let witness = DropWitness(dropped.clone());
+        let called = called.clone();
+        Arc::new(move || {
+            let _ = &witness;
+            called.fetch_add(1, Ordering::SeqCst);
+        })
+    }
+
+    #[test]
+    fn a_registration_on_a_closed_scene_hands_the_callback_back_to_be_dropped_once() {
+        let dropped = Arc::new(AtomicUsize::new(0));
+        let called = Arc::new(AtomicUsize::new(0));
+        let mut scene = OweScene { raw: None, render_initialized: false, registration: None, load: 0 };
+
+        assert!(scene.set_render_failure_callback(Some(callback_with(&dropped, &called))).is_err());
+
+        assert_eq!(dropped.load(Ordering::SeqCst), 1, "a rejected registration leaked its callback");
+        assert_eq!(called.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn a_registration_the_renderer_rejects_hands_the_callback_back_to_be_dropped_once() {
+        // The renderer refuses to take a callback before it is initialized,
+        // which is the same path as any other refusal: Rust still owns the box.
+        let dropped = Arc::new(AtomicUsize::new(0));
+        let called = Arc::new(AtomicUsize::new(0));
+        let mut raw = std::ptr::null_mut();
+        call_status("owe_scene_wallpaper_new", || unsafe {
+            sys::owe_scene_wallpaper_new(&raw mut raw)
+        })
+        .unwrap();
+        let mut scene = OweScene {
+            raw: Some(NonNull::new(raw).unwrap()),
+            render_initialized: false,
+            registration: None,
+            load: 0,
+        };
+
+        assert!(scene.set_render_failure_callback(Some(callback_with(&dropped, &called))).is_err());
+
+        assert_eq!(dropped.load(Ordering::SeqCst), 1, "a rejected registration leaked its callback");
+        assert_eq!(called.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn clearing_the_callback_on_a_closed_scene_has_nothing_to_drop() {
+        let mut scene = OweScene { raw: None, render_initialized: false, registration: None, load: 0 };
+        assert!(scene.set_render_failure_callback(None).is_err());
+    }
+
+    #[test]
+    fn the_native_callback_contains_a_panic_and_its_drop_releases_the_callback_once() {
+        let dropped = Arc::new(AtomicUsize::new(0));
+        let called = Arc::new(AtomicUsize::new(0));
+        let witness = DropWitness(dropped.clone());
+        let callback: RenderFailureCallback = Arc::new({
+            let called = called.clone();
+            move || {
+                let _ = &witness;
+                called.fetch_add(1, Ordering::SeqCst);
+                panic!("consumer panic must not cross the ABI");
+            }
+        });
+        let raw = Box::into_raw(Box::new(callback)).cast::<c_void>();
+
+        unsafe {
+            owe_render_failure_callback(raw);
+            // Still callable afterwards: a panic is the consumer's, not the
+            // registration's.
+            owe_render_failure_callback(raw);
+            owe_render_failure_callback_drop(raw);
+        }
+
+        assert_eq!(called.load(Ordering::SeqCst), 2);
+        assert_eq!(dropped.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_null_registration_is_ignored_by_both_trampolines() {
+        unsafe {
+            owe_render_failure_callback(std::ptr::null_mut());
+            owe_render_failure_callback_drop(std::ptr::null_mut());
+        }
     }
 }

@@ -370,6 +370,20 @@ snapshot publication, and a bridge relay that re-evaluates capture. The system-a
 only for `audio_response_enabled && scene reads audio && !paused`, or for a subscribed web page,
 so plain video wallpapers never open it; see [audio response](features/audio-response.md).
 
+A renderer also reports `owe_scene_wallpaper_set_render_failure_callback` when a scene that
+had presented a frame fails one and stops (no payload; never for a failure before the first
+frame, never replayed on install). It travels through the same kind of relay, a per-renderer
+watch signal into the core actor, tagged with the renderer-instance token. The actor spends
+one rung of that renderer's recovery budget (`engine/surface_recovery.rs`, pure state with
+injected instants) and schedules the attempt on itself after its delay; the attempt re-checks
+the token, so a scene replaced meanwhile is left alone. A rebuild done by recovery keeps the
+budget and the render scale in force (a new renderer starts at full size, so `SceneRuntime`
+hands it the scale again) and is watched by the actor until the new renderer has presented a
+frame, because that renderer reports a failed frame only after its first present
+(`surface_recovery::settle`); a different wallpaper starts a fresh budget.
+`WallpaperEngine::recover_surface` is the same ladder asked for from outside; see
+[scene rendering](features/scene-rendering.md#a-scene-that-stops-drawing).
+
 ### Lock-screen extension
 
 `Extension/` builds `WallpaperMachineExtension`, an `extensionkit-extension` target for the

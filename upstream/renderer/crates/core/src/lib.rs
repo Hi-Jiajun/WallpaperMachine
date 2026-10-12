@@ -42,8 +42,9 @@ pub use display::{
 pub use engine::{
     AudioRequirementCallback, DisplayConfig, DisplaySelector, DisplaySnapshotEntry,
     FirstFrameCallback, PointerActivity,
-    PointerActivityCallback, PointerConsumerCallback, PointerProbe, UserShortcutObserverCallback,
-    WallpaperAssignment, WallpaperEngine, WallpaperEngineConfig,
+    PointerActivityCallback, PointerConsumerCallback, PointerProbe, RecoveryOutcome,
+    RecoveryReason, RecoveryStep, UserShortcutObserverCallback, WallpaperAssignment,
+    WallpaperEngine, WallpaperEngineConfig,
 };
 pub use error::EngineError;
 pub use owe::backend::AudioSpectrum128;

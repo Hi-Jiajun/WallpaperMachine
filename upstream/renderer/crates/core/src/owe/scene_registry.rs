@@ -144,7 +144,7 @@ impl SceneRegistry {
 /// # Safety
 ///
 /// `raw` must point to a live scene.
-unsafe fn read_surface_health(raw: *mut std::ffi::c_void) -> Option<SurfaceHealth> {
+pub(super) unsafe fn read_surface_health(raw: *mut std::ffi::c_void) -> Option<SurfaceHealth> {
     let mut out = sys::owe_surface_health::default();
     // SAFETY: `out` is a valid, writable struct for the duration of the call.
     if unsafe { sys::owe_scene_wallpaper_surface_health(raw, &mut out) } != 0 {

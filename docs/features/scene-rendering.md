@@ -234,10 +234,67 @@ user chose, or a display the app suspended, outranks it, and it shows again the 
 that is lifted; a reading the renderer could not take stays `unknown` and is never
 reported as stopped or as running.
 
-Nothing restarts a stopped scene yet: it stays on its last picture until the wallpaper
-is applied again or the display's surface is rebuilt. A real MoltenVK or Metal
-presentation failure has not been reproduced on a desktop, so the tests cover the
-reading, not a genuine failure.
+#### Recovery
+
+A scene that had already shown a frame and then fails one calls the app back once (the
+renderer's render-failure callback: no payload, never replayed on install). The app
+then heals it with a small ladder inside a rolling minute. It is event-driven, and a
+healthy scene costs nothing. The one exception is the look at a renderer that recovery
+just rebuilt, described below, which lasts until that renderer has drawn.
+
+| Attempt | Waits | Does |
+|---|---|---|
+| 1 | 0.5 s | Rebuilds the surface and swapchain in place; the compiled scene stays |
+| 2 | 2 s | Opens a new renderer for the same wallpaper and closes the old one |
+| 3 | 8 s | The same rebuild again |
+
+An in-place rebuild that fails goes straight to the renderer rebuild instead of
+waiting for the next rung. Attempts older than a minute stop counting, so a failure
+after a quiet minute starts again at the first rung; a fourth failure inside one
+minute gives up with one line in the log, "display N stopped drawing; recovery gave up
+after 3 attempts in 60 s", and the scene stays stopped, shown as above, until the
+wallpaper is applied again. A pause (the user's, or a covered display's) is kept
+across every attempt, so recovery never plays what was paused. An attempt that finds
+the surface drawing again, because a display change rebuilt it in the meantime, does
+nothing. The wallpaper window shows its placeholder for a moment while the surface is
+rebuilt, and the engine waits for the render thread meanwhile, up to the 10 s
+swapchain acquire timeout in the worst case, as it does for a display change.
+
+A failure before the first frame is not retried: the app is still inside its first-frame
+wait, which has its own timeout and rollback, and a retry of its own would race it. The
+failure is still counted in the health reading.
+
+A renderer that recovery itself rebuilt is a new renderer with no first frame yet, so
+it too would call nobody back if its first frame failed, and the ladder would end there
+with the scene stopped and no further rung tried. The engine therefore looks at a
+rebuilt renderer itself, once a second, until it has presented a frame. The attempt stays
+under way meanwhile, so a stall check or a second failure starts nothing beside it. A
+renderer that stopped before it drew counts as the failure it is: the next rung is
+scheduled, or, after the third, the scene gives up with the usual line. A renderer that
+neither draws nor stops within 30 seconds is reported in the log and left as it is,
+because a scene with a great deal to load is not a failure and rebuilding it again would
+only interrupt the load.
+
+A caller that knows something the renderer does not can ask the engine for the next
+rung directly with `WallpaperEngine::recover_surface`. It spends the same budget the
+failures do, so a liveness check cannot buy back a spent one within the minute;
+[Retry](#retry) gets a fresh budget by loading the wallpaper afresh, which opens a new
+renderer.
+
+Each step is logged under the load it belongs to: "display N stopped drawing after a
+failed frame; trying a surface reconfigure in 500ms (attempt 1/3)", then "display N
+renderer recovered by a surface reconfigure (attempt 1/3)" or the error. A rebuild gives
+the scene a new load number and the budget carries over to it; it is logged as "renderer
+rebuilt (attempt 2/3); waiting for it to draw", and then either "renderer recovered by a
+renderer rebuild (attempt 2/3)" once it has presented a frame, or "renderer rebuilt
+(attempt 2/3) stopped before it drew" followed by the next rung.
+
+A real MoltenVK or Metal presentation failure has not been reproduced on a desktop. The
+tests inject the failure into the renderer's own failure routine and exercise everything
+after it there, the ladder with injected instants, and the relay that carries the report
+to the engine. The engine's reaction to a report on a live scene needs a real window and
+is not covered by an automated test, so whether a genuine failure is healed by the first
+rung or needs a rebuild is unverified.
 
 ## Renderer memory
 
