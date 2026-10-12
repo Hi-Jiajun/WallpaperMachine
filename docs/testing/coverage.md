@@ -133,6 +133,13 @@ on the desktop ([manual-smoke.md](manual-smoke.md)).
   conditions and survives a new instance, and `stop()` releases every action.
   `WallpaperFocusFilterTests` pin the filter's default to the choice that lets
   wallpapers run, since macOS performs it with defaults when a Focus ends.
+- `PowerSourceMonitorTests` use an injected reading: only a different source is
+  reported (the system notification also fires as the charge moves), a change made
+  before `start()` is not lost, and the snapshot refresh after a change repeats until
+  the bridge reports the source the system did, survives a failed refresh, stops after
+  the last delay and on cancellation. The notification itself, and the race between
+  the renderer's power thread and the app's observer, need a real plug or unplug and
+  are not covered.
 - `DisplayRefreshCoalescerTests` — a burst during a refresh is answered by one
   more; screen changes that leave the displays as they were refresh nothing; a
   failed refresh is retried. `DisplayTitleResolverTests` — localized display
@@ -647,7 +654,10 @@ while the view is in the window), edits drawn on a paused page, and a measured s
 frames, timers and CSS (`WebWallpaperSuspensionTests`), the frame-rate limit
 on `requestAnimationFrame` against a fake display cadence and in a real page with a
 measured live change, and the rate a slow or full-refresh page draws at
-(`WebWallpaperFramePacingTests`), pointer routing
+(`WebWallpaperFramePacingTests`), the render scale on
+`devicePixelRatio` with its resize event, start-of-document value and descriptor
+following (`WebWallpaperRenderScaleTests`, plus the render-scale cases of
+`WebWallpaperHostLifecycleTests`), pointer routing
 (`WebWallpaperMouseRoutingTests`) and the screen-saver surface
 (`ScreenSaverWebSurfaceTests`). Detail and limits:
 [web wallpapers](../features/web-wallpapers.md#verification).

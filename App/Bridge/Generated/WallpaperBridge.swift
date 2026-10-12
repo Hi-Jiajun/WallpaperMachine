@@ -7553,6 +7553,13 @@ public struct BridgeWebWallpaper {
      */
     public var entryFile: String
     public var fps: UInt32
+    /**
+     * The internal render scale in force: the saved scale, or the battery
+     * profile's while Reduced quality is selected and the Mac is on battery,
+     * already clamped to `0.25..=1.0`. A web page applies it to
+     * `window.devicePixelRatio`.
+     */
+    public var renderScale: Float
     public var paused: Bool
     public var volume: Float
     public var muted: Bool
@@ -7586,7 +7593,13 @@ public struct BridgeWebWallpaper {
          */projectPath: String, 
         /**
          * Entry page relative to `project_path`.
-         */entryFile: String, fps: UInt32, paused: Bool, volume: Float, muted: Bool, audioResponseEnabled: Bool, 
+         */entryFile: String, fps: UInt32, 
+        /**
+         * The internal render scale in force: the saved scale, or the battery
+         * profile's while Reduced quality is selected and the Mac is on battery,
+         * already clamped to `0.25..=1.0`. A web page applies it to
+         * `window.devicePixelRatio`.
+         */renderScale: Float, paused: Bool, volume: Float, muted: Bool, audioResponseEnabled: Bool, 
         /**
          * Whether this wallpaper opted in to system media integration. The host
          * still has to find a usable system media source; this is only the user's
@@ -7608,6 +7621,7 @@ public struct BridgeWebWallpaper {
         self.projectPath = projectPath
         self.entryFile = entryFile
         self.fps = fps
+        self.renderScale = renderScale
         self.paused = paused
         self.volume = volume
         self.muted = muted
@@ -7648,6 +7662,9 @@ extension BridgeWebWallpaper: Equatable, Hashable {
         if lhs.fps != rhs.fps {
             return false
         }
+        if lhs.renderScale != rhs.renderScale {
+            return false
+        }
         if lhs.paused != rhs.paused {
             return false
         }
@@ -7679,6 +7696,7 @@ extension BridgeWebWallpaper: Equatable, Hashable {
         hasher.combine(projectPath)
         hasher.combine(entryFile)
         hasher.combine(fps)
+        hasher.combine(renderScale)
         hasher.combine(paused)
         hasher.combine(volume)
         hasher.combine(muted)
@@ -7705,6 +7723,7 @@ public struct FfiConverterTypeBridgeWebWallpaper: FfiConverterRustBuffer {
                 projectPath: FfiConverterString.read(from: &buf), 
                 entryFile: FfiConverterString.read(from: &buf), 
                 fps: FfiConverterUInt32.read(from: &buf), 
+                renderScale: FfiConverterFloat.read(from: &buf), 
                 paused: FfiConverterBool.read(from: &buf), 
                 volume: FfiConverterFloat.read(from: &buf), 
                 muted: FfiConverterBool.read(from: &buf), 
@@ -7724,6 +7743,7 @@ public struct FfiConverterTypeBridgeWebWallpaper: FfiConverterRustBuffer {
         FfiConverterString.write(value.projectPath, into: &buf)
         FfiConverterString.write(value.entryFile, into: &buf)
         FfiConverterUInt32.write(value.fps, into: &buf)
+        FfiConverterFloat.write(value.renderScale, into: &buf)
         FfiConverterBool.write(value.paused, into: &buf)
         FfiConverterFloat.write(value.volume, into: &buf)
         FfiConverterBool.write(value.muted, into: &buf)

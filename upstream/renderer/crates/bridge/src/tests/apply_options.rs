@@ -1350,6 +1350,69 @@ async fn web_wallpaper_apply_bypasses_engine_and_exports_host_inputs() {
     assert!(bridge.app_snapshot().await.unwrap().active_wallpaper_ids.is_empty());
 }
 
+/// A web page has no renderer target to shrink, so the host is handed the scale
+/// that is in force and applies it to `devicePixelRatio`. It has to follow the
+/// same rule a scene does: the saved scale, or the battery profile's while
+/// Reduced quality is selected and the Mac is on battery.
+#[tokio::test]
+async fn web_wallpaper_descriptor_carries_the_effective_render_scale() {
+    let engine = FakeEngineFacade::default();
+    engine.set_snapshot(vec![display_snapshot(7, 75)]);
+    let bridge = BridgeBuilder::new(engine)
+        .with_state(crate::actor::state::BridgeActorState::default())
+        .build()
+        .unwrap();
+    bridge
+        .inject_scene_project_for_test(
+            "300",
+            "Web",
+            r#"{"type":"web","title":"Web","file":"index.html"}"#,
+        )
+        .await;
+    bridge
+        .set_display_config_enabled("300".into(), "7".into(), true)
+        .await
+        .unwrap();
+    bridge.apply_wallpaper_options("300".into(), true).await.unwrap();
+
+    assert_eq!(bridge.web_wallpapers().await.unwrap()[0].render_scale, 1.0);
+    assert!(
+        bridge.settings_snapshot().await.unwrap().render_scale_supported,
+        "a running web page honours the scale, so the control must be enabled"
+    );
+
+    bridge.set_render_scale(0.5).await.unwrap();
+    assert_eq!(bridge.web_wallpapers().await.unwrap()[0].render_scale, 0.5);
+
+    bridge
+        .set_battery_mode(crate::BridgeBatteryMode::ReducedQuality)
+        .await
+        .unwrap();
+    assert_eq!(
+        bridge.web_wallpapers().await.unwrap()[0].render_scale,
+        0.5,
+        "Reduced quality is selected but the Mac is on external power"
+    );
+
+    bridge
+        .set_power_source_for_test(crate::power::PowerSource::Battery)
+        .await;
+    let on_battery = bridge.web_wallpapers().await.unwrap();
+    assert_eq!(
+        on_battery[0].render_scale, 0.75,
+        "the battery profile's default scale"
+    );
+
+    bridge
+        .set_power_source_for_test(crate::power::PowerSource::External)
+        .await;
+    assert_eq!(
+        bridge.web_wallpapers().await.unwrap()[0].render_scale,
+        0.5,
+        "leaving battery power hands back the scale the user saved"
+    );
+}
+
 #[tokio::test]
 async fn web_wallpaper_combo_values_keep_authored_types_after_editor_changes() {
     let engine = FakeEngineFacade::default();

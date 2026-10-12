@@ -83,7 +83,7 @@ final class WebWallpaperHostLifecycleTests: XCTestCase {
     var descriptor: BridgeWebWallpaper {
       .init(displayId: 7, startupRevision: 3, displayKey: "primary", audioSourceDisplayId: 7,
         wallpaperId: "wallpaper", title: "Test", projectPath: root.path, entryFile: "index.html",
-        fps: 30, paused: false, volume: 1, muted: false, audioResponseEnabled: true,
+        fps: 30, renderScale: 1, paused: false, volume: 1, muted: false, audioResponseEnabled: true,
         mediaIntegrationEnabled: false, propertiesJson: "{}")
     }
     func close() {
@@ -363,6 +363,83 @@ final class WebWallpaperHostLifecycleTests: XCTestCase {
     try await wait { page.hostSuspended }
     XCTAssertTrue(page.isLoaded, "the page loaded before it was suspended")
     XCTAssertFalse(fixture.host.isPointerMonitorActive)
+  }
+
+  /// The scale arrives with the descriptor, follows every change of it without a
+  /// reload, and is part of a document that is loaded again afterwards.
+  func testRenderScaleFollowsTheDescriptorAndIsReplayedAfterAReload() async throws {
+    let fixture = try Fixture()
+    defer { fixture.close() }
+    await fixture.host.apply([fixture.descriptor])
+    let page = try XCTUnwrap(fixture.model.surfaces.last?.page)
+    try await wait { page.isLoaded }
+    let native = try await pageRatio(page)
+    let generation = page.documentGeneration
+
+    var scaled = fixture.descriptor
+    scaled.renderScale = 0.5
+    await fixture.host.apply([scaled])
+    try await waitForRatio(page, native * 0.5)
+    XCTAssertEqual(page.documentGeneration, generation, "a scale change must not reload the page")
+
+    scaled.renderScale = 0.75
+    await fixture.host.apply([scaled])
+    try await waitForRatio(page, native * 0.75)
+
+    // A reload, as after a crash restart, starts from the descriptor's scale.
+    page.load()
+    try await wait { page.isLoaded }
+    try await waitForRatio(page, native * 0.75)
+
+    await fixture.host.apply([fixture.descriptor])
+    try await waitForRatio(page, native)
+  }
+
+  func testAWallpaperOpenedWithAScaleIsScaledFromItsFirstRead() async throws {
+    let fixture = try Fixture()
+    defer { fixture.close() }
+    try "<!doctype html><script>window.firstRatio = window.devicePixelRatio</script>".write(
+      to: fixture.root.appendingPathComponent("index.html"), atomically: true, encoding: .utf8)
+    var scaled = fixture.descriptor
+    scaled.renderScale = 0.5
+    await fixture.host.apply([scaled])
+    let page = try XCTUnwrap(fixture.model.surfaces.last?.page)
+    try await wait { page.isLoaded }
+
+    // Back at full scale the ratio is the display's own, which the page's very
+    // first read must have been half of.
+    await fixture.host.apply([fixture.descriptor])
+    let deadline = Date().addingTimeInterval(10)
+    var doubled = false
+    while !doubled && Date() < deadline {
+      let value = try? await page.webView.callAsyncJavaScript(
+        "return window.devicePixelRatio === window.firstRatio * 2", arguments: [:], in: nil,
+        contentWorld: .page)
+      doubled = value as? Bool == true
+      if !doubled { try await Task.sleep(for: .milliseconds(25)) }
+    }
+    XCTAssertTrue(doubled, "the first read saw half the display's ratio")
+  }
+
+  private func pageNumber(_ page: WebWallpaperPage, _ expression: String) async throws -> Double {
+    let value = try await page.webView.callAsyncJavaScript(
+      "return \(expression)", arguments: [:], in: nil, contentWorld: .page)
+    return try XCTUnwrap(value as? Double)
+  }
+
+  private func pageRatio(_ page: WebWallpaperPage) async throws -> Double {
+    try await pageNumber(page, "window.devicePixelRatio")
+  }
+
+  private func waitForRatio(_ page: WebWallpaperPage, _ expected: Double) async throws {
+    let deadline = Date().addingTimeInterval(10)
+    var seen: Double?
+    while Date() < deadline {
+      seen = try? await pageRatio(page)
+      if let seen, abs(seen - expected) < 1e-9 { return }
+      try await Task.sleep(for: .milliseconds(25))
+    }
+    XCTFail("the page's devicePixelRatio is \(String(describing: seen)), expected \(expected)")
   }
 
   func testASuspendedPageAnswersPosterRequestsFromItsSuspensionPoster() async throws {

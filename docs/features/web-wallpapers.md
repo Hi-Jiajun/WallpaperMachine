@@ -129,6 +129,26 @@ running page (a Performance or power-source change) is sent together with
 callbacks already waiting are kept. It is logged at debug level
 (`frame limit <n|none>`). The native screen-saver surface does not get the wrapper.
 
+### Render scale
+
+WebKit has no render target the host can shrink, so the **Internal render scale**
+setting ([performance](performance.md#quality)) reaches a page as a multiplier of
+`window.devicePixelRatio`. The shared host script
+(`Shared/WebWallpaperProtocol.swift`) installs an accessor for the property only
+while the scale is below 1 and puts WebKit's own descriptor back when it returns to
+1, so a full-scale page runs on the native property. The scale is
+`BridgeWebWallpaper.renderScale`: the saved scale, or the battery profile's while
+Reduced quality is selected and the Mac is on battery, held to 50-100% for a page.
+Like the frame-rate limit it is part of each document's script, so the very first
+read of a page, a reload and a content-process restart already see it. A change on
+a running page (a Performance or power-source change) is delivered without a reload
+and raises one `resize` event on the window, however many changes share a turn, so
+pages that rebuild their canvas or WebGL buffers on `resize` pick it up; the
+value a document starts with raises none. Changes are logged at debug level
+(`render scale <n>`). A page that assigns `devicePixelRatio` itself keeps its own
+value. The preview, the control panel and the native screen-saver surface are
+never scaled.
+
 The page may call `wallpaperRegisterAudioListener`, the five
 `wallpaperRegisterMedia*Listener` functions (status, properties, thumbnail,
 playback, timeline) and `wallpaperRequestRandomFileForProperty`.
@@ -153,15 +173,17 @@ separate web view with its own handler (see [architecture](../architecture.md#co
   `supported`. `ActivationInputs::build()` routes web projects away from the scene
   engine and `build_web()` yields one `WebWallpaperDesc` per assigned display
   (mirrors included). The uniffi call `web_wallpapers()` exposes them as
-  `BridgeWebWallpaper` (display id, project path, entry file, fps, paused, volume,
-  mute, audio and media consent, and the effective property values as the
-  `applyUserProperties` payload). The same web descriptors are exported to the
+  `BridgeWebWallpaper` (display id, project path, entry file, fps, effective render
+  scale, paused, volume, mute, audio and media consent, and the effective property
+  values as the `applyUserProperties` payload). A running web wallpaper makes the
+  render-scale control applicable. The same web descriptors are exported to the
   native screen saver as lock-screen scenes with a web entry file.
 - Swift (`App/Services/WebWallpaper/`): `WebWallpaperHost` re-reads
   `webWallpapers()` on every snapshot and diffs it against one `WebWallpaperWindow`
   (`MWEWebWallpaperDesktopWindow`, desktop level, all Spaces, mouse-transparent) per
   display. `WebWallpaperPage` owns the `WKWebView`, the host script (installed again
-  with the committed frame-rate limit on every `load()`), property/pause delivery,
+  with the committed frame-rate limit and render scale on every `load()`),
+  property/pause delivery,
   host-side suspension and content-process recovery.
 - **Suspension** does not rely on the page cooperating. `setPaused` is an optional
   listener callback, so a page can ignore it; alongside it the host suspends all
@@ -194,7 +216,11 @@ separate web view with its own handler (see [architecture](../architecture.md#co
   descriptors to be read again, and a presentation change returns no snapshot to
   carry them: `AppDelegate` reconciles the web and native video hosts once the bridge has
   committed the change (or failed to), and the pause that came from the covered
-  desktop ends with it. Values applied while a page is suspended reach it when it
+  desktop ends with it. The battery Pause starts and ends with the power source,
+  which the renderer applies without a snapshot as well: `PowerSourceMonitor`
+  notices the change and the app reads a snapshot again
+  ([performance](performance.md#playback)), so the page is detached when the Mac is
+  unplugged and runs again when it is plugged in. Values applied while a page is suspended reach it when it
   resumes, not before, with one exception: a changed property payload (the
   inspector's Apply, an image's fit or placement) reaching a page that only its
   pause holds still puts the page back in the window for another first-frame
@@ -357,6 +383,12 @@ never substitutes Pause for an unavailable mute.
   interpolates by frame count rather than by time may judder at 30. The effective
   cadence snaps to the display's: 30 on a 60 Hz cadence is exactly every second
   frame, 40 averages 40 with uneven spacing.
+- The render scale only helps a page that sizes its canvases or WebGL buffers from
+  `devicePixelRatio` and reads it again on `resize`. A page that reads the ratio
+  once at start keeps full resolution until it reloads, `matchMedia` resolution
+  queries and subframes see the display's own ratio, and a page that mixes the
+  ratio into CSS pixel math can lay out differently at a lower scale. The image
+  softens by design, like a scene's.
 - Nonzero WebAudio gain is not controlled by the native media-volume interface;
   whole-page Mute still applies where WebKit exposes it.
 - A paused wallpaper's WebAudio is muted (`WebWallpaperAudioOwnership` gives a paused
@@ -371,10 +403,12 @@ The page host is tested against a real offscreen `WKWebView` with no desktop win
 metadata, pause composition, suspension by presentation and by pause with its
 first-frame grace and edits shown while paused, navigation lockdown, forwarded pointer events, mouse routing
 policy, changed-only property delivery, frame pacing against a fake display
-cadence and in a real page with the rate a slow or full-refresh page draws at) and the bridge contract in
+cadence and in a real page with the rate a slow or full-refresh page draws at, render
+scale on `devicePixelRatio` including the
+resize rebuild of a canvas page) and the bridge contract in
 `upstream/renderer/crates/bridge/src/tests/` (`apply_options.rs`,
-`web_audio_media.rs`); file and directory properties are covered under
-[user files](user-files.md#verification), and the domain inventory is in
+`quality_settings.rs`, `web_audio_media.rs`); file and directory properties are
+covered under [user files](user-files.md#verification), and the domain inventory is in
 [coverage](../testing/coverage.md). Show Desktop and Space transition smoothness,
 real hover and window-server routing on a desktop, audible output and mirror audio
 handoff need an authorized manual run. So do judder on pages that interpolate by
@@ -384,4 +418,7 @@ near 60 on a ProMotion display (measured for pointer moves and a page's own loop
 full-refresh pages were added, not for the pacer on a limit set on such a page), as
 does a pass over real Workshop pages from the
 [local corpus](../testing/wallpaper-corpus.md) for any that assumed a full property
-object on every edit.
+object on every edit. How soft a page looks at 75% and 50%, the real GPU and
+WebContent savings on WebGL, Spine and three.js pages (an A/B with
+`scripts/power_benchmark.py`), pages that read `devicePixelRatio` once, and pages
+that mix it into CSS pixel math also need an authorized desktop run.

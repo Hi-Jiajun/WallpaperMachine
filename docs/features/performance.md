@@ -200,8 +200,18 @@ as the scale drops. It is a quality tier and is not part of any same-quality
 backend comparison. For 2D scenes the authored canvas defines 100%; perspective
 scenes with no authored canvas use the physical output size instead of a fixed
 1920×1080 fallback, and the camera aspect follows the surface. This is native
-resolution, not supersampling. When no running wallpaper can honour a scale the
-control is disabled and reads `Not applicable to the wallpapers currently running`.
+resolution, not supersampling. For Web wallpapers the scale multiplies the page's
+`window.devicePixelRatio` (never below 50%, whatever the saved scale), so a page
+that sizes its canvas or WebGL buffers from the ratio and rebuilds them on `resize`
+draws fewer pixels and WebKit stretches the result over the same area. It applies
+to a running page without a reload (the page gets one `resize` event) and is part of
+every new document from its first line, the battery scale included. A page that
+reads the ratio once keeps full resolution until it reloads, resolution media
+queries and frames the page embeds see the display's own ratio, and a page that
+mixes the ratio into its CSS pixel math can change layout; the energy effect has
+not been measured ([limits](web-wallpapers.md#limits)). When no running wallpaper
+can honour a scale (plain videos, or nothing) the control is disabled and reads
+`Not applicable to the wallpapers currently running`.
 
 The engine clamps a render scale to `0.25...1.0` (values from a stale page are
 clamped the same way) but does not quantize it to these tiers, so a hand-edited
@@ -314,6 +324,14 @@ sent together: changing one resends the other as the engine currently reports it
 Reduced quality is in force only while that mode is selected and the Mac is on
 battery. A configuration saved with the former pause-on-battery switch maps to
 **Pause**, otherwise the former battery profile switch maps to **Reduced quality**.
+
+The renderer applies all of this itself when the power source changes, and reports
+nothing back. The app watches the source too (`PowerSourceMonitor`, the system
+notification only) and then reads the snapshot again, repeating a few times until the
+renderer reports the source the system did, so the web pages and native video it
+hosts take in the pause, frame rate and render scale at once instead of at the next
+unrelated snapshot. The notification itself has not been exercised by unplugging a
+Mac in a test.
 
 ### Low Power Mode, heat and Focus
 

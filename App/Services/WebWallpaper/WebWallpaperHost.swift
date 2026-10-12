@@ -419,7 +419,8 @@ final class WebWallpaperHost {
                 let load = AppLog.beginLoad("web", project: wallpaper.projectPath, detail: """
                     wallpaper \(wallpaper.wallpaperId) “\(wallpaper.title)” entry \(wallpaper.entryFile), \
                     \(DiagnosticEnvironment.display(displayID)), fps \(wallpaper.fps)\
-                    \(rendersAtDisplayRefresh ? " at display refresh" : ""), paused \(wallpaper.paused)
+                    \(rendersAtDisplayRefresh ? " at display refresh" : ""), \
+                    render scale \(wallpaper.renderScale), paused \(wallpaper.paused)
                     """)
                 page.logLoad = load
                 counters.record(.webPageCreated, for: surface)
@@ -532,6 +533,9 @@ final class WebWallpaperHost {
         }
         if previous?.fps != wallpaper.fps {
             page.applyGeneralProperties(fps: wallpaper.fps)
+        }
+        if previous?.renderScale != wallpaper.renderScale {
+            page.applyRenderScale(wallpaper.renderScale)
         }
         if previous?.paused != wallpaper.paused {
             page.setPaused(wallpaper.paused)

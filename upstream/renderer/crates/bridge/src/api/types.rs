@@ -104,6 +104,11 @@ pub struct BridgeWebWallpaper {
     /// Entry page relative to `project_path`.
     pub entry_file: String,
     pub fps: u32,
+    /// The internal render scale in force: the saved scale, or the battery
+    /// profile's while Reduced quality is selected and the Mac is on battery,
+    /// already clamped to `0.25..=1.0`. A web page applies it to
+    /// `window.devicePixelRatio`.
+    pub render_scale: f32,
     pub paused: bool,
     pub volume: f32,
     pub muted: bool,

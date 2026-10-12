@@ -102,6 +102,8 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         var fps: UInt32?
         /// The refresh rate of the display the page is on, 0 while unknown.
         var displayRefreshRate = 0
+        /// Multiplies the page's `devicePixelRatio`; 1 is the display's own.
+        var renderScale: Float = 1
         var volume: Float = 1
         var muted = false
         /// The bridge's composed pause, not only the Play/Pause button: user
@@ -396,11 +398,13 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
     }
 
     /// Rebuilds the user scripts from the committed state. A script cannot be
-    /// replaced alone, and the frame-rate limit is baked into the host script so
-    /// a document sees it from its first line; the live path in
-    /// `deliverGeneralProperties` keeps a running document in step afterwards.
+    /// replaced alone, and the frame-rate limit and render scale are baked into
+    /// the host script so a document sees them from its first line; the live
+    /// paths in `deliverGeneralProperties` and `deliverRenderScale` keep a
+    /// running document in step afterwards.
     private func installUserScripts() {
-        let seed = WebWallpaperProtocol.Seed(framePacing: true, frameLimit: frameLimit)
+        let seed = WebWallpaperProtocol.Seed(
+            framePacing: true, frameLimit: frameLimit, renderScale: Double(committed.renderScale))
         let controller = webView.configuration.userContentController
         controller.removeAllUserScripts()
         controller.addUserScript(WKUserScript(
@@ -467,6 +471,18 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         committed.fps = fps
         logFrameLimit(changedFrom: before)
         deliverGeneralProperties()
+    }
+
+    /// The internal render scale in force. The page's `devicePixelRatio` is
+    /// multiplied by it, so a page that sizes its drawing buffers from the ratio
+    /// draws fewer pixels. A running document is told at once and rebuilds on the
+    /// resize event that follows; a new document starts with it.
+    func applyRenderScale(_ scale: Float) {
+        let clamped = Float(WebWallpaperProtocol.clampedRenderScale(Double(scale)))
+        guard clamped != committed.renderScale else { return }
+        committed.renderScale = clamped
+        AppLog.debug("web wallpaper \(projectURL.lastPathComponent): render scale \(clamped)", load: logLoad)
+        deliverRenderScale()
     }
 
     /// The refresh rate of the display the page is on. It sets the rate the page
@@ -700,6 +716,11 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
             """, arguments: ["general": ["fps": Int(fps)], "limit": frameLimit])
     }
 
+    private func deliverRenderScale() {
+        guard isLoaded else { return }
+        run("window.__mweWallpaperHost.setRenderScale(scale)", arguments: ["scale": Double(committed.renderScale)])
+    }
+
     private func deliverAudioOutput() {
         audioOutputCapabilities = WebWallpaperAudioOutput.apply(
             volume: committed.volume, muted: committed.muted || committed.volume == 0, to: webView)
@@ -718,6 +739,7 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         deliverAudioOutput()
         deliverUserProperties()
         deliverGeneralProperties()
+        deliverRenderScale()
         deliverPaused()
     }
 

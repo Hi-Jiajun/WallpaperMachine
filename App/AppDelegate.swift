@@ -43,6 +43,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var appRuleMonitor: AppRuleMonitor?
     private var otherAudioMonitor: OtherAudioMonitor?
     private var systemConditionMonitor: SystemConditionMonitor?
+    private var powerSourceMonitor: PowerSourceMonitor?
+    private var powerSourceRefresh: Task<Void, Never>?
     private var playlistScheduler: PlaylistScheduler?
     private var automaticWallpapers: WallpaperAutomationController?
     private var desktopSpaces: WallpaperSpaceMonitor?
@@ -412,6 +414,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             presentationPolicy = policy
             syncPlaybackMonitors()
             conditions.start()
+            let power = PowerSourceMonitor()
+            powerSourceMonitor = power
+            power.onChange = { [weak self] source in self?.powerSourceChanged(source) }
+            power.start()
             policy.start()
             desktopSpaces = .shared
             desktopSpaces?.start()
@@ -1070,6 +1076,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         appRuleMonitor?.stop()
         otherAudioMonitor?.stop()
         systemConditionMonitor?.stop()
+        powerSourceMonitor?.stop()
+        powerSourceRefresh?.cancel()
+        powerSourceRefresh = nil
+    }
+
+    /// The renderer applies its power policy (battery Pause, Reduced quality) when
+    /// the source changes and reports nothing back. Reading the snapshot again is
+    /// what makes the hosts here (web pages, native video) take in the pause, frame
+    /// rate and render scale that came with it.
+    private func powerSourceChanged(_ source: PowerSourceMonitor.Source) {
+        guard let store, !shutdownInProgress, !shutdownComplete else { return }
+        powerSourceRefresh?.cancel()
+        powerSourceRefresh = Task { [weak self] in
+            await PowerSourceRefresh.run(
+                expectedOnBattery: source == .battery,
+                refresh: {
+                    do {
+                        try await store.refreshAllAsync()
+                        self?.lastError = nil
+                        self?.playbackSnapshotCurrent = true
+                    } catch {
+                        self?.lastError = error
+                        self?.playbackSnapshotCurrent = false
+                        throw error
+                    }
+                },
+                bridgeOnBattery: { store.settingsSnapshot.onBatteryPower })
+            self?.rebuildMenu()
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

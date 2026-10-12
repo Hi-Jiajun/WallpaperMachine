@@ -1269,6 +1269,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                     project_path,
                     entry_file: desc.entry_file,
                     fps: desc.fps,
+                    render_scale: self.effective_render_scale(),
                     paused: desc.paused,
                     volume: desc.volume,
                     muted: desc.muted,

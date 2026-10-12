@@ -282,7 +282,7 @@ final class WebWallpaperPropertyPayloadTests: XCTestCase {
       wallpaper = BridgeWebWallpaper(
         displayId: 1, startupRevision: 0, displayKey: "1", audioSourceDisplayId: 1,
         wallpaperId: "w", title: "Test", projectPath: project.path,
-        entryFile: "index.html", fps: 30, paused: false, volume: 1, muted: false,
+        entryFile: "index.html", fps: 30, renderScale: 1, paused: false, volume: 1, muted: false,
         audioResponseEnabled: false,
         mediaIntegrationEnabled: false,
         propertiesJson: """

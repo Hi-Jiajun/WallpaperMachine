@@ -364,7 +364,7 @@ final class WebWallpaperRecoveryTests: XCTestCase {
     BridgeWebWallpaper(
       displayId: 7, startupRevision: 0, displayKey: "7", audioSourceDisplayId: 7,
       wallpaperId: "1", title: "Test", projectPath: project.path,
-      entryFile: entryFile, fps: 30, paused: false, volume: 1, muted: false,
+      entryFile: entryFile, fps: 30, renderScale: 1, paused: false, volume: 1, muted: false,
       audioResponseEnabled: false,
       mediaIntegrationEnabled: false, propertiesJson: "{}")
   }

@@ -51,10 +51,11 @@ pub struct ActivationInputs<'a> {
     /// Refusals the native player recorded, per wallpaper and then per
     /// admission key. See [`NativeVideoRejections`].
     pub native_video_rejected: &'a NativeVideoRejections,
-    /// Global frame-rate ceiling. `None` means no limit. This is the saved
-    /// cap only: the battery cap is applied live to open scenes, not baked
-    /// into descriptors. Web and native-video rates use it because those
-    /// hosts have no later `set_fps`.
+    /// Global frame-rate ceiling in force. `None` means no limit. Call sites
+    /// pass `active_target_fps_cap()`, so it already includes the battery cap
+    /// while Reduced quality is selected and the Mac is on battery. Web and
+    /// native-video descriptors carry the capped rate because those hosts have
+    /// no later `set_fps`.
     pub frame_rate_cap: Option<u32>,
     /// Transient mute composed on top of each slot's saved mute for every playback host.
     pub audio_suppressed: bool,
@@ -157,8 +158,10 @@ pub struct RenderBackendSurvey {
     /// included: a mirror presents on its own display and is routed with its
     /// source.
     pub videos: Vec<VideoBackendRouting>,
-    /// Whether anything running rasterizes through the renderer's own targets
-    /// and can therefore honour an internal render scale.
+    /// Whether anything running can honour an internal render scale: a scene
+    /// rasterizes through the renderer's own targets, and a web page multiplies
+    /// `window.devicePixelRatio` by the scale. A plain video decodes to its
+    /// source resolution on either backend and does neither.
     pub render_scale_supported: bool,
 }
 
@@ -550,16 +553,17 @@ impl ActivationInputs<'_> {
                 continue;
             };
             match model.project_type {
-                // Only a project scene rasterizes through the renderer's own
-                // targets. A plain video decodes to its source resolution on
-                // either backend, and a web wallpaper is not the scene engine
-                // at all, so neither honours an internal render scale.
-                WallpaperProjectType::Scene => {
+                // A scene rasterizes through the renderer's own targets, and a
+                // web page is handed the scale as a multiplier of its
+                // `devicePixelRatio` (`BridgeWebWallpaper::render_scale`). A
+                // plain video decodes to its source resolution on either
+                // backend, so it honours neither.
+                WallpaperProjectType::Scene | WallpaperProjectType::Web => {
                     render_scale_supported = true;
                     continue;
                 }
                 WallpaperProjectType::Video => {}
-                WallpaperProjectType::Web | WallpaperProjectType::Unknown => continue,
+                WallpaperProjectType::Unknown => continue,
             }
             let admission_fps = self.slot_admission_fps(&slot, &group_targets);
             let candidate = self.native_video_candidate(slot.wallpaper_id, admission_fps);

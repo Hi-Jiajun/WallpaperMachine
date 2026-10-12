@@ -28,23 +28,44 @@ enum WebWallpaperProtocol {
 
     /// What a page's document-start script needs to know before any page script
     /// runs. The frame-rate limit has to be known by the page's very first
-    /// `requestAnimationFrame` call, so it is baked into the script of each
-    /// document instead of being delivered once the document has loaded.
+    /// `requestAnimationFrame` call and the render scale by its very first read
+    /// of `devicePixelRatio`, so both are baked into the script of each document
+    /// instead of being delivered once the document has loaded.
     struct Seed: Equatable {
         /// Wraps `requestAnimationFrame` so the limit can be enforced (desktop
         /// and preview pages). The screen saver keeps the native function.
         var framePacing = false
         /// Callbacks per second, or 0 for none; `frameLimit(forFPS:)` derives it.
         var frameLimit = 0
+        /// Multiplies `window.devicePixelRatio`; see `clampedRenderScale`. At 1
+        /// the page keeps WebKit's own property.
+        var renderScale = 1.0
+    }
+
+    /// The range a web page's internal render scale is held to. The bridge
+    /// allows 0.25 for a scene, but page text and interface drawn at a quarter
+    /// of the pixel density are not a usable quality tier, so half is the floor.
+    static let renderScaleRange: ClosedRange<Double> = 0.5...1
+
+    /// `scale` held to `renderScaleRange`; a value that is not a number is no
+    /// scale at all and means full resolution, because guessing low would leave
+    /// a page blurry for good.
+    static func clampedRenderScale(_ scale: Double) -> Double {
+        guard scale.isFinite else { return renderScaleRange.upperBound }
+        return min(max(scale, renderScaleRange.lowerBound), renderScaleRange.upperBound)
     }
 
     /// The host script of one document. Only numbers and booleans are
     /// interpolated into it.
     static func makeHostScript(seed: Seed) -> String {
-        "\(hostScriptSource)({ framePacing: \(seed.framePacing), frameLimit: \(seed.frameLimit) })"
+        """
+        \(hostScriptSource)({ framePacing: \(seed.framePacing), frameLimit: \(seed.frameLimit), \
+        renderScale: \(clampedRenderScale(seed.renderScale)) })
+        """
     }
 
-    /// The script without a seed: no `requestAnimationFrame` wrapper, no limit.
+    /// The script without a seed: no `requestAnimationFrame` wrapper, no limit and
+    /// no render scale.
     /// The native screen-saver surface injects this one.
     static let hostScript = makeHostScript(seed: Seed())
 
@@ -87,6 +108,43 @@ enum WebWallpaperProtocol {
         replace(["requestAnimationFrame", "webkitRequestAnimationFrame"], pacedRequest);
         replace(["cancelAnimationFrame", "webkitCancelAnimationFrame", "webkitCancelRequestAnimationFrame"], pacedCancel);
       }
+      // Internal render scale. A page sizes its canvases and WebGL buffers from
+      // window.devicePixelRatio, so multiplying that number by the scale gives it
+      // fewer pixels to draw, and WebKit stretches the result over the same area.
+      // The scaled property is an accessor installed only while the scale is below
+      // 1, and returning to 1 puts WebKit's own descriptor back unchanged. A live
+      // change raises one resize event, which is what resize-aware pages listen for
+      // to rebuild their buffers; the value the document starts with raises none.
+      // Pages that read the ratio once keep full resolution until they reload,
+      // media queries on resolution and subframes are not touched, and a page that
+      // assigned the property itself keeps its own value. The getter and the event
+      // use what is captured here, whatever the page does to its globals later.
+      const nativeRatio = Object.getOwnPropertyDescriptor(window, "devicePixelRatio");
+      const nativeDispatch = EventTarget.prototype.dispatchEvent;
+      const NativeEvent = Event;
+      let renderScale = 1;
+      let scaledRatio = null;
+      let resizePending = false;
+      const setScale = value => {
+        if (!nativeRatio || !nativeRatio.configurable || typeof nativeRatio.get !== "function") return false;
+        const next = Number.isFinite(value) ? Math.min(1, Math.max(0.5, value)) : 1;
+        if (next === renderScale) return false;
+        renderScale = next;
+        if (next < 1 && !scaledRatio) {
+          scaledRatio = Object.getOwnPropertyDescriptor({
+            get devicePixelRatio() { return nativeRatio.get.call(window) * renderScale; },
+          }, "devicePixelRatio").get;
+          Object.defineProperty(window, "devicePixelRatio", {
+            configurable: true, enumerable: nativeRatio.enumerable, get: scaledRatio, set: nativeRatio.set,
+          });
+        } else if (next === 1 && scaledRatio) {
+          const current = Object.getOwnPropertyDescriptor(window, "devicePixelRatio");
+          if (current && current.get === scaledRatio) Object.defineProperty(window, "devicePixelRatio", nativeRatio);
+          scaledRatio = null;
+        }
+        return true;
+      };
+      setScale(seed.renderScale);
       // WebKit resolves fetch() of a project file with status 0, ok === false and
       // no headers. Wallpaper Engine's Chromium host answers like a server: 200 OK
       // with a Content-Type from the extension. Loaders that check response.ok,
@@ -311,6 +369,12 @@ enum WebWallpaperProtocol {
         applyGeneralProperties(properties) { deliverProperties("applyGeneralProperties", properties); },
         // Takes effect on the next frame, and only where the seed asked for pacing.
         setFrameLimit(limit) { if (pacer) pacer.setLimit(limit); },
+        // Changes made in one turn of the page share one resize event.
+        setRenderScale(scale) {
+          if (!setScale(scale) || resizePending) return;
+          resizePending = true;
+          queueMicrotask(() => { resizePending = false; nativeDispatch.call(window, new NativeEvent("resize")); });
+        },
         setPaused(paused) { lastPaused = !!paused; call("setPaused", lastPaused); },
         deliverAudio(bins) {
           if (!audioListener) return false;
