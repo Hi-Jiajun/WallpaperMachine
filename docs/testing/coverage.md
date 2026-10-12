@@ -494,18 +494,34 @@ or depend on a second physical monitor.
   restores native choices before waiting for Desktop restoration.
 - `LockScreenExtensionRegistrationTests` use synthetic app bundles and an
   injected registry: current-copy selection, duplicate and removed-copy cleanup,
-  symlink aliases, invalid inventory rejection, cancellation, command failures.
+  symlink aliases, invalid inventory rejection, cancellation, command failures;
+  stale extension processes are ended only after the registry confirmed the
+  intended copy and never after a failed, conflicting or cancelled registration.
   `LockScreenExtensionDiagnosticsTests`, `LockScreenSurfaceRegistryTests`,
   `LockScreenIdleExitTests` and `LockScreenFrameBackingTests` (snapshot pixels
   composited under a Metal layer without a drawable) cover the extension side.
+- `LockScreenExtensionProcessesTests` — which running extension processes are
+  stale (another bundle; a binary replaced after launch, by a newer file or by a
+  copy that kept its source's old dates but holds another build than the one
+  running; or a process whose files are gone and whose build UUID is not the
+  registered executable's, with file dates playing no part), SIGKILL only for
+  survivors of the SIGTERM wait, a changed pid identity never signalled, nothing
+  sent when cancelled, and the live libproc table against a child the test spawns
+  itself (path, start time, replaced-binary detection by date and by a
+  date-preserving copy of another build, the path-less state after its bundle is
+  deleted, reused-pid refusal). `MachOImageUUIDsTests` — the `LC_UUID` reader on
+  synthetic thin and universal images, malformed and truncated input, and the test
+  host's own executable against the UUID the kernel keeps for it. The registration's
+  default process table is inert, so tests never touch the installed extension.
 - `WallpaperPresentationAuthorityTests` — both display/host wake orders, user
   pause surviving sleep and wake, a lock-screen surface presenting only while
   locked, and an unlocked one settling for `desktopSettleBudget` before it holds
   a frame.
 
 Not covered: real lock-screen visual timing, private XPC snapshot transport, live
-registration repair and macOS choosing the intended extension copy; these need an
-authorized runtime check ([lock-screen](../features/lock-screen.md#verification)).
+registration repair, ending a genuinely stale extension process and macOS choosing
+the intended extension copy; these need an authorized runtime check
+([lock-screen](../features/lock-screen.md#verification)).
 
 ## NativeVideo
 

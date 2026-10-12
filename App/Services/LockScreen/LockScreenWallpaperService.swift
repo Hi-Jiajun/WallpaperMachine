@@ -58,7 +58,7 @@ final class LockScreenWallpaperService {
   @ObservationIgnored private var lockScreenActivationError: String?
 
   convenience init(bridge: WallpaperBridge, contentRevision: @escaping () -> UInt64 = { 0 }) {
-    let registration = LockScreenExtensionRegistration()
+    let registration = LockScreenExtensionRegistration(processes: .live)
     self.init(
       prepareExtension: { try await registration.prepare() },
       notifyConfigurationChanged: {

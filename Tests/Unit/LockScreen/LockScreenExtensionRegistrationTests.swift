@@ -35,8 +35,28 @@ final class LockScreenExtensionRegistrationTests: XCTestCase {
     return app
   }
 
-  private func registration(_ app: URL, registry: Registry) -> LockScreenExtensionRegistration {
-    LockScreenExtensionRegistration(currentAppURL: app, command: { try await registry.run($0, $1) })
+  private func registration(
+    _ app: URL, registry: Registry, processes: LockScreenExtensionProcesses = .inert,
+    timeline: Timeline? = nil
+  ) -> LockScreenExtensionRegistration {
+    LockScreenExtensionRegistration(
+      currentAppURL: app,
+      command: { tool, arguments in
+        timeline?.add("registry")
+        return try await registry.run(tool, arguments)
+      },
+      processes: processes)
+  }
+
+  /// The table's processes, with every signal noted on the timeline next to registry commands.
+  private func recording(_ table: FakeExtensionProcessTable, on timeline: Timeline) -> LockScreenExtensionProcesses {
+    var processes = table.processes
+    let signal = processes.signal
+    processes.signal = { process, number in
+      timeline.add("signal")
+      return signal(process, number)
+    }
+    return processes
   }
 
   func testSoleCurrentRegistrationIsIdempotentWithoutMutations() async throws {
@@ -163,6 +183,76 @@ final class LockScreenExtensionRegistrationTests: XCTestCase {
     XCTAssertFalse(state.commands.contains { ["-r", "-u"].contains($0.arguments[0]) })
   }
 
+  func testPrepareEndsStaleProcessesOnlyAfterTheRegistryConverges() async throws {
+    let app = try makeApp("Current")
+    let old = try makeApp("Old")
+    let intended = app.appendingPathComponent(LockScreenExtensionRegistration.extensionPath)
+    let oldExtension = old.appendingPathComponent(LockScreenExtensionRegistration.extensionPath)
+
+    // Once through the idempotent early return and once through a real reconciliation.
+    for registered in [[intended], [oldExtension]] {
+      let timeline = Timeline()
+      let table = FakeExtensionProcessTable([
+        FakeExtensionProcessTable.process(1, bundle: oldExtension.path),
+        FakeExtensionProcessTable.process(2, bundle: intended.path),
+      ])
+      let registry = Registry(paths: registered)
+      try await registration(app, registry: registry, processes: recording(table, on: timeline), timeline: timeline)
+        .prepare()
+
+      // Only the process of the other copy goes: the intended copy's own helper is untouched,
+      // which also shows the intended extension, not the app, was the copy kept.
+      XCTAssertEqual(table.signals, [.init(pid: 1, number: SIGTERM)])
+      let events = timeline.events
+      XCTAssertGreaterThan(
+        try XCTUnwrap(events.firstIndex(of: "signal")), try XCTUnwrap(events.lastIndex(of: "registry")),
+        "A process may only be ended after the registry was confirmed to name the intended copy")
+      let state = await registry.state()
+      XCTAssertEqual(state.paths, [intended])
+    }
+  }
+
+  func testPrepareEndsTheHelperOfAnUpdatedAppThatNoLongerHasFiles() async throws {
+    // The in-app updater replaces the app and deletes the old copy, so its helper keeps
+    // running with no path. It goes because it runs another build than the registered one.
+    let app = try makeApp("Current")
+    let intended = app.resolvingSymlinksInPath().standardizedFileURL
+      .appendingPathComponent(LockScreenExtensionRegistration.extensionPath)
+    let old = UUID()
+    let current = UUID()
+    let table = FakeExtensionProcessTable([
+      FakeExtensionProcessTable.deletedProcess(1, image: old),
+      FakeExtensionProcessTable.deletedProcess(2, image: current),
+    ])
+    table.setImages([current], for: LockScreenExtensionProcesses.executable(in: intended))
+    try await registration(app, registry: Registry(paths: [intended]), processes: table.processes).prepare()
+    XCTAssertEqual(table.signals, [.init(pid: 1, number: SIGTERM)])
+  }
+
+  func testFailedRegistrationNeverTerminatesAnything() async throws {
+    let current = try makeApp("Current")
+    let invalid = try makeApp("Invalid", identifier: "unrelated.app")
+    let other = try makeApp("Other")
+    let otherExtension = other.appendingPathComponent(LockScreenExtensionRegistration.extensionPath)
+    let cases: [(String, URL, Registry)] = [
+      ("invalid current bundle", invalid, Registry(paths: [otherExtension])),
+      ("unresolved conflict", current, Registry(paths: [otherExtension], ignoreRemoval: true)),
+      ("cancellation", current, Registry(paths: [], failureFlag: "-a", cancel: true)),
+      ("command failure", current, Registry(paths: [], failureFlag: "-a")),
+    ]
+    for (name, app, registry) in cases {
+      let table = FakeExtensionProcessTable([
+        FakeExtensionProcessTable.process(1, bundle: otherExtension.path)
+      ])
+      do {
+        try await registration(app, registry: registry, processes: table.processes).prepare()
+        XCTFail("\(name) must fail")
+      } catch {}
+      XCTAssertTrue(table.signals.isEmpty, name)
+      XCTAssertEqual(table.lists, 0, "\(name): the process table must not even be read")
+    }
+  }
+
   func testDiscoveryParsesVersionsFlagsSpacesAndUnicodeWithoutDroppingCopies() throws {
     let paths = ["/Applications/WallpaperMachine.app", "/a b/调试 (new).app"].map {
       URL(fileURLWithPath: $0 + "/" + LockScreenExtensionRegistration.extensionPath)
@@ -181,6 +271,13 @@ final class LockScreenExtensionRegistrationTests: XCTestCase {
       output.replacingOccurrences(of: LockScreenConfiguration.extensionIdentifier, with: "unrelated.extension")] {
       XCTAssertThrowsError(try LockScreenExtensionRegistration.parseRegistrations(invalid))
     }
+  }
+
+  private final class Timeline: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [String] = []
+    var events: [String] { lock.withLock { recorded } }
+    func add(_ event: String) { lock.withLock { recorded.append(event) } }
   }
 
   private actor Registry {

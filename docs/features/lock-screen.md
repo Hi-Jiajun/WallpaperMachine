@@ -219,14 +219,51 @@ limit), and changing a native-mode switch or shutting down cancels pending
 preparation before it can publish. Registration alone does not establish playback:
 activation still waits for the matching first-frame acknowledgement.
 
+Once the registry confirms this app's extension (never after a failure or a
+cancellation), activation ends leftover renderer processes. macOS can hand requests to
+an extension process that is already running instead of launching the registered
+binary, so a helper left behind by another copy or by an earlier build stalls
+activation until it is gone. The app lists this user's processes of the extension
+executable, identified by the kernel-reported path, the bundle identifier and the
+process start time, and ends those that cannot serve the registered copy: a process
+running from a different bundle, or one whose executable was replaced in place after the
+process started. A replacement shows either as an executable created or modified after
+the process started (a rebuild) or, for a copy that keeps its source's file dates
+(`ditto`, `cp -p`, Finder over an existing file), as a running build UUID that is not
+among the registered executable's (compared as described below). An unreadable build on
+either side keeps the process.
+
+A process whose files are gone is the state an in-app update leaves behind: the
+updater renames the old app aside and deletes it before the new one opens, so macOS no
+longer reports a path for the old helper, which keeps running until its idle grace
+ends. Such a process is recognised by its name, its owner and the build UUID the kernel
+recorded when it started (`proc_pid_rusage`), which stays readable after the file is
+deleted. It is ended when that UUID is not among the UUIDs (`LC_UUID`, one per
+architecture slice) of the registered extension executable, which the app reads from
+disk. File dates are not used for this: `ditto`, which the updater copies with, carries
+the release's own file dates into the installed copy, and those are normally older than
+the moment the old helper started. A process that runs the same build as the registered
+executable, or whose build or the registered executable's cannot be read, is left alone
+and logged at debug level. A process that has already exited and is only waiting to be
+collected is not listed.
+
+Each ended process gets SIGTERM and up to two seconds to exit; only survivors get
+SIGKILL. Before every signal the app reads the pid again and sends it only if the
+executable path (or, without one, the name) and start time still match, so a reused
+pid is never hit. Only the extension helper that ExtensionKit starts again on demand is
+ended: the app, other app copies and WallpaperAgent are never signalled. Ending a
+process is best effort: a refused signal is logged and activation continues to the
+timeout diagnostics below.
+
 macOS can rediscover a copy after a build or launch, so unregistering it is not a
 permanent exclusion. If a current diagnostic (or a legacy timeout's process-path check)
 identifies another copy, the app restores its owned selections and makes one fresh
-activation attempt with a new revision, repeating registration repair. If that also
-fails, it restores the selections and shows **Retry**; close other running copies
-before retrying. Ordinary two-second refreshes do not rewrite registration. Startup
-logs include the extension bundle path and configuration version, because checking
-only the identifier does not prove which copy macOS loaded.
+activation attempt with a new revision, repeating registration repair and ending
+leftover renderer processes again. If that also fails, it restores the selections and
+shows **Retry**; close other running copies before retrying. Ordinary two-second
+refreshes do not rewrite registration. Startup logs include the extension bundle path
+and configuration version, because checking only the identifier does not prove which
+copy macOS loaded.
 
 ### Idle exit
 
@@ -237,9 +274,12 @@ an already-running extension process to WallpaperAgent even after macOS has
 registered another copy (an update or another build). That process never receives the
 new connection, and WallpaperAgent processes requests one at a time, so each System
 Settings query stalls for about 30 seconds while wallpaper choices, the lock screen
-and the screen saver wait behind it. A process from an older build that lingers can be
-cleared by quitting it (`pkill -x WallpaperMachineExtension`) or logging out; macOS
-starts the registered copy on the next request.
+and the screen saver wait behind it. Activation ends a process from an older build that
+lingers (see [App copies and registration](#app-copies-and-registration)), and macOS
+starts the registered copy on the next request. That includes the helper left by the
+in-app updater. A process that cannot be told apart from the registered build (the same
+build, or one whose build cannot be read) is left alone; quit it with
+`pkill -x WallpaperMachineExtension` or log out.
 
 ## Turning it off
 
@@ -314,5 +354,5 @@ backing, presentation authority, and the screen saver's native-context/WebKit
 surface) are inventoried under *Lock screen* in [coverage](../testing/coverage.md).
 They never mutate LaunchServices or PlugInKit and select no real wallpaper. Real idle
 transitions, password UI, multi-monitor compositor delivery, sleep/wake visuals, live
-registration repair and macOS choosing the intended extension still require an
-authorized desktop check.
+registration repair, ending a genuinely stale extension process and macOS choosing the
+intended extension still require an authorized desktop check.

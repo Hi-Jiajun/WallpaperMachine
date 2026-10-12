@@ -11,18 +11,31 @@ actor LockScreenExtensionRegistration {
 
   private let app: URL
   private let command: @Sendable (URL, [String]) async throws -> String
+  private let processes: LockScreenExtensionProcesses
 
+  /// `processes` defaults to inert: unit tests run inside the real app, where a live default
+  /// would end the developer's installed extension. The app passes `.live`.
   init(
     currentAppURL: URL = Bundle.main.bundleURL,
     command: @escaping @Sendable (URL, [String]) async throws -> String = {
       try await LockScreenExtensionRegistration.runCommand($0, $1)
-    }
+    },
+    processes: LockScreenExtensionProcesses = .inert
   ) {
     app = currentAppURL.resolvingSymlinksInPath().standardizedFileURL
     self.command = command
+    self.processes = processes
   }
 
+  /// Registers this app's extension, then ends helpers that cannot serve it. Ending them is
+  /// only safe once the registry names the intended copy, and never follows a failure.
   func prepare() async throws {
+    let intended = try await reconcile()
+    try Task.checkCancellation()
+    await processes.terminateStale(expected: intended)
+  }
+
+  private func reconcile() async throws -> URL {
     do {
       try Task.checkCancellation()
       let intended = app.appendingPathComponent(Self.extensionPath)
@@ -38,7 +51,7 @@ actor LockScreenExtensionRegistration {
       let others = registered.filter { !LockScreenExtensionDiagnostics.isSameBundle($0, intended) }
       if others.isEmpty, registered.contains(where: {
         LockScreenExtensionDiagnostics.isSameBundle($0, intended)
-      }) { return }
+      }) { return intended }
 
       // Validate every target before making any change. A stale record for a removed app is
       // removable, but a path now occupied by an unrelated bundle must never be unregistered.
@@ -70,7 +83,7 @@ actor LockScreenExtensionRegistration {
         let remaining = try await registrations()
         if !remaining.isEmpty, remaining.allSatisfy({
           LockScreenExtensionDiagnostics.isSameBundle($0, intended)
-        }) { return }
+        }) { return intended }
         if attempt < 4 { try await Task.sleep(for: .milliseconds(200)) }
       }
       throw Failure.conflictingRegistrations
