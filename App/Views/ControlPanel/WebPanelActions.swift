@@ -1142,10 +1142,11 @@ extension WebPanelController {
       (request.body["duplicates"] as? String) == "keepBoth"
       ? WallpaperImportService.DuplicatePolicy.keepBoth : .skip
     guard let window = webView?.window else { return }
+    // A project's own files stand for its folder (project.json, scene.json, scene.pkg).
     let types: [UTType] =
-      [.folder]
+      [.folder, .json]
       + WallpaperImportService.videoExtensions.union(WallpaperImportService.webExtensions)
-      .union(WallpaperImportService.imageExtensions).sorted()
+      .union(WallpaperImportService.imageExtensions).union(["pkg"]).sorted()
       .compactMap { UTType(filenameExtension: $0) }
     guard let urls = try await importPicker.choose(
       for: window, language: appLanguage.effective.tag, allowedContentTypes: types), !stopped

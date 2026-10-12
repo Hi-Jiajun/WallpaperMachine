@@ -435,4 +435,167 @@ final class ImportTests: XCTestCase {
         XCTAssertTrue(failed.importedIDs.isEmpty)
         XCTAssertEqual(failed.failures.count, 1)
     }
+
+    // MARK: Where projects are found
+
+    private func videoProject(at url: URL) throws {
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        try Data("content of \(url.lastPathComponent)".utf8).write(to: url.appendingPathComponent("movie.mp4"))
+        try JSONSerialization.data(withJSONObject: ["title": url.lastPathComponent, "type": "video", "file": "movie.mp4"])
+            .write(to: url.appendingPathComponent("project.json"))
+    }
+
+    private func sceneProject(at url: URL) throws {
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: url.appendingPathComponent("scene.json"))
+        try Data("PKGV".utf8).write(to: url.appendingPathComponent("scene.pkg"))
+        try JSONSerialization.data(withJSONObject: ["title": url.lastPathComponent, "type": "scene", "file": "scene.json"])
+            .write(to: url.appendingPathComponent("project.json"))
+    }
+
+    /// Imports `source` into a library of its own and returns the ids it added, sorted.
+    private func idsImported(from source: URL, file: StaticString = #filePath, line: UInt = #line) async throws -> [String] {
+        let report = try await importer.importItems([source], into: freshLibrary(), duplicates: .skip, progress: { _ in })
+        XCTAssertEqual(report.failures, [], file: file, line: line)
+        return report.importedIDs.sorted()
+    }
+
+    private func freshLibrary() -> URL {
+        root.appendingPathComponent("libraries/\(UUID().uuidString)/Library")
+    }
+
+    private func assertRefused(_ source: URL, file: StaticString = #filePath, line: UInt = #line) async throws {
+        let library = freshLibrary()
+        let report = try await importer.importItems([source], into: library, duplicates: .skip, progress: { _ in })
+        XCTAssertEqual(report.failures.count, 1, "\(source.path)", file: file, line: line)
+        XCTAssertTrue(report.importedIDs.isEmpty, file: file, line: line)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: library.path), [], file: file, line: line)
+    }
+
+    func testAWallpaperEngineInstallInAnyChosenFolderImportsItsProjectsByFolderName() async throws {
+        let steam = root.appendingPathComponent("Steam")
+        let install = steam.appendingPathComponent("steamapps/common/wallpaper_engine")
+        let projects = install.appendingPathComponent("projects")
+        try videoProject(at: projects.appendingPathComponent("myprojects/mine-a"))
+        try videoProject(at: projects.appendingPathComponent("myprojects/mine-b"))
+        try videoProject(at: projects.appendingPathComponent("defaultprojects/default-a"))
+        // Only project folders count: a stray folder and a file beside them are not wallpapers.
+        try FileManager.default.createDirectory(at: projects.appendingPathComponent("myprojects/empty"), withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: projects.appendingPathComponent("myprojects/readme.txt"))
+
+        let everything = ["default-a", "mine-a", "mine-b"]
+        let selections: [(URL, [String])] = [
+            (steam, everything),
+            (steam.appendingPathComponent("steamapps"), everything),
+            (steam.appendingPathComponent("steamapps/common"), everything),
+            (install, everything),
+            (projects, everything),
+            (projects.appendingPathComponent("myprojects"), ["mine-a", "mine-b"]),
+            (projects.appendingPathComponent("defaultprojects"), ["default-a"]),
+        ]
+        for (selection, expected) in selections {
+            let ids = try await idsImported(from: selection)
+            XCTAssertEqual(ids, expected, selection.path)
+        }
+        // The copy is complete, not just the manifest.
+        let library = freshLibrary()
+        _ = try await importer.importItems([steam], into: library, duplicates: .skip, progress: { _ in })
+        XCTAssertEqual(try String(contentsOf: library.appendingPathComponent("default-a/movie.mp4"), encoding: .utf8),
+                       "content of default-a")
+    }
+
+    func testACopiedWallpaperEngineFolderImportsFromItselfOrItsParent() async throws {
+        let copy = root.appendingPathComponent("From my PC")
+        let folder = copy.appendingPathComponent("Wallpaper Engine")
+        try videoProject(at: folder.appendingPathComponent("projects/myprojects/copied-1"))
+        try videoProject(at: folder.appendingPathComponent("projects/defaultprojects/copied-2"))
+        for selection in [copy, folder, folder.appendingPathComponent("projects")] {
+            let ids = try await idsImported(from: selection)
+            XCTAssertEqual(ids, ["copied-1", "copied-2"], selection.path)
+        }
+    }
+
+    func testASteamLibraryImportsItsWorkshopItemsTogetherWithWallpaperEngineProjects() async throws {
+        let steam = root.appendingPathComponent("Steam/steamapps")
+        try videoProject(at: steam.appendingPathComponent("workshop/content/431960/555"))
+        try videoProject(at: steam.appendingPathComponent("common/wallpaper_engine/projects/myprojects/mine"))
+        let ids = try await idsImported(from: root.appendingPathComponent("Steam"))
+        XCTAssertEqual(ids, ["555", "mine"])
+    }
+
+    func testAProjectsFolderLinkedFromOutsideTheChosenFolderIsNotFollowed() async throws {
+        let elsewhere = root.appendingPathComponent("Elsewhere")
+        try videoProject(at: elsewhere.appendingPathComponent("projects/myprojects/outside"))
+        // The same layout inside the chosen folder is imported.
+        try videoProject(at: root.appendingPathComponent("Inside/Wallpaper Engine/projects/myprojects/inside"))
+        let found = try await idsImported(from: root.appendingPathComponent("Inside"))
+        XCTAssertEqual(found, ["inside"])
+        let pick = root.appendingPathComponent("Pick/Wallpaper Engine")
+        try FileManager.default.createDirectory(at: pick, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: pick.appendingPathComponent("projects"),
+                                                   withDestinationURL: elsewhere.appendingPathComponent("projects"))
+        try await assertRefused(root.appendingPathComponent("Pick"))
+        try await assertRefused(pick)
+    }
+
+    func testSelectingSceneOrProjectFileImportsItsFolder() async throws {
+        let scene = root.appendingPathComponent("sources/scene-100")
+        try sceneProject(at: scene)
+        for name in ["project.json", "scene.json", "scene.pkg"] {
+            let library = freshLibrary()
+            let report = try await importer.importItems(
+                [scene.appendingPathComponent(name)], into: library, duplicates: .skip, progress: { _ in })
+            XCTAssertEqual(report.importedIDs, ["scene-100"], "\(name): \(report.failures)")
+            XCTAssertEqual(try Data(contentsOf: library.appendingPathComponent("scene-100/scene.pkg")), Data("PKGV".utf8))
+        }
+        // A package's extension is matched without regard to case.
+        let video = root.appendingPathComponent("sources/video-200")
+        try videoProject(at: video)
+        try Data("PKGV".utf8).write(to: video.appendingPathComponent("extra.PKG"))
+        let ids = try await idsImported(from: video.appendingPathComponent("extra.PKG"))
+        XCTAssertEqual(ids, ["video-200"])
+        // The folder and one of its files chosen together are one project.
+        let report = try await importer.importItems(
+            [scene, scene.appendingPathComponent("scene.pkg")], into: freshLibrary(), duplicates: .skip, progress: { _ in })
+        XCTAssertEqual(report.importedIDs, ["scene-100"])
+        XCTAssertEqual(report.failures, [])
+    }
+
+    func testProjectFileWithoutSiblingManifestIsStillRefused() async throws {
+        let loose = root.appendingPathComponent("loose")
+        try FileManager.default.createDirectory(at: loose, withIntermediateDirectories: true)
+        for name in ["scene.json", "scene.pkg", "data.pkg"] {
+            try Data("x".utf8).write(to: loose.appendingPathComponent(name))
+            try await assertRefused(loose.appendingPathComponent(name))
+        }
+        // Any other JSON file next to a manifest is not a project file either.
+        let project = root.appendingPathComponent("sources/with-extras")
+        try videoProject(at: project)
+        try Data("{}".utf8).write(to: project.appendingPathComponent("notes.json"))
+        try await assertRefused(project.appendingPathComponent("notes.json"))
+    }
+
+    func testSymlinkedProjectFileOrParentIsRejected() async throws {
+        let real = root.appendingPathComponent("sources/real")
+        try sceneProject(at: real)
+        let links = root.appendingPathComponent("links")
+        try FileManager.default.createDirectory(at: links, withIntermediateDirectories: true)
+        // The folder is a link to a project: choosing a file inside it is as refused as choosing the link.
+        try FileManager.default.createSymbolicLink(at: links.appendingPathComponent("folder-link"), withDestinationURL: real)
+        try await assertRefused(links.appendingPathComponent("folder-link/project.json"))
+        try await assertRefused(links.appendingPathComponent("folder-link/scene.pkg"))
+        // The chosen file itself is a link.
+        let holder = links.appendingPathComponent("holder")
+        try FileManager.default.createDirectory(at: holder, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: holder.appendingPathComponent("project.json"),
+                                                   withDestinationURL: real.appendingPathComponent("project.json"))
+        try await assertRefused(holder.appendingPathComponent("project.json"))
+        // The manifest beside a package is a link.
+        let sibling = links.appendingPathComponent("sibling")
+        try FileManager.default.createDirectory(at: sibling, withIntermediateDirectories: true)
+        try Data("PKGV".utf8).write(to: sibling.appendingPathComponent("scene.pkg"))
+        try FileManager.default.createSymbolicLink(at: sibling.appendingPathComponent("project.json"),
+                                                   withDestinationURL: real.appendingPathComponent("project.json"))
+        try await assertRefused(sibling.appendingPathComponent("scene.pkg"))
+    }
 }

@@ -551,17 +551,31 @@ actor WallpaperImportService {
         }
     }
 
+    /// Folders, relative to a chosen one, whose children can be projects: Workshop downloads in a
+    /// Steam library, and the `projects` folders of a Wallpaper Engine install, which a user may
+    /// pick as the library, as `steamapps`, `common`, the install itself, or a copy of it from
+    /// another computer.
+    private static let projectRoots: [String] = {
+        let workshop = ["", "steamapps/workshop/content/431960", "workshop/content/431960", "content/431960", "431960"]
+        let installs = ["steamapps/common/wallpaper_engine", "common/wallpaper_engine", "wallpaper_engine", "Wallpaper Engine", ""]
+        let projectFolders = ["projects/myprojects", "projects/defaultprojects"]
+        let installed = installs.flatMap { install in
+            projectFolders.map { folder in install.isEmpty ? folder : install + "/" + folder }
+        }
+        // The projects folder itself, or one of its two halves.
+        return workshop + installed + ["myprojects", "defaultprojects"]
+    }()
+
     private func discover(_ source: URL) throws -> [URL] {
         let fm = FileManager.default
         let values = try source.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
         guard values.isSymbolicLink != true else {
             throw ImportError(message: String(localized: "Symbolic links are not imported. Choose the original folder or file instead."))
         }
-        guard values.isDirectory == true else { return [source] }
+        guard values.isDirectory == true else { return [projectFolder(ofFile: source) ?? source] }
         if fm.fileExists(atPath: source.appendingPathComponent("project.json").path) { return [source] }
-        let relativeRoots = ["", "steamapps/workshop/content/431960", "workshop/content/431960", "content/431960", "431960"]
         var projects: [URL] = []
-        for relative in relativeRoots {
+        for relative in Self.projectRoots {
             try Task.checkCancellation()
             let root = relative.isEmpty ? source : source.appendingPathComponent(relative, isDirectory: true)
             guard fm.fileExists(atPath: root.path) else { continue }
@@ -573,9 +587,23 @@ actor WallpaperImportService {
             }
         }
         guard !projects.isEmpty else {
-            throw ImportError(message: String(localized: "No project.json found. Choose a wallpaper project, a folder containing projects, or a Steam library with steamapps/workshop/content/431960."))
+            throw ImportError(message: String(localized: "No project.json found. Choose a wallpaper project, a folder containing projects, a Steam library or a Wallpaper Engine folder."))
         }
         return projects.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+    }
+
+    /// The project a chosen file belongs to: its own folder, when the file is the manifest, the
+    /// scene description or a package, and the folder holds a project manifest. Links are never
+    /// followed, neither the file nor the folder, so this is as strict as choosing the folder.
+    private func projectFolder(ofFile file: URL) -> URL? {
+        let name = file.lastPathComponent.lowercased()
+        guard name == "project.json" || name == "scene.json" || file.pathExtension.lowercased() == "pkg",
+              let metadata = try? downloadMetadata(at: file), metadata.st_mode & S_IFMT == S_IFREG else { return nil }
+        let folder = URL(fileURLWithPath: file.deletingLastPathComponent().path, isDirectory: true)
+        guard let folderMetadata = try? downloadMetadata(at: folder), folderMetadata.st_mode & S_IFMT == S_IFDIR,
+              let manifest = try? downloadMetadata(at: folder.appendingPathComponent("project.json")),
+              manifest.st_mode & S_IFMT == S_IFREG else { return nil }
+        return folder
     }
 
     private func validateProject(at root: URL, requireNonemptyContent: Bool = false) throws {

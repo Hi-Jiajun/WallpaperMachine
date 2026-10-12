@@ -36,6 +36,8 @@ was run.
 ## Library and import
 
 - [ ] Open and cancel Import.
+- [ ] In Import's picker, a project's `scene.pkg` and `project.json` and a
+      Wallpaper Engine folder are all selectable, and each imports its project(s).
 - [ ] Search for a nonexistent local title, clear the search, and confirm the
       collection returns.
 - [ ] Select a wallpaper and refresh: the selection survives.

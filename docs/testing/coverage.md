@@ -242,7 +242,11 @@ on [manual-smoke.md](manual-smoke.md).
   bad sibling not blocking a good one; downloaded projects move whole, an update
   replaces the installed tree, and Workshop presets are assembled on a base that
   was downloaded with them, is installed, or sits beside them in a Steam library,
-  and are rejected without a usable base. Fetching a preset's base in the same
+  and are rejected without a usable base. Where a chosen folder is searched (a
+  Steam library, `steamapps`, a Wallpaper Engine install or a copy of it, its
+  `projects` folder and either half), a chosen `project.json`, `scene.json` or
+  `.pkg` standing for its folder, and links refused in the file, its folder and
+  the manifest beside it, are covered. Fetching a preset's base in the same
   SteamCMD run is in `DownloaderLifecycleTests`.
 - `ImageImportTests` import real ImageIO pictures as the still `web` project with
   the original's bytes kept and the file name kept out of the page, the fit

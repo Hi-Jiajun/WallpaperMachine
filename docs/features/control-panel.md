@@ -395,23 +395,39 @@ into the library and leave the originals untouched, with a duplicate policy of
 never cancels work: `LibraryImportStore` runs the import for the app, not for the
 page. Quitting cancels and awaits an active local import.
 
-An import takes Wallpaper Engine project folders, a Steam library, videos (`mp4`,
-`m4v`, `mov`, `webm`, `mkv`, `avi`), HTML files and pictures (`jpg`, `jpeg`,
-`png`, `gif`, `webp`, `heic`, `heif`, `tif`, `tiff`, `bmp`, `avif`, at most 512
-MB). A picture becomes a still `web` wallpaper with the id `image-<file name>`,
-packaged the way pixiv pages are (`StillImageWallpaper`; see
-[pixiv](pixiv.md#saving-a-page)): the original kept as `image.<ext>`, a 512 px
-`preview.jpg`, and a `display.jpg` shown instead when the format is not one a web
-view shows as it is (`jpg`, `png`, `gif`, `webp`) or the long side exceeds 8,192
-px. Its **Image fit** and **Background color** labels are translated like pixiv's.
-A picture ImageIO cannot measure or scale is reported and not imported. A Workshop
-preset folder is imported as one self-contained wallpaper built on its base, found
-next to it (a Steam library) or already in the library; see
+An import takes Wallpaper Engine project folders, a Steam library, a Wallpaper
+Engine folder, a project's own files, videos (`mp4`, `m4v`, `mov`, `webm`, `mkv`,
+`avi`), HTML files and pictures (`jpg`, `jpeg`, `png`, `gif`, `webp`, `heic`,
+`heif`, `tif`, `tiff`, `bmp`, `avif`, at most 512 MB). A picture becomes a still
+`web` wallpaper with the id `image-<file name>`, packaged the way pixiv pages are
+(`StillImageWallpaper`; see [pixiv](pixiv.md#saving-a-page)): the original kept as
+`image.<ext>`, a 512 px `preview.jpg`, and a `display.jpg` shown instead when the
+format is not one a web view shows as it is (`jpg`, `png`, `gif`, `webp`) or the
+long side exceeds 8,192 px. Its **Image fit** and **Background color** labels are
+translated like pixiv's. A picture ImageIO cannot measure or scale is reported and
+not imported. A Workshop preset folder is imported as one self-contained wallpaper
+built on its base, found next to it (a Steam library) or already in the library; see
 [Workshop presets](workshop-downloads.md#workshop-presets). Files dropped on the
 Dock icon, or opened with WallpaperMachine from Finder (`CFBundleDocumentTypes` in
 `Info.plist`, rank Alternate, so the app never becomes a default), are imported the
 same way with **Skip duplicates**, and the window opens on Installed with the
 import in the activity bar.
+
+A chosen folder is searched for projects where Steam and Wallpaper Engine keep
+them, so the right subfolder need not be found first. It may itself be a project
+(it holds a `project.json`) or hold project folders; otherwise these folders
+inside it are read: `steamapps/workshop/content/431960`, and the
+`projects/myprojects` and `projects/defaultprojects` of a Wallpaper Engine
+install. The pick can be the Steam library, `steamapps`, `steamapps/common`, the
+install (`wallpaper_engine`), a copy of it from another computer (`Wallpaper
+Engine`, or the folder holding that copy), its `projects` folder, or either half.
+Each project keeps its folder name as its library id. Choosing a project's own
+`project.json`, `scene.json` or `.pkg` file imports the folder that holds it when
+that folder has a `project.json`; any other file is handled as before. Links are
+never followed: not a chosen file, not its folder, not the manifest beside it,
+and a searched folder that resolves outside the chosen one is ignored. A large
+`defaultprojects` folder imports every project in it, each failure listed
+separately in the report.
 
 A local import's temporary directory holds an ownership marker and a live file
 lock. Startup reclaims abandoned marked directories; an unmarked legacy directory
