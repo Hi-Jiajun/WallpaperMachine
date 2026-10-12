@@ -315,6 +315,12 @@ setter through optional private CoreGraphics and HIServices symbols, falling bac
   first refresh and the retry of a failed one never wait. A screen without a display
   ID leaving is an ordinary change. Whether real hot-plugs and wakes produce such blips, and
   whether 0.8 s covers them, has not been measured on a desktop.
+  The native video host draws on the screens AppKit lists, so a wallpaper the bridge offers for
+  a display ID that list lacks (the bridge reads CoreGraphics' active displays, which can differ
+  for a hardware mirror set, an AirPlay or Sidecar screen or a closed lid) is not shown and is
+  logged once; nothing is retried, and the pass that finds the display listed opens it. A
+  screen without a display number is never drawn on by the Swift hosts. See
+  [display layouts](features/display-layouts.md#mirror-sets-airplay-and-a-closed-lid).
   The Space monitor rereads Spaces only when `DisplayConfiguration` moved, and the presentation
   policy re-evaluates only when a screen frame or working area moved. A refresh reopens a scene
   only when its saved configuration changed: the frame-rate ceiling, transient mute, pause and

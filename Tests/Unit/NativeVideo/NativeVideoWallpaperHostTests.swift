@@ -1113,6 +1113,181 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         XCTAssertEqual(host.activeDisplayIDs, [7], "and the failed trailing pass closes nothing")
     }
 
+    // MARK: A display the host cannot see
+
+    /// The bridge reads CoreGraphics' active displays and this host reads
+    /// AppKit's screens. Where they disagree (a mirror set, an AirPlay screen, a
+    /// closed lid) the offer for the missing display used to vanish without a
+    /// trace, which left a wallpaper that never appeared and nothing to look at.
+    func testAWantedDisplayTheHostCannotSeeIsReportedNotSilentlyDropped() async {
+        let recorder = Recorder()
+        let host = makeHost(wallpapers: [], recorder: recorder)
+        defer { host.shutdown() }
+        screenFrames = screenFrames.filter { $0.id == 7 }
+
+        await host.apply([wallpaper(displayID: 7), wallpaper(displayID: 9, id: "301")])
+
+        XCTAssertEqual(host.activeDisplayIDs, [7], "the display it can see plays")
+        XCTAssertNil(surfacesMade[9], "no window is built for a screen that is not there")
+        XCTAssertEqual(host.offeredButUnseenDisplayIDsForTest, [9])
+        XCTAssertEqual(host.unseenWarningCountForTest, 1)
+        XCTAssertTrue(recorder.rejected.isEmpty, "a display the host cannot see is not a verdict on the clip")
+        XCTAssertEqual(recorder.admissionProbes.count, 1, "and its file is not read for nothing")
+    }
+
+    func testTheUnseenDisplayIsOpenedOnceItAppears() async {
+        let recorder = Recorder()
+        let host = makeHost(wallpapers: [], recorder: recorder)
+        defer { host.shutdown() }
+        let both = screenFrames
+        screenFrames = both.filter { $0.id == 7 }
+        let offer = [wallpaper(displayID: 7), wallpaper(displayID: 9, id: "301")]
+        await host.apply(offer)
+        XCTAssertEqual(host.offeredButUnseenDisplayIDsForTest, [9])
+
+        screenFrames = both
+        await host.apply(offer)
+
+        XCTAssertEqual(host.activeDisplayIDs, [7, 9])
+        XCTAssertTrue(host.offeredButUnseenDisplayIDsForTest.isEmpty)
+        XCTAssertTrue(recorder.rejected.isEmpty)
+    }
+
+    func testTheWarningIsNotRepeatedEveryPass() async {
+        let recorder = Recorder()
+        let host = makeHost(wallpapers: [], recorder: recorder)
+        defer { host.shutdown() }
+        screenFrames = screenFrames.filter { $0.id == 7 }
+        let offer = [wallpaper(displayID: 7), wallpaper(displayID: 9, id: "301")]
+
+        for _ in 0..<5 { await host.apply(offer) }
+
+        XCTAssertEqual(host.offeredButUnseenDisplayIDsForTest, [9], "the disagreement is still on record")
+        XCTAssertEqual(host.unseenWarningCountForTest, 1, "and said once, not on every snapshot")
+    }
+
+    func testADisagreementThatComesBackOrChangesIsReportedAgain() async {
+        let recorder = Recorder()
+        let host = makeHost(wallpapers: [], recorder: recorder)
+        defer { host.shutdown() }
+        let both = screenFrames
+        let onlySeven = both.filter { $0.id == 7 }
+        let nine = wallpaper(displayID: 9, id: "301")
+
+        screenFrames = onlySeven
+        await host.apply([nine])
+        XCTAssertEqual(host.unseenWarningCountForTest, 1)
+
+        // Another wallpaper offered for the same missing display is a new fact.
+        await host.apply([wallpaper(displayID: 9, id: "302", admissionKey: 2)])
+        XCTAssertEqual(host.unseenWarningCountForTest, 2)
+
+        // The bridge stops offering it, and offers it again later.
+        await host.apply([])
+        XCTAssertTrue(host.offeredButUnseenDisplayIDsForTest.isEmpty)
+        await host.apply([nine])
+        XCTAssertEqual(host.unseenWarningCountForTest, 3, "an offer that went away and returned is news again")
+
+        // The display shows up, plays, and goes missing again.
+        screenFrames = both
+        await host.apply([nine])
+        XCTAssertEqual(host.activeDisplayIDs, [9])
+        XCTAssertEqual(host.unseenWarningCountForTest, 3)
+        screenFrames = onlySeven
+        await host.apply([nine])
+        XCTAssertEqual(host.unseenWarningCountForTest, 4, "a disagreement that comes back is not already known")
+    }
+
+    func testADisplayMissingForAMomentIsClosedAndOpensAgainWhenItReturns() async throws {
+        // A display that drops out of the screen list for a moment (the refresh
+        // that would follow is held back by the settle) is a disagreement, not a
+        // verdict: its window goes and the same offer brings it back. What asks
+        // for that offer again is the next test.
+        let recorder = Recorder()
+        let host = makeHost(wallpapers: [], recorder: recorder)
+        defer { host.shutdown() }
+        let both = screenFrames
+        let offer = [wallpaper(displayID: 7), wallpaper(displayID: 9, id: "301")]
+        await host.apply(offer)
+        let first = try XCTUnwrap(surfacesMade[9])
+
+        screenFrames = both.filter { $0.id == 7 }
+        await host.apply(offer)
+        XCTAssertTrue(first.isStopped, "there is nothing to draw on")
+        XCTAssertEqual(host.activeDisplayIDs, [7])
+        XCTAssertEqual(host.offeredButUnseenDisplayIDsForTest, [9])
+        XCTAssertTrue(recorder.rejected.isEmpty)
+
+        screenFrames = both
+        await host.apply(offer)
+        XCTAssertEqual(host.activeDisplayIDs, [7, 9])
+        XCTAssertFalse(try XCTUnwrap(surfacesMade[9]).isStopped)
+        XCTAssertTrue(host.offeredButUnseenDisplayIDsForTest.isEmpty)
+        XCTAssertTrue(recorder.rejected.isEmpty)
+    }
+
+    /// The host and the refresh filter as the app wires them. A snapshot applied while a
+    /// display is missing closes its window, and a display that is back before the settle ends
+    /// causes no refresh, so no snapshot follows. The coalescer's announcement of the return is
+    /// what brings the window back; without it the display stays dark until some unrelated
+    /// snapshot arrives.
+    func testADisplayThatReturnsInsideTheSettleHasItsWindowBackWithoutARefresh() async throws {
+        let recorder = Recorder()
+        let offer = [wallpaper(displayID: 7), wallpaper(displayID: 9, id: "301")]
+        let host = makeHost(wallpapers: offer, recorder: recorder)
+        defer { host.shutdown() }
+        let both = screenFrames
+        var refreshes = 0
+        let settleTimer = ManualSleeper()
+        let coalescer = DisplayRefreshCoalescer(
+            configuration: { [unowned self] in self.displayConfiguration() }, sleep: settleTimer.closure,
+            displayReturned: { host.reconcile() }
+        ) {
+            refreshes += 1
+            return true
+        }
+        defer { coalescer.cancel() }
+        coalescer.request()
+        await coalescer.waitUntilIdleForTest()
+        await host.apply(offer)
+        XCTAssertEqual(host.activeDisplayIDs, [7, 9])
+
+        screenFrames = both.filter { $0.id == 7 }
+        coalescer.request()
+        await settleTimer.waitUntilPending()
+        // Any snapshot applied inside the wait runs a pass over the shorter list.
+        host.reconcile()
+        await settle(until: { host.activeDisplayIDs == [7] })
+        XCTAssertEqual(host.offeredButUnseenDisplayIDsForTest, [9])
+
+        screenFrames = both
+        coalescer.request()
+        await settle(until: { host.activeDisplayIDs == [7, 9] })
+
+        XCTAssertEqual(refreshes, 1, "the display never stayed away long enough to be refreshed for")
+        XCTAssertTrue(host.offeredButUnseenDisplayIDsForTest.isEmpty)
+        XCTAssertFalse(try XCTUnwrap(surfacesMade[9]).isStopped)
+        XCTAssertTrue(recorder.rejected.isEmpty)
+    }
+
+    private func displayConfiguration() -> DisplayConfiguration {
+        DisplayConfiguration(displays: screenFrames.map {
+            .init(id: $0.id, frame: $0.frame, scale: 2, refreshRate: 60)
+        })
+    }
+
+    func testShuttingDownForgetsWhatWasUnseen() async {
+        let recorder = Recorder()
+        let host = makeHost(wallpapers: [], recorder: recorder)
+        screenFrames = screenFrames.filter { $0.id == 7 }
+        await host.apply([wallpaper(displayID: 9, id: "301")])
+        XCTAssertEqual(host.offeredButUnseenDisplayIDsForTest, [9])
+
+        host.shutdown()
+
+        XCTAssertTrue(host.offeredButUnseenDisplayIDsForTest.isEmpty)
+    }
+
     // MARK: First frame
 
     /// Lets work the host started on its own turn reach `condition`, without

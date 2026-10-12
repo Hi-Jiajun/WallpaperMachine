@@ -605,6 +605,18 @@ asked, the clip is shown as it was offered and the next pass corrects it. **In u
 now** is unaffected: an abandoned open is only a line in the diagnostics log
 (`superseded while its metadata was read`).
 
+A video the bridge offers for a display that the app's own screen list does not contain
+gets no window, since there is no screen to put it on. The engine reads the active displays
+from CoreGraphics and the app reads AppKit's screens, and a hardware mirror set, an AirPlay
+or Sidecar screen or a closed lid can make the two differ. That used to leave the display
+without a wallpaper and without a word in the log; the diagnostics log now says once, per
+wallpaper and display, that it is offered for a display the host cannot see and lists the
+screens it does see. The video opens by itself once the lists agree, because the bridge
+offers it again and a real screen change refreshes the displays. A display that is only
+missing for a moment is logged the same way. Whether real mirror sets, AirPlay and a closed
+lid produce the disagreement has not been checked on a desktop
+([display layouts](display-layouts.md#mirror-sets-airplay-and-a-closed-lid)).
+
 When the clip's audio output cannot start (no output device, or one that will not
 start), AVFoundation fails the whole clip, muted or not, and reports only
 `AVErrorUnknown`. Native playback then rebuilds the clip from its video track alone

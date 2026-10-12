@@ -537,6 +537,19 @@ engine to redo, and when.
   and nothing else moved waits (0.8 s, fixed, never extended); everything else
   still refreshes at once, so a real unplug refreshes exactly once and a
   changed remaining display is never left stale.
+- **A wanted display the native video host cannot see is said so, not dropped** —
+  `NativeVideoWallpaperHostTests` (`testAWantedDisplayTheHostCannotSeeIsReportedNotSilentlyDropped`,
+  `testTheUnseenDisplayIsOpenedOnceItAppears`, `testTheWarningIsNotRepeatedEveryPass`,
+  `testADisagreementThatComesBackOrChangesIsReportedAgain`,
+  `testADisplayThatReturnsInsideTheSettleHasItsWindowBackWithoutARefresh`) and the mirror,
+  clamshell and unnumbered-screen fixtures in `DisplayRefreshCoalescerTests`. The bridge
+  reads CoreGraphics' displays and the host reads AppKit's screens, so an offer for a display the host's list
+  lacks was skipped with no log line, which looked like a wallpaper that never appears. The
+  host still draws nothing there and adds no timer, but it logs the disagreement once and
+  opens the display as soon as the lists agree. That includes a display that was missing
+  only inside the refresh filter's settle, which causes no refresh and so no snapshot: the
+  filter announces the return and the host reconciles, which the host test drives through a
+  real `DisplayRefreshCoalescer`.
 - **The lock state is not asked per evaluation** — `WallpaperPresentationPolicyTests.testTheLockStateIsAskedOnlyWhenItCanHaveChanged`,
   `.testASessionLockedBeforeStartIsSuspendedFromTheStart`,
   `.testWakingDisplaysAskForTheLockStateAgain`,

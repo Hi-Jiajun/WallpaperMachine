@@ -150,6 +150,27 @@ final class NativeVideoWallpaperHost {
 
     var activeDisplayIDs: Set<UInt32> { Set(surfaces.keys) }
     var isEmpty: Bool { surfaces.isEmpty }
+    /// Displays the bridge offered a wallpaper for in the last pass that this
+    /// host's screen list does not contain. The bridge reads the active displays
+    /// from CoreGraphics and this host reads AppKit's screens, and the two can
+    /// disagree about a hardware mirror set, an AirPlay or Sidecar screen, or a
+    /// built-in display whose lid is closed. Nothing can be drawn on a display
+    /// that is not in this list, so these offers are left alone until the lists
+    /// agree. Empty when every offered display is visible here. Only the tests
+    /// read it: the host retries nothing, and the pass that finds the display
+    /// listed opens it.
+    private(set) var offeredButUnseenDisplayIDsForTest: Set<UInt32> = []
+    /// An offer the host has already said it cannot place.
+    private struct UnseenOffer: Hashable {
+        let displayID: UInt32
+        let wallpaperID: String
+    }
+    /// The unseen offers that were logged, so a display
+    /// that stays unseen is said once and not on every snapshot. An entry goes
+    /// when its display shows up or the bridge stops offering the wallpaper
+    /// there, so the same disagreement coming back is news again.
+    private var warnedUnseen: Set<UnseenOffer> = []
+    private(set) var unseenWarningCountForTest = 0
 
     /// Whether this display's player is running. The observable the suspension
     /// rules are argued from: a decision delivered is not a player stopped.
@@ -266,9 +287,15 @@ final class NativeVideoWallpaperHost {
         let generation = applyGeneration
         let screenIDs = Set(screens().map { $0.id })
         var wanted: [UInt32: BridgeNativeVideoWallpaper] = [:]
-        for wallpaper in wallpapers where screenIDs.contains(wallpaper.displayId) {
-            wanted[wallpaper.displayId] = wallpaper
+        var unseen: [BridgeNativeVideoWallpaper] = []
+        for wallpaper in wallpapers {
+            if screenIDs.contains(wallpaper.displayId) {
+                wanted[wallpaper.displayId] = wallpaper
+            } else {
+                unseen.append(wallpaper)
+            }
         }
+        noteUnseen(unseen, screenIDs: screenIDs)
         for (displayID, var state) in states where wanted[displayID] == nil {
             state.phase = .closed
             onStateChanged?(state)
@@ -326,6 +353,30 @@ final class NativeVideoWallpaperHost {
         // describe a list that has been replaced.
         guard generation == applyGeneration else { return }
         notifySurfacesChanged()
+    }
+
+    /// Records the offers for displays this host cannot see, and says so the
+    /// first time each one is met.
+    ///
+    /// Such an offer used to be dropped without a word: the wallpaper never
+    /// appeared and nothing in the log said why. It is still not drawn, since
+    /// there is no screen to put a window on, but the cause is now on record. No
+    /// retry is scheduled. The bridge re-offers the wallpaper on its next
+    /// snapshot and a real screen change refreshes the bridge, so the display is
+    /// opened by the pass that finds it in the list.
+    private func noteUnseen(_ unseen: [BridgeNativeVideoWallpaper], screenIDs: Set<UInt32>) {
+        offeredButUnseenDisplayIDsForTest = Set(unseen.map(\.displayId))
+        let current = Set(unseen.map { UnseenOffer(displayID: $0.displayId, wallpaperID: $0.wallpaperId) })
+        warnedUnseen.formIntersection(current)
+        let listed = screenIDs.sorted().map(String.init).joined(separator: ", ")
+        for offer in current.sorted(by: { ($0.displayID, $0.wallpaperID) < ($1.displayID, $1.wallpaperID) })
+        where warnedUnseen.insert(offer).inserted {
+            unseenWarningCountForTest += 1
+            AppLog.warn(
+                "native video wallpaper \(offer.wallpaperID) is offered for display \(offer.displayID), "
+                    + "which this host cannot see (AppKit screens: \(listed.isEmpty ? "none" : listed)); "
+                    + "nothing is shown there until the screen lists agree")
+        }
     }
 
     private func currentFrame(of displayID: UInt32) -> NSRect? {
@@ -917,6 +968,8 @@ final class NativeVideoWallpaperHost {
         admissionCache.removeAll()
         admissionCacheOrder.removeAll()
         outstandingProbes.removeAll()
+        offeredButUnseenDisplayIDsForTest.removeAll()
+        warnedUnseen.removeAll()
     }
 
     /// Answers a desktop poster request from the player that is already

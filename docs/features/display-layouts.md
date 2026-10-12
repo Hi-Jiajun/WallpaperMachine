@@ -79,6 +79,34 @@ ID and retains local records with the same ID; ordinary display names are labels
 not filesystem paths or authorization to access content. Deleted wallpaper
 references remain visible instead of being silently pruned into a partial layout.
 
+## Mirror sets, AirPlay and a closed lid
+
+The renderer reads the active displays from CoreGraphics, while the native video
+backend and the web host draw on the screens AppKit lists, matched by display ID. A
+hardware mirror set, an AirPlay or Sidecar screen and a built-in display whose lid
+is closed are the shapes where the two lists can differ. The app does not reconcile
+them, and promises only this:
+
+- A hardware mirror set follows the member macOS reports for it, the set's primary as
+  macOS names it. The app does not choose another member or draw on the others.
+- A closed lid follows the same rule: the `primary` selector means whichever display
+  macOS then reports as the main one, and a wallpaper assigned to the built-in display
+  waits there until that display is listed again.
+- A screen AppKit lists without a display number is not drawn on by the Swift hosts,
+  because there is no ID to match it to a wallpaper. It is not mistaken for a display
+  that left: its coming and going refreshes the displays like any other change.
+- When the bridge offers a native video wallpaper for a display that AppKit does not
+  list, the wallpaper is not shown there, and the log says so once per wallpaper and
+  display (`native video wallpaper … is offered for display …, which this host cannot
+  see`). The host adds no retry: the bridge offers the wallpaper again on its next
+  snapshot, and a real screen change refreshes the displays, so the display opens as
+  soon as the lists agree. A display that is only missing for a moment is logged the
+  same way, and that is not a failure. The web host has the same filter and does not
+  log it yet.
+
+None of this has been checked against real mirror sets, AirPlay or a closed lid; the
+tests prove what the host and the refresh do with the readings they are given.
+
 ## Spaces boundary
 
 These are per-display layouts. [Follow desktop Space](spaces.md) separately keeps

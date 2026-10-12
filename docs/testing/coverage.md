@@ -178,7 +178,13 @@ on the desktop ([manual-smoke.md](manual-smoke.md)).
   that returns costs no bridge work and is announced once to the hosts (also when it
   returns as the wait ends), one that stays away refreshes once and is not announced, and a
   display added, swapped, moved or promoted to main, a screen without an ID, the
-  first reading and a retry never wait. Not covered: whether real hot-plugs and
+  first reading and a retry never wait. Fixtures for the shapes that make AppKit's
+  list and the bridge's differ: a mirror set collapsing two screens into one (the
+  survivor unchanged waits and refreshes once, the other member surviving at the
+  origin refreshes at once), a closed lid leaving the external display first and at
+  the origin, and unnumbered screens coming and going; each refreshes once for its
+  shape and not again for the same reading. They pin the coalescer's reading of
+  those shapes, not what macOS really lists. Not covered: whether real hot-plugs and
   wakes blip, and whether 0.8 s is long enough. `DisplayTitleResolverTests` —
   localized display names replace the renderer's label; `DisplayGeometry` finds a
   screen by id or by the title's live id, clamps its shape and has none for an
@@ -685,6 +691,19 @@ need an authorized runtime check
   the settings it would have put over the newer pass's. A display that vanished or
   moved while a file was read gets no surface or the frame it has now, and the next
   pass opens it from the kept verdict without reading the file again.
+- A display the bridge offers that the host's screen list lacks, in the host suite with the
+  list edited between passes: the offer for the missing display builds no window and reads
+  no file, is not refused (so the bridge keeps offering it), and is recorded in
+  `offeredButUnseenDisplayIDsForTest`; the display that is listed still plays. The warning is
+  logged once per wallpaper and display however many snapshots follow (read through a
+  counter, since the log is global), again for a different wallpaper offered there, for an
+  offer that went away and came back, and for a display that was listed in between and
+  went missing again. A listed display that drops out is closed and the same offer opens it
+  when it returns, and a display that returns inside the refresh filter's settle (no refresh,
+  no snapshot) is opened again by the filter's announcement, driven through a real
+  `DisplayRefreshCoalescer` rather than a hand-called `apply`; shutting down forgets the
+  set. Not covered: whether a real mirror set, AirPlay screen or closed lid makes the lists
+  differ.
 - `NativeVideoLayoutTests` — where the picture goes under Fit, Fill, Stretch,
   Original size and a scale factor: the rectangles equal the numbers the
   renderer's own `ComputeWallpaperScalingLayout` gives (Original size is one video

@@ -366,6 +366,127 @@ final class DisplayRefreshCoalescerTests: XCTestCase {
         XCTAssertEqual(returns, 0, "a coalescer that was stopped announces nothing")
     }
 
+    // MARK: Mirror sets, a closed lid and a screen without an ID
+
+    /// AppKit lists a hardware mirror set as one screen, a closed lid takes the
+    /// built-in display out of the list, and a screen can come without a display
+    /// number. The coalescer reads these as any other change in the list: one
+    /// refresh for the shape, and none for the same reading again.
+    private static let builtIn = DisplayConfiguration.Display(
+        id: 1, frame: CGRect(x: 0, y: 0, width: 1728, height: 1117), scale: 2, refreshRate: 120)
+    private static let external = DisplayConfiguration.Display(
+        id: 2, frame: CGRect(x: 1728, y: 0, width: 1920, height: 1080), scale: 1, refreshRate: 60)
+
+    /// A mirror set whose surviving screen is unchanged is the other screen
+    /// leaving, which waits for it to come back and then refreshes once.
+    func testAMirrorSetCollapsingTwoScreensRefreshesOnce() async throws {
+        displays = DisplayConfiguration(displays: [Self.builtIn, Self.external])
+        let coalescer = makeCoalescer()
+        coalescer.request()
+        await coalescer.waitUntilIdleForTest()
+        XCTAssertEqual(refreshes, [[1, 2]])
+
+        displays = DisplayConfiguration(displays: [Self.builtIn])
+        coalescer.request()
+        try await waitForTheSettle()
+        for _ in 0..<20 { coalescer.request() }
+        XCTAssertEqual(refreshes.count, 1, "the second screen may only be blinking")
+        XCTAssertTrue(sleeper.fireNext())
+        try await waitUntil { refreshes.count == 2 }
+        await coalescer.waitUntilIdleForTest()
+        XCTAssertEqual(refreshes, [[1, 2], [1]])
+
+        for _ in 0..<20 { coalescer.request() }
+        await coalescer.waitUntilIdleForTest()
+        XCTAssertEqual(refreshes.count, 2, "the same mirror set again is not a change")
+        XCTAssertEqual(sleeper.requested.count, 1)
+    }
+
+    /// When the screen that survives is the one that was not first, it takes the
+    /// first place and the origin, which is a change to a display that remains.
+    func testAMirrorSetWhoseOtherMemberSurvivesRefreshesAtOnceAndOnlyOnce() async throws {
+        displays = DisplayConfiguration(displays: [Self.builtIn, Self.external])
+        let coalescer = makeCoalescer()
+        coalescer.request()
+        await coalescer.waitUntilIdleForTest()
+
+        var survivor = Self.external
+        survivor.frame.origin = .zero
+        displays = DisplayConfiguration(displays: [survivor])
+        coalescer.request()
+        try await waitUntil { refreshes.count == 2 }
+        await coalescer.waitUntilIdleForTest()
+        XCTAssertEqual(refreshes, [[1, 2], [2]])
+        XCTAssertTrue(sleeper.requested.isEmpty, "the screen that stayed moved, so there is nothing to wait for")
+
+        for _ in 0..<20 { coalescer.request() }
+        await coalescer.waitUntilIdleForTest()
+        XCTAssertEqual(refreshes.count, 2)
+    }
+
+    func testClamshellWithTheBuiltInLeavingRefreshesOnceAndThenSettles() async throws {
+        displays = DisplayConfiguration(displays: [Self.builtIn, Self.external])
+        let coalescer = makeCoalescer()
+        coalescer.request()
+        await coalescer.waitUntilIdleForTest()
+
+        // The lid closes: the external display is first in the list and at the origin.
+        var main = Self.external
+        main.frame.origin = .zero
+        displays = DisplayConfiguration(displays: [main])
+        coalescer.request()
+        try await waitUntil { refreshes.count == 2 }
+        await coalescer.waitUntilIdleForTest()
+        XCTAssertEqual(refreshes.last, [2])
+        XCTAssertTrue(sleeper.requested.isEmpty, "the main display changed, so its wallpaper cannot wait")
+
+        for _ in 0..<20 {
+            coalescer.request()
+            await Task.yield()
+        }
+        await coalescer.waitUntilIdleForTest()
+        XCTAssertEqual(refreshes.count, 2, "the lid staying closed is not another change")
+
+        // The lid opens again.
+        displays = DisplayConfiguration(displays: [Self.builtIn, Self.external])
+        coalescer.request()
+        try await waitUntil { refreshes.count == 3 }
+        await coalescer.waitUntilIdleForTest()
+        XCTAssertEqual(refreshes.last, [1, 2])
+    }
+
+    func testAScreenWithoutAnIDIsNotMistakenForADisplayThatLeft() async throws {
+        // Two screens without a number are two screens, not one display 0.
+        var unnumbered = Self.external
+        unnumbered.id = 0
+        var another = unnumbered
+        another.frame.origin.x += 1920
+        displays = DisplayConfiguration(displays: [Self.builtIn, unnumbered, another])
+        let coalescer = makeCoalescer()
+        coalescer.request()
+        await coalescer.waitUntilIdleForTest()
+        XCTAssertEqual(refreshes.count, 1)
+
+        for _ in 0..<20 { coalescer.request() }
+        await coalescer.waitUntilIdleForTest()
+        XCTAssertEqual(refreshes.count, 1, "the same screens again are not a change")
+
+        // One of them leaving cannot be matched to any display the bridge holds,
+        // so it is an ordinary change and the displays are refreshed at once.
+        displays = DisplayConfiguration(displays: [Self.builtIn, unnumbered])
+        coalescer.request()
+        try await waitUntil { refreshes.count == 2 }
+        await coalescer.waitUntilIdleForTest()
+        XCTAssertTrue(sleeper.requested.isEmpty)
+
+        // One arriving is a change too.
+        displays = DisplayConfiguration(displays: [Self.builtIn, unnumbered, another])
+        coalescer.request()
+        try await waitUntil { refreshes.count == 3 }
+        await coalescer.waitUntilIdleForTest()
+        XCTAssertTrue(sleeper.requested.isEmpty)
+    }
+
     private var displays = DisplayRefreshCoalescerTests.configuration(ids: [1, 2])
     private var refreshes: [[UInt32]] = []
     private var refreshSucceeds = true
