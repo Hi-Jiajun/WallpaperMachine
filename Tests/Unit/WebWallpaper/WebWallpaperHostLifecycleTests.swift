@@ -230,6 +230,83 @@ final class WebWallpaperHostLifecycleTests: XCTestCase {
     XCTAssertEqual(fixture.model.surfaces.map(\.page.rendersAtDisplayRefresh), [false, true, false])
   }
 
+  /// A page rebuilt at the display's refresh, or back from it, starts from the
+  /// whole descriptor: the render scale, the pause, the frame limit and the
+  /// pointer rate of the new cadence, not only what changed with the frame rate.
+  func testAPageRebuiltAcrossTheDisplayRefreshStartsFromTheWholeDescriptor() async throws {
+    let fixture = try Fixture(pageTiming: .init(firstFrameGrace: .zero))
+    defer { fixture.close() }
+    fixture.model.refreshRate = 120
+    var descriptor = fixture.descriptor
+    descriptor.fps = 60
+    await fixture.host.apply([descriptor])
+    let first = try XCTUnwrap(fixture.model.surfaces.last?.page)
+    try await wait { first.isLoaded }
+    let native = try await pageRatio(first)
+    XCTAssertEqual(first.pointerMoveInterval, 1.0 / 60, accuracy: 1e-12)
+    descriptor.renderScale = 0.5
+    await fixture.host.apply([descriptor])
+    try await waitForRatio(first, native * 0.5)
+
+    descriptor.fps = 120
+    await fixture.host.apply([descriptor])
+    let fast = try XCTUnwrap(fixture.model.surfaces.last?.page)
+    XCTAssertTrue(fast.rendersAtDisplayRefresh)
+    XCTAssertEqual(fixture.model.surfaces.count, 2)
+    try await wait { fast.isLoaded }
+    try await waitForRatio(fast, native * 0.5)
+    let fastHandle = try await pageNumber(fast, Self.rafHandle)
+    XCTAssertFalse(pacedHandle(fastHandle), "120 fps limits nothing")
+    XCTAssertEqual(fast.pointerMoveInterval, 1.0 / 120, accuracy: 1e-12, "hover follows the display's refresh")
+
+    // The battery frame rate takes over: a new page again, paced, and hovering at its own rate.
+    descriptor.fps = 30
+    await fixture.host.apply([descriptor])
+    let slow = try XCTUnwrap(fixture.model.surfaces.last?.page)
+    XCTAssertFalse(slow.rendersAtDisplayRefresh)
+    XCTAssertEqual(fixture.model.surfaces.count, 3)
+    try await wait { slow.isLoaded }
+    try await waitForRatio(slow, native * 0.5)
+    let slowHandle = try await pageNumber(slow, Self.rafHandle)
+    XCTAssertTrue(pacedHandle(slowHandle), "30 fps is held")
+    XCTAssertEqual(slow.pointerMoveInterval, 1.0 / 30, accuracy: 1e-12)
+
+    // Pausing while the rate crosses the refresh again: the new page is built paused
+    // and the host detaches it, rather than leaving it running because it is new.
+    descriptor.fps = 120
+    descriptor.paused = true
+    await fixture.host.apply([descriptor])
+    let paused = try XCTUnwrap(fixture.model.surfaces.last?.page)
+    XCTAssertTrue(paused.rendersAtDisplayRefresh)
+    XCTAssertEqual(fixture.model.surfaces.count, 4)
+    try await wait { paused.isLoaded && paused.hostSuspended }
+    XCTAssertFalse(fixture.host.isPointerMonitorActive, "a suspended page keeps no global pointer monitor")
+  }
+
+  /// The display's refresh is read on every apply: a mode change that crosses
+  /// nothing retunes the running page and keeps its document.
+  func testADisplayChangingRefreshRetunesTheRunningPageWithoutRebuildingIt() async throws {
+    let fixture = try Fixture()
+    defer { fixture.close() }
+    fixture.model.refreshRate = 120
+    var descriptor = fixture.descriptor
+    descriptor.fps = 60
+    await fixture.host.apply([descriptor])
+    let page = try XCTUnwrap(fixture.model.surfaces.last?.page)
+    try await wait { page.isLoaded }
+    XCTAssertEqual(page.pointerMoveInterval, 1.0 / 60, accuracy: 1e-12)
+    let generation = page.documentGeneration
+
+    fixture.model.refreshRate = 48
+    await fixture.host.apply([descriptor])
+    XCTAssertEqual(page.pointerMoveInterval, 1.0 / 48, accuracy: 1e-12, "a 48 Hz display draws no faster")
+    fixture.model.refreshRate = 120
+    await fixture.host.apply([descriptor])
+    XCTAssertEqual(page.pointerMoveInterval, 1.0 / 60, accuracy: 1e-12)
+    XCTAssertEqual(fixture.model.surfaces.count, 1)
+    XCTAssertEqual(page.documentGeneration, generation)
+  }
+
   func testOnlyAFrameRateThatReachesAFastDisplaysRefreshDrawsAtIt() {
     let cases: [(fps: UInt32, refresh: Int, expected: Bool)] = [
       (60, 120, false), (119, 120, false), (120, 120, true), (144, 144, true), (90, 90, true),
@@ -420,6 +497,11 @@ final class WebWallpaperHostLifecycleTests: XCTestCase {
     }
     XCTAssertTrue(doubled, "the first read saw half the display's ratio")
   }
+
+  /// A handle from the page's `requestAnimationFrame`: paced ones sit above 2^30.
+  private static let rafHandle = "(() => { const id = requestAnimationFrame(() => {}); cancelAnimationFrame(id); return id; })()"
+
+  private func pacedHandle(_ handle: Double) -> Bool { handle >= 1_073_741_824 }
 
   private func pageNumber(_ page: WebWallpaperPage, _ expression: String) async throws -> Double {
     let value = try await page.webView.callAsyncJavaScript(

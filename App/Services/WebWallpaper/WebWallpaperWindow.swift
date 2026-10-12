@@ -427,6 +427,19 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         committed.fps.map { WebWallpaperProtocol.frameLimit(forFPS: $0, renderRate: renderRate) } ?? 0
     }
 
+    /// The fewest seconds between two pointer moves forwarded to the page: no
+    /// more than the page draws a second (WebKit hands it one move per drawn
+    /// frame, so 60 near its default cadence and the display's refresh for a page
+    /// that draws at it), and no more than the frame limit, since a page held to
+    /// 30 frames cannot show 60 positions. Below 10 a second hover would stop
+    /// following the pointer, so a very low limit does not slow it further.
+    var pointerMoveInterval: TimeInterval {
+        let limit = frameLimit
+        return 1 / Double(limit == 0 ? renderRate : max(limit, Self.minimumPointerRate))
+    }
+
+    private static let minimumPointerRate = 10
+
     /// Drops everything that belonged to the document being replaced. The new
     /// document re-registers its own listeners, so inheriting the old ones would
     /// leave the capture tap open for a page that never asked for it, and would

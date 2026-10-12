@@ -654,11 +654,14 @@ while the view is in the window), edits drawn on a paused page, and a measured s
 frames, timers and CSS (`WebWallpaperSuspensionTests`), the frame-rate limit
 on `requestAnimationFrame` against a fake display cadence and in a real page with a
 measured live change, and the rate a slow or full-refresh page draws at
-(`WebWallpaperFramePacingTests`), the render scale on
+(`WebWallpaperFramePacingTests`), a page rebuilt across a fast display's refresh with
+its render scale, pause and limit (`WebWallpaperHostLifecycleTests`), the render scale on
 `devicePixelRatio` with its resize event, start-of-document value and descriptor
 following (`WebWallpaperRenderScaleTests`, plus the render-scale cases of
 `WebWallpaperHostLifecycleTests`), pointer routing
-(`WebWallpaperMouseRoutingTests`) and the screen-saver surface
+(`WebWallpaperMouseRoutingTests`), pointer-move pacing and coalescing
+(`WebWallpaperMoveThrottleTests`, and the interval a page asks for in
+`WebWallpaperPageTests`) and the screen-saver surface
 (`ScreenSaverWebSurfaceTests`). Detail and limits:
 [web wallpapers](../features/web-wallpapers.md#verification).
 

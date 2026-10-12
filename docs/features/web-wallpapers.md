@@ -29,6 +29,11 @@ for them.
   wallpaper* turns off macOS's "Click wallpaper to reveal desktop" option (the
   same value System Settings → Desktop & Dock writes) so a click no longer
   slides every window aside.
+  Pointer moves reach the page no more often than it draws (60 a second near
+  WebKit's default cadence, the display's refresh for a page that draws at it), or as
+  often as the [frame-rate limit](#frame-rate-limit) when that is lower (never below
+  10), always ending on the position where the pointer stopped; presses, drags, releases,
+  scrolls and exits are never delayed or dropped.
 - On macOS 26+, **Use wallpaper as screen saver** can present web and still-image
   projects through the native extension. It uses committed properties and isolated
   file copies, without audio, capture or interaction. See
@@ -256,7 +261,9 @@ separate web view with its own handler (see [architecture](../architecture.md#co
   refresh (the slider, or the battery frame rate taking over) rebuilds the page;
   a change that stays on one side keeps the document. At the default rate nothing
   changes. If the running WebKit no longer offers the feature, the page keeps the
-  default cadence and the limitation is logged once.
+  default cadence and the limitation is logged once. The rebuilt page is a new
+  page like any other: it takes in the render scale, the pause, the frame limit and
+  the pointer rate of its cadence from the descriptor before it loads.
 - **Recovery.** A content process that keeps terminating is restarted on a windowed
   budget with exponential backoff rather than forever; the budget returns only
   after a document has run without interruption for the stable-run threshold.
@@ -290,6 +297,18 @@ separate web view with its own handler (see [architecture](../architecture.md#co
   true because WebKit hit-tests hover only for active windows (it still cannot
   become key, so keyboard focus is never taken). The host script cancels
   `contextmenu` defaults so WebKit's own menu never opens.
+  Moves are paced per window by `WebWallpaperMoveThrottle`, because a 1000 Hz mouse
+  otherwise costs the main thread a rebuilt event and a WebKit hit test per report.
+  The first move after a quiet stretch is delivered at once, moves inside the interval
+  are held with only the newest kept, and one timer per window delivers it when the
+  interval ends (`WebWallpaperMoveCoalescer`). The interval comes from the page
+  (`WebWallpaperPage.pointerMoveInterval`): one over the rate the page draws at (60;
+  the display's refresh for a page created to draw at it, or when that is below 60), or
+  1/limit s when a frame-rate limit applies, with a floor of 10 a second. WebKit hands a
+  page one pointer move per drawn frame, so a faster interval could not reach the page. A press, drag, release, scroll or exit first delivers the held move
+  so a gesture never sees a stale pointer and an exit always follows the last move;
+  removing the monitor drops anything held. `RuntimeCounters.pointerDelivered` counts
+  deliveries, so it shows the reduction.
 - `DesktopClickRevealPreference` (`App/Services/Desktop/`) reads and writes
   `com.apple.WindowManager EnableStandardClickToShowDesktop` for the Settings toggle.
 - `WallpaperPresentationPolicy` counts both window classes when deciding whether a
@@ -419,17 +438,19 @@ The page host is tested against a real offscreen `WKWebView` with no desktop win
 (`Tests/Unit/WebWallpaper/`: module loading, late-listener replay, local request
 metadata, pause composition, suspension by presentation and by pause with its
 first-frame grace and edits shown while paused, navigation lockdown, forwarded pointer events, mouse routing
-policy, changed-only property delivery, frame pacing against a fake display
-cadence and in a real page with the rate a slow or full-refresh page draws at, render
-scale on `devicePixelRatio` including the
+policy and move pacing, changed-only property delivery, frame pacing against a fake display
+cadence and in a real page with the rate a slow or full-refresh page draws at, the page
+rebuilt when a frame rate crosses a fast display's refresh with its render scale, pause,
+limit and pointer rate carried over, render scale on `devicePixelRatio` including the
 resize rebuild of a canvas page, the audio pump with its silence cadence on a
 hand-moved clock) and the bridge contract in
 `upstream/renderer/crates/bridge/src/tests/` (`apply_options.rs`,
 `quality_settings.rs`, `web_audio_media.rs`); file and directory properties are
 covered under [user files](user-files.md#verification), and the domain inventory is in
 [coverage](../testing/coverage.md). Show Desktop and Space transition smoothness,
-real hover and window-server routing on a desktop, audible output and mirror audio
-handoff need an authorized manual run. So do judder on pages that interpolate by
+real hover and window-server routing on a desktop, how flicks and parallax pages feel
+with a real high-rate mouse, that the hover exit still lands after the last move,
+audible output and mirror audio handoff need an authorized manual run. So do judder on pages that interpolate by
 frame count at 30 fps, the real CPU and GPU change of a Low-preset web wallpaper
 (`scripts/power_benchmark.py`), and whether WebKit really caps `requestAnimationFrame`
 near 60 on a ProMotion display (measured for pointer moves and a page's own loop when
