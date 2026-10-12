@@ -252,13 +252,17 @@ An in-place rebuild that fails goes straight to the renderer rebuild instead of
 waiting for the next rung. Attempts older than a minute stop counting, so a failure
 after a quiet minute starts again at the first rung; a fourth failure inside one
 minute gives up with one line in the log, "display N stopped drawing; recovery gave up
-after 3 attempts in 60 s", and the scene stays stopped, shown as above, until the
-wallpaper is applied again. A pause (the user's, or a covered display's) is kept
-across every attempt, so recovery never plays what was paused. An attempt that finds
-the surface drawing again, because a display change rebuilt it in the meantime, does
-nothing. The wallpaper window shows its placeholder for a moment while the surface is
-rebuilt, and the engine waits for the render thread meanwhile, up to the 10 s
-swapchain acquire timeout in the worst case, as it does for a display change.
+after 3 attempts in 60 s", and the scene stays stopped, shown as above, until
+[Retry](#retry) or a different wallpaper loads on that display. A pause (the user's, or
+a covered display's) is kept across every attempt, so recovery never plays what was
+paused. The internal [render scale](performance.md#quality) is kept the same way: a
+renderer the engine opens itself starts at full size, so the rebuild hands it the scale in force
+before it draws, and a wallpaper turned down to 50% does not come back at four times the pixels.
+An attempt that finds the surface drawing again, because a display change
+rebuilt it in the meantime, does nothing. The wallpaper window shows its placeholder
+for a moment while the surface is rebuilt, and the engine waits for the render thread
+meanwhile, up to the 10 s swapchain acquire timeout in the worst case, as it does for a
+display change.
 
 A failure before the first frame is not retried: the app is still inside its first-frame
 wait, which has its own timeout and rollback, and a retry of its own would race it. The
@@ -295,6 +299,36 @@ after it there, the ladder with injected instants, and the relay that carries th
 to the engine. The engine's reaction to a report on a live scene needs a real window and
 is not covered by an automated test, so whether a genuine failure is healed by the first
 rung or needs a rebuild is unverified.
+
+#### Retry
+
+A scene that reads stopped has a **Retry** button on its row in **Settings → Performance
+→ Live diagnostics → Updating now**. That covers a scene recovery gave up on and one
+that failed before its first frame, which recovery leaves alone. Retry takes the
+wallpaper off that display and applies it again, so a new renderer opens with a fresh
+recovery budget. Applying the same wallpaper again from the Library cannot do this: a
+wallpaper a display already shows is left as it is, and so is its stopped scene.
+
+- Only the display on the row reloads. Another display showing the same wallpaper is
+  not touched, and the wallpaper's files are not counted as changed, which only a
+  Workshop update does. The exception is a display that mirrors another: it presents a
+  scene of its own but has no wallpaper of its own to take off, so its Retry reloads the
+  display it mirrors, which opens a new scene on that display and on the mirror.
+- It is queued in that display's slot, like a switch. It waits for the command that is
+  running, a newer choice on the display replaces a retry that is still waiting, and a
+  retry that waited behind a switch finds another wallpaper on the display and does
+  nothing. While it runs the button is disabled, like every control that waits on that
+  queue.
+- Nothing retries by itself. A scene that stops again reads stopped again, with the
+  recovery ladder above starting afresh, until Retry is pressed once more.
+- If the reload fails, the error shows as for any apply and the display has no
+  wallpaper, because it was taken off first, rather than a frozen picture.
+
+The button appears for the stopped reading only: a pause, a suspension and a scene
+still starting are not faults to retry. The tests drive the page, the dispatcher and
+the store against a stand-in engine; the button's placement, a reload of a genuinely
+stopped scene on a real display, and whether reloading a display's source opens a new
+scene on its mirror have not been checked on a desktop.
 
 ## Renderer memory
 

@@ -77,8 +77,16 @@ library usable for retry; history changes only after a successful activation;
 playback-environment changes (suspend/resume, unload/reload, audio) and library
 refreshes wait for an in-flight apply and the reverse, while explicit Pause still
 interrupts; the first-wallpaper support prompt follows only a successful
-downloaded activation. `UserCommandQueueTests` — commands run in arrival order
-and a newer command in the same slot replaces a waiting one.
+downloaded activation. The same suite covers Retry for a scene that stopped
+drawing over the two-display fake: it takes the wallpaper off the named display
+and applies it again and touches no other, a display with no wallpaper gets an
+error and no change, a mirroring display reloads the display it mirrors (and a
+mirror of an empty display gets the error), a retry that waited behind a switch
+on its display leaves the switch alone, and a newer choice replaces a retry still
+waiting; reloading
+everywhere after an update still reloads every display. `UserCommandQueueTests` —
+commands run in arrival order and a newer command in the same slot replaces a
+waiting one.
 
 ### Playback policy
 
@@ -437,7 +445,10 @@ follows the developer's in-app language choice.
   Settings is visible), `WebPanelExternalLinkTests` (every fixed link in
   `WebUI/*.js` passes the allowlist), `WebPanelGeneralSettingsTests`,
   `WebPanelPerformanceSettingsTests` and `WebPanelSceneSettingsTests` (unknown,
-  non-boolean or non-numeric values are refused, out-of-range ones clamped),
+  non-boolean or non-numeric values are refused, out-of-range ones clamped; the
+  Retry on a stopped scene refuses an id that names no enabled display, is
+  disabled while it runs, and reloads that display (or, for a mirror, the display
+  it mirrors) from a click on the real page),
   `WebPanelPropertyLabelTests` (author markup is reduced to text),
   `WebPanelSupportPromptTests`, `WebPanelWorkshopSourceTests`,
   `WebPanelWorkshopUpdateTests`, `WebPanelImagePlacementRaceTests` and

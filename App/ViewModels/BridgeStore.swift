@@ -315,17 +315,48 @@ final class BridgeStore {
 
     /// Loads a wallpaper's files afresh on every display showing it, after an update replaced
     /// them: applying it again alone would find nothing changed and keep what is loaded. Each
-    /// display goes through its own command slot, so a switch the user asks for meanwhile wins.
-    func reloadWallpaperAsync(id: String) async throws {
-        wallpaperContentRevision &+= 1
-        let displays = monitorInformationSnapshot.rows
-            .filter { $0.wallpaperId == id && $0.mirrorTargetDisplayId == nil }.map(\.displayId)
+    /// display goes through its own command slot, so a switch the user asks for meanwhile wins:
+    /// a reload still waiting is replaced by it, and one that waited behind it finds the display
+    /// showing something else and leaves it alone.
+    ///
+    /// `displayId` limits the reload to one display. That is the Retry for a scene that stopped
+    /// drawing, which loads the same files again, so the posters made from them stay valid.
+    func reloadWallpaperAsync(id: String, displayId: String? = nil) async throws {
+        if displayId == nil { wallpaperContentRevision &+= 1 }
+        let displays = monitorInformationSnapshot.rows.filter {
+            $0.wallpaperId == id && $0.mirrorTargetDisplayId == nil
+                && (displayId == nil || $0.displayId == displayId)
+        }.map(\.displayId)
         for display in displays {
             try await commands.run(slot: Self.activationSlot(displayId: display), subject: id) {
+                guard self.isWallpaperActive(id: id, displayId: display) else { return }
                 try await self.ejectWallpaperFromDisplayAsync(displayId: display, wallpaperId: id)
                 try await self.activateWallpaperAsync(id: id, displayId: display)
             }
         }
+    }
+
+    /// The user's Retry for a scene that stopped drawing after a rendering failure: loads the
+    /// wallpaper on `displayId` afresh. Applying it again would find it already active and
+    /// change nothing, so the stopped scene would stay as it is. The reload is queued in the
+    /// display's slot, so a newer choice for that display replaces it, and nothing retries
+    /// by itself: a scene that stops again stays stopped until the user asks once more.
+    ///
+    /// A display that mirrors another presents its own scene of the wallpaper it mirrors, but
+    /// holds no assignment of its own: the wallpaper is applied to and taken off the display it
+    /// mirrors, never the mirror. A mirror's Retry therefore reloads that source display, which
+    /// opens a new scene on both.
+    func retryStoppedSceneAsync(displayId: String) async throws {
+        let rows = monitorInformationSnapshot.rows
+        guard let shown = rows.first(where: { $0.displayId == displayId && !$0.wallpaperId.isEmpty }),
+              let owner = rows.first(where: {
+                  $0.displayId == (shown.mirrorTargetDisplayId ?? displayId)
+                      && $0.mirrorTargetDisplayId == nil && $0.wallpaperId == shown.wallpaperId
+              })
+        else {
+            throw WallpaperActionError(message: String(localized: "No wallpaper is running on this display."))
+        }
+        try await reloadWallpaperAsync(id: owner.wallpaperId, displayId: owner.displayId)
     }
 
     func isWallpaperActive(id: String, displayId: String) -> Bool {

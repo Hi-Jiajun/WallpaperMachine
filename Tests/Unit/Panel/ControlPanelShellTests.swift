@@ -1050,7 +1050,8 @@ final class ControlPanelShellTests: ControlPanelTestCase {
 
   /// A scene whose renderer stopped after a failure is not paused and not still
   /// starting, even when it never drew a first frame: both of those would send the
-  /// user looking for something they did not do.
+  /// user looking for something they did not do. It is also the one reading with
+  /// something to do about it, so it, and only it, offers Retry.
   func testASceneThatStoppedAfterAFailureIsNeverWordedAsAPauseOrAsStarting() async throws {
     try await withPanel { panel in
       try await panel.finishWelcome()
@@ -1065,21 +1066,29 @@ final class ControlPanelShellTests: ControlPanelTestCase {
           report(4, 'continuous', ['no_frame_yet']),
         ]}});
         document.querySelector('[data-section="performance"]').click();
-        return [...document.querySelectorAll('[data-key="scene-update-report"] li')].map(item => item.textContent);
-        """) as? [String]
+        return [...document.querySelectorAll('[data-key="scene-update-report"] li')].map(item => ({
+          text: [...item.childNodes].filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent).join('').trim(),
+          retry: [...item.querySelectorAll('button')].map(button => `${button.dataset.action} ${button.dataset.args}`),
+        }));
+        """) as? [[String: Any]]
 
       let rows = try XCTUnwrap(lines)
       XCTAssertEqual(rows.count, 4)
+      let text = rows.map { $0["text"] as? String ?? "" }
       XCTAssertEqual(
-        rows[0], "Display 1 — Wallpaper 1: stopped after a rendering failure",
+        text[0], "Display 1 — Wallpaper 1: stopped after a rendering failure",
         "A scene that failed before its first frame is stopped, not starting")
       XCTAssertEqual(
-        rows[1], "Display 2 — Wallpaper 2: stopped after a rendering failure",
+        text[1], "Display 2 — Wallpaper 2: stopped after a rendering failure",
         "Why the clock was needed is moot once the scene has stopped")
-      XCTAssertTrue(rows[2].hasSuffix("paused by you"), rows[2])
+      XCTAssertTrue(text[2].hasSuffix("paused by you"), text[2])
       XCTAssertTrue(
-        rows[3].hasSuffix("starting — no frame drawn yet"),
-        "A scene that is genuinely starting keeps its own wording: \(rows[3])")
+        text[3].hasSuffix("starting — no frame drawn yet"),
+        "A scene that is genuinely starting keeps its own wording: \(text[3])")
+      XCTAssertEqual(
+        rows.map { $0["retry"] as? [String] },
+        [[#"sceneRetry {"displayId":1}"#], [#"sceneRetry {"displayId":2}"#], [], []],
+        "Both stopped scenes, including the one that never drew, offer Retry for their own display; a pause or a start is not a fault to retry")
     }
   }
 

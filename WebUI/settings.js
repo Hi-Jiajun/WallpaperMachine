@@ -419,7 +419,11 @@ function draw(view) {
     const video = t(videoPaths[report.videoPath]);
     return `${where}: ${backend}${fellBack && report.fallbackReason ? ` ${t('(fell back: {reason})', { reason: report.fallbackReason })}` : ''}${video ? ` ${t('— video: {path}', { path: video })}` : ''}`;
   };
-  const sceneModeReport = (settings.sceneUpdateModes || []).map(report => `<li>${e(sceneModeLine(report))}</li>`).join('');
+  // A scene that stopped after a failure is the one reading with something to do about
+  // it: Retry loads that wallpaper again on that display. Nothing retries by itself, and
+  // no other row offers it, because a pause or a suspension is not a fault to retry.
+  const sceneModeItem = report => `<li>${e(sceneModeLine(report))}${report.mode === 'stopped_after_failure' ? ` ${button(t('Retry'), 'sceneRetry', { displayId: report.displayId }, busy)}` : ''}</li>`;
+  const sceneModeReport = (settings.sceneUpdateModes || []).map(sceneModeItem).join('');
   const sceneBackendReport = (settings.sceneRenderers || []).map(report => `<li>${e(sceneRendererLine(report))}</li>`).join('');
   // Read from what actually drew a scene, not from the preference: the note it
   // gates is only true of a surface that really is on the native backend.

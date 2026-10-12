@@ -514,6 +514,170 @@ final class WallpaperActivationRecoveryTests: XCTestCase {
         try await refresh.value
         XCTAssertEqual(bridge.refreshSawActive, true)
     }
+
+    // MARK: Retry for a scene that stopped drawing
+
+    /// Applying a wallpaper that a display already shows changes nothing, so a stopped scene
+    /// is brought back by taking the wallpaper off the display and applying it again.
+    func testRetryReloadsOnlyTheNamedDisplayThroughItsSlot() async throws {
+        let (store, bridge) = try await twoDisplayStore(showing: ["primary": "a", "secondary": "a"])
+        let revision = store.wallpaperContentRevision
+
+        try await store.retryStoppedSceneAsync(displayId: "primary")
+
+        XCTAssertEqual(
+            bridge.events, ["eject primary a", "apply primary a"],
+            "The wallpaper leaves the display and is applied to it again, and the other display is not touched")
+        XCTAssertEqual(bridge.assignments, ["primary": "a", "secondary": "a"])
+        XCTAssertEqual(
+            store.wallpaperContentRevision, revision,
+            "A retry loads the same files again, so the posters made from them are not stale")
+        XCTAssertFalse(store.commands.isBusy)
+        XCTAssertNil(store.activatingWallpaperID)
+    }
+
+    /// A mirror presents a scene of its own, but its wallpaper is its source's: nothing can be
+    /// ejected from the mirror, so Retry reloads the display it mirrors.
+    func testRetryOnAMirroringDisplayReloadsTheDisplayItMirrors() async throws {
+        let (store, bridge) = try await twoDisplayStore(showing: ["primary": "a"], mirroring: ["secondary": "primary"])
+        let revision = store.wallpaperContentRevision
+
+        try await store.retryStoppedSceneAsync(displayId: "secondary")
+
+        XCTAssertEqual(
+            bridge.events, ["eject primary a", "apply primary a"],
+            "The wallpaper is taken off and applied to the display it mirrors, and never ejected from the mirror")
+        XCTAssertEqual(bridge.assignments, ["primary": "a"])
+        XCTAssertEqual(store.wallpaperContentRevision, revision)
+        XCTAssertFalse(store.commands.isBusy)
+    }
+
+    func testRetryOnAMirrorWhoseSourceShowsNothingThrowsAUsefulError() async throws {
+        let (store, bridge) = try await twoDisplayStore(showing: [:], mirroring: ["secondary": "primary"])
+
+        do {
+            try await store.retryStoppedSceneAsync(displayId: "secondary")
+            XCTFail("A mirror of an empty display has nothing to reload")
+        } catch {
+            XCTAssertEqual(
+                error.localizedDescription, String(localized: "No wallpaper is running on this display."))
+        }
+        XCTAssertEqual(bridge.events, [])
+    }
+
+    func testRetryOnADisplayWithNoWallpaperThrowsAUsefulError() async throws {
+        let (store, bridge) = try await twoDisplayStore(showing: ["primary": "a"])
+
+        for display in ["secondary", "elsewhere"] {
+            do {
+                try await store.retryStoppedSceneAsync(displayId: display)
+                XCTFail("There is nothing to reload on \(display)")
+            } catch {
+                XCTAssertEqual(
+                    error.localizedDescription, String(localized: "No wallpaper is running on this display."))
+            }
+        }
+        XCTAssertEqual(bridge.events, [], "Nothing is ejected from or applied to a display that shows nothing")
+        XCTAssertEqual(bridge.assignments, ["primary": "a"])
+    }
+
+    /// The reload an update asks for, with no display named, still covers every display.
+    func testReloadingAWallpaperEverywhereReloadsEveryDisplayShowingItAndMarksItsFilesChanged() async throws {
+        let (store, bridge) = try await twoDisplayStore(showing: ["primary": "a", "secondary": "a"])
+        let revision = store.wallpaperContentRevision
+
+        try await store.reloadWallpaperAsync(id: "a")
+
+        XCTAssertEqual(
+            bridge.events,
+            ["eject primary a", "apply primary a", "eject secondary a", "apply secondary a"])
+        XCTAssertEqual(bridge.assignments, ["primary": "a", "secondary": "a"])
+        XCTAssertEqual(
+            store.wallpaperContentRevision, revision &+ 1,
+            "An update replaced the files, which is what the posters are rebuilt for")
+    }
+
+    /// A reload that waited behind a switch on its display must not put the old wallpaper back.
+    func testARetryThatWaitedBehindASwitchOnItsDisplayLeavesTheSwitchAlone() async throws {
+        let (store, bridge) = try await twoDisplayStore(showing: ["primary": "a", "secondary": "b"])
+        let slot = BridgeStore.activationSlot(displayId: "primary")
+        var release: CheckedContinuation<Void, Never>?
+        bridge.beforeApply = {
+            bridge.beforeApply = nil
+            await withCheckedContinuation { release = $0 }
+        }
+        let switching = Task {
+            try await store.commands.run(slot: slot) {
+                try await store.activateWallpaperAsync(id: "c", displayId: "primary", userInitiated: true)
+            }
+        }
+        let held = ContinuousClock.now.advanced(by: .seconds(5))
+        while release == nil && ContinuousClock.now < held { await Task.yield() }
+        guard let release else {
+            switching.cancel()
+            return XCTFail("The switch did not reach the bridge")
+        }
+
+        let retry = Task { try await store.retryStoppedSceneAsync(displayId: "primary") }
+        let queued = ContinuousClock.now.advanced(by: .seconds(5))
+        while !store.commands.hasWaiting(slot: slot) && ContinuousClock.now < queued { await Task.yield() }
+        XCTAssertTrue(store.commands.hasWaiting(slot: slot), "The retry waits its turn behind the switch")
+
+        release.resume()
+        try await switching.value
+        try await retry.value
+
+        XCTAssertEqual(bridge.assignments, ["primary": "c", "secondary": "b"])
+        XCTAssertEqual(
+            bridge.events, ["apply primary c"],
+            "The retry found the display showing another wallpaper and reloaded nothing")
+    }
+
+    /// The same slot as a switch: a choice made while a retry still waits replaces it.
+    func testANewerChoiceOnTheDisplayReplacesARetryStillWaiting() async throws {
+        let (store, bridge) = try await twoDisplayStore(showing: ["primary": "a", "secondary": "b"])
+        let slot = BridgeStore.activationSlot(displayId: "primary")
+        var gate: CheckedContinuation<Void, Never>?
+        let holder = Task { await store.commands.run { await withCheckedContinuation { gate = $0 } } }
+        let held = ContinuousClock.now.advanced(by: .seconds(5))
+        while gate == nil && ContinuousClock.now < held { await Task.yield() }
+        guard let gate else {
+            holder.cancel()
+            return XCTFail("The first command did not start")
+        }
+
+        let retry = Task { try await store.retryStoppedSceneAsync(displayId: "primary") }
+        let queued = ContinuousClock.now.advanced(by: .seconds(5))
+        while !store.commands.hasWaiting(slot: slot) && ContinuousClock.now < queued { await Task.yield() }
+        XCTAssertTrue(store.commands.hasWaiting(slot: slot), "The retry waits behind the running command")
+
+        let choice = Task {
+            try await store.commands.run(slot: slot) {
+                try await store.activateWallpaperAsync(id: "c", displayId: "primary", userInitiated: true)
+            }
+        }
+        // The queue answers the replaced retry at once, while the first command still runs.
+        try await retry.value
+        XCTAssertEqual(bridge.events, [], "The replaced retry did not run")
+
+        gate.resume()
+        _ = await holder.value
+        try await choice.value
+        XCTAssertEqual(bridge.events, ["apply primary c"])
+        XCTAssertEqual(bridge.assignments, ["primary": "c", "secondary": "b"])
+    }
+
+    private func twoDisplayStore(
+        showing assignments: [String: String], mirroring mirrors: [String: String] = [:]
+    ) async throws -> (BridgeStore, DisplayTransferTestBridge) {
+        let bridge = DisplayTransferTestBridge(noPointer: .init())
+        bridge.assignments = assignments
+        bridge.mirrors = mirrors
+        try bridge.installProjects(in: home.appendingPathComponent("Library", isDirectory: true))
+        let store = BridgeStore(bridge: bridge)
+        try await store.refreshAllAsync()
+        return (store, bridge)
+    }
 }
 
 private func XCTAssertThrowsErrorAsync(

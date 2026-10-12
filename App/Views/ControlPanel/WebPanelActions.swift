@@ -326,6 +326,10 @@ extension WebPanelController {
       try await store.commands.run(slot: BridgeStore.activationSlot(displayId: displayID)) {
         try await store.activatePreviousWallpaperAsync(displayId: displayID)
       }
+    // Queues itself in the display's slot, like a switch, so it must not run inside the
+    // queued commands below: a command that waits for the queue it holds never returns.
+    case "sceneRetry":
+      try await store.retryStoppedSceneAsync(displayId: try sceneDisplay(request))
     // The confirmation is asked before queueing, so an open sheet holds up nothing else.
     case "delete":
       let id = try wallpaperID(request)
@@ -830,6 +834,19 @@ extension WebPanelController {
       })
     else { throw WebPanelRequest.invalid }
     return id
+  }
+
+  /// The panel's id for the display a scene report names. The page knows it by the physical
+  /// id the report carries, so the id is looked up among the displays that can run a
+  /// scene; one that is gone or disabled has nothing to retry. A display that mirrors another
+  /// presents a scene of its own, so it is accepted, and the store reloads the display it mirrors.
+  func sceneDisplay(_ request: WebPanelRequest) throws -> String {
+    guard let physical = UInt32(exactly: try request.number("displayId", range: 0...Double(UInt32.max))),
+      let display = store.settingsSnapshot.displays.first(where: {
+        $0.enabled && ResolvedDisplayTitles.liveDisplayID($0.displayId, title: $0.title) == physical
+      })
+    else { throw WebPanelRequest.invalid }
+    return display.displayId
   }
 
   func playlistSetting(_ request: WebPanelRequest) throws {
