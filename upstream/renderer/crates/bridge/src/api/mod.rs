@@ -67,7 +67,8 @@ use crate::{
             GetLibrarySnapshot, GetLockScreenScenes, GetWallpaperPreview, GetMonitorInformationSnapshot,
             GetSettingsSnapshot, GetWallpaperOptionsSnapshot, GetWebWallpapers, InitialFrameReady,
             GetNativeVideoWallpapers, PollMousePosition, RejectNativeVideo, RendererCounters,
-            RefreshDisplays, RefreshLibrary, RestorePropertyDefault, SelectWallpaper,
+            RefreshDisplays, RefreshLibrary, ReleaseHeldWallpaper, RestorePropertyDefault,
+            SelectWallpaper,
             SetAudioResponseEnabled, SetDisplayConfigEnabled, SetDisplayEnabled, SetDisplayMode,
             SetDisplayPresentationSuspended,
             SetFilter, SetGlobalPlayback, SetLaunchAtLogin, SetMirrorMuted, SetMirrorScalingFactor,
@@ -1156,6 +1157,21 @@ impl WallpaperBridge {
     /// Returns an error when display refresh fails.
     pub async fn refresh_displays(&self) -> Result<BridgeSnapshotBundle, BridgeError> {
         self.actor.ask(RefreshDisplays).await
+    }
+
+    /// Opens a wallpaper the load journal holds back after repeated crashes
+    /// while it loaded, and lifts the hold. A wallpaper that is not held is
+    /// left alone.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the configuration cannot be reconciled; the
+    /// wallpaper then stays held.
+    pub async fn release_held_wallpaper(
+        &self,
+        wallpaper_id: String,
+    ) -> Result<BridgeSnapshotBundle, BridgeError> {
+        self.actor.ask(ReleaseHeldWallpaper { wallpaper_id }).await
     }
 
     /// # Errors

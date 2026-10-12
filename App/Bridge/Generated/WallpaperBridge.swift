@@ -828,6 +828,18 @@ public protocol WallpaperBridgeProtocol : AnyObject {
     func rejectNativeVideo(wallpaperId: String, admissionKey: UInt64, reason: String) async throws 
     
     /**
+     * Opens a wallpaper the load journal holds back after repeated crashes
+     * while it loaded, and lifts the hold. A wallpaper that is not held is
+     * left alone.
+     *
+     * # Errors
+     *
+     * Returns an error when the configuration cannot be reconciled; the
+     * wallpaper then stays held.
+     */
+    func releaseHeldWallpaper(wallpaperId: String) async throws  -> BridgeSnapshotBundle
+    
+    /**
      * Reads renderer work counters for every open scene.
      *
      * This is the evidence half of the per-surface suspension work: it answers
@@ -2053,6 +2065,33 @@ open func rejectNativeVideo(wallpaperId: String, admissionKey: UInt64, reason: S
             completeFunc: ffi_wallpaper_bridge_rust_future_complete_void,
             freeFunc: ffi_wallpaper_bridge_rust_future_free_void,
             liftFunc: { $0 },
+            errorHandler: FfiConverterTypeBridgeError.lift
+        )
+}
+    
+    /**
+     * Opens a wallpaper the load journal holds back after repeated crashes
+     * while it loaded, and lifts the hold. A wallpaper that is not held is
+     * left alone.
+     *
+     * # Errors
+     *
+     * Returns an error when the configuration cannot be reconciled; the
+     * wallpaper then stays held.
+     */
+open func releaseHeldWallpaper(wallpaperId: String)async throws  -> BridgeSnapshotBundle {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wallpaper_bridge_fn_method_wallpaperbridge_release_held_wallpaper(
+                    self.uniffiClonePointer(),
+                    FfiConverterString.lower(wallpaperId)
+                )
+            },
+            pollFunc: ffi_wallpaper_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeBridgeSnapshotBundle.lift,
             errorHandler: FfiConverterTypeBridgeError.lift
         )
 }
@@ -3442,14 +3481,26 @@ public struct BridgeAppSnapshot {
     public var selectedWallpaperId: String?
     public var activeWallpaperIds: [String]
     public var errors: [String]
+    /**
+     * Wallpapers assigned to a display that were left out of this session
+     * because the app died while opening them in two sessions in a row,
+     * sorted. `BridgeStore` offers each one a retry; Apply clears them too.
+     */
+    public var heldWallpaperIds: [String]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(playbackState: BridgePlaybackState, selectedWallpaperId: String?, activeWallpaperIds: [String], errors: [String]) {
+    public init(playbackState: BridgePlaybackState, selectedWallpaperId: String?, activeWallpaperIds: [String], errors: [String], 
+        /**
+         * Wallpapers assigned to a display that were left out of this session
+         * because the app died while opening them in two sessions in a row,
+         * sorted. `BridgeStore` offers each one a retry; Apply clears them too.
+         */heldWallpaperIds: [String]) {
         self.playbackState = playbackState
         self.selectedWallpaperId = selectedWallpaperId
         self.activeWallpaperIds = activeWallpaperIds
         self.errors = errors
+        self.heldWallpaperIds = heldWallpaperIds
     }
 }
 
@@ -3469,6 +3520,9 @@ extension BridgeAppSnapshot: Equatable, Hashable {
         if lhs.errors != rhs.errors {
             return false
         }
+        if lhs.heldWallpaperIds != rhs.heldWallpaperIds {
+            return false
+        }
         return true
     }
 
@@ -3477,6 +3531,7 @@ extension BridgeAppSnapshot: Equatable, Hashable {
         hasher.combine(selectedWallpaperId)
         hasher.combine(activeWallpaperIds)
         hasher.combine(errors)
+        hasher.combine(heldWallpaperIds)
     }
 }
 
@@ -3491,7 +3546,8 @@ public struct FfiConverterTypeBridgeAppSnapshot: FfiConverterRustBuffer {
                 playbackState: FfiConverterTypeBridgePlaybackState.read(from: &buf), 
                 selectedWallpaperId: FfiConverterOptionString.read(from: &buf), 
                 activeWallpaperIds: FfiConverterSequenceString.read(from: &buf), 
-                errors: FfiConverterSequenceString.read(from: &buf)
+                errors: FfiConverterSequenceString.read(from: &buf), 
+                heldWallpaperIds: FfiConverterSequenceString.read(from: &buf)
         )
     }
 
@@ -3500,6 +3556,7 @@ public struct FfiConverterTypeBridgeAppSnapshot: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.selectedWallpaperId, into: &buf)
         FfiConverterSequenceString.write(value.activeWallpaperIds, into: &buf)
         FfiConverterSequenceString.write(value.errors, into: &buf)
+        FfiConverterSequenceString.write(value.heldWallpaperIds, into: &buf)
     }
 }
 
@@ -9327,6 +9384,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_reject_native_video() != 52338) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_release_held_wallpaper() != 62348) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_renderer_counters() != 60387) {

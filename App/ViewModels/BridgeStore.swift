@@ -168,6 +168,19 @@ final class BridgeStore {
         }
     }
 
+    /// Wallpapers a display is assigned to that the load journal left out of this session
+    /// because the app died while opening them twice in a row.
+    var heldWallpaperIDs: [String] { appSnapshot.heldWallpaperIds }
+
+    /// Opens a held wallpaper again at the user's request. The reply shows it as opened and no
+    /// longer held; a failure leaves the hold in place and reaches the caller.
+    func releaseHeldWallpaperAsync(id: String) async throws {
+        try await updatePlaybackEnvironment {
+            let bundle = try await bridge.releaseHeldWallpaper(wallpaperId: id)
+            apply(bundle)
+        }
+    }
+
     func receiveHostState(_ state: HostWallpaperState) {
         let previousState = hostWallpaperStates[state.key]
         if let previousState {
@@ -906,7 +919,8 @@ final class BridgeStore {
                 playbackState: .paused,
                 selectedWallpaperId: nil,
                 activeWallpaperIds: [],
-                errors: []
+                errors: [],
+                heldWallpaperIds: []
             ),
             library: BridgeLibrarySnapshot(
                 wallpapers: [],

@@ -32,7 +32,7 @@ final class DisplayTransferTestBridge: LayoutSnapshotBridge {
             })
     }
     var currentBundle: BridgeSnapshotBundle {
-        .init(app: .init(playbackState: .paused, selectedWallpaperId: selected, activeWallpaperIds: Array(Set(assignments.values)), errors: []),
+        .init(app: .init(playbackState: .paused, selectedWallpaperId: selected, activeWallpaperIds: Array(Set(assignments.values)), errors: [], heldWallpaperIds: []),
             library: .init(wallpapers: ["a", "b", "c"].map { id in
                 .init(id: id, title: id == "a" ? "Ocean <img src=x>" : id, kind: .webpage, supported: true,
                       active: assignments.values.contains(id), selected: selected == id, previewPath: nil)

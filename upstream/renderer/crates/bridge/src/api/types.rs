@@ -208,6 +208,10 @@ pub struct BridgeAppSnapshot {
     pub selected_wallpaper_id: Option<String>,
     pub active_wallpaper_ids: Vec<String>,
     pub errors: Vec<String>,
+    /// Wallpapers assigned to a display that were left out of this session
+    /// because the app died while opening them in two sessions in a row,
+    /// sorted. `BridgeStore` offers each one a retry; Apply clears them too.
+    pub held_wallpaper_ids: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]

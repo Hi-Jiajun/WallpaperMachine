@@ -213,6 +213,41 @@ final class WallpaperActivationRecoveryTests: XCTestCase {
         XCTAssertFalse(prompt.isPending)
     }
 
+    /// The load journal holds back a wallpaper that crashed the app twice. Only the user choosing it
+    /// again lifts the hold; a playlist, rule or schedule that comes round to it must not.
+    func testOnlyTheUsersOwnChoiceIsMarkedAsAbleToLiftAHold() async throws {
+        for userInitiated in [false, true] {
+            let bridge = ApplyFailureBridge(noPointer: .init())
+            bridge.applyError = nil
+            let store = BridgeStore(bridge: bridge)
+            try await store.refreshAllAsync()
+
+            try await store.activateWallpaperAsync(id: "failing", displayId: "primary", userInitiated: userInitiated)
+
+            XCTAssertEqual(bridge.applyRequests, [userInitiated],
+                           "activation passes on who asked (userInitiated: \(userInitiated))")
+        }
+    }
+
+    /// The inspector's Apply is the user choosing the wallpaper again, so on a held wallpaper it is
+    /// the way back; the same settings applied for a rule or a rotation must leave the hold, and the
+    /// banner that reads it, in place.
+    func testApplyingAHeldWallpaperFromTheInspectorLiftsTheHoldOnlyForTheUser() async throws {
+        for userInitiated in [false, true] {
+            let bridge = ApplyFailureBridge(noPointer: .init())
+            bridge.applyError = nil
+            bridge.heldIds = ["failing"]
+            let store = BridgeStore(bridge: bridge)
+            try await store.refreshAllAsync()
+            XCTAssertEqual(store.heldWallpaperIDs, ["failing"])
+
+            try await store.applyWallpaperOptionsAsync(wallpaperId: "failing", userInitiated: userInitiated)
+
+            XCTAssertEqual(store.heldWallpaperIDs, userInitiated ? [] : ["failing"],
+                           "the hold after an apply (userInitiated: \(userInitiated))")
+        }
+    }
+
     func testAutomaticActivationAndNoOpReapplyDoNotRequestSupport() async throws {
         let defaults = try TemporaryDefaults.make(for: self).defaults
         let prompt = SupportPromptStore(defaults: defaults)
@@ -596,14 +631,20 @@ private final class ApplyFailureBridge: WallpaperBridge {
         options
     }
 
+    /// Whether each apply the bridge received came from the user's own choice.
+    private(set) var applyRequests: [Bool] = []
+
     override func applyWallpaperOptions(
         wallpaperId: String,
         userInitiated: Bool
     ) async throws -> BridgeWallpaperMutationBundle {
+        applyRequests.append(userInitiated)
         let startedGeneration = generation
         let overlappedEnvironmentChange = environmentChangeInFlight
         if let holdApply { await holdApply() }
         if let applyError { throw applyError }
+        // Like the engine: only the user applying a held wallpaper lifts its hold.
+        if userInitiated { heldIds.removeAll { $0 == wallpaperId } }
         dirty = overlappedEnvironmentChange || generation != startedGeneration
         if !dirty { active = reportsActivation }
         return mutation
@@ -611,6 +652,8 @@ private final class ApplyFailureBridge: WallpaperBridge {
 
     /// Mirrors the engine: the wallpaper only becomes active once an apply succeeds.
     private var active = false
+    /// Wallpapers the load journal holds back; the display keeps its assignment to them.
+    var heldIds: [String] = []
 
     var bundle: BridgeSnapshotBundle {
         BridgeSnapshotBundle(app: app, library: library, wallpaperOptions: options,
@@ -635,7 +678,7 @@ private final class ApplyFailureBridge: WallpaperBridge {
     private var app: BridgeAppSnapshot {
         BridgeAppSnapshot(
             playbackState: playbackState, selectedWallpaperId: "failing",
-            activeWallpaperIds: active ? ["failing"] : [], errors: [])
+            activeWallpaperIds: active ? ["failing"] : [], errors: [], heldWallpaperIds: heldIds)
     }
 
     private var library: BridgeLibrarySnapshot {

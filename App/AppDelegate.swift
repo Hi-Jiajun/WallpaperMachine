@@ -1038,6 +1038,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             menu.addItem(item)
         }
 
+        // A login launch leaves the panel closed, so the menu is where a held wallpaper shows.
+        if let store, !store.heldWallpaperIDs.isEmpty {
+            menu.addItem(.separator())
+            menu.addItem(disabledMenuItem(String(localized: "A wallpaper was held back after a crash")))
+        }
+
         if let error = startupError ?? lastError {
             menu.addItem(.separator())
             menu.addItem(disabledMenuItem(error.localizedDescription))

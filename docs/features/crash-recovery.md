@@ -14,13 +14,27 @@ names the build (`ClientPaths.buildStamp`).
 ## What the user sees
 
 - After the second crash in a row while one wallpaper loads, the next launch starts
-  normally, leaves that wallpaper's display without a live scene and reports, in the
-  same error line the control panel already shows for startup problems:
-  `<title> was not restored because WallpaperMachine quit unexpectedly twice while
-  loading it. Apply it again to retry.` The sentence is English only for now; it is
-  not in the string catalogs.
-- **Apply** in the inspector opens the wallpaper again, even when nothing in its draft
-  changed, and clears the hold and the notice.
+  normally and leaves that wallpaper's display without a live scene. The control panel
+  shows a **banner** under the top bar, one row per held wallpaper, with a sentence
+  naming it (`"<title>" was not restored: WallpaperMachine quit unexpectedly twice in a
+  row while loading it. Nothing was deleted.`) and a **Try again** button. The menu-bar
+  menu carries a disabled line, **A wallpaper was held back after a crash**, so a login
+  launch with the panel closed still shows the state. Both come from
+  `BridgeAppSnapshot.held_wallpaper_ids` and are localized in the app and panel catalogs.
+- **Try again** opens that wallpaper on its display(s) and lifts the hold. If the engine
+  refuses, the panel's error banner shows the reason and the banner row stays: a retry
+  that opened nothing is not a release.
+- **Apply** in the inspector, or choosing the wallpaper again from the library, also opens it
+  again, even when nothing in its draft changed, and clears the hold and the banner. Only the
+  user's own choice does, which is what `BridgeStore` calls `userInitiated` (a Shortcuts or
+  URL command that names the wallpaper counts as one, and so does the options dialog's OK). A
+  playlist rotation, an automatic rule or a Space or Focus rule that comes round to the
+  wallpaper leaves the hold and the strike count alone, so the rotation cannot reopen the
+  wallpaper that crashed the app each time it reaches it: that display stays empty and the
+  banner says why. Apply is as careful as Try again: if the engine refuses, the wallpaper
+  stays held, and if the app dies while it loads, the next launch holds it again.
+- A hold on a wallpaper that no display is assigned to is kept but not shown; the banner
+  returns if the wallpaper is assigned again.
 - Installing an app update releases every hold, because the code that crashed is gone.
 - Other wallpapers on other displays load as usual.
 
@@ -80,16 +94,35 @@ wallpaper, however many displays it was opening on). At **two consecutive strike
 A hold is applied in `ActivationInputs`: `slots()` skips held wallpaper ids, so the scene,
 web and native-video plans, the backend report and the lock-screen export all agree.
 `Bootstrap` reads the held set after the library scan, drops strikes for wallpapers that
-are no longer installed (`prune`, only after a successful scan), keeps the set in
-`BridgeActorState::held_wallpapers` and reports each held wallpaper that is assigned to a
-display. `ApplyWallpaperOptions` calls `forgive` first; when that releases a hold it also
-forces the reconcile that an unchanged draft would otherwise skip.
+are no longer installed (`prune`, only after a successful scan) and keeps the set in
+`BridgeActorState::held_wallpapers`. `BridgeAppSnapshot.held_wallpaper_ids` is that set
+restricted to wallpapers a display is assigned to, sorted; it is state for the panel to
+word, not an entry in `errors`.
+
+There are two ways back. `ApplyWallpaperOptions` takes the id out of the held set when it
+carries `user_initiated` (`BridgeStore` passes its `userInitiated` flag through
+`WallpaperBridge.apply_wallpaper_options`), so that the reconcile plans the wallpaper, and
+when that lifts a hold it also forces the reconcile that an unchanged draft would otherwise
+skip. It calls `forgive` only once that reconcile has succeeded; a reconcile that fails puts
+the id back into the held set (`ReconcileFailed.restore_hold`, before the repair that follows
+a failed reconcile plans from the set). An apply that reconciles nothing has no load to wait
+for and calls `forgive` at once, which is how the user choosing a suspect (one strike)
+again starts its count over. An apply without the flag never calls `forgive`: it neither lifts
+a hold nor starts a strike count over.
+`ReleaseHeldWallpaper` (`WallpaperBridge.release_held_wallpaper`, **Try again**) takes the
+id out of the held set, reconciles the configuration and only then calls `forgive`. The
+order matters for both: if the reconcile fails the id goes back into the set and the journal
+still holds its strikes, and if the process dies during the attempt the next launch counts a
+third strike and holds the wallpaper again, where forgiving first would have made the crash
+a first offence, opened at startup and crashing the app again before the user could do
+anything. A release for a wallpaper that is not held changes nothing and does not touch the
+engine.
 
 ## Limits
 
 - A force quit, a `kill -9`, a power loss or a logout kill during a load or its settle
   window looks like a crash and counts one strike. Two in a row hold the wallpaper,
-  which is why one is not enough. Releasing is one Apply.
+  which is why one is not enough. Releasing is one Apply or one Try again.
 - A launch that opens several displays at once makes every wallpaper still opening a
   suspect; the journal cannot tell which one killed the process.
 - A crash later than the settle window is not attributed to a load.
@@ -128,7 +161,7 @@ The session log (see [diagnostics.md](diagnostics.md)) carries:
 
 - `WARN load journal: previous session died while opening <id> (display N); strike k/2`
 - `WARN load journal: holding <id>` at every launch while it is held
-- `INFO load journal: released <id> (apply)` and `released N held wallpaper(s) after update`
+- `INFO load journal: released <id> (by the user)` for Apply and Try again, and `released N held wallpaper(s) after update`
 - `WARN load journal: set aside an unusable journal ...` and `could not write ...`
 - `DEBUG` lines when a load is recorded and when it settles
 
@@ -141,15 +174,28 @@ Device-free, against the fake engine and a temporary support root:
   dropped and succeeded tickets, clean shutdown (also from another thread, and nothing
   recorded after it), a new build, forgive, a corrupt file,
   an empty load never touching the disk, and pruning.
-- `tests::crash_loop_guard`: bootstrap leaves a held wallpaper out and names it, Apply
-  brings it back and releases the hold, later reconciles keep skipping it, the record is
-  on disk while a load runs and through its settle window, only scenes that really open are
-  recorded, quitting and failing loads leave no strike.
+- `tests::crash_loop_guard`: bootstrap leaves a held wallpaper out and lists it in the
+  snapshot (sorted, only while a display is assigned to it), Apply and
+  `release_held_wallpaper` bring it back and release the hold, a release of a wallpaper that
+  is not held or whose reconcile fails changes nothing, an Apply whose reconcile fails leaves
+  it held (and the repair after the failure plans without it), a crash while an Apply is
+  loading it counts a third strike at the next launch, later reconciles keep skipping it,
+  an apply that is not the user's (a rotation coming back to a held wallpaper) leaves the hold
+  and a strike count alone while the user's apply releases and resets them,
+  the record is on disk while a load runs and through its settle window, a quit that arrives
+  while startup still holds the actor (or a load that begins after the quit) leaves no
+  strike, only scenes that
+  really open are recorded, quitting and failing loads leave no strike.
+- `ControlPanelHeldWallpaperTests` (hosted, windowless web view): the panel snapshot names
+  each held wallpaper with the localized sentence, `releaseHeld` reaches the bridge once for
+  a held wallpaper and rejects an installed one that is not held, the banner lists the rows
+  and its button posts the action, and a refused retry keeps the row and shows the error.
 - `tests::activation_plan`: a held wallpaper gets no scene, web or native-video
   descriptor; `build_owned` names the owner of every scene, mirrors included.
 
-Not verifiable headlessly: a real engine crash while a scene loads. The fake engine
-cannot take the process down, so the crash is played by a record that never ends. The
-check on a desktop is to kill the app with `SIGSEGV` during a restore twice, relaunch
-and confirm the wallpaper is held, then apply it from the panel and confirm it loads;
-that needs an explicitly authorized run.
+Not verifiable headlessly: a real engine crash while a scene loads, and how the banner and
+the menu line look in the real panel and status menu. The fake engine cannot take the
+process down, so the crash is played by a record that never ends. The check on a desktop is
+to kill the app with `SIGSEGV` during a restore twice, relaunch, confirm the banner and the
+menu line, then press **Try again** and confirm the wallpaper loads; that needs an
+explicitly authorized run.

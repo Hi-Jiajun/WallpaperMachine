@@ -30,6 +30,14 @@ extension WebPanelController {
             }) else { throw WebPanelRequest.invalid }
       store.retryHostWallpaper?(id, displayID)
       return
+    case "releaseHeld":
+      let id = try wallpaperID(request)
+      // Only a wallpaper the app is holding back can be released; anything else is a stale tile.
+      guard store.heldWallpaperIDs.contains(id) else { throw WebPanelRequest.invalid }
+      try await store.commands.run(subject: id) {
+        try await store.releaseHeldWallpaperAsync(id: id)
+      }
+      return
     case "themeSetting":
       try theme.set(try request.string("key"), value: try request.string("value"))
       return

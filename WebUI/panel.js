@@ -244,8 +244,17 @@ function renderError() {
   $('error-banner').hidden = !error;
   if (error) morph($('error-banner'), `<p>${escapeHTML(error)}</p>${!state || !window.webkit?.messageHandlers?.native ? button(t('Reconnect'), 'ready', {}, { icon: 'refresh' }) : ''}${button('', 'dismissError', {}, { icon: 'close', title: t('Dismiss error'), className: 'quiet icon-button' })}`);
 }
+// Wallpapers the app left out of this session because it quit unexpectedly twice while loading
+// them. Native words each message; Try again opens that wallpaper and lifts the hold. A failed
+// retry reaches the error banner above and the row stays.
+function renderHeld() {
+  const held = Array.isArray(state?.held) ? state.held : [];
+  $('held-banner').hidden = !held.length;
+  if (held.length) morph($('held-banner'), held.map(item => `<div class="held-row" ${keyAttr(`held-${item.id}`)}><p>${escapeHTML(item.message)}</p>${button(t('Try again'), 'releaseHeld', { id: item.id }, { icon: 'refresh' })}</div>`).join(''));
+}
 function render() {
   renderError();
+  renderHeld();
   if (!state) return;
   const discover = state.page === 'discover';
   const settings = state.page === 'settings';

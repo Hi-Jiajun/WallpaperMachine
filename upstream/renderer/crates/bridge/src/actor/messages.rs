@@ -87,6 +87,11 @@ pub struct RefreshLibrary;
 
 pub struct RefreshDisplays;
 
+/// Opens a wallpaper that the load journal holds back, at the user's request.
+pub struct ReleaseHeldWallpaper {
+    pub wallpaper_id: String,
+}
+
 pub struct PollMousePosition;
 
 pub struct SetFilter {
@@ -391,6 +396,9 @@ pub struct CompleteRestoreAfterReconcile {
 pub struct ReconcileFailed {
     pub error: BridgeError,
     pub generation: u64,
+    /// A wallpaper whose hold the failed apply lifted so that the reconcile
+    /// would plan it. Nothing was opened, so the hold goes back.
+    pub restore_hold: Option<String>,
 }
 
 pub struct CompleteAudioResponse {
@@ -413,6 +421,7 @@ pub type TestMutationReply = Result<(), BridgeError>;
 pub type SelectWallpaperReply = AllSnapshotsReply;
 pub type RefreshLibraryReply = AllSnapshotsReply;
 pub type RefreshDisplaysReply = AllSnapshotsReply;
+pub type ReleaseHeldWallpaperReply = AllSnapshotsReply;
 pub type PollMousePositionReply = Result<(), BridgeError>;
 pub type SetFilterReply = AllSnapshotsReply;
 pub type DisplayMutationReply = Result<BridgeDisplayMutationBundle, crate::api::BridgeError>;

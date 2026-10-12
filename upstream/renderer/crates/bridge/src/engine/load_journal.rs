@@ -237,7 +237,7 @@ impl LoadJournal {
         };
         let was_held = strike.count >= HOLD_AFTER_STRIKES;
         if was_held {
-            log::info!("load journal: released {wallpaper_id} (apply)");
+            log::info!("load journal: released {wallpaper_id} (by the user)");
         }
         inner.persist();
         was_held

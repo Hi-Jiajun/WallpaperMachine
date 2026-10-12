@@ -420,6 +420,19 @@ impl BridgeActorState {
         Self::active_ids(&self.app_config)
     }
 
+    /// The held wallpapers a display is assigned to, sorted. A hold on a
+    /// wallpaper nothing shows is not worth a notice; it comes back the moment
+    /// the wallpaper is assigned again.
+    #[must_use]
+    pub fn held_assigned_ids(&self) -> Vec<String> {
+        let assigned = self.configured_ids();
+        self.held_wallpapers
+            .iter()
+            .filter(|id| assigned.contains(id))
+            .cloned()
+            .collect()
+    }
+
     /// The installed wallpapers, once a scan has established them; `None`
     /// before that, when nothing is known to be missing.
     #[must_use]

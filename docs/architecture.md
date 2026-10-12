@@ -304,6 +304,9 @@ The bridge also keeps a load journal (`engine/load_journal.rs`, `load-journal.js
 opened when the process died in two launches in a row is left out of every activation plan
 (`ActivationInputs::held`) until the user applies it again or the build changes; nothing is
 deleted. `ClientPaths.prepare()` names the build for it through `WALLPAPER_MACHINE_BUILD`.
+`BridgeAppSnapshot.held_wallpaper_ids` lists the held wallpapers a display is assigned to, which
+`BridgeStore.heldWallpaperIDs` hands to the panel banner and the menu-bar line, and
+`WallpaperBridge.release_held_wallpaper` is the panel's **Try again**.
 See [crash recovery](features/crash-recovery.md).
 
 Pointer polling follows committed native scene capability, not a manifest or a first-frame

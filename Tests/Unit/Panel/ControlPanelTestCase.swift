@@ -81,6 +81,10 @@ class LayoutSnapshotBridge: WallpaperBridge {
   @MainActor var frameRateCapCalls: [UInt32?] = []
   @MainActor var hostStartupCalls: [(display: UInt32, wallpaper: String, revision: UInt64, admission: UInt64?, ready: Bool)] = []
   @MainActor var bundleProvider: (@MainActor () -> BridgeSnapshotBundle)?
+  /// Wallpapers the panel asked to release from the load journal's hold, in order.
+  @MainActor var releaseHeldCalls: [String] = []
+  /// What a release throws instead of answering, for a test that needs the bridge to refuse it.
+  @MainActor var releaseHeldFailure: Error?
 
   override func setBatteryMode(mode: BridgeBatteryMode) async throws -> BridgeSnapshotBundle {
     try await reply { $0.batteryModeCalls.append(mode) }
@@ -99,6 +103,16 @@ class LayoutSnapshotBridge: WallpaperBridge {
     try await reply {
       $0.hostStartupCalls.append((displayId, wallpaperId, startupRevision, nativeAdmissionKey, ready))
     }
+  }
+
+  override func releaseHeldWallpaper(wallpaperId: String) async throws -> BridgeSnapshotBundle {
+    try await releaseReply(wallpaperId)
+  }
+
+  @MainActor private func releaseReply(_ wallpaperId: String) throws -> BridgeSnapshotBundle {
+    releaseHeldCalls.append(wallpaperId)
+    if let releaseHeldFailure { throw releaseHeldFailure }
+    return try reply { _ in }
   }
 
   @MainActor private func reply(_ record: @MainActor (LayoutSnapshotBridge) -> Void) throws -> BridgeSnapshotBundle {

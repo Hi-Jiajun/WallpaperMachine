@@ -18,6 +18,22 @@ extension WebPanelController {
     }
   }
 
+  /// The wallpapers the load journal held back, each with the sentence the page shows beside its
+  /// Try again button. The sentence is worded here so the page never assembles a localized one.
+  func heldWallpapersSnapshot() -> [[String: Any]] {
+    store.heldWallpaperIDs.map { id in
+      let title = store.librarySnapshot.wallpapers.first { $0.id == id }?.title ?? id
+      return ["id": id, "title": title, "message": Self.heldWallpaperMessage(title: title)]
+    }
+  }
+
+  static func heldWallpaperMessage(title: String) -> String {
+    String(
+      localized:
+        "“\(title)” was not restored: WallpaperMachine quit unexpectedly twice in a row while loading it. Nothing was deleted."
+    )
+  }
+
   /// Register native dependencies without materializing a page payload while hidden.
   func trackSnapshotDependencies() {
     _ = store.appSnapshot
@@ -616,6 +632,7 @@ extension WebPanelController {
       ],
       "previewAvailable": store.openPreview != nil,
       "hostStates": hostStatesSnapshot(),
+      "held": heldWallpapersSnapshot(),
       "libraryRevision": library.revision,
       "filtersCollapsed": filtersCollapsed,
       "welcomeSeen": welcomeSeen,

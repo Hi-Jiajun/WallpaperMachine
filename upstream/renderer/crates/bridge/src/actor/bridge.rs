@@ -33,7 +33,7 @@ use crate::{
             InitialFrameReady, InjectDisplayForTest, InjectSceneProjectForTest,
             InjectSceneWallpaperConfigForTest, InjectWallpaperForTest, PollMousePosition,
             GetNativeVideoWallpapers, ReconcileFailed, RefreshDisplays, RefreshLibrary,
-            RejectNativeVideo, RendererCounters,
+            ReleaseHeldWallpaper, RejectNativeVideo, RendererCounters,
             ReplaceLibraryForTest,
             ReplaceWallpaperConfigForTest, RestorePropertyDefault, SelectWallpaper,
             SetAudioResponseEnabled, SetBatteryQualityProfile, SetContentPacingEnabled,
@@ -471,6 +471,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             selected_wallpaper_id: self.state.selected_wallpaper_id.clone(),
             active_wallpaper_ids: self.state.active_wallpaper_ids.clone(),
             errors: self.state.errors.clone(),
+            held_wallpaper_ids: self.state.held_assigned_ids(),
         }
     }
 
@@ -1038,8 +1039,9 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
     /// leaves them out of every plan from here on.
     ///
     /// Runs once per launch, after the library is known and before anything is
-    /// opened. A held wallpaper that is assigned to a display is reported, since
-    /// that display will not show it until the user applies it again.
+    /// opened. The panel learns about a held wallpaper that is assigned to a
+    /// display from [`BridgeAppSnapshot::held_wallpaper_ids`], since that
+    /// display will not show it until the user retries it.
     fn hold_back_crashing_wallpapers(&mut self) {
         if let Some(library) = self.state.scanned_library() {
             // A hold must not outlive the files it is about.
@@ -1047,29 +1049,9 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             self.load_journal.prune(&installed);
         }
         self.state.held_wallpapers = self.load_journal.held();
-        let configured = self.state.configured_ids();
-        for id in self.state.held_wallpapers.clone() {
+        for id in &self.state.held_wallpapers {
             log::warn!("load journal: holding {id}");
-            if configured.contains(&id) {
-                let notice = self.held_notice(&id);
-                self.state.errors.push(notice);
-            }
         }
-    }
-
-    /// The sentence shown while `wallpaper_id` is held back. A structured field
-    /// replaces this text once the panel can show a banner of its own.
-    fn held_notice(&self, wallpaper_id: &str) -> String {
-        let title = self
-            .state
-            .library
-            .iter()
-            .find(|entry| entry.id == wallpaper_id)
-            .map_or(wallpaper_id, |entry| entry.title.as_str());
-        format!(
-            "{title} was not restored because WallpaperMachine quit unexpectedly twice while \
-             loading it. Apply it again to retry."
-        )
     }
 
     fn load_guard(&self) -> LoadGuard {
@@ -1761,6 +1743,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                         .ask(ReconcileFailed {
                             error: duplicate_error(&error),
                             generation,
+                            restore_hold: None,
                         })
                         .await;
                     return Err(error);
@@ -2717,6 +2700,32 @@ impl<E: EngineFacade + Clone> Message<RefreshDisplays> for BridgeActor<E> {
     ) -> Self::Reply {
         self.refresh_displays().await?;
         self.reconcile_configured().await?;
+        self.bump_generation();
+        Ok(self.all_snapshots())
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<ReleaseHeldWallpaper> for BridgeActor<E> {
+    type Reply = messages::ReleaseHeldWallpaperReply;
+
+    async fn handle(
+        &mut self,
+        msg: ReleaseHeldWallpaper,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        if !self.state.held_wallpapers.remove(&msg.wallpaper_id) {
+            // Already released, by Apply or by an earlier click: nothing to open.
+            return Ok(self.all_snapshots());
+        }
+        // The journal keeps its strikes until the wallpaper has been handed to
+        // the engine, so a crash during this very attempt holds it again at
+        // the next launch instead of counting as a first offence.
+        if let Err(error) = self.reconcile_configured().await {
+            // Nothing was opened, so it is still held back.
+            self.state.held_wallpapers.insert(msg.wallpaper_id);
+            return Err(error);
+        }
+        let _ = self.load_journal.forgive(&msg.wallpaper_id);
         self.bump_generation();
         Ok(self.all_snapshots())
     }
@@ -4723,41 +4732,51 @@ impl<E: EngineFacade + Clone> Message<ApplyWallpaperOptions> for BridgeActor<E> 
         // reaching the same wallpaper leaves the journal alone: it neither
         // lifts a hold nor starts a count over, or a wallpaper that crashes
         // the app would be reopened every time the rotation came round to it.
-        let released = msg.user_initiated && self.load_journal.forgive(&msg.wallpaper_id);
-        if released {
-            let notice = self.held_notice(&msg.wallpaper_id);
-            self.state.errors.retain(|error| *error != notice);
-            let _ = self.state.held_wallpapers.remove(&msg.wallpaper_id);
-        }
+        //
+        // Only the in-memory hold is lifted here, so that this reconcile plans
+        // the wallpaper. The journal keeps its strikes until the reconcile has
+        // succeeded, the way Try again does: a crash during this very load then
+        // earns the wallpaper a third strike and holds it again at the next
+        // launch instead of counting as a first offence. A failure puts the
+        // hold back.
+        let lifts_hold = msg.user_initiated && self.state.held_wallpapers.remove(&msg.wallpaper_id);
         let app_config = candidates.app_config.clone();
         let wallpaper_configs = candidates.wallpaper_configs.clone();
         let library = self.state.scanned_library().map(<[_]>::to_vec);
-        let requires_reconcile = candidates.requires_reconcile || released;
+        let requires_reconcile = candidates.requires_reconcile || lifts_hold;
         let paused = self.playback_paused();
         let suspended_displays = self.state.suspended_displays.clone();
-        let predicted_scenes = reply_try!(
-            requires_reconcile
-                .then(|| {
-                    ActivationInputs {
-                        app_config: &app_config,
-                        wallpapers: &wallpaper_configs,
-                        library: self.state.scanned_library(),
-                        displays: &displays,
-                        paused,
-                        suspended_displays: &suspended_displays,
-                        paths: &self.paths,
-                        force_shader_refresh: false,
-                        project_models: &self.state.project_models,
-                        native_video_enabled: app_config.video_backend == VideoBackendModeCfg::NativePreferred,
-                        native_video_rejected: &self.state.native_video_rejected,
-                        frame_rate_cap: self.active_target_fps_cap(),
-                        audio_suppressed: self.state.audio_suppressed,
-                        held: &self.state.held_wallpapers,
-                    }
-                    .build()
-                })
-                .transpose()
-        );
+        let predicted_scenes = match requires_reconcile
+            .then(|| {
+                ActivationInputs {
+                    app_config: &app_config,
+                    wallpapers: &wallpaper_configs,
+                    library: self.state.scanned_library(),
+                    displays: &displays,
+                    paused,
+                    suspended_displays: &suspended_displays,
+                    paths: &self.paths,
+                    force_shader_refresh: false,
+                    project_models: &self.state.project_models,
+                    native_video_enabled: app_config.video_backend == VideoBackendModeCfg::NativePreferred,
+                    native_video_rejected: &self.state.native_video_rejected,
+                    frame_rate_cap: self.active_target_fps_cap(),
+                    audio_suppressed: self.state.audio_suppressed,
+                    held: &self.state.held_wallpapers,
+                }
+                .build()
+            })
+            .transpose()
+        {
+            Ok(scenes) => scenes,
+            Err(error) => {
+                // Nothing was handed to the engine, so it is still held back.
+                if lifts_hold {
+                    self.state.held_wallpapers.insert(msg.wallpaper_id);
+                }
+                return ctx.reply(Err(error));
+            }
+        };
         let project_models = self.state.configured_project_models(&app_config);
 
         if requires_reconcile {
@@ -4765,6 +4784,9 @@ impl<E: EngineFacade + Clone> Message<ApplyWallpaperOptions> for BridgeActor<E> 
             let actor = ctx.actor_ref().clone();
             let engine = self.engine.clone();
             let wallpaper_id = msg.wallpaper_id;
+            let restore_hold = lifts_hold.then(|| wallpaper_id.clone());
+            let forgive_when_opened = msg.user_initiated;
+            let journal = self.load_journal.clone();
             let native_video_rejected_snapshot = self.state.native_video_rejected.clone();
             let quality = self.quality_runtime();
             let paths = self.paths.clone();
@@ -4796,11 +4818,19 @@ impl<E: EngineFacade + Clone> Message<ApplyWallpaperOptions> for BridgeActor<E> 
                             .ask(ReconcileFailed {
                                 error: duplicate_error(&error),
                                 generation,
+                                restore_hold,
                             })
                             .await;
                         return Err(error);
                     }
                 };
+                // The scenes are open, and the journal has them on record
+                // through the settle window: from here a crash is counted
+                // against the wallpaper afresh, not on top of the strikes
+                // that held it.
+                if forgive_when_opened {
+                    let _ = journal.forgive(&wallpaper_id);
+                }
                 actor
                     .ask(CommitApplyAfterReconcile {
                         wallpaper_id,
@@ -4818,6 +4848,11 @@ impl<E: EngineFacade + Clone> Message<ApplyWallpaperOptions> for BridgeActor<E> 
             self.state
                 .commit_apply_candidates(msg.wallpaper_id.clone(), candidates, false)
         );
+        if msg.user_initiated {
+            // Nothing was handed to the engine, so there is no load to wait
+            // for: the user choosing the wallpaper again starts its count over.
+            let _ = self.load_journal.forgive(&msg.wallpaper_id);
+        }
         self.state.refresh_active_ids();
         if let Some(predicted_scenes) = predicted_scenes.as_deref() {
             self.state.set_active_ids_from_scenes(predicted_scenes);
@@ -4923,6 +4958,11 @@ impl<E: EngineFacade + Clone> Message<ReconcileFailed> for BridgeActor<E> {
         msg: ReconcileFailed,
         ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
+        if let Some(wallpaper_id) = msg.restore_hold {
+            // Before the repair `reconcile_failure` starts, which plans from
+            // the held set: it must not open what this attempt could not.
+            self.state.held_wallpapers.insert(wallpaper_id);
+        }
         self.reconcile_failure(msg.generation, msg.error, ctx.actor_ref().clone());
         Ok(())
     }

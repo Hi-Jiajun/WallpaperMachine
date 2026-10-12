@@ -91,6 +91,13 @@ named icon button. Errors keep their original details and **Dismiss**;
 **Reconnect** is offered only before the first snapshot or when the native bridge
 is unavailable, not for an ordinary operation failure.
 
+A wallpaper that was left out of the session because the app quit unexpectedly twice
+while loading it gets its own banner under the error line, one row per wallpaper:
+a sentence naming it and **Try again**. It is a warning, not an error, so it has no
+Dismiss; it goes away when the wallpaper is retried or applied, and a retry the engine
+refuses shows the reason in the error line and keeps the row. The menu-bar menu repeats
+the state as a disabled line. See [crash recovery](crash-recovery.md).
+
 ## Tabs
 
 - **Discover** browses the Steam Workshop. See [Workshop downloads](workshop-downloads.md).

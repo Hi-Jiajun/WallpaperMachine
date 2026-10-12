@@ -176,11 +176,14 @@ async fn bootstrap_does_not_reopen_a_wallpaper_that_crashed_the_app_twice() {
     );
     let app = bridge.app_snapshot().await.unwrap();
     assert_eq!(app.active_wallpaper_ids, vec![LAKE.to_string()]);
+    assert_eq!(
+        app.held_wallpaper_ids,
+        vec![FOREST.to_string()],
+        "the held wallpaper has to be named, or its display just looks broken"
+    );
     assert!(
-        app.errors
-            .iter()
-            .any(|error| error.contains("Moody Forest")),
-        "the held wallpaper has to be named, or its display just looks broken: {:?}",
+        app.errors.is_empty(),
+        "the hold is reported as state for the panel to word, not as an error line: {:?}",
         app.errors
     );
     // Nothing was deleted: the wallpaper is still installed and still assigned.
@@ -209,7 +212,9 @@ async fn one_earlier_crash_is_not_enough_to_hold_a_wallpaper_back() {
     bridge.bootstrap().await.unwrap();
 
     assert_eq!(scene_displays(&engine.calls()[0]), vec![7, 8]);
-    assert!(bridge.app_snapshot().await.unwrap().errors.is_empty());
+    let app = bridge.app_snapshot().await.unwrap();
+    assert!(app.held_wallpaper_ids.is_empty());
+    assert!(app.errors.is_empty());
 }
 
 #[tokio::test]
@@ -243,9 +248,9 @@ async fn applying_a_held_wallpaper_again_opens_it_and_releases_the_hold() {
         vec![FOREST.to_string(), LAKE.to_string()]
     );
     assert!(
-        app.errors.is_empty(),
+        app.held_wallpaper_ids.is_empty(),
         "the notice goes away with the hold: {:?}",
-        app.errors
+        app.held_wallpaper_ids
     );
     assert!(
         setup.journal_file()["strikes"].get(FOREST).is_none(),
@@ -261,6 +266,281 @@ async fn applying_a_held_wallpaper_again_opens_it_and_releases_the_hold() {
         scene_displays(calls.last().unwrap()),
         vec![7, 8],
         "a released wallpaper stays in every later plan"
+    );
+}
+
+#[test]
+fn a_crash_while_a_held_wallpaper_is_applied_again_holds_it_at_the_next_launch() {
+    let setup = Setup::new();
+    setup.die_while_opening(FOREST, 7);
+    setup.die_while_opening(FOREST, 7);
+    let engine = setup.engine();
+    let bridge = Arc::new(setup.bridge(&engine));
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(bridge.bootstrap())
+        .unwrap();
+    assert_eq!(scene_displays(&engine.calls()[0]), vec![8]);
+
+    let block = engine.block_next_reconcile();
+    let applying = Arc::clone(&bridge);
+    let apply = thread::spawn(move || {
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(applying.apply_wallpaper_options(FOREST.to_string(), true))
+    });
+    assert!(
+        block.wait_until_blocked(Duration::from_secs(10)),
+        "the apply never reached the engine"
+    );
+
+    // The process dies here, with the scene still loading. Try again keeps the
+    // strikes until the load has succeeded, and so must Apply: otherwise the
+    // wallpaper that crashed the app twice comes back as a first offence, is
+    // opened by startup, and crashes the app a third time before the user can
+    // do anything.
+    let file = setup.journal_file();
+    assert_eq!(
+        file["strikes"][FOREST]["count"], 2,
+        "the hold is not lifted before the load has been survived: {file}"
+    );
+    assert!(opening(&file).contains(&(FOREST.to_string(), 7)));
+    let next_launch = setup.journal();
+    assert_eq!(next_launch.strikes()[FOREST].count, 3);
+    assert!(
+        next_launch.held().contains(FOREST),
+        "the next launch holds it again"
+    );
+
+    block.release();
+    apply.join().unwrap().unwrap();
+    assert!(
+        setup.journal_file()["strikes"].get(FOREST).is_none(),
+        "a load that got through is forgiven"
+    );
+}
+
+#[tokio::test]
+async fn an_apply_that_fails_leaves_a_held_wallpaper_held() {
+    let setup = Setup::new();
+    setup.die_while_opening(FOREST, 7);
+    setup.die_while_opening(FOREST, 7);
+    let engine = setup.engine();
+    let bridge = setup.bridge(&engine);
+    bridge.bootstrap().await.unwrap();
+
+    engine.fail_reconcile_with("engine unavailable");
+    let error = bridge
+        .apply_wallpaper_options(FOREST.to_string(), true)
+        .await
+        .expect_err("the engine refused the reconcile");
+    assert!(error.message().contains("engine unavailable"));
+    // A failed apply is followed by a repair, which the engine refuses as well.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while bridge.app_snapshot().await.unwrap().errors.len() < 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the repair after a failed apply never finished");
+
+    assert_eq!(
+        bridge.app_snapshot().await.unwrap().held_wallpaper_ids,
+        vec![FOREST.to_string()],
+        "an apply that opened nothing must not look like a release"
+    );
+    assert_eq!(
+        setup.journal_file()["strikes"][FOREST]["count"],
+        2,
+        "and the next launch still holds it back"
+    );
+    assert_eq!(
+        scene_displays(engine.calls().last().unwrap()),
+        vec![8],
+        "the repair that follows the failure does not reopen what the apply could not"
+    );
+
+    // Applying it again works once the engine does.
+    engine.clear_reconcile_failure();
+    bridge
+        .apply_wallpaper_options(FOREST.to_string(), true)
+        .await
+        .unwrap();
+    assert!(
+        bridge
+            .app_snapshot()
+            .await
+            .unwrap()
+            .held_wallpaper_ids
+            .is_empty()
+    );
+    assert!(setup.journal_file()["strikes"].get(FOREST).is_none());
+}
+
+#[tokio::test]
+async fn app_snapshot_lists_held_ids_sorted() {
+    let setup = Setup::new();
+    // Held in the opposite order to the one they sort in.
+    for _ in 0..2 {
+        setup.die_while_opening(LAKE, 8);
+    }
+    for _ in 0..2 {
+        setup.die_while_opening(FOREST, 7);
+    }
+    let engine = setup.engine();
+    let bridge = setup.bridge(&engine);
+
+    let bundle = bridge.bootstrap().await.unwrap();
+
+    let expected = vec![FOREST.to_string(), LAKE.to_string()];
+    assert_eq!(bundle.app.held_wallpaper_ids, expected);
+    assert_eq!(
+        bridge.app_snapshot().await.unwrap().held_wallpaper_ids,
+        expected,
+        "every snapshot carries the same list as the bootstrap bundle"
+    );
+    assert!(
+        engine.calls().iter().all(|scenes| scenes.is_empty()),
+        "with every assignment held, nothing is handed to the engine"
+    );
+}
+
+#[tokio::test]
+async fn release_held_wallpaper_reconciles_it_and_empties_the_snapshot_field() {
+    let setup = Setup::new();
+    setup.die_while_opening(FOREST, 7);
+    setup.die_while_opening(FOREST, 7);
+    let engine = setup.engine();
+    let bridge = setup.bridge(&engine);
+    bridge.bootstrap().await.unwrap();
+    assert_eq!(scene_displays(&engine.calls()[0]), vec![8]);
+    let calls_before = engine.calls().len();
+
+    let bundle = bridge
+        .release_held_wallpaper(FOREST.to_string())
+        .await
+        .unwrap();
+
+    assert!(bundle.app.held_wallpaper_ids.is_empty());
+    assert_eq!(
+        bundle.app.active_wallpaper_ids,
+        vec![FOREST.to_string(), LAKE.to_string()],
+        "the reply already shows the wallpaper as opened"
+    );
+    let calls = engine.calls();
+    assert!(
+        calls.len() > calls_before,
+        "the engine was asked to open it"
+    );
+    assert_eq!(scene_displays(calls.last().unwrap()), vec![7, 8]);
+    assert!(
+        setup.journal_file()["strikes"].get(FOREST).is_none(),
+        "the release is saved, or the next launch would hold it again"
+    );
+    assert!(
+        bridge
+            .app_snapshot()
+            .await
+            .unwrap()
+            .held_wallpaper_ids
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn releasing_a_wallpaper_that_is_not_held_changes_nothing() {
+    let setup = Setup::new();
+    setup.die_while_opening(FOREST, 7);
+    setup.die_while_opening(FOREST, 7);
+    let engine = setup.engine();
+    let bridge = setup.bridge(&engine);
+    bridge.bootstrap().await.unwrap();
+    let calls_before = engine.calls().len();
+
+    // A stale click on a tile the panel has already moved past.
+    let bundle = bridge
+        .release_held_wallpaper(LAKE.to_string())
+        .await
+        .unwrap();
+
+    assert_eq!(bundle.app.held_wallpaper_ids, vec![FOREST.to_string()]);
+    assert_eq!(engine.calls().len(), calls_before, "nothing was reopened");
+    assert_eq!(setup.journal_file()["strikes"][FOREST]["count"], 2);
+}
+
+#[tokio::test]
+async fn a_release_that_fails_leaves_the_wallpaper_held() {
+    let setup = Setup::new();
+    setup.die_while_opening(FOREST, 7);
+    setup.die_while_opening(FOREST, 7);
+    let engine = setup.engine();
+    let bridge = setup.bridge(&engine);
+    bridge.bootstrap().await.unwrap();
+
+    engine.fail_reconcile_with("engine unavailable");
+    let error = bridge
+        .release_held_wallpaper(FOREST.to_string())
+        .await
+        .expect_err("the engine refused the reconcile");
+    assert!(error.message().contains("engine unavailable"));
+
+    assert_eq!(
+        bridge.app_snapshot().await.unwrap().held_wallpaper_ids,
+        vec![FOREST.to_string()],
+        "a retry that opened nothing must not look like a release"
+    );
+    assert_eq!(
+        setup.journal_file()["strikes"][FOREST]["count"],
+        2,
+        "and the next launch still holds it back"
+    );
+
+    // The retry works once the engine does.
+    engine.clear_reconcile_failure();
+    let bundle = bridge
+        .release_held_wallpaper(FOREST.to_string())
+        .await
+        .unwrap();
+    assert!(bundle.app.held_wallpaper_ids.is_empty());
+    assert!(setup.journal_file()["strikes"].get(FOREST).is_none());
+}
+
+#[tokio::test]
+async fn a_hold_on_a_wallpaper_no_display_shows_is_not_reported() {
+    let setup = Setup::new();
+    setup.die_while_opening(FOREST, 7);
+    setup.die_while_opening(FOREST, 7);
+    let engine = setup.engine();
+    let bridge = setup.bridge(&engine);
+    bridge.bootstrap().await.unwrap();
+    assert_eq!(
+        bridge.app_snapshot().await.unwrap().held_wallpaper_ids,
+        vec![FOREST.to_string()]
+    );
+
+    // Display 7 is given another wallpaper, so nothing waits for FOREST.
+    bridge
+        .set_display_config_enabled("300".to_string(), "7".to_string(), true)
+        .await
+        .unwrap();
+    bridge
+        .apply_wallpaper_options("300".to_string(), true)
+        .await
+        .unwrap();
+
+    assert!(
+        bridge
+            .app_snapshot()
+            .await
+            .unwrap()
+            .held_wallpaper_ids
+            .is_empty(),
+        "a banner about a wallpaper no display wants would be noise"
+    );
+    assert_eq!(
+        setup.journal_file()["strikes"][FOREST]["count"],
+        2,
+        "the hold itself is not forgotten"
     );
 }
 
@@ -293,6 +573,98 @@ async fn a_hold_blocks_later_reconciles_as_well_as_startup() {
         "the held wallpaper's display is still left alone"
     );
     assert!(last[0].scene_path.contains("/300/"));
+}
+
+#[tokio::test]
+async fn a_playlist_coming_back_to_a_held_wallpaper_does_not_reopen_it() {
+    let setup = Setup::new();
+    setup.die_while_opening(FOREST, 7);
+    setup.die_while_opening(FOREST, 7);
+    let engine = setup.engine();
+    let bridge = setup.bridge(&engine);
+    bridge.bootstrap().await.unwrap();
+
+    // A rotation moves display 7 on and then comes round to FOREST again. It
+    // applies the wallpaper the way the user's Apply does, without the user.
+    for wallpaper in ["300", FOREST] {
+        let done = engine.wait_for_next_reconcile();
+        bridge
+            .set_display_config_enabled(wallpaper.to_string(), "7".to_string(), true)
+            .await
+            .unwrap();
+        bridge
+            .apply_wallpaper_options(wallpaper.to_string(), false)
+            .await
+            .unwrap();
+        assert!(done.wait(Duration::from_secs(5)));
+    }
+
+    let calls = engine.calls();
+    assert_eq!(
+        scene_displays(calls.last().unwrap()),
+        vec![8],
+        "FOREST crashed the app twice: a schedule does not get to reopen it"
+    );
+    let app = bridge.app_snapshot().await.unwrap();
+    assert_eq!(
+        app.held_wallpaper_ids,
+        vec![FOREST.to_string()],
+        "display 7 is waiting for it again, so the panel says why it is empty"
+    );
+    assert_eq!(
+        setup.journal_file()["strikes"][FOREST]["count"],
+        2,
+        "and the next launch holds it as well"
+    );
+
+    // The user choosing it is still the way back.
+    let done = engine.wait_for_next_reconcile();
+    bridge
+        .apply_wallpaper_options(FOREST.to_string(), true)
+        .await
+        .unwrap();
+    assert!(done.wait(Duration::from_secs(5)));
+    assert_eq!(scene_displays(engine.calls().last().unwrap()), vec![7, 8]);
+    assert!(
+        bridge
+            .app_snapshot()
+            .await
+            .unwrap()
+            .held_wallpaper_ids
+            .is_empty()
+    );
+    assert!(setup.journal_file()["strikes"].get(FOREST).is_none());
+}
+
+#[tokio::test]
+async fn an_automated_apply_does_not_start_a_strike_count_over() {
+    let setup = Setup::new();
+    setup.die_while_opening(FOREST, 7);
+    let engine = setup.engine();
+    let bridge = setup.bridge(&engine);
+    bridge.bootstrap().await.unwrap();
+    assert_eq!(setup.journal_file()["strikes"][FOREST]["count"], 1);
+
+    bridge
+        .apply_wallpaper_options(FOREST.to_string(), false)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        setup.journal_file()["strikes"][FOREST]["count"],
+        1,
+        "a rule applying it again says nothing about whether it still crashes"
+    );
+
+    bridge
+        .apply_wallpaper_options(FOREST.to_string(), true)
+        .await
+        .unwrap();
+
+    assert!(
+        setup.journal_file()["strikes"].get(FOREST).is_none(),
+        "the user applying it again does start the count over"
+    );
 }
 
 #[test]

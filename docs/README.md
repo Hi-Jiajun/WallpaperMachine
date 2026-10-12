@@ -87,7 +87,7 @@ file; pass `rg -u` to search them deliberately.
 | [features/appearance.md](features/appearance.md) | Theme, accent and tone, the app icon, and brand asset generation |
 | [features/performance.md](features/performance.md) | Energy readout and per-wallpaper ratings, quality and playback settings, video backend, experimental switches, and background work only while it has a consumer |
 | [features/scene-rendering.md](features/scene-rendering.md) | Scene renderer choice (Compatibility or Native Metal preferred), scene render optimisation, skipping frames that would repeat, renderer memory and repeated-work reduction |
-| [features/crash-recovery.md](features/crash-recovery.md) | The load journal: a wallpaper that was being opened when the app died twice in a row is held back at launch, how strikes, the settle window and release by Apply or update work, and the limits |
+| [features/crash-recovery.md](features/crash-recovery.md) | The load journal: a wallpaper that was being opened when the app died twice in a row is held back at launch, how strikes, the settle window and release by Apply, the panel's Try again or an update work, the banner and menu line, and the limits |
 | [features/diagnostics.md](features/diagnostics.md) | Application log format and load tagging, detailed logging, retention, and the diagnostics report users attach to bug reports |
 
 ## Maintaining these docs

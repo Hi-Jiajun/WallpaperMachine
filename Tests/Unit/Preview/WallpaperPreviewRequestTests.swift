@@ -85,7 +85,7 @@ final class WallpaperPreviewRequestTests: XCTestCase {
                 canRestoreDefaults: false, enabled: true, assetManaged: false, assetMissing: false, assetSourcePath: nil),
         ])
         let store = BridgeStore(bridge: bridge)
-        store.appSnapshot = .init(playbackState: .playing, selectedWallpaperId: "other", activeWallpaperIds: ["other"], errors: [])
+        store.appSnapshot = .init(playbackState: .playing, selectedWallpaperId: "other", activeWallpaperIds: ["other"], errors: [], heldWallpaperIds: [])
         let before = store.appSnapshot
         let field = WallpaperEditorState.FieldKey(wallpaperID: "preview", fieldID: "message")
         store.editorState.setPropertyText("local draft", key: field)
