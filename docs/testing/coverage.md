@@ -246,8 +246,10 @@ on [manual-smoke.md](manual-smoke.md).
   Steam library, `steamapps`, a Wallpaper Engine install or a copy of it, its
   `projects` folder and either half), a chosen `project.json`, `scene.json` or
   `.pkg` standing for its folder, and links refused in the file, its folder and
-  the manifest beside it, are covered. Fetching a preset's base in the same
-  SteamCMD run is in `DownloaderLifecycleTests`.
+  the manifest beside it, are covered, as is the Workshop id a renamed project
+  takes from its manifest or link (and the values that are not one), which
+  follows the duplicate policy when already installed. Fetching a preset's base
+  in the same SteamCMD run is in `DownloaderLifecycleTests`.
 - `ImageImportTests` import real ImageIO pictures as the still `web` project with
   the original's bytes kept and the file name kept out of the page, the fit
   chosen from the picture's shape, a JPEG display copy for a TIFF, an undecodable

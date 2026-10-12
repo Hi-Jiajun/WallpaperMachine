@@ -598,4 +598,157 @@ final class ImportTests: XCTestCase {
                                                    withDestinationURL: real.appendingPathComponent("project.json"))
         try await assertRefused(sibling.appendingPathComponent("scene.pkg"))
     }
+
+    // MARK: A renamed Workshop project
+
+    /// A video project in a folder of the given name whose manifest carries `fields`, raw JSON
+    /// members such as `"workshopid": "123"`, so numbers, overflow and nonsense can be written as is.
+    @discardableResult
+    private func renamedProject(_ name: String, under parent: String = "sources", fields: String...) throws -> URL {
+        let url = root.appendingPathComponent("\(parent)/\(name)")
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        try Data("content of \(name)".utf8).write(to: url.appendingPathComponent("movie.mp4"))
+        let members = [#""title": "\#(name)""#, #""type": "video""#, #""file": "movie.mp4""#] + fields
+        try Data("{\(members.joined(separator: ","))}".utf8).write(to: url.appendingPathComponent("project.json"))
+        return url
+    }
+
+    private func importReport(of source: URL, policy: WallpaperImportService.DuplicatePolicy = .skip) async throws -> WallpaperImportService.Report {
+        try await importer.importItems([source], into: freshLibrary(), duplicates: policy, progress: { _ in })
+    }
+
+    func testRenamedProjectIsFiledUnderTheWorkshopIDItsManifestNames() async throws {
+        let source = try renamedProject("My Cool Wallpaper", fields: #""workshopid": "3000000001""#)
+        let report = try await importOne(source)
+        XCTAssertEqual(report.importedIDs, ["3000000001"], "\(report.failures)")
+        XCTAssertEqual(report.recognizedWorkshopIDs, ["My Cool Wallpaper": "3000000001"])
+        XCTAssertEqual(try String(contentsOf: library.appendingPathComponent("3000000001/movie.mp4"), encoding: .utf8),
+                       "content of My Cool Wallpaper")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: library.appendingPathComponent("My Cool Wallpaper").path))
+        // A manifest that writes the id as a JSON number names it just as well.
+        let numeric = try renamedProject("Number", fields: #""workshopid": 3000000002"#)
+        let second = try await importReport(of: numeric)
+        XCTAssertEqual(second.importedIDs, ["3000000002"])
+    }
+
+    func testRenamedProjectWithOnlyAWorkshopLinkIsRecognized() async throws {
+        let links = [
+            "steam://url/CommunityFilePage/3000000003",
+            "https://steamcommunity.com/sharedfiles/filedetails/?id=3000000003",
+            "https://steamcommunity.com/sharedfiles/filedetails/?id=3000000003&searchtext=",
+        ]
+        for (index, link) in links.enumerated() {
+            let source = try renamedProject("Linked \(index)", fields: #""workshopurl": "\#(link)""#)
+            let report = try await importReport(of: source)
+            XCTAssertEqual(report.importedIDs, ["3000000003"], link)
+        }
+        // The id field wins when both are present.
+        let both = try renamedProject("Both", fields: #""workshopid": "3000000004""#,
+                                      #""workshopurl": "steam://url/CommunityFilePage/3000000005""#)
+        let report = try await importReport(of: both)
+        XCTAssertEqual(report.importedIDs, ["3000000004"])
+    }
+
+    func testFolderAlreadyNamedWithAnIDKeepsItsNameWhateverTheManifestSays() async throws {
+        let source = try renamedProject("555", fields: #""workshopid": "999""#)
+        let report = try await importOne(source)
+        XCTAssertEqual(report.importedIDs, ["555"])
+        XCTAssertTrue(report.recognizedWorkshopIDs.isEmpty)
+    }
+
+    func testAManifestThatNamesNoWholePositiveNumberLeavesTheFolderName() async throws {
+        let unusable = [
+            #""workshopid": "abc123""#, #""workshopid": "123abc""#, #""workshopid": "12 34""#, #""workshopid": " 123""#,
+            #""workshopid": """#, #""workshopid": "0""#, #""workshopid": 0"#, #""workshopid": -5"#, #""workshopid": "-5""#,
+            #""workshopid": "99999999999999999999""#, #""workshopid": 99999999999999999999"#,
+            #""workshopid": 12.5"#, #""workshopid": 1e3"#, #""workshopid": true"#, #""workshopid": null"#,
+            #""workshopid": ["123"]"#, #""workshopid": {"id": "123"}"#,
+            #""workshopurl": "https://example.com/sharedfiles/filedetails/?id=123""#,
+            #""workshopurl": "https://steamcommunity.com/sharedfiles/filedetails/?id=abc""#,
+            #""workshopurl": "https://steamcommunity.com/sharedfiles/filedetails/?id=1&id=2""#,
+            #""workshopurl": "https://steamcommunity.com/profiles/123""#,
+            #""workshopurl": "steam://url/CommunityFilePage/-1""#, #""workshopurl": "steam://url/CommunityFilePage""#,
+            #""workshopurl": "123""#, #""workshopurl": 123"#, #""workshopurl": """#,
+        ]
+        for (index, field) in unusable.enumerated() {
+            let name = "Unusable \(index)"
+            let report = try await importReport(of: try renamedProject(name, fields: field))
+            XCTAssertEqual(report.importedIDs, [name], field)
+            XCTAssertTrue(report.recognizedWorkshopIDs.isEmpty, field)
+        }
+        // Digits in a title are not a Workshop id, and neither is a manifest that names nothing.
+        let titled = try renamedProject("Neon City 2077")
+        let report = try await importReport(of: titled)
+        XCTAssertEqual(report.importedIDs, ["Neon City 2077"])
+    }
+
+    func testAnUnusableIDFieldFallsBackToTheLinkNextToIt() async throws {
+        let source = try renamedProject("Fallback", fields: #""workshopid": 1e3"#,
+                                        #""workshopurl": "steam://url/CommunityFilePage/3000000006""#)
+        let report = try await importReport(of: source)
+        XCTAssertEqual(report.importedIDs, ["3000000006"])
+    }
+
+    func testARecognizedIDAlreadyInstalledFollowsTheDuplicatePolicy() async throws {
+        let original = try renamedProject("3000000007", fields: #""workshopid": "3000000007""#)
+        _ = try await importOne(original)
+        let copy = try renamedProject("A renamed copy", fields: #""workshopid": "3000000007""#)
+        try Data("edited copy".utf8).write(to: copy.appendingPathComponent("movie.mp4"))
+
+        let skipped = try await importOne(copy)
+        XCTAssertEqual(skipped.skipped, ["A renamed copy"])
+        XCTAssertTrue(skipped.importedIDs.isEmpty)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: library.path), ["3000000007"])
+        XCTAssertEqual(try String(contentsOf: library.appendingPathComponent("3000000007/movie.mp4"), encoding: .utf8),
+                       "content of 3000000007", "The installed item is never replaced")
+
+        let kept = try await importOne(copy, policy: .keepBoth)
+        let keptID = try XCTUnwrap(kept.importedIDs.first)
+        XCTAssertTrue(keptID.hasPrefix("3000000007-"), keptID)
+        XCTAssertEqual(try String(contentsOf: library.appendingPathComponent("\(keptID)/movie.mp4"), encoding: .utf8), "edited copy")
+        XCTAssertEqual(try String(contentsOf: library.appendingPathComponent("3000000007/movie.mp4"), encoding: .utf8),
+                       "content of 3000000007")
+    }
+
+    func testRenamedCopiesOfOneItemInOneImportMeetTheDuplicatePolicy() async throws {
+        let first = try renamedProject("First copy", fields: #""workshopid": "3000000008""#)
+        let second = try renamedProject("Second copy", fields: #""workshopid": "3000000008""#)
+        let report = try await importer.importItems([first, second], into: library, duplicates: .skip, progress: { _ in })
+        XCTAssertEqual(report.importedIDs, ["3000000008"])
+        XCTAssertEqual(report.skipped, ["Second copy"])
+    }
+
+    func testARenamedPresetIsFiledUnderItsOwnIDAndStillAssembled() async throws {
+        let steamContent = root.appendingPathComponent("Steam/steamapps/workshop/content/431960")
+        try presetBase(at: steamContent.appendingPathComponent("100"))
+        try preset(at: steamContent.appendingPathComponent("Purple Ink"))
+        let report = try await importOne(steamContent.appendingPathComponent("Purple Ink"))
+        XCTAssertEqual(report.importedIDs, ["200"], "\(report.failures)")
+        XCTAssertEqual(report.recognizedWorkshopIDs, ["Purple Ink": "200"])
+        try assertAssembledPreset("200")
+    }
+
+    func testWorkshopLinksNameTheirItem() {
+        let id = WallpaperImportService.workshopItemID(inLink:)
+        XCTAssertEqual(id("steam://url/CommunityFilePage/123"), "123")
+        XCTAssertEqual(id("steam://url/CommunityFilePage/123/"), "123")
+        XCTAssertEqual(id("  steam://url/CommunityFilePage/123\n"), "123")
+        XCTAssertEqual(id("STEAM://URL/communityfilepage/123"), "123")
+        XCTAssertEqual(id("https://steamcommunity.com/sharedfiles/filedetails/?id=123"), "123")
+        XCTAssertEqual(id("https://www.steamcommunity.com/sharedfiles/filedetails?id=123&searchtext=blue"), "123")
+        XCTAssertEqual(id("http://steamcommunity.com/sharedfiles/filedetails/?l=english&id=123"), "123")
+        XCTAssertEqual(id("steam://openurl/https://steamcommunity.com/sharedfiles/filedetails/?id=123"), "123")
+        XCTAssertNil(id("https://steamcommunity.com.example.com/sharedfiles/filedetails/?id=123"))
+        XCTAssertNil(id("https://example.com/sharedfiles/filedetails/?id=123"))
+        XCTAssertNil(id("https://steamcommunity.com/sharedfiles/filedetails/"))
+        XCTAssertNil(id("https://steamcommunity.com/sharedfiles/filedetails/?id=0"))
+        XCTAssertNil(id("https://steamcommunity.com/sharedfiles/filedetails/?id=12abc"))
+        XCTAssertNil(id("https://steamcommunity.com/sharedfiles/filedetails/?id=1&id=2"))
+        XCTAssertNil(id("https://steamcommunity.com/app/431960/workshop/?id=123"))
+        XCTAssertNil(id("steam://url/CommunityFilePage/1/2"))
+        XCTAssertNil(id("steam://run/431960"))
+        XCTAssertNil(id("ftp://steamcommunity.com/sharedfiles/filedetails/?id=123"))
+        XCTAssertNil(id("123"))
+        XCTAssertNil(id(""))
+    }
 }

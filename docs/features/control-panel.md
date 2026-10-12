@@ -421,7 +421,14 @@ inside it are read: `steamapps/workshop/content/431960`, and the
 install. The pick can be the Steam library, `steamapps`, `steamapps/common`, the
 install (`wallpaper_engine`), a copy of it from another computer (`Wallpaper
 Engine`, or the folder holding that copy), its `projects` folder, or either half.
-Each project keeps its folder name as its library id. Choosing a project's own
+Each project keeps its folder name as its library id, except a Workshop project
+copied under another name: when the folder name is not a Workshop id, the id in
+the project's `project.json` (`workshopid`, else the item its `workshopurl` link
+names) becomes the library id, so update checks, the Steam link and duplicate
+detection work for it. Only a whole positive number counts, and digits in a
+folder name are never taken for an id; anything else keeps the folder name. When
+that id is already installed the duplicate policy decides, so nothing is renamed
+or overwritten, and the log records each recognition. Choosing a project's own
 `project.json`, `scene.json` or `.pkg` file imports the folder that holds it when
 that folder has a `project.json`; any other file is handled as before. Links are
 never followed: not a chosen file, not its folder, not the manifest beside it,

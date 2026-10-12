@@ -14,6 +14,9 @@ actor WallpaperImportService {
         var skipped: [String] = []
         var failures: [String] = []
         var cancelled = false
+        /// Folders whose name is not a Workshop id but whose manifest names the item they are
+        /// a copy of: folder name to item id. They are filed under that id.
+        var recognizedWorkshopIDs: [String: String] = [:]
     }
 
     struct ImportError: LocalizedError {
@@ -85,8 +88,16 @@ actor WallpaperImportService {
                         let isDirectory = try candidate.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true
                         let ext = candidate.pathExtension.lowercased()
                         let isImage = !isDirectory && Self.imageExtensions.contains(ext)
-                        let preferredID = isDirectory ? candidate.lastPathComponent
+                        var preferredID = isDirectory ? candidate.lastPathComponent
                             : (isImage ? Self.imageIDPrefix : "local-") + candidate.lastPathComponent
+                        if isDirectory, Self.workshopID(preferredID) == nil, let itemID = inferredWorkshopID(of: candidate) {
+                            // A Workshop project copied under another name is still that item: the
+                            // library files it under the id so updates, Steam links and duplicate
+                            // detection find it. An id that is already installed meets the policy below.
+                            report.recognizedWorkshopIDs[preferredID] = itemID
+                            AppLog.info("import: \(preferredID) recognized as Workshop item \(itemID)")
+                            preferredID = itemID
+                        }
                         guard isSafeRelativePath(preferredID), !preferredID.contains("/") else {
                             throw ImportError(message: String(localized: "The folder name cannot be used as a library identifier."))
                         }
@@ -405,14 +416,55 @@ actor WallpaperImportService {
     /// The preset described by `root/project.json`, or nil when it is anything else; ordinary
     /// validation then reports what is wrong with it.
     private func presetManifest(at root: URL) -> Preset? {
-        let url = root.appendingPathComponent("project.json")
-        guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]),
-              values.isRegularFile == true, values.isSymbolicLink != true, (values.fileSize ?? 0) <= 16 * 1024 * 1024,
-              let data = try? Data(contentsOf: url), !data.starts(with: [0xEF, 0xBB, 0xBF]),
-              let manifest = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+        guard let manifest = readManifest(at: root),
               ((manifest["type"] as? String) ?? "").isEmpty,
               let dependency = Self.workshopID(manifest["dependency"]) else { return nil }
         return Preset(manifest: manifest, dependency: dependency)
+    }
+
+    /// The JSON object in `root/project.json`, or nil unless that is a regular file (not a link)
+    /// of at most 16 MB without a byte-order mark. Import validation still insists on UTF-8.
+    private func readManifest(at root: URL) -> [String: Any]? {
+        let url = root.appendingPathComponent("project.json")
+        guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]),
+              values.isRegularFile == true, values.isSymbolicLink != true, (values.fileSize ?? 0) <= 16 * 1024 * 1024,
+              let data = try? Data(contentsOf: url), !data.starts(with: [0xEF, 0xBB, 0xBF]) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
+    /// The Workshop item a project folder belongs to although its name is not the id: the
+    /// manifest's `workshopid`, else the item its `workshopurl` points at. Only a whole positive
+    /// number counts. The folder name is not consulted (a title like "2077" is not an id), and a
+    /// manifest naming nothing usable leaves the folder name as the library id.
+    private func inferredWorkshopID(of folder: URL) -> String? {
+        guard let manifest = readManifest(at: folder) else { return nil }
+        // A fraction, an exponent (`1e3`) or a number too large for 64 bits is a measurement, not an identifier.
+        let isMeasurement = (manifest["workshopid"] as? NSNumber).map { ["f", "d"].contains(String(cString: $0.objCType)) } ?? false
+        if !isMeasurement, let id = Self.workshopID(manifest["workshopid"]) { return id }
+        guard let link = manifest["workshopurl"] as? String else { return nil }
+        return Self.workshopItemID(inLink: link)
+    }
+
+    /// The item a Workshop link names: `steam://url/CommunityFilePage/<id>`, a Steam Community
+    /// `filedetails` page (`?id=<id>`), or a `steam://openurl/` wrapper around one.
+    nonisolated static func workshopItemID(inLink link: String) -> String? {
+        let text = link.trimmingCharacters(in: .whitespacesAndNewlines)
+        let wrapper = "steam://openurl/"
+        if text.lowercased().hasPrefix(wrapper) { return workshopItemID(inLink: String(text.dropFirst(wrapper.count))) }
+        guard let components = URLComponents(string: text), let host = components.host?.lowercased() else { return nil }
+        switch components.scheme?.lowercased() {
+        case "steam":
+            let parts = components.path.split(separator: "/", omittingEmptySubsequences: true)
+            guard host == "url", parts.count == 2, parts[0].lowercased() == "communityfilepage" else { return nil }
+            return workshopID(String(parts[1]))
+        case "http", "https":
+            guard host == "steamcommunity.com" || host == "www.steamcommunity.com",
+                  components.path.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "/")) == "sharedfiles/filedetails",
+                  let ids = components.queryItems?.filter({ $0.name == "id" }), ids.count == 1 else { return nil }
+            return workshopID(ids[0].value)
+        default:
+            return nil
+        }
     }
 
     /// The first candidate folder holding an installable wallpaper to build the preset on.
