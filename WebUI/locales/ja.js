@@ -1082,6 +1082,11 @@ export default {
   'Background color': '背景色',
   'Fill, keep the top': '画面全体に表示（上部を維持）',
   'Fit with blurred backdrop': '画面に合わせる（背景をぼかす）',
+  // Low battery
+  'When the battery is low': 'バッテリー残量が少ないとき',
+  'Low battery level': 'バッテリー残量の基準',
+  'Applies only while the Mac runs on battery. It ends 5 points above the level you choose, or when you plug in. The battery is at {percent}% now.': 'Macがバッテリー駆動の間だけ有効です。選んだ残量より5ポイント上がるか、電源に接続すると終了します。現在のバッテリー残量は{percent}%です。',
+  'When the battery is low, wallpapers pause or stop once the charge falls to the level you chose, and resume when you plug in or the charge recovers.': 'バッテリー残量が少ないときは、残量が選んだレベルまで下がると壁紙が一時停止または停止し、電源に接続するか残量が回復すると再開します。',
   // Low Power Mode, heat and Focus
   'In Low Power Mode': '低電力モード時',
   'Low Power Mode is on now.': '低電力モードは現在オンです。',

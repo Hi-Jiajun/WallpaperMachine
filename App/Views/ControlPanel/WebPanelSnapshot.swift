@@ -503,6 +503,13 @@ extension WebPanelController {
     let thermalState = Self.thermalState(ProcessInfo.processInfo.thermalState)
     let focusAction = FocusFilterState.shared.selection?.target.kind.rawValue
       ?? FocusFilterState.shared.action?.rawValue ?? "keepRunning"
+    // The charge is null on a Mac without an internal battery, which is how the page knows to
+    // leave the low-battery rows out.
+    let lowBatterySnapshot: [String: Any] = [
+      "lowBatteryAction": playback.lowBatteryAction.rawValue,
+      "lowBatteryThreshold": playback.lowBatteryThreshold,
+      "batteryPercent": BatteryReading.read()?.percent as Any? ?? null,
+    ]
     // The sections are built separately: as one literal, the Swift compiler on the
     // macOS 15 release runner gives up type-checking it in reasonable time.
     let settingsSnapshot: [String: Any] = [
@@ -672,7 +679,7 @@ extension WebPanelController {
       "imagePlacement": imagePlacementSnapshot(),
       "wallpaperCompatibility": compatibilitySnapshot()["wallpaperCompatibility"] ?? null,
       "options": options ?? null,
-      "settings": settingsSnapshot,
+      "settings": settingsSnapshot.merging(lowBatterySnapshot) { _, new in new },
       "workshop": workshopSnapshot, "workshopUpdates": updatesSnapshot,
       "pixiv": pixivSnapshot(),
       "setup": setupSnapshot,

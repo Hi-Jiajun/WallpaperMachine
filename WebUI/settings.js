@@ -20,6 +20,8 @@ const otherAudioActions = [['keepRunning', 'Keep running'], ['mute', 'Mute'], ['
 const displaySleepActions = [['pause', 'Pause'], ['stop', 'Stop (free memory)']];
 const desktopCoveredActions = [['pause', 'Pause'], ['keepRunning', 'Keep running']];
 const systemConditionActions = [['keepRunning', 'Keep running'], ['pause', 'Pause'], ['stop', 'Stop (free memory)']];
+// The charge levels the low-battery rule offers, in percent; Swift refuses any other.
+const lowBatteryLevels = [[10, '10%'], [20, '20%'], [30, '30%']];
 const focusActions = { keepRunning: 'Keep running', mute: 'Mute', pause: 'Pause', stop: 'Stop (free memory)', wallpaper: 'Use wallpaper', playlist: 'Use saved playlist' };
 const thermalStates = { nominal: 'normal', fair: 'warm', serious: 'hot', critical: 'very hot' };
 const hotkeyTitles = { togglePlayback: 'Play or pause wallpapers', nextWallpaper: 'Next wallpaper', previousWallpaper: 'Previous wallpaper', openControlPanel: 'Open the control panel' };
@@ -481,6 +483,10 @@ function draw(view) {
     + (batteryReduced ? row('battery-scale', t('Render scale on battery'), select('batteryRenderScale', t('Render scale on battery'), draft('batteryRenderScale', batteryScale), scaleOptions(batteryScale), 'data-setting="batteryRenderScale" data-number', busy || unavailable))
       + row('battery-fps', t('Frame rate on battery'), `<input class="settings-number" data-key="batteryTargetFps" type="number" inputmode="numeric" aria-label="${e(t('Frame rate on battery'))}" min="1" max="240" step="1" value="${e(draft('batteryTargetFps', settings.batteryTargetFps))}" data-setting="batteryTargetFps"${disabled(busy || unavailable)}><span class="settings-unit">fps</span>`)
       + row('battery-state', t('Power source'), `<span class="settings-status" role="status">${e(batteryActive ? t('On battery. Reduced quality is in use.') : settings.onBatteryPower ? t('On battery') : t('Plugged in. Your usual quality settings are in use.'))}</span>`, '', 'settings-readout') : '')
+    + (settings.batteryPercent != null
+      ? row('low-battery', t('When the battery is low'), select('lowBatteryAction', t('When the battery is low'), draft('lowBatteryAction', settings.lowBatteryAction || 'keepRunning'), localizedOptions(systemConditionActions), 'data-setting="lowBatteryAction"', busy || unavailable), t('Applies only while the Mac runs on battery. It ends 5 points above the level you choose, or when you plug in. The battery is at {percent}% now.', { percent: settings.batteryPercent }))
+        + (settings.lowBatteryAction && settings.lowBatteryAction !== 'keepRunning' ? row('low-battery-level', t('Low battery level'), select('lowBatteryThreshold', t('Low battery level'), draft('lowBatteryThreshold', settings.lowBatteryThreshold ?? 20), lowBatteryLevels, 'data-setting="lowBatteryThreshold" data-number', busy || unavailable)) : '')
+      : '')
     + row('low-power', t('In Low Power Mode'), select('lowPowerModeAction', t('In Low Power Mode'), draft('lowPowerModeAction', settings.lowPowerModeAction || 'keepRunning'), localizedOptions(systemConditionActions), 'data-setting="lowPowerModeAction"', busy || unavailable), settings.lowPowerMode ? t('Low Power Mode is on now.') : t('Low Power Mode is off now.'))
     + row('thermal', t('When the Mac is hot'), select('thermalAction', t('When the Mac is hot'), draft('thermalAction', settings.thermalAction || 'keepRunning'), localizedOptions(systemConditionActions), 'data-setting="thermalAction"', busy || unavailable), t('Applies while macOS reports the Mac as hot or very hot, which is when it starts slowing itself down. Right now it is {state}.', { state: t(thermalStates[settings.thermalState] || 'normal') }))
     + row('focus', t('Focus'), button(t('Open Focus Settings…'), 'openFocusSettings', {}, busy), settings.focusAction && settings.focusAction !== 'keepRunning' ? t('A Focus filter is in effect now: {action}.', { action: t(focusActions[settings.focusAction] || settings.focusAction) }) : t('In System Settings → Focus, add the WallpaperMachine filter to pause, mute, stop or temporarily switch wallpapers. No Focus filter is in effect now.'))
@@ -514,6 +520,7 @@ function draw(view) {
       t('When another app plays sound, Mute uses each wallpaper’s output mute channel. Web mute availability is shown in its details. Pause stops every wallpaper until that sound ends.'),
       t('When displays sleep, Pause keeps wallpapers loaded. Stop frees renderer memory and reloads them when the display wakes.'),
       t('On battery, Keep running leaves quality alone, Reduced quality uses the battery scale and frame rate, and Pause stops wallpapers until you plug in. None of these promises a measured power saving.'),
+      t('When the battery is low, wallpapers pause or stop once the charge falls to the level you chose, and resume when you plug in or the charge recovers.'),
       t('App rules pause, mute or stop wallpapers while a chosen app is running or in front. Your own Play and Pause are not changed.'),
       t('Low Power Mode, a hot Mac and a Focus filter work the same way: while they hold, wallpapers pause, mute or stop as you chose, and resume when they end. Stop frees renderer memory and reloads wallpapers afterwards.'),
       t('A quality preset sets the frame-rate limit and render scale together. The frame-rate limit caps every display without rewriting the frame rate saved for each wallpaper. Internal render scale sets how many pixels are rendered before the image is scaled to fit.'),

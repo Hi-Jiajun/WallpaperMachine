@@ -17,8 +17,8 @@ enum DesktopCoveredAction: String, Codable, CaseIterable, Sendable {
     case keepRunning
 }
 
-/// What wallpapers do while a condition of the whole Mac holds: Low Power Mode, or macOS
-/// reporting it hot.
+/// What wallpapers do while a condition of the whole Mac holds: Low Power Mode, macOS
+/// reporting it hot, or a low battery.
 enum SystemConditionAction: String, Codable, CaseIterable, Sendable {
     case keepRunning
     case pause
@@ -54,8 +54,8 @@ struct AppRule: Codable, Equatable, Identifiable, Sendable {
 }
 
 /// UserDefaults-backed playback rules for display sleep, other-app audio, a
-/// covered desktop, Low Power Mode, a hot Mac and per-app pause, mute and stop. Mutations post
-/// `didChangeNotification` once.
+/// covered desktop, Low Power Mode, a hot Mac, a low battery and per-app pause, mute and stop.
+/// Mutations post `didChangeNotification` once.
 @MainActor
 final class PlaybackPreferences {
     static let didChangeNotification = Notification.Name("WallpaperMachine.playbackPreferencesDidChange")
@@ -73,7 +73,13 @@ final class PlaybackPreferences {
     private static let appRulesKey = "WallpaperMachine.appRules"
     private static let lowPowerModeKey = "WallpaperMachine.lowPowerModeAction"
     private static let thermalKey = "WallpaperMachine.thermalAction"
+    private static let lowBatteryActionKey = "WallpaperMachine.lowBatteryAction"
+    private static let lowBatteryThresholdKey = "WallpaperMachine.lowBatteryThreshold"
     private static let periodicDesktopPictureKey = "WallpaperMachine.refreshDesktopPicturePeriodically"
+
+    /// The charge levels the user can pick for the low-battery rule, in percent.
+    nonisolated static let lowBatteryThresholds = [10, 20, 30]
+    nonisolated static let defaultLowBatteryThreshold = 20
 
     private let defaults: UserDefaults
 
@@ -107,6 +113,28 @@ final class PlaybackPreferences {
     var thermalAction: SystemConditionAction {
         get { storedEnum(Self.thermalKey, default: .keepRunning) }
         set { store(newValue.rawValue, forKey: Self.thermalKey) }
+    }
+
+    /// Off until chosen: a low battery alone never changes playback. Applies only while the Mac
+    /// runs on its internal battery at or below `lowBatteryThreshold`.
+    var lowBatteryAction: SystemConditionAction {
+        get { storedEnum(Self.lowBatteryActionKey, default: .keepRunning) }
+        set { store(newValue.rawValue, forKey: Self.lowBatteryActionKey) }
+    }
+
+    /// One of `lowBatteryThresholds`. A stored value outside the list, which only a hand edit or
+    /// a damaged file can leave, reads as the default; setting one is ignored.
+    var lowBatteryThreshold: Int {
+        get {
+            guard let stored = defaults.object(forKey: Self.lowBatteryThresholdKey) as? Int,
+                  Self.lowBatteryThresholds.contains(stored) else { return Self.defaultLowBatteryThreshold }
+            return stored
+        }
+        set {
+            guard Self.lowBatteryThresholds.contains(newValue) else { return }
+            defaults.set(newValue, forKey: Self.lowBatteryThresholdKey)
+            postChange()
+        }
     }
 
     /// Off by default: the still picture Mission Control shows is otherwise

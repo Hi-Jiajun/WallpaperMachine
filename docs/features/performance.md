@@ -119,7 +119,7 @@ delegate and reachable from the panel as `BridgeStore.wallpaperEnergyRatings`:
 - **When a sample is credited.** Every 30 seconds the recorder asks the app
   delegate for a `WallpaperEnergyContext`. There is none, and no sample is taken,
   unless presentation is running and playback is playing (no display sleep, lock,
-  app rule, other-audio, Low Power Mode, heat, Focus-filter or battery pause), the
+  app rule, other-audio, Low Power Mode, heat, low-battery, Focus-filter or battery pause), the
   control panel is not on screen, no live preview window is open, no download is
   running SteamCMD or fetching a pixiv original, exactly one wallpaper is assigned
   across the displays that are not suspended by occlusion, and none of those
@@ -254,6 +254,7 @@ control for that part.
 | When another app plays sound | **Keep running**, **Mute**, **Pause** | Keep running |
 | When displays sleep | **Pause**, **Stop (free memory)** | Pause |
 | On battery | **Keep running**, **Reduced quality**, **Pause** | Keep running |
+| When the battery is low | **Keep running**, **Pause**, **Stop (free memory)**; the level is **10%**, **20%** or **30%** | Keep running, 20% |
 | In Low Power Mode | **Keep running**, **Pause**, **Stop (free memory)** | Keep running |
 | When the Mac is hot | **Keep running**, **Pause**, **Stop (free memory)** | Keep running |
 
@@ -337,13 +338,25 @@ web pages and native video it hosts take in the pause, frame rate and render sca
 once instead of at the next unrelated snapshot. The notification itself has not been
 exercised by unplugging a Mac in a test.
 
-### Low Power Mode, heat and Focus
+### Low battery, Low Power Mode, heat and Focus
 
 **In Low Power Mode** applies while macOS reports Low Power Mode
 (`ProcessInfo.isLowPowerModeEnabled`), and **When the Mac is hot** while it reports
 the thermal state as serious or critical, the states in which macOS starts
 throttling itself. Both are off until chosen. Each row's note says whether the
 condition holds right now.
+
+**When the battery is low** applies while the Mac runs on its internal battery at or
+below the **Low battery level** (10%, 20% or 30%; 20% unless you choose another). The
+level row appears once an action other than **Keep running** is chosen, and both rows
+appear only on a Mac with an internal battery; the note shows the charge when the
+page was drawn. The rule ends when the charge is 5 points above the level, so a charge
+that hovers around it does not pause and resume the wallpapers over and over, and it
+ends at once when you plug in, whatever the charge. Only the internal battery counts,
+never a UPS, and a reading that fails counts as not low. Like the other conditions it
+pauses or stops wallpapers without touching your own Play/Pause; **Stop** frees
+renderer memory and reloads the wallpapers when the rule ends. A Reduced quality choice
+is not offered for it.
 
 A Focus can act on wallpapers through a Focus filter (`WallpaperFocusFilter`, an
 App Intents `SetFocusFilterIntent`): in System Settings → Focus → a Focus → Focus
@@ -363,7 +376,12 @@ the app rules' in `WallpaperPresentationPolicy`, so they pause, mute or stop
 wallpapers exactly as an app rule does and never change the user's own Play/Pause.
 It only observes notifications (`NSProcessInfoPowerStateDidChange`,
 `ProcessInfo.thermalStateDidChangeNotification`, the preferences and the Focus
-filter); nothing is polled. Web mute uses the same availability boundary as above.
+filter); nothing is polled. The battery adds IOKit's power-source notification
+(`IOPSNotificationCreateRunLoopSource`, wrapped by `SystemBatteryLevel`), registered
+only while a low-battery action is chosen and removed when it is not, and read again
+when the Mac wakes in case a plug or unplug during sleep was never reported. The
+decision itself is `LowBatteryGate`, fed by one `BatteryReading` of the internal
+battery. Web mute uses the same availability boundary as above.
 Wallpaper and playlist selections instead reach `WallpaperAutomationScheduler`;
 they never become pause/mute/stop actions or change the user's own Play/Pause. The
 experimental [desktop Space mode](spaces.md) uses the same eligibility gate,

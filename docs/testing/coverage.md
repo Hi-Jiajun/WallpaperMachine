@@ -133,7 +133,15 @@ on the desktop ([manual-smoke.md](manual-smoke.md)).
 - `SystemConditionMonitorTests` use injected Low Power Mode and thermal readings
   and a private notification center: Low Power Mode acts only once an action is
   chosen, only serious and critical heat counts, a Focus filter joins the other
-  conditions and survives a new instance, and `stop()` releases every action.
+  conditions and survives a new instance, and `stop()` releases every action. A fake
+  battery source drives the low-battery rule: it is neither read nor observed until an
+  action is chosen, engages at the level and releases five points above it, follows a
+  changed level and a plug-in at any charge, never engages without an internal
+  battery, joins the other conditions, and a wake-time refresh reads a change nobody
+  announced. `LowBatteryTests` pin the gate sequence, the margin and the parse of
+  IOKit's power-source description (internal battery only, no UPS, no zero maximum)
+  with synthetic dictionaries; the real source is only started and stopped to prove it
+  releases itself.
   `WallpaperFocusFilterTests` pin the filter's default to the choice that lets
   wallpapers run, since macOS performs it with defaults when a Focus ends.
 - `PowerSourceMonitorTests` use an injected reading: only a different source is
@@ -168,7 +176,9 @@ on the desktop ([manual-smoke.md](manual-smoke.md)).
 
 Not covered: the real Focus Settings pane and a real Low Power Mode; a real plug or
 unplug during sleep, including whether `IOKit` answers correctly the moment the Mac
-wakes; real wallpaper windows on another Space and the effect of either repair step;
+wakes; a real discharge crossing the low-battery level, how often IOKit posts the
+power-source notification on this Mac, and how the two rows lay out in the live
+panel; real wallpaper windows on another Space and the effect of either repair step;
 whether a scene surface stops producing frames across a real sleep and wake, and
 whether the wake check's repair restores it (needs a desktop run).
 

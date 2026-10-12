@@ -45,6 +45,62 @@ final class WebPanelPerformanceSettingsTests: XCTestCase {
     XCTAssertEqual(context.playback.desktopCoveredAction, .keepRunning)
   }
 
+  func testLowBatteryActionIsSavedAndAnUnknownValueRefused() async throws {
+    let context = try Context()
+    defer { context.tearDown() }
+
+    try await context.controller.perform(
+      "setting", body: ["key": "lowBatteryAction", "value": "stop"])
+    XCTAssertEqual(context.playback.lowBatteryAction, .stop)
+
+    for bad: Any in ["sometimes", "mute", 1, true] {
+      do {
+        try await context.controller.perform(
+          "setting", body: ["key": "lowBatteryAction", "value": bad])
+        XCTFail("\(bad) is not a low-battery action")
+      } catch {}
+    }
+    XCTAssertEqual(context.playback.lowBatteryAction, .stop, "A refused value leaves the saved one alone")
+  }
+
+  func testLowBatteryLevelAcceptsOnlyTheOfferedLevels() async throws {
+    let context = try Context()
+    defer { context.tearDown() }
+
+    for level in [10, 30, 20] {
+      try await context.controller.perform(
+        "setting", body: ["key": "lowBatteryThreshold", "value": level])
+      XCTAssertEqual(context.playback.lowBatteryThreshold, level)
+    }
+    context.playback.lowBatteryThreshold = 10
+    for bad: Any in [15, 9, 31, 20.5, "20", true, NSNull()] {
+      do {
+        try await context.controller.perform(
+          "setting", body: ["key": "lowBatteryThreshold", "value": bad])
+        XCTFail("\(bad) is not an offered low-battery level")
+      } catch {}
+    }
+    XCTAssertEqual(context.playback.lowBatteryThreshold, 10, "Refused levels leave the saved one alone")
+  }
+
+  func testSnapshotPublishesTheLowBatteryChoicesAndAChargeOnlyWhenThereIsABattery() throws {
+    let context = try Context()
+    defer { context.tearDown() }
+    context.playback.lowBatteryAction = .pause
+    context.playback.lowBatteryThreshold = 30
+
+    let settings = try XCTUnwrap(context.controller.snapshot()["settings"] as? [String: Any])
+
+    XCTAssertEqual(settings["lowBatteryAction"] as? String, "pause")
+    XCTAssertEqual(settings["lowBatteryThreshold"] as? Int, 30)
+    // Whether this Mac has a battery is the Mac's business; the page needs the key either way,
+    // and a charge it can show or null that hides the rows.
+    let charge = try XCTUnwrap(settings["batteryPercent"], "The key must always be present")
+    if !(charge is NSNull) {
+      XCTAssertTrue((0...100).contains(try XCTUnwrap(charge as? Int)))
+    }
+  }
+
   func testUnknownVideoBackendIsRefusedInsteadOfSilentlyDefaulting() async throws {
     let context = try Context()
     defer { context.tearDown() }

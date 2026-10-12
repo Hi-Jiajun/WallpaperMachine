@@ -57,7 +57,7 @@ In **System Settings → Focus → Focus Filters**, WallpaperMachine also offers
 **Use wallpaper** and **Use saved playlist**, with an optional display. Omitting the
 display pins the panel's current target when that Focus choice takes effect. The
 selection temporarily overrides time and appearance rules; existing pause/mute/stop
-Focus actions are documented under [Performance](performance.md#low-power-mode-heat-and-focus).
+Focus actions are documented under [Performance](performance.md#low-battery-low-power-mode-heat-and-focus).
 
 When the filter ends, a currently due automatic rule takes over; otherwise the
 previous wallpaper and playlist return. A manual wallpaper chosen during Focus is

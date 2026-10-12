@@ -154,8 +154,8 @@ the state as a disabled line. See [crash recovery](crash-recovery.md).
     the same note.
   - **Performance** opens with a live energy readout for the app, then quality
     (presets, frame-rate limit, render scale) directly beneath it, then playback
-    (occlusion, other-app audio, display sleep, battery, Low Power Mode, heat,
-    Focus, app rules). Video backend, scene controls and the experimental switches
+    (occlusion, other-app audio, display sleep, battery, low battery, Low Power Mode,
+    heat, Focus, app rules). Video backend, scene controls and the experimental switches
     stay under **Advanced**. See [Performance settings](performance.md). The
     inspector of an installed wallpaper adds its measured energy grade, and on a
     Mac with a battery its share of a charge per hour, once it has one

@@ -25,6 +25,15 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-13 — Low-battery playback rule
+
+New Playback rule `When the battery is low` (Keep running, Pause or Stop at 10, 20 or 30 percent; internal battery only). It joins SystemConditionMonitor's actions, reads IOKit's power-source notification only while an action is chosen, and is hidden on Macs without a battery. No bridge or Rust change.
+
+- `python3 scripts/test.py --only LowBatteryTests --only SystemConditionMonitorTests --only PlaybackPreferencesTests --only WebPanelPerformanceSettingsTests --only WallpaperBackupTests` plus WebPanelGeneralSettingsTests, ControlPanelSnapshotDeliveryTests, WebPanelAssetsTests, WebPanelCompatibilityTests, ControlPanelPlaybackToolsTests, WallpaperPresentationPolicyTests, PlaybackPolicyCompositionTests — 122 passed of 122 (18 new).
+- Seven deliberate breaks (no release margin, parse accepting a UPS, observing while Keep running, a wake refresh that reads nothing, unchecked level in preferences, panel action and backup restore) each failed at least one new test; all were reverted.
+- `python3 -m unittest scripts.tests.test_panel_localization` — 5 passed (four new WebUI strings in ja, zh-Hans, zh-Hant).
+- Not run: the full gate, a real discharge crossing the level, IOKit's notification cadence on this Mac, the live panel row layout. The live battery read is never asserted.
+
 ## 2026-10-13 — Mission Control poster kept while fresh
 
 Commit `perf(desktop): stop retaking the Mission Control picture while the current one is fresh`: DesktopWallpaperSync retakes a surface's poster on a Space change, wake or resume only when it is older than 120 s or was taken before the wallpaper settled. Taken in a worktree; the full gate was not run here.
@@ -114,13 +123,3 @@ SceneRuntimeContext rotated a non-centre layer about its centre and slid its anc
 - Run in a detached worktree of the PR branch, linked against main's libwallpaper_bridge.a (no App/Bridge differences between the trees).
 - Headless Chromium harness over renderSettings with a stub snapshot: Custom sends nothing and starts from the saved interval; leaving after an invalid 0 restores the saved preset; switching apps keeps a typed value; a valid value committed on leave is saved; a refused send keeps the field and value next to the error; a typed preset snaps the menu back.
 - Not checked: real WKWebView panel appearance and focus events (focusout was dispatched by hand in a hidden tab); no Release build, the branch is behind main.
-
-## 2026-10-10 — Custom playlist rotation interval
-
-Playlists accept any whole number of minutes from 1 to 10,080 next to the preset menu. Verified from a Linux cloud container without Xcode.
-
-- `python3 -m unittest discover -s scripts/tests` — 271 tests OK, 17 skipped (includes panel localization key parity)
-- `node --check` on settings.js, plans.js and the three locale catalogs — OK
-- Headless Chromium harness over `renderSettings`: choosing Custom sends nothing and focuses the minutes field; 45 sends `interval: 45`; 0 is refused locally; 60 snaps the menu back to Every hour
-- Native gate (`python3 scripts/test.py`, incl. new WebPanelPlaylistTests/PlaylistStoreTests cases) — not run: needs macOS/Xcode
-- WKWebView appearance in the real panel — unchecked; no Release build

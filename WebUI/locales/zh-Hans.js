@@ -1082,6 +1082,11 @@ export default {
   'Background color': '背景颜色',
   'Fill, keep the top': '填充（保留顶部）',
   'Fit with blurred backdrop': '适应（模糊背景）',
+  // Low battery
+  'When the battery is low': '电量低时',
+  'Low battery level': '低电量阈值',
+  'Applies only while the Mac runs on battery. It ends 5 points above the level you choose, or when you plug in. The battery is at {percent}% now.': '仅在 Mac 使用电池供电时生效。电量回升到所选阈值再高 5 个百分点，或接上电源后结束。目前电量为 {percent}%。',
+  'When the battery is low, wallpapers pause or stop once the charge falls to the level you chose, and resume when you plug in or the charge recovers.': '电量低时，壁纸会在电量降到你所选的阈值后暂停或停止，并在你接上电源或电量回升后恢复。',
   // Low Power Mode, heat and Focus
   'In Low Power Mode': '低电量模式下',
   'Low Power Mode is on now.': '低电量模式现已开启。',

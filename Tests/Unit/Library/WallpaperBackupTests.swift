@@ -589,6 +589,30 @@ final class WallpaperBackupTests: XCTestCase {
         try JSONSerialization.data(withJSONObject: manifest).write(to: package.appendingPathComponent("manifest.json"))
     }
 
+    func testLowBatteryChoicesAreBackedUpAndOnlyOfferedValuesRestore() throws {
+        let preferences = try defaults()
+        preferences.set("stop", forKey: "WallpaperMachine.lowBatteryAction")
+        preferences.set(30, forKey: "WallpaperMachine.lowBatteryThreshold")
+        let export = try WallpaperBackupPreferences(defaults: preferences, domainName: domainName(for: preferences))
+        for (key, expected) in [("WallpaperMachine.lowBatteryAction", "stop" as Any), ("WallpaperMachine.lowBatteryThreshold", 30 as Any)] {
+            let stored = try WallpaperBackupPreferences.decode(XCTUnwrap(export.values[key], key))
+            try WallpaperBackupPreferences.validate(stored, forKey: key)
+            XCTAssertEqual("\(stored)", "\(expected)")
+        }
+        for action in ["keepRunning", "pause", "stop"] {
+            XCTAssertNoThrow(try WallpaperBackupPreferences.validate(action, forKey: "WallpaperMachine.lowBatteryAction"))
+        }
+        for level in [10, 20, 30] {
+            XCTAssertNoThrow(try WallpaperBackupPreferences.validate(NSNumber(value: level), forKey: "WallpaperMachine.lowBatteryThreshold"))
+        }
+        for action: Any in ["nap", "", 1, true] {
+            XCTAssertThrowsError(try WallpaperBackupPreferences.validate(action, forKey: "WallpaperMachine.lowBatteryAction"), "\(action)")
+        }
+        for level: Any in [0, 15, 25, 31, -20, 20.5, "20", true, NSNumber(value: 1e30)] {
+            XCTAssertThrowsError(try WallpaperBackupPreferences.validate(level, forKey: "WallpaperMachine.lowBatteryThreshold"), "\(level)")
+        }
+    }
+
     func testStructuredPreferenceRejectionPreservesPendingAndLiveArchive() async throws {
         let original = try fixture()
         let live = try defaults()

@@ -507,6 +507,19 @@ extension WebPanelController {
         } else {
           playback.thermalAction = action
         }
+      case "lowBatteryAction":
+        guard let action = SystemConditionAction(rawValue: try request.string("value")) else {
+          throw WebPanelRequest.invalid
+        }
+        playback.lowBatteryAction = action
+      case "lowBatteryThreshold":
+        let thresholds = PlaybackPreferences.lowBatteryThresholds
+        let value = try request.number(
+          "value", range: Double(thresholds.min() ?? 0)...Double(thresholds.max() ?? 0))
+        guard let level = Int(exactly: value), thresholds.contains(level) else {
+          throw WebPanelRequest.invalid
+        }
+        playback.lowBatteryThreshold = level
       case "verboseLogging":
         try await store.setVerboseLoggingAsync(enabled: try request.boolean("value"))
       case "keepWindowsOnWallpaperClick":

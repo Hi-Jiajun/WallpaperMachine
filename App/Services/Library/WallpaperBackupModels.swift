@@ -103,6 +103,7 @@ struct WallpaperBackupPreferences: Sendable {
         "WallpaperMachine.displaySleepAction", "WallpaperMachine.otherAudioAction",
         "WallpaperMachine.desktopCoveredAction", "WallpaperMachine.appRules",
         "WallpaperMachine.lowPowerModeAction", "WallpaperMachine.thermalAction",
+        "WallpaperMachine.lowBatteryAction", "WallpaperMachine.lowBatteryThreshold",
         "WallpaperMachine.hideAfterActivating", "WallpaperMachine.concurrentDownloads",
         "WallpaperMachine.workshopUpdateChecks", "WallpaperMachineAssetsPath",
         "WallpaperMachine.workshopFiltersCollapsed", "WallpaperMachine.installedFiltersCollapsed",
@@ -238,7 +239,11 @@ struct WallpaperBackupPreferences: Sendable {
         case "WallpaperMachine.displaySleepAction": guard let raw = value as? String, DisplaySleepAction(rawValue: raw) != nil else { throw invalid() }
         case "WallpaperMachine.otherAudioAction": guard let raw = value as? String, OtherAudioAction(rawValue: raw) != nil else { throw invalid() }
         case "WallpaperMachine.desktopCoveredAction": guard let raw = value as? String, DesktopCoveredAction(rawValue: raw) != nil else { throw invalid() }
-        case "WallpaperMachine.lowPowerModeAction", "WallpaperMachine.thermalAction": guard let raw = value as? String, SystemConditionAction(rawValue: raw) != nil else { throw invalid() }
+        case "WallpaperMachine.lowPowerModeAction", "WallpaperMachine.thermalAction", "WallpaperMachine.lowBatteryAction":
+            guard let raw = value as? String, SystemConditionAction(rawValue: raw) != nil else { throw invalid() }
+        case "WallpaperMachine.lowBatteryThreshold":
+            guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(), number.doubleValue == Double(number.intValue),
+                  PlaybackPreferences.lowBatteryThresholds.contains(number.intValue) else { throw invalid() }
         case "WallpaperMachine.concurrentDownloads":
             guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(), number.doubleValue == Double(number.intValue),
                   WorkshopDownloadManager.concurrentDownloadRange.contains(number.intValue) else { throw invalid() }
