@@ -58,6 +58,11 @@ pub struct ActivationInputs<'a> {
     pub frame_rate_cap: Option<u32>,
     /// Transient mute composed on top of each slot's saved mute for every playback host.
     pub audio_suppressed: bool,
+    /// Wallpapers the load journal holds back because the app died while
+    /// opening them in consecutive sessions. They get no scene, web or
+    /// native-video descriptor, so a display assigned one keeps what it
+    /// showed. See [`crate::engine::LoadJournal`].
+    pub held: &'a BTreeSet<String>,
 }
 
 /// Refusals recorded per wallpaper id, then per admission key.
@@ -273,9 +278,24 @@ impl ActivationInputs<'_> {
     /// Returns an error when an active wallpaper config cannot be converted
     /// into a scene.
     pub fn build(&self) -> Result<Vec<SceneDesc>, BridgeError> {
+        Ok(self
+            .build_owned()?
+            .into_iter()
+            .map(|(scene, _)| scene)
+            .collect())
+    }
+
+    /// [`Self::build`] with the wallpaper each scene belongs to: the one
+    /// assigned to its display, or for a mirror the one its source shows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when an active wallpaper config cannot be converted
+    /// into a scene.
+    pub fn build_owned(&self) -> Result<Vec<(SceneDesc, String)>, BridgeError> {
         let (direct, mirrors) = self.slots();
         let group_targets = self.mirror_group_targets(&mirrors);
-        let mut scenes = Vec::new();
+        let mut scenes: Vec<(SceneDesc, String)> = Vec::new();
         for slot in direct {
             // A wallpaper routed to a host-rendered backend must not also get a
             // scene: two renderers for one display would decode and present the
@@ -288,12 +308,16 @@ impl ActivationInputs<'_> {
             {
                 continue;
             }
-            scenes.push(self.scene_for_monitor(
-                slot.display,
-                slot.wallpaper_id,
-                slot.wallpaper,
-                slot.monitor,
-            )?);
+            let owner = slot.wallpaper_id.to_string();
+            scenes.push((
+                self.scene_for_monitor(
+                    slot.display,
+                    slot.wallpaper_id,
+                    slot.wallpaper,
+                    slot.monitor,
+                )?,
+                owner,
+            ));
         }
 
         let mut mirrored: Vec<DisplayDesc> = Vec::new();
@@ -304,9 +328,9 @@ impl ActivationInputs<'_> {
             {
                 continue;
             }
-            let Some(source_scene) = scenes
+            let Some((source_scene, owner)) = scenes
                 .iter()
-                .find(|scene| scene.display.display_id == mirror.source_display_id)
+                .find(|(scene, _)| scene.display.display_id == mirror.source_display_id)
                 .cloned()
             else {
                 continue;
@@ -332,7 +356,7 @@ impl ActivationInputs<'_> {
                 kind: BridgeErrorKind::Engine,
                 message: error.to_string(),
             })?;
-            scenes.push(scene);
+            scenes.push((scene, owner));
         }
 
         Ok(scenes)
@@ -813,6 +837,16 @@ impl ActivationInputs<'_> {
                 log::debug!(
                     "wallpaper {wallpaper_id} is assigned to a display but is not in the \
                      library; leaving that display empty"
+                );
+                continue;
+            }
+
+            if self.held.contains(wallpaper_id) {
+                // Debug, not warn: snapshots rebuild this plan on every refresh.
+                // The bridge said why once, when it learned the wallpaper is held.
+                log::debug!(
+                    "wallpaper {wallpaper_id} is held back by the load journal; \
+                     leaving its display as it is"
                 );
                 continue;
             }

@@ -86,7 +86,7 @@ async fn commit(
         .await
         .unwrap();
     bridge
-        .apply_wallpaper_options(wallpaper.into())
+        .apply_wallpaper_options(wallpaper.into(), true)
         .await
         .unwrap();
 }

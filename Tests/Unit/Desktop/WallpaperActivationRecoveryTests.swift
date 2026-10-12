@@ -597,7 +597,8 @@ private final class ApplyFailureBridge: WallpaperBridge {
     }
 
     override func applyWallpaperOptions(
-        wallpaperId: String
+        wallpaperId: String,
+        userInitiated: Bool
     ) async throws -> BridgeWallpaperMutationBundle {
         let startedGeneration = generation
         let overlappedEnvironmentChange = environmentChangeInFlight

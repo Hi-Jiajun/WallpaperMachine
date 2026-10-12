@@ -47,7 +47,7 @@ async fn scene_media_requires_consent_and_clears_on_disable() {
     bridge.inject_scene_project_for_test("301", "Scene",
         r#"{"type":"scene","title":"Scene","file":"scene.json"}"#).await;
     bridge.set_display_config_enabled("301".into(), "7".into(), true).await.unwrap();
-    bridge.apply_wallpaper_options("301".into()).await.unwrap();
+    bridge.apply_wallpaper_options("301".into(), true).await.unwrap();
     let snapshot = BridgeMediaSnapshot { title: "Track".into(), playback_state: 0, ..Default::default() };
     bridge.update_scene_media("301".into(), snapshot.clone()).await.unwrap();
     assert!(engine.media_calls().is_empty());
@@ -101,7 +101,7 @@ async fn web_bridge(engine: &FakeEngineFacade) -> WallpaperBridge {
         .set_display_config_enabled("300".into(), "7".into(), true)
         .await
         .unwrap();
-    bridge.apply_wallpaper_options("300".into()).await.unwrap();
+    bridge.apply_wallpaper_options("300".into(), true).await.unwrap();
     bridge
 }
 
@@ -250,7 +250,7 @@ async fn a_web_listener_counts_beside_a_scene_that_reads_no_audio() {
     engine.set_snapshot(vec![display_snapshot(7), scene_display]);
     bridge.inject_scene_wallpaper_config_for_test("400", "Scene").await;
     bridge.set_display_config_enabled("400".into(), "9".into(), true).await.unwrap();
-    bridge.apply_wallpaper_options("400".into()).await.unwrap();
+    bridge.apply_wallpaper_options("400".into(), true).await.unwrap();
     assert_eq!(audio_consumers(&bridge).await, 0, "neither the page nor the scene consumes yet");
 
     bridge.set_web_audio_subscribed("300".into(), 7, true).await.unwrap();
@@ -517,7 +517,7 @@ async fn scene_media_events_fan_out_only_to_opted_in_handles() {
         .set_display_config_enabled("100".into(), "7".into(), true)
         .await
         .unwrap();
-    bridge.apply_wallpaper_options("100".into()).await.unwrap();
+    bridge.apply_wallpaper_options("100".into(), true).await.unwrap();
 
     bridge
         .submit_system_media_event(r#"{"type":"mediaPlaybackChanged","state":0}"#.into())
@@ -599,7 +599,7 @@ async fn scene_media_handles_follow_consent_so_nothing_reads_the_player_without_
         .set_display_config_enabled("100".into(), "7".into(), true)
         .await
         .unwrap();
-    bridge.apply_wallpaper_options("100".into()).await.unwrap();
+    bridge.apply_wallpaper_options("100".into(), true).await.unwrap();
 
     assert!(
         bridge.system_media_scene_handles().await.unwrap().is_empty(),
@@ -660,7 +660,7 @@ async fn paused_and_suspended_scenes_stop_consuming_media_but_keep_their_consent
         .set_display_config_enabled("100".into(), "7".into(), true)
         .await
         .unwrap();
-    bridge.apply_wallpaper_options("100".into()).await.unwrap();
+    bridge.apply_wallpaper_options("100".into(), true).await.unwrap();
     bridge
         .set_media_integration_enabled("100".into(), true)
         .await
@@ -754,7 +754,7 @@ async fn one_suspended_display_stops_only_its_own_scene_on_every_entry_point() {
             .await
             .unwrap();
     }
-    bridge.apply_wallpaper_options("100".into()).await.unwrap();
+    bridge.apply_wallpaper_options("100".into(), true).await.unwrap();
     bridge
         .set_media_integration_enabled("100".into(), true)
         .await

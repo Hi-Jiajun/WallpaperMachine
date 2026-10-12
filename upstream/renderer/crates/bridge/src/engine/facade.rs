@@ -306,7 +306,7 @@ impl RealEngineFacade {
 /// which reports its first frame once. Waiting on such a display could only
 /// end in the 90-second timeout, which then rolled back a wallpaper that was
 /// playing.
-fn displays_awaiting_first_frame(live: &[DisplaySnapshotEntry], scenes: &[SceneDesc]) -> Vec<u32> {
+pub(crate) fn displays_awaiting_first_frame(live: &[DisplaySnapshotEntry], scenes: &[SceneDesc]) -> Vec<u32> {
     scenes
         .iter()
         .filter(|scene| {

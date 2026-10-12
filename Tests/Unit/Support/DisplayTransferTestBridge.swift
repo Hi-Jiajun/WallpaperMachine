@@ -59,7 +59,7 @@ final class DisplayTransferTestBridge: LayoutSnapshotBridge {
         edits[wallpaperId, default: [:]][displayId] = enabled
         return mutation
     }
-    override func applyWallpaperOptions(wallpaperId: String) async throws -> BridgeWallpaperMutationBundle {
+    override func applyWallpaperOptions(wallpaperId: String, userInitiated: Bool) async throws -> BridgeWallpaperMutationBundle {
         if let beforeApply { await beforeApply() }
         let changes = edits[wallpaperId] ?? [:]
         let fail = changes.keys.contains { "\($0)=\(wallpaperId)" == failOnce }

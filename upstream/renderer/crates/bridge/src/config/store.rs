@@ -32,6 +32,13 @@ impl ConfigStore {
         Self { root: root.into() }
     }
 
+    /// The directory every file of this store lives under. Other state that
+    /// has to survive a restart (the load journal) is kept beside it.
+    #[must_use]
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
     /// Parses backup bytes without reading, repairing, or replacing live configuration files.
     pub fn validate_app_config_text(raw: &str) -> Result<(), BridgeError> {
         let config = toml::from_str::<AppConfig>(raw)

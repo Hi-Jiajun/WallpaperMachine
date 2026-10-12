@@ -270,6 +270,7 @@
 		ADDDE76CBEFFB2BA8A3899DF /* WebPanelImagePlacementRaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED9EB61CFDBC9CB93930658B /* WebPanelImagePlacementRaceTests.swift */; };
 		ADF13BBC11643FF21D90820F /* SystemConditionMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F7BDB126629799EB315626B /* SystemConditionMonitor.swift */; };
 		ADF5E650A7B635B5CB630874 /* WebPanelSceneSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BD32982C40166B8CC50F2AC /* WebPanelSceneSettingsTests.swift */; };
+		AE447A0D8D626A61AA3572B5 /* ClientPathsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7220B4F3C3C74CDADE6477C /* ClientPathsTests.swift */; };
 		AEB71784EAE79FB1607F2BDF /* MediaRemoteAdapter.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 274F390A8228BA202CDD7900 /* MediaRemoteAdapter.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		AFBA07659FA5BB432B3C214A /* LockScreenWallpaperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B566AB3DD5844527857E9658 /* LockScreenWallpaperTests.swift */; };
 		B0883AEF78A30F8EA8B8B18B /* ControlPanelAutomationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 486470B831133175C97E5C33 /* ControlPanelAutomationTests.swift */; };
@@ -805,6 +806,7 @@
 		F43F505CAF6F3794DE66490B /* WebWallpaperAudioOwnershipTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebWallpaperAudioOwnershipTests.swift; sourceTree = "<group>"; };
 		F4AD9E79BA6BF063B8C95DB8 /* MediaRemoteAdapter.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MediaRemoteAdapter.h; sourceTree = "<group>"; };
 		F58A0BB938E96873487B33B1 /* WallpaperCollectionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperCollectionStore.swift; sourceTree = "<group>"; };
+		F7220B4F3C3C74CDADE6477C /* ClientPathsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientPathsTests.swift; sourceTree = "<group>"; };
 		F786511D1E15599E7D74C3FE /* WebPanelPresets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPanelPresets.swift; sourceTree = "<group>"; };
 		F99A08B5FFF247118CA021A0 /* DisplayConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayConfiguration.swift; sourceTree = "<group>"; };
 		FA8704E8F2DC99C56E448967 /* LockScreenSurfaceRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LockScreenSurfaceRegistry.swift; sourceTree = "<group>"; };
@@ -1289,6 +1291,7 @@
 			isa = PBXGroup;
 			children = (
 				D03E3B7EABC023AB5C5B3638 /* BatchDeletionTests.swift */,
+				F7220B4F3C3C74CDADE6477C /* ClientPathsTests.swift */,
 				4845AE6259EEB393BA86A4E4 /* ClientPreferencesTests.swift */,
 				93FD3C95C18D430D508ADA33 /* DeletionTests.swift */,
 				49BC750DF18F6C33876E6B4C /* ImageImportTests.swift */,
@@ -1975,6 +1978,7 @@
 				8FFF93B6ACB774B0E6FD9C22 /* AutomationCommandTests.swift in Sources */,
 				B434359C955C798072F65CA5 /* BatchDeletionTests.swift in Sources */,
 				9D6355301D1C8931D0F7D845 /* BridgeSnapshotFixtures.swift in Sources */,
+				AE447A0D8D626A61AA3572B5 /* ClientPathsTests.swift in Sources */,
 				7F2EFA8BC97F6EBED86E0AFC /* ClientPreferencesTests.swift in Sources */,
 				B0883AEF78A30F8EA8B8B18B /* ControlPanelAutomationTests.swift in Sources */,
 				93F7B11DCE4A7CFFCC6BDF29 /* ControlPanelBackupFlowTests.swift in Sources */,

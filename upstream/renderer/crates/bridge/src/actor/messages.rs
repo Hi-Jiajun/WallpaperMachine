@@ -358,6 +358,10 @@ pub struct RestorePropertyDefault {
 
 pub struct ApplyWallpaperOptions {
     pub wallpaper_id: String,
+    /// The user chose this (Apply, a click on a tile, Try again), as opposed
+    /// to a playlist, a rule or a schedule moving a display. Only the user's
+    /// apply lifts the load journal's hold on the wallpaper.
+    pub user_initiated: bool,
 }
 
 pub struct CancelWallpaperOptions {

@@ -55,7 +55,7 @@ async fn display_settings_commit_persists_reconciles_and_clears_stale_wallpaper_
         .unwrap();
     let done = engine.wait_for_next_reconcile();
     bridge
-        .apply_wallpaper_options("100".to_string())
+        .apply_wallpaper_options("100".to_string(), true)
         .await
         .unwrap();
     assert!(done.wait(std::time::Duration::from_secs(2)));
@@ -96,7 +96,7 @@ async fn display_settings_commit_persists_reconciles_and_clears_stale_wallpaper_
     assert_display_enabled(&next_bridge, "7", false).await;
 
     bridge
-        .apply_wallpaper_options("100".to_string())
+        .apply_wallpaper_options("100".to_string(), true)
         .await
         .unwrap();
     assert_display_enabled(&bridge, "7", false).await;
@@ -121,7 +121,7 @@ async fn control_plane_stays_responsive_when_display_setting_reconcile_is_in_fli
         .await
         .unwrap();
     bridge
-        .apply_wallpaper_options("100".to_string())
+        .apply_wallpaper_options("100".to_string(), true)
         .await
         .unwrap();
 
@@ -675,7 +675,7 @@ async fn display_settings_commit_preserves_option_edits_while_rebasing_display_a
         .await
         .unwrap();
     bridge
-        .apply_wallpaper_options("100".to_string())
+        .apply_wallpaper_options("100".to_string(), true)
         .await
         .unwrap();
 
@@ -714,7 +714,7 @@ async fn display_settings_commit_preserves_option_edits_while_rebasing_display_a
     assert!(!options.display_configurations[0].dirty);
 
     bridge
-        .apply_wallpaper_options("100".to_string())
+        .apply_wallpaper_options("100".to_string(), true)
         .await
         .unwrap();
     assert_display_enabled(&bridge, "7", false).await;
@@ -1437,7 +1437,7 @@ async fn applying_wallpaper_options_restores_existing_mirror_window_after_reconc
 
     let done = engine.wait_for_next_reconcile();
     bridge
-        .apply_wallpaper_options("100".to_string())
+        .apply_wallpaper_options("100".to_string(), true)
         .await
         .unwrap();
     assert!(done.wait(std::time::Duration::from_secs(2)));
@@ -1699,7 +1699,7 @@ async fn applying_primary_wallpaper_keeps_identity_fallback_for_previous_primary
         .unwrap();
 
     bridge
-        .apply_wallpaper_options("300".to_string())
+        .apply_wallpaper_options("300".to_string(), true)
         .await
         .unwrap();
 
@@ -1732,7 +1732,7 @@ async fn wallpaper_options_report_display_disabled_when_another_wallpaper_owns_i
         .await
         .unwrap();
     bridge
-        .apply_wallpaper_options("100".to_string())
+        .apply_wallpaper_options("100".to_string(), true)
         .await
         .unwrap();
 
@@ -1747,7 +1747,7 @@ async fn wallpaper_options_report_display_disabled_when_another_wallpaper_owns_i
         .await
         .unwrap();
     bridge
-        .apply_wallpaper_options("200".to_string())
+        .apply_wallpaper_options("200".to_string(), true)
         .await
         .unwrap();
 
@@ -1878,7 +1878,7 @@ async fn wallpaper_options_disable_draft_becomes_clean_when_another_wallpaper_ow
         .unwrap();
     bridge.select_wallpaper("100".to_string()).await.unwrap();
     bridge
-        .apply_wallpaper_options("100".to_string())
+        .apply_wallpaper_options("100".to_string(), true)
         .await
         .unwrap();
     bridge.select_wallpaper("200".to_string()).await.unwrap();
@@ -2438,7 +2438,7 @@ async fn mirror_scene_tracks_source_rebuild_settings_except_monitor_overrides() 
         .unwrap();
     let done = engine.wait_for_next_reconcile();
     bridge
-        .apply_wallpaper_options("100".to_string())
+        .apply_wallpaper_options("100".to_string(), true)
         .await
         .unwrap();
     assert!(done.wait(std::time::Duration::from_secs(2)));
@@ -2497,7 +2497,7 @@ async fn a_reported_press_comes_back_out_of_the_bridge() {
         .set_display_config_enabled("100".into(), "7".into(), true)
         .await
         .unwrap();
-    bridge.apply_wallpaper_options("100".into()).await.unwrap();
+    bridge.apply_wallpaper_options("100".into(), true).await.unwrap();
     bridge
         .set_media_integration_enabled("100".into(), true)
         .await
@@ -2553,7 +2553,7 @@ async fn an_unbound_transport_shortcut_reaches_the_scene_engine() {
         .await
         .unwrap();
     bridge
-        .apply_wallpaper_options("100".to_string())
+        .apply_wallpaper_options("100".to_string(), true)
         .await
         .unwrap();
 
@@ -2575,7 +2575,7 @@ async fn an_unbound_transport_shortcut_reaches_the_scene_engine() {
         .await
         .unwrap();
     bridge
-        .apply_wallpaper_options("100".to_string())
+        .apply_wallpaper_options("100".to_string(), true)
         .await
         .unwrap();
     assert_eq!(
@@ -2742,7 +2742,7 @@ async fn apply_primary_wallpaper(bridge: &WallpaperBridge, wallpaper_id: &str) {
         .await
         .unwrap();
     bridge
-        .apply_wallpaper_options(wallpaper_id.to_string())
+        .apply_wallpaper_options(wallpaper_id.to_string(), true)
         .await
         .unwrap();
 }

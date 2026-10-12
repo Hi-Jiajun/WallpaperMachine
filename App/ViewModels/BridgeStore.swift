@@ -270,7 +270,7 @@ final class BridgeStore {
         var applyCompleted = false
         do {
             try await setDisplayConfigEnabledAsync(wallpaperId: id, displayId: displayId, enabled: true)
-            try await applyValidatedWallpaperOptionsAsync(wallpaperId: id)
+            try await applyValidatedWallpaperOptionsAsync(wallpaperId: id, userInitiated: userInitiated)
             applyCompleted = true
             try validateActivationTarget(displayId)
             guard isWallpaperActive(id: id, displayId: displayId) else {
@@ -714,7 +714,7 @@ final class BridgeStore {
         try validateWallpaperForPlayback(id: wallpaperId)
         try await commitPendingWallpaperEditsAsync(id: wallpaperId)
         do {
-            try await applyValidatedWallpaperOptionsAsync(wallpaperId: wallpaperId)
+            try await applyValidatedWallpaperOptionsAsync(wallpaperId: wallpaperId, userInitiated: userInitiated)
         } catch {
             // The engine restores its previous configuration when an apply fails,
             // so re-read it instead of leaving the UI stuck behind a manual refresh.
@@ -784,9 +784,12 @@ final class BridgeStore {
         }
     }
 
-    private func applyValidatedWallpaperOptionsAsync(wallpaperId: String) async throws {
+    /// `userInitiated` is what lets the apply open a wallpaper the load journal holds back after
+    /// repeated crashes. A playlist, a rule or a schedule coming round to it must not: it would
+    /// reopen the wallpaper that crashed the app, every time the rotation reaches it.
+    private func applyValidatedWallpaperOptionsAsync(wallpaperId: String, userInitiated: Bool) async throws {
         do {
-            let bundle = try await bridge.applyWallpaperOptions(wallpaperId: wallpaperId)
+            let bundle = try await bridge.applyWallpaperOptions(wallpaperId: wallpaperId, userInitiated: userInitiated)
             apply(bundle)
             guard bundle.wallpaperOptions.wallpaperId == wallpaperId, !bundle.wallpaperOptions.dirty else {
                 throw WallpaperActionError(message: String(localized: "Applying was interrupted by another playback or display change. Your pending edits have been kept. Refresh and retry."))

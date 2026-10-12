@@ -66,6 +66,8 @@ automation schedulers, the web and native-video wallpaper hosts, system media).
 - **Shutdown.** `applicationShouldTerminate` returns `.terminateLater` and runs an ordered
   asynchronous teardown: lock-screen and desktop-poster restoration first (a failure cancels the
   quit), then import, update, SteamCMD, Workshop and pixiv work, and the renderer bridge last.
+  The bridge's `Shutdown` also ends the load journal's in-flight record, so quitting during a
+  load is not counted as a crash ([crash recovery](features/crash-recovery.md)).
 - **Hosted tests.** Under a hosted test run (`NSClassFromString("XCTestCase") != nil`) the
   delegate short-circuits: no services are created against the user's real app-support folder.
 
@@ -296,6 +298,13 @@ serial; the unit number is a last resort that never overrides a UUID or serial t
 macOS renumbers displays and renames identical models ("Name (1)", "Name (2)") across reboots
 and reconnects, so display sync (`AppConfig::sync_known_monitors`) keeps one block per display,
 renamed to its current selector, and settings entries and mirror targets follow.
+
+The bridge also keeps a load journal (`engine/load_journal.rs`, `load-journal.json` beside
+`config.toml`) of the scenes `reconcile_with` is about to open. A wallpaper that was being
+opened when the process died in two launches in a row is left out of every activation plan
+(`ActivationInputs::held`) until the user applies it again or the build changes; nothing is
+deleted. `ClientPaths.prepare()` names the build for it through `WALLPAPER_MACHINE_BUILD`.
+See [crash recovery](features/crash-recovery.md).
 
 Pointer polling follows committed native scene capability, not a manifest or a first-frame
 notification. Pure video projects publish no pointer consumer, ordinary and not-yet-committed

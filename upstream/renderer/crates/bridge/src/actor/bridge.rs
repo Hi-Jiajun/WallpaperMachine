@@ -70,7 +70,10 @@ use crate::{
         WallpaperConfig,
     },
     display::{DisplaySelectorExt, DisplaySnapshotExt},
-    engine::{ActivationInputs, AudioCaptureDemand, EngineFacade, NativeVideoRejection, NativeVideoRejections},
+    engine::{
+        ActivationInputs, AudioCaptureDemand, EngineFacade, LoadJournal, NativeVideoRejection,
+        NativeVideoRejections, displays_awaiting_first_frame,
+    },
     library::scan,
     login::LaunchAtLoginController,
     paths::BridgePaths,
@@ -109,6 +112,18 @@ pub struct BridgeActor<E: EngineFacade> {
     launch_at_login: LaunchAtLoginController,
     paths: BridgePaths,
     mouse_polling: Arc<MousePollingControl>,
+    /// Which wallpapers were being opened, so one that killed the app twice
+    /// in a row is held back. See [`LoadJournal`].
+    load_journal: LoadJournal,
+}
+
+/// What a reconcile needs to keep the load journal honest: the journal to
+/// record the scenes it is about to open in, and the wallpapers to leave
+/// out because the journal already holds them back.
+#[derive(Clone)]
+struct LoadGuard {
+    journal: LoadJournal,
+    held: BTreeSet<String>,
 }
 
 enum PlaybackChangeOrigin {
@@ -146,6 +161,7 @@ impl<E: EngineFacade> BridgeActorHandle<E> {
         launch_at_login: LaunchAtLoginController,
         paths: BridgePaths,
         mouse_polling: Arc<MousePollingControl>,
+        load_journal: LoadJournal,
     ) -> Result<Self, BridgeError> {
         let actor = BridgeActor {
             state,
@@ -161,6 +177,7 @@ impl<E: EngineFacade> BridgeActorHandle<E> {
             launch_at_login,
             paths,
             mouse_polling,
+            load_journal,
         };
         actor.refresh_mouse_polling_policy();
 
@@ -1017,6 +1034,51 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         Ok(())
     }
 
+    /// Learns which wallpapers the previous sessions died while opening and
+    /// leaves them out of every plan from here on.
+    ///
+    /// Runs once per launch, after the library is known and before anything is
+    /// opened. A held wallpaper that is assigned to a display is reported, since
+    /// that display will not show it until the user applies it again.
+    fn hold_back_crashing_wallpapers(&mut self) {
+        if let Some(library) = self.state.scanned_library() {
+            // A hold must not outlive the files it is about.
+            let installed = library.iter().map(|entry| entry.id.clone()).collect();
+            self.load_journal.prune(&installed);
+        }
+        self.state.held_wallpapers = self.load_journal.held();
+        let configured = self.state.configured_ids();
+        for id in self.state.held_wallpapers.clone() {
+            log::warn!("load journal: holding {id}");
+            if configured.contains(&id) {
+                let notice = self.held_notice(&id);
+                self.state.errors.push(notice);
+            }
+        }
+    }
+
+    /// The sentence shown while `wallpaper_id` is held back. A structured field
+    /// replaces this text once the panel can show a banner of its own.
+    fn held_notice(&self, wallpaper_id: &str) -> String {
+        let title = self
+            .state
+            .library
+            .iter()
+            .find(|entry| entry.id == wallpaper_id)
+            .map_or(wallpaper_id, |entry| entry.title.as_str());
+        format!(
+            "{title} was not restored because WallpaperMachine quit unexpectedly twice while \
+             loading it. Apply it again to retry."
+        )
+    }
+
+    fn load_guard(&self) -> LoadGuard {
+        LoadGuard {
+            journal: self.load_journal.clone(),
+            held: self.state.held_wallpapers.clone(),
+        }
+    }
+
     fn activation_inputs<'a>(
         &'a self,
         displays: &'a [DisplaySnapshotEntry],
@@ -1036,6 +1098,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             native_video_rejected: &self.state.native_video_rejected,
             frame_rate_cap: self.active_target_fps_cap(),
             audio_suppressed: self.state.audio_suppressed,
+            held: &self.state.held_wallpapers,
         }
     }
 
@@ -1566,6 +1629,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         let paths = self.paths.clone();
         let presentation_unloaded = self.state.presentation_unloaded;
         let audio_suppressed = self.state.audio_suppressed;
+        let load_guard = self.load_guard();
         tokio::spawn(async move {
             let result = reconcile_with(
                 engine,
@@ -1581,6 +1645,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                 quality,
                 presentation_unloaded,
                 audio_suppressed,
+                load_guard,
             )
             .await;
             let _ = actor
@@ -1646,6 +1711,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             self.quality_runtime(),
             self.state.presentation_unloaded,
             self.state.audio_suppressed,
+            self.load_guard(),
         )
         .await
     }
@@ -1669,6 +1735,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         let paths = self.paths.clone();
         let presentation_unloaded = self.state.presentation_unloaded;
         let audio_suppressed = self.state.audio_suppressed;
+        let load_guard = self.load_guard();
         ctx.spawn(async move {
             let scenes = match reconcile_with(
                 engine,
@@ -1684,6 +1751,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                 quality,
                 presentation_unloaded,
                 audio_suppressed,
+                load_guard,
             )
             .await
             {
@@ -2056,9 +2124,10 @@ async fn reconcile_with<E: EngineFacade>(
     quality: QualityRuntime,
     presentation_unloaded: bool,
     audio_suppressed: bool,
+    load_guard: LoadGuard,
 ) -> Result<Vec<SceneDesc>, BridgeError> {
     let displays = engine.display_snapshot();
-    let scenes: Vec<SceneDesc> = if presentation_unloaded {
+    let owned: Vec<(SceneDesc, String)> = if presentation_unloaded {
         Vec::new()
     } else {
         ActivationInputs {
@@ -2075,12 +2144,28 @@ async fn reconcile_with<E: EngineFacade>(
             native_video_rejected: &native_video_rejected,
             frame_rate_cap: quality.target_fps_cap,
             audio_suppressed,
+            held: &load_guard.held,
         }
-        .build()?
+        .build_owned()?
         .into_iter()
-        .map(|scene| live_scene(scene, quality.target_fps_cap, audio_suppressed))
+        .map(|(scene, owner)| (live_scene(scene, quality.target_fps_cap, audio_suppressed), owner))
         .collect()
     };
+    let scenes: Vec<SceneDesc> = owned.iter().map(|(scene, _)| scene.clone()).collect();
+
+    // Record the wallpapers the engine is about to open or replace, and only
+    // those: a scene that is already running is no suspect. The record has to
+    // cover everything below the first frame, because a crash can also come
+    // from what follows the scene, such as applying a render scale to it.
+    let opening = displays_awaiting_first_frame(&displays, &scenes);
+    let ticket = load_guard.journal.begin(
+        owned
+            .iter()
+            .filter(|(scene, _)| opening.contains(&scene.display.display_id))
+            .map(|(scene, owner)| (owner.clone(), scene.display.display_id))
+            .collect(),
+    );
+
     let results = engine
         .reconcile_scenes(scenes.clone())
         .await
@@ -2126,6 +2211,7 @@ async fn reconcile_with<E: EngineFacade>(
         }
     }
 
+    ticket.succeed();
     Ok(scenes)
 }
 
@@ -2191,6 +2277,7 @@ impl<E: EngineFacade + Clone> Message<Bootstrap> for BridgeActor<E> {
         if let Err(error) = self.load_wallpapers() {
             self.state.errors.push(error.message().to_string());
         }
+        self.hold_back_crashing_wallpapers();
         if let Err(error) = self.reconcile_configured().await {
             self.state.errors.push(error.message().to_string());
             self.state.pending_battery_pause_after_initial_frame = false;
@@ -2357,6 +2444,7 @@ impl<E: EngineFacade + Clone> Message<ClearShaderCache> for BridgeActor<E> {
             self.quality_runtime(),
             self.state.presentation_unloaded,
             self.state.audio_suppressed,
+            self.load_guard(),
         )
         .await;
         self.refresh_mouse_polling_policy();
@@ -4220,6 +4308,8 @@ impl<E: EngineFacade + Clone> Message<Shutdown> for BridgeActor<E> {
         _msg: Shutdown,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
+        // Quitting while a scene is still loading is not a crash.
+        self.load_journal.clean_shutdown();
         self.mouse_polling.set_policy_enabled(false);
         let mut active_handles = Vec::new();
         for display in self.engine.display_snapshot() {
@@ -4627,10 +4717,22 @@ impl<E: EngineFacade + Clone> Message<ApplyWallpaperOptions> for BridgeActor<E> 
             self.state
                 .apply_candidates(&msg.wallpaper_id, primary_identity_selector.as_ref())
         );
+        // The user applying a wallpaper again is the way back from a hold.
+        // Nothing about its draft changed, so the usual "nothing to reconcile"
+        // shortcut would leave it unopened. A playlist, rule or schedule
+        // reaching the same wallpaper leaves the journal alone: it neither
+        // lifts a hold nor starts a count over, or a wallpaper that crashes
+        // the app would be reopened every time the rotation came round to it.
+        let released = msg.user_initiated && self.load_journal.forgive(&msg.wallpaper_id);
+        if released {
+            let notice = self.held_notice(&msg.wallpaper_id);
+            self.state.errors.retain(|error| *error != notice);
+            let _ = self.state.held_wallpapers.remove(&msg.wallpaper_id);
+        }
         let app_config = candidates.app_config.clone();
         let wallpaper_configs = candidates.wallpaper_configs.clone();
         let library = self.state.scanned_library().map(<[_]>::to_vec);
-        let requires_reconcile = candidates.requires_reconcile;
+        let requires_reconcile = candidates.requires_reconcile || released;
         let paused = self.playback_paused();
         let suspended_displays = self.state.suspended_displays.clone();
         let predicted_scenes = reply_try!(
@@ -4650,6 +4752,7 @@ impl<E: EngineFacade + Clone> Message<ApplyWallpaperOptions> for BridgeActor<E> 
                         native_video_rejected: &self.state.native_video_rejected,
                         frame_rate_cap: self.active_target_fps_cap(),
                         audio_suppressed: self.state.audio_suppressed,
+                        held: &self.state.held_wallpapers,
                     }
                     .build()
                 })
@@ -4667,6 +4770,7 @@ impl<E: EngineFacade + Clone> Message<ApplyWallpaperOptions> for BridgeActor<E> 
             let paths = self.paths.clone();
             let presentation_unloaded = self.state.presentation_unloaded;
             let audio_suppressed = self.state.audio_suppressed;
+            let load_guard = self.load_guard();
             return ctx.spawn(async move {
                 let scenes = match reconcile_with(
                     engine,
@@ -4682,6 +4786,7 @@ impl<E: EngineFacade + Clone> Message<ApplyWallpaperOptions> for BridgeActor<E> 
                     quality,
                     presentation_unloaded,
                     audio_suppressed,
+                    load_guard,
                 )
                 .await
                 {

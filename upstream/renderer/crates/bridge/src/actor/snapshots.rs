@@ -624,6 +624,7 @@ impl BridgeActorState {
             native_video_rejected: &self.native_video_rejected,
             frame_rate_cap: self.active_target_fps_cap(),
             audio_suppressed: self.audio_suppressed,
+            held: &self.held_wallpapers,
         }
         .render_backends();
         let video_backends = backends

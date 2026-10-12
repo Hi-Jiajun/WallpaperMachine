@@ -677,7 +677,7 @@ private final class PresetTransactionBridge: WallpaperBridge {
     try await cancel()
   }
 
-  override func applyWallpaperOptions(wallpaperId: String) async throws -> BridgeWallpaperMutationBundle {
+  override func applyWallpaperOptions(wallpaperId: String, userInitiated: Bool) async throws -> BridgeWallpaperMutationBundle {
     try await commit()
   }
 

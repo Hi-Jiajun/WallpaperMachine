@@ -530,6 +530,22 @@ engine to redo, and when.
   descriptors the facade last handed over would make the next Apply wait out the
   90 seconds and roll back a playing wallpaper
   (`engine::facade::first_frame_tests`).
+- **A wallpaper that kills the app while it loads is held back.** The saved
+  configuration is replayed at every launch, so a scene that crashes the
+  process on load would crash every launch. The bridge's load journal records
+  the scenes about to open (`engine/load_journal.rs`) and keeps them through a
+  20 s settle window after the first frame and over the render-scale, audio and
+  mute calls that follow the scene (the changelog records a launch crash after
+  applying a render scale). Two launches in a row that
+  die mid-load hold the wallpaper out of every plan; Apply, an app update, or
+  its removal from the library releases it, and nothing is deleted.
+  `engine::load_journal::tests` and `tests::crash_loop_guard` (fake engine, a
+  record that never ends playing the crash) must keep covering: a quit while startup holds the actor, one strike per
+  dead session and wallpaper, the hold persisting across launches, a failed
+  load and a quit during a load leaving no strike, only scenes that really open
+  being recorded, and Apply reaching the engine for an unchanged draft. A real
+  engine crash is not reproducible headlessly; see
+  [crash recovery](../features/crash-recovery.md#verification).
 - **Texture decode at preparation** — `texture_prefetch_test` (CPU, in the gate):
   images handed over once under their own name, decoding plus untaken images held
   within the byte budget (an image larger than the budget alone), preparation

@@ -56,6 +56,16 @@ enum ClientPaths {
         setenv("WALLPAPER_MACHINE_LIBRARY_ROOT", libraryURL.path, 1)
         setenv("WALLPAPER_MACHINE_ASSETS_ROOT", assetsURL.path, 1)
         setenv("WALLPAPER_MACHINE_USER_ASSETS_ROOT", userAssetsURL.path, 1)
+        setenv("WALLPAPER_MACHINE_BUILD", buildStamp(), 1)
+    }
+
+    /// Names the running build for the renderer's load journal, which releases
+    /// every held wallpaper when the build changes: the code that crashed is gone.
+    static func buildStamp(bundle: Bundle = .main) -> String {
+        let info = bundle.infoDictionary ?? [:]
+        let version = info["CFBundleShortVersionString"] as? String ?? "unknown"
+        let build = info["CFBundleVersion"] as? String ?? "unknown"
+        return "\(version) (\(build))"
     }
 
     static func hasSceneAssets(at url: URL) -> Bool {

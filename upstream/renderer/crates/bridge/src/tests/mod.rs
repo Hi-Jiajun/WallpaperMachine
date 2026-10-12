@@ -2,6 +2,7 @@ mod activation_plan;
 mod api_smoke;
 mod apply_options;
 mod bridge_intents;
+mod crash_loop_guard;
 mod display_presentation;
 mod renderer_counters;
 mod display_identity;

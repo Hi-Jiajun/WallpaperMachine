@@ -54,6 +54,10 @@ pub struct BridgeActorState {
     /// wallpaper cannot oscillate between the two backends, and the scene
     /// engine — which supports everything — takes it back.
     pub native_video_rejected: NativeVideoRejections,
+    /// Wallpapers the load journal holds back: the app died while opening
+    /// them in consecutive sessions. Activation plans skip them until the
+    /// user applies one again. Nothing here is persisted; the journal is.
+    pub held_wallpapers: BTreeSet<String>,
     pub selected_wallpaper_id: Option<String>,
     pub active_wallpaper_ids: Vec<String>,
     pub errors: Vec<String>,
@@ -96,6 +100,7 @@ impl Default for BridgeActorState {
             suspended_displays: BTreeSet::new(),
             renderer_counters_enabled: false,
             native_video_rejected: BTreeMap::new(),
+            held_wallpapers: BTreeSet::new(),
             selected_wallpaper_id: None,
             active_wallpaper_ids: Vec::new(),
             errors: Vec::new(),

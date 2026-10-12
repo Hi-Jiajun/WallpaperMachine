@@ -85,7 +85,7 @@ use crate::{
         state::BridgeActorState,
     },
     config::{ConfigStore, SceneRendererModeCfg, VideoBackendModeCfg},
-    engine::{EngineFacade, RealEngineFacade},
+    engine::{EngineFacade, LoadJournal, RealEngineFacade},
     login::LaunchAtLoginController,
     media::SystemMediaStore,
     paths::BridgePaths,
@@ -253,6 +253,12 @@ impl<E: EngineFacade> BridgeBuilder<E> {
                 control.record_activity(activity);
             }
         })));
+        // Kept beside the configuration it protects, so an isolated support
+        // root has its own journal.
+        let load_journal = LoadJournal::open(
+            self.config_store.as_ref().map(ConfigStore::root),
+            &crate::engine::build_stamp(),
+        );
         let actor = BridgeActorHandle::spawn(
             state,
             engine.clone(),
@@ -260,6 +266,7 @@ impl<E: EngineFacade> BridgeBuilder<E> {
             self.launch_at_login,
             self.paths,
             Arc::clone(&mouse_polling),
+            load_journal.clone(),
         )?;
         let first_frame_notifier = FirstFrameNotifier {
             actor: actor.clone(),
@@ -301,6 +308,7 @@ impl<E: EngineFacade> BridgeBuilder<E> {
             system_media_submission: tokio::sync::Mutex::new(()),
             engine,
             _config_store: self.config_store,
+            load_journal,
             user_shortcuts: tokio::sync::Mutex::new(shortcut_receiver),
         })
     }
@@ -582,6 +590,9 @@ pub struct WallpaperBridge {
     /// analysis can be read without an actor round trip on every poll.
     engine: ArcEngineFacade,
     _config_store: Option<ConfigStore>,
+    /// The actor's load journal, so a quit can close it without the actor: the
+    /// actor may be inside a startup load that lasts longer than the quit does.
+    load_journal: LoadJournal,
     /// Requests waiting for `next_user_shortcut`. Bounded, and outside the
     /// actor: awaiting one inside a message handler would stall the mailbox for
     /// every other request while nobody is pressing anything.
@@ -2079,14 +2090,25 @@ impl WallpaperBridge {
             .await
     }
 
+    /// `user_initiated` says the user asked for this wallpaper themselves. Only
+    /// then does applying it lift the crash-loop guard's hold on it: a playlist,
+    /// a schedule or a rule that comes back to a wallpaper that crashed the app
+    /// must not reopen it, or the guard would stop nothing.
+    ///
     /// # Errors
     ///
     /// Returns an error when pending options cannot be applied or persisted.
     pub async fn apply_wallpaper_options(
         &self,
         wallpaper_id: String,
+        user_initiated: bool,
     ) -> Result<BridgeWallpaperMutationBundle, BridgeError> {
-        self.actor.ask(ApplyWallpaperOptions { wallpaper_id }).await
+        self.actor
+            .ask(ApplyWallpaperOptions {
+                wallpaper_id,
+                user_initiated,
+            })
+            .await
     }
 
     /// # Errors
@@ -2108,7 +2130,8 @@ impl WallpaperBridge {
         &self,
         wallpaper_id: String,
     ) -> Result<BridgeWallpaperMutationBundle, BridgeError> {
-        self.apply_wallpaper_options(wallpaper_id).await
+        // The OK button of the options dialog is the user's own choice.
+        self.apply_wallpaper_options(wallpaper_id, true).await
     }
 
     /// # Errors
@@ -2153,6 +2176,11 @@ impl WallpaperBridge {
     ///
     /// Returns an error when the engine cannot shut down active scenes.
     pub async fn shutdown(&self) -> Result<(), BridgeError> {
+        // Before the request, not inside it: the actor handles one message at
+        // a time, and startup holds it until the first scene shows a frame.
+        // Asking first would leave the record open for as long as the load
+        // takes, and a quit that gives up waiting would count it as a crash.
+        self.load_journal.clean_shutdown();
         self.actor.ask(Shutdown).await
     }
 }

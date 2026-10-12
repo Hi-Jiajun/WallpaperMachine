@@ -605,11 +605,16 @@ public protocol WallpaperBridgeProtocol : AnyObject {
     func applySystemMediaArtwork(width: UInt32, height: UInt32, rgba: Data) async throws 
     
     /**
+     * `user_initiated` says the user asked for this wallpaper themselves. Only
+     * then does applying it lift the crash-loop guard's hold on it: a playlist,
+     * a schedule or a rule that comes back to a wallpaper that crashed the app
+     * must not reopen it, or the guard would stop nothing.
+     *
      * # Errors
      *
      * Returns an error when pending options cannot be applied or persisted.
      */
-    func applyWallpaperOptions(wallpaperId: String) async throws  -> BridgeWallpaperMutationBundle
+    func applyWallpaperOptions(wallpaperId: String, userInitiated: Bool) async throws  -> BridgeWallpaperMutationBundle
     
     /**
      * Starts the log of a wallpaper load the host performs itself (web
@@ -1512,17 +1517,22 @@ open func applySystemMediaArtwork(width: UInt32, height: UInt32, rgba: Data)asyn
 }
     
     /**
+     * `user_initiated` says the user asked for this wallpaper themselves. Only
+     * then does applying it lift the crash-loop guard's hold on it: a playlist,
+     * a schedule or a rule that comes back to a wallpaper that crashed the app
+     * must not reopen it, or the guard would stop nothing.
+     *
      * # Errors
      *
      * Returns an error when pending options cannot be applied or persisted.
      */
-open func applyWallpaperOptions(wallpaperId: String)async throws  -> BridgeWallpaperMutationBundle {
+open func applyWallpaperOptions(wallpaperId: String, userInitiated: Bool)async throws  -> BridgeWallpaperMutationBundle {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_wallpaper_bridge_fn_method_wallpaperbridge_apply_wallpaper_options(
                     self.uniffiClonePointer(),
-                    FfiConverterString.lower(wallpaperId)
+                    FfiConverterString.lower(wallpaperId),FfiConverterBool.lower(userInitiated)
                 )
             },
             pollFunc: ffi_wallpaper_bridge_rust_future_poll_rust_buffer,
@@ -9247,7 +9257,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_apply_system_media_artwork() != 35216) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_apply_wallpaper_options() != 10903) {
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_apply_wallpaper_options() != 44420) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_begin_host_load_log() != 7518) {
