@@ -624,6 +624,17 @@ engine to redo, and when.
   launch-at-login status; reading it from `SMAppService` for each one would hold a
   burst of queued bridge requests (Apply and Quit among them) behind service-manager
   round trips.
+- **A failed scene replacement keeps the previous layer in the view** —
+  `tests::general::platform::case_wallpaper_window_layer_swap_revert` and `::case_wallpaper_window_layer_swap_finish`
+  (`wallpaper-core`, window tests: `WE_RUN_MACOS_WINDOW_TESTS`, an authorized desktop run
+  only, listed in `CORE_EXCLUSIONS` of `scripts/check_rust.py`). The window installs the new
+  `CAMetalLayer` before the replacement renderer exists. When the replacement then fails, the
+  renderer that kept running draws on the layer that was taken out of the view, and the
+  bridge's restore sees an unchanged descriptor and rebuilds nothing, so the display stayed on
+  the empty replacement layer. A reverted swap must show the original layer pointer and the
+  original window, view and layer geometry (changed on purpose by the swap); a finished swap
+  keeps the new layer. Nothing routine opens a window, so the revert on a forced `open_scene`
+  failure is verified by reading only, and the gated cases have not been run.
 - **The lock screen ignores the covered desktop** — `apply_options::lock_screen_export_ignores_the_desktop_display_being_covered`:
   locking covers the desktop and suspends its display, and the exported
   lock-screen scene must stay unpaused unless the user or power policy paused

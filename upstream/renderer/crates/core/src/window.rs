@@ -608,11 +608,34 @@ impl WallpaperWindow {
     /// been closed.
     ///
     /// The `NSWindow` and `NSView` are retained. The old `CAMetalLayer` is
-    /// released after the new layer is installed.
+    /// released after the new layer is installed, so this replacement cannot be
+    /// undone; a caller that might have to put the old layer back uses
+    /// `begin_layer_swap`.
     pub fn update_layer(
         &mut self,
         display: DisplayDesc,
     ) -> Result<*mut std::ffi::c_void, EngineError> {
+        let swap = self.begin_layer_swap(display)?;
+        let layer = swap.layer_ptr();
+        swap.finish();
+        Ok(layer)
+    }
+
+    /// Installs a fresh `CAMetalLayer` under the existing `NSView` and keeps
+    /// the layer it replaced, so the replacement can still be undone.
+    ///
+    /// The caller opens its renderer on [`LayerSwap::layer_ptr`] and then
+    /// either confirms the swap with [`LayerSwap::finish`] or undoes it with
+    /// [`Self::revert_layer_swap`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the display geometry is invalid or the window has
+    /// been closed.
+    pub(crate) fn begin_layer_swap(
+        &mut self,
+        display: DisplayDesc,
+    ) -> Result<LayerSwap, EngineError> {
         if display.display_id == 0 {
             return Err(EngineError::InvalidInput(
                 "display_id must be non-zero".to_string(),
@@ -623,6 +646,7 @@ impl WallpaperWindow {
                 "display dimensions must be non-zero".to_string(),
             ));
         }
+        let previous_display = self.display.clone();
         let Some(handle) = self.handle.as_mut() else {
             return Err(EngineError::Platform(
                 "wallpaper window is already closed".to_string(),
@@ -635,18 +659,59 @@ impl WallpaperWindow {
             handle_ref.replace_metal_layer(&display_clone)
         })?;
 
-        // Swap the stored MainThread wrapper to track the new layer.
+        // Track the new layer in the window and hold on to the old wrapper
+        // instead of releasing it.
         let ptr_for_retain = SendPtr(new_layer_ptr);
-        let old_metal_layer = std::mem::replace(
+        let previous = std::mem::replace(
             &mut handle.metal_layer,
             MainThread::dispatch(move || unsafe { MainThread::retain_from_ptr(ptr_for_retain) })?,
         );
-        MainThread::dispatch(move || unsafe {
-            old_metal_layer.release();
-        });
 
         self.display = display;
-        Ok(new_layer_ptr)
+        Ok(LayerSwap {
+            layer: SendPtr(new_layer_ptr),
+            previous,
+            previous_display,
+        })
+    }
+
+    /// Undoes [`Self::begin_layer_swap`]: puts the previous `CAMetalLayer`
+    /// back under the `NSView`, restores the window, view and layer geometry
+    /// of the display it was installed for, and releases the layer that
+    /// replaced it.
+    ///
+    /// Call it only after whatever was opened on the new layer is closed, so
+    /// nothing else holds on to that layer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the window has been closed; the previous layer is
+    /// released with the window in that case.
+    #[allow(clippy::single_call_fn)]
+    pub(crate) fn revert_layer_swap(&mut self, swap: LayerSwap) -> Result<(), EngineError> {
+        let LayerSwap {
+            previous,
+            previous_display,
+            ..
+        } = swap;
+        let Some(handle) = self.handle.as_mut() else {
+            MainThread::dispatch(move || unsafe { previous.release() });
+            return Err(EngineError::Platform(
+                "wallpaper window is already closed".to_string(),
+            ));
+        };
+
+        let handle_ref = handle.clone_for_main_thread();
+        let previous_ptr = SendPtr(previous.as_ptr().cast::<std::ffi::c_void>());
+        let abandoned = std::mem::replace(&mut handle.metal_layer, previous);
+        let display_for_main = previous_display.clone();
+        MainThread::dispatch(move || unsafe {
+            handle_ref.restore_metal_layer(previous_ptr, &display_for_main);
+            abandoned.release();
+        });
+
+        self.display = previous_display;
+        Ok(())
     }
 
     /// Returns the retained `CAMetalLayer` pointer used by Vulkan/MoltenVK.
@@ -695,6 +760,37 @@ pub struct WallpaperWindowNativeState {
     pub metal_layer_contents_scale: f64,
     pub metal_layer_drawable_width: f64,
     pub metal_layer_drawable_height: f64,
+}
+
+/// A `CAMetalLayer` replacement that is installed but not yet settled.
+///
+/// [`WallpaperWindow::begin_layer_swap`] puts a fresh layer under the view and
+/// keeps the layer it replaced alive here. Whoever opens a renderer on the new
+/// layer then settles the swap exactly once: [`LayerSwap::finish`] when the
+/// renderer exists, [`WallpaperWindow::revert_layer_swap`] when it could not be
+/// built, which shows the previous layer, and the renderer still drawing on it,
+/// again. Both consume the value, so a swap cannot be settled twice.
+#[must_use = "a layer swap must be finished or reverted, or the previous layer leaks"]
+pub(crate) struct LayerSwap {
+    layer: SendPtr,
+    previous: MainThread,
+    previous_display: DisplayDesc,
+}
+
+impl LayerSwap {
+    /// The new layer, as a renderer's surface takes it.
+    pub(crate) fn layer_ptr(&self) -> *mut std::ffi::c_void {
+        self.layer.0
+    }
+
+    /// Keeps the new layer: releases the one it replaced.
+    ///
+    /// A renderer's surface on the previous layer keeps its own retain until
+    /// that renderer is closed.
+    pub(crate) fn finish(self) {
+        let Self { previous, .. } = self;
+        MainThread::dispatch(move || unsafe { previous.release() });
+    }
 }
 
 impl Drop for WallpaperWindow {
@@ -979,6 +1075,31 @@ impl WindowHandleRef {
         }
         if metal_layer.drawableSize() != drawable_size {
             metal_layer.setDrawableSize(drawable_size);
+        }
+        CATransaction::commit();
+    }
+
+    /// Puts `previous` back under the view in place of the layer installed by
+    /// `replace_metal_layer`, then restores the geometry of `display`.
+    ///
+    /// The geometry goes through `update_display` aimed at the previous layer,
+    /// so values that already match are not written again: an untouched
+    /// layer keeps its drawables.
+    unsafe fn restore_metal_layer(self, previous: SendPtr, display: &DisplayDesc) {
+        debug_assert!(NSThread::isMainThread_class());
+        let content_view = unsafe { &*(self.content_view.cast::<NSView>()) };
+        let previous_layer = unsafe { &*(previous.0.cast::<CAMetalLayer>()) };
+
+        CATransaction::begin();
+        CATransaction::setDisableActions(true);
+        content_view.setLayer(Some(previous_layer));
+        content_view.setWantsLayer(true);
+        unsafe {
+            Self {
+                metal_layer: previous.0.cast::<AnyObject>(),
+                ..self
+            }
+            .update_display(display);
         }
         CATransaction::commit();
     }

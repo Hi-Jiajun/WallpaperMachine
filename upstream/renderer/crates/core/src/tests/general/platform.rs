@@ -102,6 +102,132 @@ pub fn case_wallpaper_window_update_display() {
     }
 }
 
+#[test]
+pub fn case_wallpaper_window_layer_swap_revert() {
+    if !window_tests_enabled_or_skip("window layer swap revert") {
+        return;
+    }
+    let Some(display) = primary_display_or_skip() else {
+        return;
+    };
+    let mut window = crate::WallpaperWindow::builder(display.clone())
+        .placeholder_style(crate::PlaceholderStyle::default())
+        .open()
+        .expect("window should open");
+    let original_layer = window.metal_layer_ptr();
+    let original_state = window
+        .native_state_for_tests()
+        .expect("native state should exist");
+
+    // A different scale factor makes the swap change the window's geometry as
+    // well, so a revert that only swapped the layer back would be caught.
+    let swapped = crate::DisplayDesc::with_identity(
+        display.display_id,
+        display.identity.clone(),
+        display.x,
+        display.y,
+        display.width,
+        display.height,
+        if display.scale_factor > 1.0 { 1.0 } else { 2.0 },
+    );
+    let swap = window
+        .begin_layer_swap(swapped)
+        .expect("layer swap should begin");
+    assert_ne!(window.metal_layer_ptr(), original_layer);
+    assert_eq!(swap.layer_ptr(), window.metal_layer_ptr());
+    let swapped_state = window
+        .native_state_for_tests()
+        .expect("native state should exist");
+    assert!(
+        (swapped_state.window_width - original_state.window_width).abs() > 0.001,
+        "the swap should have reshaped the window"
+    );
+
+    window
+        .revert_layer_swap(swap)
+        .expect("layer swap should revert");
+    assert!(window.is_open());
+    assert_eq!(window.metal_layer_ptr(), original_layer);
+    assert_same_geometry(
+        &window
+            .native_state_for_tests()
+            .expect("native state should exist"),
+        &original_state,
+    );
+
+    window.close();
+}
+
+#[test]
+pub fn case_wallpaper_window_layer_swap_finish() {
+    if !window_tests_enabled_or_skip("window layer swap finish") {
+        return;
+    }
+    let Some(display) = primary_display_or_skip() else {
+        return;
+    };
+    let mut window = crate::WallpaperWindow::builder(display.clone())
+        .placeholder_style(crate::PlaceholderStyle::default())
+        .open()
+        .expect("window should open");
+    let original_layer = window.metal_layer_ptr();
+    let original_state = window
+        .native_state_for_tests()
+        .expect("native state should exist");
+
+    let swap = window
+        .begin_layer_swap(display)
+        .expect("layer swap should begin");
+    let new_layer = swap.layer_ptr();
+    assert_ne!(new_layer, original_layer);
+    swap.finish();
+
+    assert!(window.is_open());
+    assert_eq!(window.metal_layer_ptr(), new_layer);
+    // Same display, so the fresh layer is shaped exactly like the one it replaced.
+    assert_same_geometry(
+        &window
+            .native_state_for_tests()
+            .expect("native state should exist"),
+        &original_state,
+    );
+    window.close();
+}
+
+fn assert_same_geometry(
+    actual: &crate::window::WallpaperWindowNativeState,
+    expected: &crate::window::WallpaperWindowNativeState,
+) {
+    for (actual, expected) in [
+        (actual.window_x, expected.window_x),
+        (actual.window_y, expected.window_y),
+        (actual.window_width, expected.window_width),
+        (actual.window_height, expected.window_height),
+        (actual.content_view_x, expected.content_view_x),
+        (actual.content_view_y, expected.content_view_y),
+        (actual.content_view_width, expected.content_view_width),
+        (actual.content_view_height, expected.content_view_height),
+        (actual.metal_layer_x, expected.metal_layer_x),
+        (actual.metal_layer_y, expected.metal_layer_y),
+        (actual.metal_layer_width, expected.metal_layer_width),
+        (actual.metal_layer_height, expected.metal_layer_height),
+        (
+            actual.metal_layer_contents_scale,
+            expected.metal_layer_contents_scale,
+        ),
+        (
+            actual.metal_layer_drawable_width,
+            expected.metal_layer_drawable_width,
+        ),
+        (
+            actual.metal_layer_drawable_height,
+            expected.metal_layer_drawable_height,
+        ),
+    ] {
+        assert_close(actual, expected);
+    }
+}
+
 fn assert_close(actual: f64, expected: f64) {
     let tolerance = 0.001;
     assert!(

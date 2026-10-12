@@ -270,6 +270,17 @@ so hiding the app (Cmd-H, or the panel hiding itself after an activation) hides 
 with AppKit's default the wallpaper windows left the screen too and occlusion suspended every
 display.
 
+Replacing the scene a Rust window shows is a transaction on its `CAMetalLayer`. Each Vulkan
+surface needs a layer of its own, so `SceneRuntime::rebuild_for_desc` installs a fresh layer
+before the new renderer exists, and `WallpaperWindow::begin_layer_swap` keeps the previous one
+(in a `LayerSwap`) until the replacement is built and its settings are applied. If either step
+fails, the runtime closes what it built and `revert_layer_swap` puts the previous layer back
+under the view with its window, view and layer geometry: the renderer that kept running is on
+screen again, and the restore the bridge asks for after a failed reconcile finds the runtime's
+descriptor unchanged and rebuilds nothing. On success the previous layer is released and the
+picture does not change. A display reconfigure swaps the layer with `update_layer`, which does
+not keep the previous one.
+
 Multi-display user commands are coordinated above these windows by `WallpaperDisplayTransfer`
 and `BridgeStoreDisplayLayouts`; `WallpaperDisplayLayoutStore` owns only saved wallpaper
 choices, while playlists, properties and display topology stay with their existing owners. See

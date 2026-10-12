@@ -24,7 +24,7 @@ use crate::{
     },
     project::{ScalingMode, SceneDesc, SceneHandle, SerdeValudeExt},
     render::RendererSurfaceCounters,
-    window::{MouseButtonEdges, NormalizedMousePosition},
+    window::{LayerSwap, MouseButtonEdges, NormalizedMousePosition},
 };
 
 /// The native looper only writes watch state; this task owns bounded delivery.
@@ -465,6 +465,21 @@ impl RuntimeRefreshMode {
     }
 }
 
+/// Undoes the layer swap of a scene replacement that failed, so the renderer
+/// still running keeps its picture instead of the empty layer meant for the
+/// replacement.
+fn restore_previous_layer(window: &mut WallpaperWindow, swap: LayerSwap, cause: &EngineError) {
+    match window.revert_layer_swap(swap) {
+        Ok(()) => log::warn!(
+            "[wallpaper-core engine] scene replacement failed, previous layer restored: {cause}"
+        ),
+        Err(error) => log::warn!(
+            "[wallpaper-core engine] scene replacement failed and the previous layer could not \
+             be restored ({error}): {cause}"
+        ),
+    }
+}
+
 impl SceneRuntime {
     pub fn open(
         backend: OweBackend,
@@ -672,7 +687,6 @@ impl SceneRuntime {
             &descriptor_state,
             inheritance,
         );
-        let old_display = self.desc.display.clone();
         let render_scale = self.render_scale;
         let first_frame_callback = self.renderer_first_frame_callback();
         let (pointer_relay, pointer_callback) = PointerInputRelay::new(self.actor.clone(), self.handle)?;
@@ -698,11 +712,16 @@ impl SceneRuntime {
         // The old CAMetalLayer remains alive via MoltenVK's retain through
         // the old VkSurface, and is deallocated when `old_renderer.close()`
         // destroys that surface.
-        let metal_layer = window.update_layer(desc.display.clone())?;
+        //
+        // The swap is a transaction. The window keeps the old layer until the
+        // new renderer exists, because a replacement that fails leaves the old
+        // renderer in place, drawing on that layer: it has to be back under
+        // the view then, or the display stays on the empty new layer.
+        let swap = window.begin_layer_swap(desc.display.clone())?;
 
         let mut renderer = match backend.open_scene(
             desc,
-            metal_layer,
+            swap.layer_ptr(),
             state.scaling_mode,
             state.scaling_factor,
             render_resolution,
@@ -714,10 +733,7 @@ impl SceneRuntime {
         ) {
             Ok(renderer) => renderer,
             Err(error) => {
-                // Best-effort geometry rollback. The layer swap is not reversible
-                // without creating yet another new layer, so we restore the
-                // NSWindow/NSView frames to the old display's geometry instead.
-                let _ = window.update_display(old_display);
+                restore_previous_layer(window, swap, &error);
                 return Err(error);
             }
         };
@@ -728,10 +744,13 @@ impl SceneRuntime {
             .apply_to(&mut renderer, &descriptor_state)
             .and_then(|()| render_scale.restore(|scale| renderer.set_render_scale(scale)))
         {
+            // Closed first, so nothing but the window holds the new layer
+            // when it is taken out of the view.
             let _ = renderer.close();
-            let _ = window.update_display(old_display);
+            restore_previous_layer(window, swap, &error);
             return Err(error);
         }
+        swap.finish();
         let mut old_renderer = std::mem::replace(&mut self.renderer, renderer);
         self.renderer.inherit_runtime_registration(&mut old_renderer, desc.display.display_id);
         self.last_media = None;

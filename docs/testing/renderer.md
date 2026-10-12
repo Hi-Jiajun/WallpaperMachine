@@ -305,7 +305,7 @@ the desktop, media and network opt-ins, and runs, all with `--release --locked`:
 the `wallpaper-core` and `wallpaper-bridge` library tests, four device-free
 `wallpaper-core` integration targets (`audio_response_controller`,
 `core_audio_api`, `project_override_json`, `wallpaper_background`) and the
-`shader` crate with `ffi`. It prints and records the six explicit
+`shader` crate with `ffi`. It prints and records the eight explicit
 desktop/external-corpus exclusions (`CORE_EXCLUSIONS` in the script) and any
 emitted skip reasons. A nonzero command or missing tool fails the check. Full
 logs and the JSON verdict go under `artifacts/rust/` (`--output` redirects them);
