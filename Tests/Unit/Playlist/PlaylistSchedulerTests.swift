@@ -130,7 +130,7 @@ final class PlaylistSchedulerTests: XCTestCase {
         var release: CheckedContinuation<Void, Never>?
         var attempts: [String] = []
         let scheduler = makeScheduler(commandRevision: { _ in queue.revision(for: slot) }, activate: { _, choose in
-            try await queue.run(slot: slot) {
+            try await queue.run(slot: slot, origin: .playlist) {
                 guard let id = choose() else { return }
                 attempts.append(id)
                 await withCheckedContinuation { release = $0 }
@@ -153,6 +153,90 @@ final class PlaylistSchedulerTests: XCTestCase {
         await settle()
         XCTAssertEqual(attempts, ["b"], "an automatic retry must not supersede the manual switch")
         XCTAssertEqual(shown["primary"], "manual")
+    }
+
+    func testRotationThatYieldsToAWaitingUserChoiceIsRescheduled() async throws {
+        store.update("primary") { $0.mode = .rotate; $0.interval = 5 }
+        let queue = UserCommandQueue()
+        let slot = BridgeStore.activationSlot(displayId: "primary")
+        var attempts: [String] = []
+        var release: CheckedContinuation<Void, Never>?
+        let blocker = Task { await queue.run { await withCheckedContinuation { release = $0 } } }
+        await settle()
+        let chosen = Task { await queue.run(slot: slot, subject: "chosen") { self.shown["primary"] = "chosen" } }
+        await settle()
+        XCTAssertTrue(queue.hasWaiting(slot: slot))
+        let scheduler = makeScheduler(commandRevision: { _ in queue.revision(for: slot) }, activate: { display, choose in
+            var applied: String?
+            try await queue.run(slot: slot, origin: .playlist) {
+                guard let id = choose() else { return }
+                attempts.append(id)
+                self.shown[display] = id
+                applied = id
+            }
+            return applied
+        })
+        scheduler.start()
+        defer { scheduler.stop() }
+
+        clock.addTimeInterval(2 * 60)
+
+        scheduler.skip("primary")
+        await settle()
+        XCTAssertTrue(attempts.isEmpty, "The rotation gives way without choosing a wallpaper")
+        XCTAssertEqual(store.nextChange["primary"], clock.addingTimeInterval(5 * 60),
+                       "A rotation that yielded waits a full interval from now instead of retrying")
+
+        try XCTUnwrap(release).resume()
+        await blocker.value
+        await chosen.value
+        await settle()
+        XCTAssertTrue(attempts.isEmpty)
+        XCTAssertEqual(shown["primary"], "chosen", "The wallpaper the user chose stays")
+    }
+
+    /// The rotation falls due while the user's Apply is already running, not waiting. It must not
+    /// join the line behind it: it would run right after and replace the wallpaper just chosen.
+    func testRotationThatFindsAUserChoiceRunningGivesWayAndDoesNotReplaceIt() async throws {
+        store.update("primary") { $0.mode = .rotate; $0.interval = 5 }
+        let queue = UserCommandQueue()
+        let slot = BridgeStore.activationSlot(displayId: "primary")
+        var attempts: [String] = []
+        var release: CheckedContinuation<Void, Never>?
+        let chosen = Task {
+            await queue.run(slot: slot, subject: "chosen") {
+                await withCheckedContinuation { release = $0 }
+                self.shown["primary"] = "chosen"
+            }
+        }
+        await settle()
+        XCTAssertTrue(queue.isBusy)
+        XCTAssertFalse(queue.hasWaiting(slot: slot), "the choice is running, not waiting")
+        let scheduler = makeScheduler(commandRevision: { _ in queue.revision(for: slot) }, activate: { display, choose in
+            var applied: String?
+            try await queue.run(slot: slot, origin: .playlist) {
+                guard let id = choose() else { return }
+                attempts.append(id)
+                self.shown[display] = id
+                applied = id
+            }
+            return applied
+        })
+        scheduler.start()
+        defer { scheduler.stop() }
+
+        clock.addTimeInterval(6 * 60)
+        scheduler.evaluate()
+        await settle()
+        XCTAssertTrue(queue.waiting.isEmpty, "The rotation does not queue up behind the choice")
+        XCTAssertEqual(store.nextChange["primary"], clock.addingTimeInterval(5 * 60),
+                       "A rotation that yielded waits a full interval from now instead of retrying")
+
+        try XCTUnwrap(release).resume()
+        await chosen.value
+        await settle()
+        XCTAssertTrue(attempts.isEmpty)
+        XCTAssertEqual(shown["primary"], "chosen", "The wallpaper the user chose stays")
     }
 
     func testChangingPlaylistDuringFailureDoesNotContinueTheOldRotation() async {

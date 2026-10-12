@@ -17,13 +17,13 @@ final class WallpaperAutomationController {
                     $0.displayId == display && $0.mirrorTargetDisplayId == nil && !$0.wallpaperId.isEmpty
                 }?.wallpaperId)
             }, queue: { display, operation in
-                try await bridge.commands.run(slot: BridgeStore.activationSlot(displayId: display), operation)
+                try await bridge.commands.run(slot: BridgeStore.activationSlot(displayId: display), origin: .automation, operation)
             }, apply: { target, display in
                 try await Self.apply(target, to: display, bridge: bridge, playlists: playlists, collections: collections)
             }, restore: { state, display, preserveWallpaper in
                 if !preserveWallpaper {
                     if let id = state.wallpaperID, bridge.librarySnapshot.wallpapers.contains(where: { $0.id == id && $0.supported }) {
-                        try await bridge.activateWallpaperAsync(id: id, displayId: display)
+                        try await bridge.activateWallpaperAsync(id: id, displayId: display, origin: .automation)
                     } else if state.wallpaperID == nil,
                               let current = bridge.monitorInformationSnapshot.rows.first(where: { $0.displayId == display })?.wallpaperId,
                               !current.isEmpty {
@@ -65,7 +65,7 @@ final class WallpaperAutomationController {
             guard bridge.librarySnapshot.wallpapers.contains(where: { $0.id == target.id && $0.supported }) else {
                 throw AutomationError(message: String(localized: "The wallpaper chosen by this rule is no longer available."))
             }
-            try await bridge.activateWallpaperAsync(id: target.id, displayId: display)
+            try await bridge.activateWallpaperAsync(id: target.id, displayId: display, origin: .automation)
             playlists.update(display) { $0.mode = .off }
         case .playlist:
             try applyPlaylist(target.id, to: display, playlists: playlists, collections: collections)

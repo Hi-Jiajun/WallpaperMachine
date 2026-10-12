@@ -551,9 +551,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             },
             activate: { display, choose in
                 var applied: String?
-                try await store.commands.run(slot: BridgeStore.activationSlot(displayId: display)) {
+                try await store.commands.run(slot: BridgeStore.activationSlot(displayId: display), origin: .playlist) {
                     guard let id = choose() else { return }
-                    try await store.activateWallpaperAsync(id: id, displayId: display)
+                    try await store.activateWallpaperAsync(id: id, displayId: display, origin: .playlist)
                     applied = id
                 }
                 return applied
@@ -1708,7 +1708,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             try await store.commands.run(slot: BridgeStore.activationSlot(displayId: displayId)) {
                 _ = try self.automationDisplay(displayId, store: store)
                 guard let id = store.nextWallpaperID(displayId: displayId) else { return }
-                try await store.activateWallpaperAsync(id: id, displayId: displayId, userInitiated: true)
+                try await store.activateWallpaperAsync(id: id, displayId: displayId, origin: .user)
             }
         case .apply(let id, let display):
             let displayId = try automationDisplay(display, store: store)
@@ -1717,7 +1717,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             }
             try await store.commands.run(slot: BridgeStore.activationSlot(displayId: displayId), subject: id) {
                 _ = try self.automationDisplay(displayId, store: store)
-                try await store.activateWallpaperAsync(id: id, displayId: displayId, userInitiated: true)
+                try await store.activateWallpaperAsync(id: id, displayId: displayId, origin: .user)
             }
         case .applyPlaylist(let id, let display):
             let displayID = try automationDisplay(display, store: store)

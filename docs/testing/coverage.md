@@ -77,16 +77,19 @@ library usable for retry; history changes only after a successful activation;
 playback-environment changes (suspend/resume, unload/reload, audio) and library
 refreshes wait for an in-flight apply and the reverse, while explicit Pause still
 interrupts; the first-wallpaper support prompt follows only a successful
-downloaded activation. The same suite covers Retry for a scene that stopped
-drawing over the two-display fake: it takes the wallpaper off the named display
-and applies it again and touches no other, a display with no wallpaper gets an
-error and no change, a mirroring display reloads the display it mirrors (and a
-mirror of an empty display gets the error), a retry that waited behind a switch
-on its display leaves the switch alone, and a newer choice replaces a retry still
-waiting; reloading
-everywhere after an update still reloads every display. `UserCommandQueueTests` —
-commands run in arrival order and a newer command in the same slot replaces a
-waiting one.
+downloaded activation; only the user's own activation reports a manual choice,
+and an update reload gives way to a choice the user is waiting on. The same suite
+covers Retry for a scene that stopped drawing over the two-display fake: it takes
+the wallpaper off the named display and applies it again and touches no other, a
+display with no wallpaper gets an error and no change, a mirroring display reloads
+the display it mirrors (and a mirror of an empty display gets the error), a retry
+that waited behind a command switching its display leaves the switch alone, one that
+arrives while the user's switch runs there gives way at once, and a newer
+choice replaces a retry still waiting; reloading everywhere after an update still
+reloads every display. `UserCommandQueueTests` — commands run in arrival order, a
+newer command in the same slot replaces a waiting one, and a playlist, rule or
+update reload never replaces a user command waiting in its slot (it returns at
+once and leaves the slot revision alone).
 
 ### Playback policy
 
@@ -531,7 +534,7 @@ signed-in answers and the real sign-in page are not covered
 across displays and detached on manual edit, cleanup when wallpapers or
 collections go), `PlaylistSchedulerTests` (fake clock, library and activation;
 no renderer: failure cooldowns, paused catch-up, a newer manual command
-outranking a failed automatic switch), `WebPanelPlaylistTests` and offscreen
+outranking a failed automatic switch, a rotation yielding to a waiting Apply), `WebPanelPlaylistTests` and offscreen
 `ControlPanelPlaybackToolsTests` (drag and button sorting, keyboard focus,
 stale-drag rejection, escaped history titles, clearing only the target display).
 What each covers: [playlists](../features/playlists.md#verification).

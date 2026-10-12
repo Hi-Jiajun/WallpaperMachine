@@ -59,7 +59,7 @@ final class WallpaperDisplayTransferIntegrationTests: XCTestCase {
         let layout = Task { try await store.applyDisplayTransferAsync(.swap("primary", "secondary")) }
         while release == nil { await Task.yield() }
         let manual = Task { try await store.commands.run(slot: BridgeStore.activationSlot(displayId: "primary")) {
-            try await store.activateWallpaperAsync(id: "c", displayId: "primary", userInitiated: true)
+            try await store.activateWallpaperAsync(id: "c", displayId: "primary", origin: .user)
         } }
         for _ in 0..<10 { await Task.yield() }
         release?.resume()

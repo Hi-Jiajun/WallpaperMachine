@@ -36,7 +36,9 @@ choose the later rule in the list. A daylight-saving gap moves a nonexistent tim
 to the next valid clock time; a repeated time fires at its first occurrence only.
 After sleep, lock, pause or a covered display, only the latest due choice is applied
 when playback can run again. Manual wallpaper and playlist choices mark the current
-event handled, including across relaunch. Saving changed rules creates a new event
+event handled, including across relaunch. A rule that comes due while your own
+Apply is waiting on that display, or running there, gives way to it and is not
+applied afterwards; it counts as handled, like a manual choice. Saving changed rules creates a new event
 and may apply it immediately. A failed event is reported in the display's section
 and waits for **Retry automatic change** or a later event.
 
@@ -89,9 +91,10 @@ and retained if restore rolls back.
 Previous, Next, Apply Wallpaper and Apply Saved Playlist act on the panel's target display unless a display is named, and
 only an enabled display showing its own wallpaper can be switched. Switches share
 the display's command slot with the panel, so the latest request for a display
-wins. A command that arrives while the app is still starting (the system may
-launch it to run one) waits up to 15 seconds for the library to load, then fails
-with a message saying so. If the renderer could not start at all, opening the
+wins; an automatic change (a playlist, a rule, an update reload) never replaces
+a request that is waiting or running there. A command that arrives while the app is still
+starting (the system may launch it to run one) waits up to 15 seconds for the
+library to load, then fails with a message saying so. If the renderer could not start at all, opening the
 panel still works, since Settings is where a failed start is put right; every
 other command fails at once instead of waiting. A failure from a link or a keyboard shortcut shows at
 the foot of the menu bar menu; the Shortcuts app shows its own.
@@ -173,7 +176,8 @@ modifier mapping (`HotKeyPreferencesTests`, `GlobalHotKeysTests`), the planner, 
 scheduler (`WallpaperAutomationPlannerTests`, `WallpaperAutomationStoreTests`,
 `WallpaperAutomationSchedulerTests`: weekday rules, simultaneous events, appearance
 choices, DST, solar offsets crossing midnight, absent polar events, catch-up and retry
-against a fake clock and the real command queue, manual precedence, Focus exit and
+against a fake clock and the real command queue, manual precedence including a rule
+giving way to a waiting or running manual command, Focus exit and
 interrupted recovery), native validation and queued manual playlist edits
 (`WebPanelPlaylistTests`), the offscreen rule editor (`ControlPanelAutomationTests`) and
 rule merging and rollback in backups (`WallpaperBackupTests`) each have their own suite;

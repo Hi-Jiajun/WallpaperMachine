@@ -208,6 +208,13 @@ screen. Activation is explicit.
   display; for the wallpaper already active there it reads **Reapply wallpaper**.
   An Installed tile shows an **Applying** ring while its apply runs and a quiet
   mark while it waits behind another apply.
+- A wallpaper you apply is never replaced by an automatic change that arrives
+  while it waits for its turn on that display: the display's playlist, an
+  automatic rule or an update reloading files gives way. The playlist tries
+  again one interval later, a rule's event counts as handled, and a reload
+  loads the new files at the next update or launch. A newer Apply of yours
+  still replaces an older one that is waiting. The log notes each time one gives
+  way (`activation yielded to a waiting user choice`).
 - Double-clicking a tile on the Installed tab activates it as well and does not
   close the window. On Discover, double-click downloads the tile (or applies it
   once it is in the library); see

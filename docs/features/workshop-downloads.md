@@ -622,7 +622,9 @@ need not play, which is what lets a reinstall repair it. An update check still r
 when the download finishes does not mark it outdated again. The item's saved
 options belong to its id and are kept. A display showing it then loads it again:
 applying alone would find nothing changed, so it is removed and applied again
-through the display's command slot. Moving a wallpaper to Trash forgets its update
+through the display's command slot. A wallpaper you are applying on that display
+meanwhile is never replaced by this reload: it gives way, and the new files load
+at the next update or launch. Moving a wallpaper to Trash forgets its update
 and install record.
 
 ### Reinstall from Workshop

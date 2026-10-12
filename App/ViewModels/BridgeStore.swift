@@ -242,10 +242,13 @@ final class BridgeStore {
         guard let id = previousWallpaperID(displayId: displayId) else {
             throw WallpaperActionError(message: String(localized: "This display has no previous wallpaper still in your library."))
         }
-        try await activateWallpaperAsync(id: id, displayId: displayId, userInitiated: true, returningToPrevious: true)
+        try await activateWallpaperAsync(id: id, displayId: displayId, origin: .user, returningToPrevious: true)
     }
 
-    func activateWallpaperAsync(id: String, displayId: String, userInitiated: Bool = false,
+    /// Makes `id` the wallpaper of `displayId`. Only the user's own `origin` reports a manual
+    /// choice and counts toward the support prompt; the other origins are the app acting on
+    /// its own, so a caller that does not say is treated as automatic.
+    func activateWallpaperAsync(id: String, displayId: String, origin: ActivationOrigin = .automation,
                                 returningToPrevious: Bool = false, recordsHistory: Bool = true) async throws {
         await waitForIdleActivation()
         try requireIdleWallpaperEdits(id: id)
@@ -264,7 +267,7 @@ final class BridgeStore {
         }
         if isWallpaperActive(id: id, displayId: displayId), !options.dirty,
            !wallpaperAppliesNeedingSave.contains(id), !editorState.hasPendingEdits(wallpaperID: id) {
-            if userInitiated { onUserWallpaperChoice?(id, displayId) }
+            if origin.isUserChoice { onUserWallpaperChoice?(id, displayId) }
             return
         }
         guard options.supported else {
@@ -283,7 +286,7 @@ final class BridgeStore {
         var applyCompleted = false
         do {
             try await setDisplayConfigEnabledAsync(wallpaperId: id, displayId: displayId, enabled: true)
-            try await applyValidatedWallpaperOptionsAsync(wallpaperId: id, userInitiated: userInitiated)
+            try await applyValidatedWallpaperOptionsAsync(wallpaperId: id, userInitiated: origin.isUserChoice)
             applyCompleted = true
             try validateActivationTarget(displayId)
             guard isWallpaperActive(id: id, displayId: displayId) else {
@@ -305,10 +308,10 @@ final class BridgeStore {
         }
         if recordsHistory { recordHistory(before: previousAssignments, returningDisplay: returningToPrevious ? displayId : nil) }
         reportSuccessfulApply(wallpaperID: id)
-        if userInitiated { onUserWallpaperChoice?(id, displayId) }
+        if origin.isUserChoice { onUserWallpaperChoice?(id, displayId) }
         // Startup, playlist rotation and update reloads never solicit support. Wait until
         // saving and the final display check both succeed for an explicit activation.
-        if userInitiated, !previouslyActive {
+        if origin.isUserChoice, !previouslyActive {
             supportPrompt?.recordSuccessfulActivation(wallpaperID: id)
         }
     }
@@ -317,7 +320,8 @@ final class BridgeStore {
     /// them: applying it again alone would find nothing changed and keep what is loaded. Each
     /// display goes through its own command slot, so a switch the user asks for meanwhile wins:
     /// a reload still waiting is replaced by it, and one that waited behind it finds the display
-    /// showing something else and leaves it alone.
+    /// showing something else and leaves it alone. A reload that finds the user's choice waiting
+    /// is dropped, and the files load on the next update or launch.
     ///
     /// `displayId` limits the reload to one display. That is the Retry for a scene that stopped
     /// drawing, which loads the same files again, so the posters made from them stay valid.
@@ -328,10 +332,10 @@ final class BridgeStore {
                 && (displayId == nil || $0.displayId == displayId)
         }.map(\.displayId)
         for display in displays {
-            try await commands.run(slot: Self.activationSlot(displayId: display), subject: id) {
+            try await commands.run(slot: Self.activationSlot(displayId: display), subject: id, origin: .updateReload) {
                 guard self.isWallpaperActive(id: id, displayId: display) else { return }
                 try await self.ejectWallpaperFromDisplayAsync(displayId: display, wallpaperId: id)
-                try await self.activateWallpaperAsync(id: id, displayId: display)
+                try await self.activateWallpaperAsync(id: id, displayId: display, origin: .updateReload)
             }
         }
     }

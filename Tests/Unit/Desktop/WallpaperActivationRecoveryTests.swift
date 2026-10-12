@@ -190,11 +190,11 @@ final class WallpaperActivationRecoveryTests: XCTestCase {
         XCTAssertFalse(prompt.isPending)
 
         await XCTAssertThrowsErrorAsync(
-            try await store.activateWallpaperAsync(id: "failing", displayId: "primary", userInitiated: true))
+            try await store.activateWallpaperAsync(id: "failing", displayId: "primary", origin: .user))
         XCTAssertFalse(prompt.isPending)
 
         bridge.applyError = nil
-        try await store.activateWallpaperAsync(id: "failing", displayId: "primary", userInitiated: true)
+        try await store.activateWallpaperAsync(id: "failing", displayId: "primary", origin: .user)
         XCTAssertTrue(prompt.isPending)
     }
 
@@ -209,7 +209,7 @@ final class WallpaperActivationRecoveryTests: XCTestCase {
         try await store.refreshAllAsync()
 
         await XCTAssertThrowsErrorAsync(
-            try await store.activateWallpaperAsync(id: "failing", displayId: "primary", userInitiated: true))
+            try await store.activateWallpaperAsync(id: "failing", displayId: "primary", origin: .user))
         XCTAssertFalse(prompt.isPending)
     }
 
@@ -222,7 +222,8 @@ final class WallpaperActivationRecoveryTests: XCTestCase {
             let store = BridgeStore(bridge: bridge)
             try await store.refreshAllAsync()
 
-            try await store.activateWallpaperAsync(id: "failing", displayId: "primary", userInitiated: userInitiated)
+            try await store.activateWallpaperAsync(id: "failing", displayId: "primary",
+                                                   origin: userInitiated ? .user : .automation)
 
             XCTAssertEqual(bridge.applyRequests, [userInitiated],
                            "activation passes on who asked (userInitiated: \(userInitiated))")
@@ -259,7 +260,7 @@ final class WallpaperActivationRecoveryTests: XCTestCase {
 
         try await store.activateWallpaperAsync(id: "failing", displayId: "primary")
         XCTAssertFalse(prompt.isPending)
-        try await store.activateWallpaperAsync(id: "failing", displayId: "primary", userInitiated: true)
+        try await store.activateWallpaperAsync(id: "failing", displayId: "primary", origin: .user)
         XCTAssertFalse(prompt.isPending)
     }
 
@@ -271,7 +272,7 @@ final class WallpaperActivationRecoveryTests: XCTestCase {
         let store = BridgeStore(bridge: bridge, supportPrompt: prompt)
         try await store.refreshAllAsync()
 
-        try await store.activateWallpaperAsync(id: "failing", displayId: "primary", userInitiated: true)
+        try await store.activateWallpaperAsync(id: "failing", displayId: "primary", origin: .user)
         XCTAssertFalse(prompt.isPending)
     }
 
@@ -487,6 +488,70 @@ final class WallpaperActivationRecoveryTests: XCTestCase {
         XCTAssertFalse(store.activationNeedsRefresh)
     }
 
+    /// Only the user choosing counts as a choice: a playlist, a rule, a restored layout or an
+    /// update reloading files must never tell automation the user took over a display.
+    func testOnlyTheUsersOwnActivationReportsAManualChoice() async throws {
+        for origin in [ActivationOrigin.user, .playlist, .automation, .layout, .updateReload] {
+            let bridge = ApplyFailureBridge(noPointer: .init())
+            bridge.applyError = nil
+            let store = BridgeStore(bridge: bridge)
+            try await store.refreshAllAsync()
+            var chosen: [String] = []
+            store.onUserWallpaperChoice = { id, display in chosen.append("\(display)=\(id)") }
+
+            try await store.activateWallpaperAsync(id: "failing", displayId: "primary", origin: origin)
+            XCTAssertEqual(chosen, origin.isUserChoice ? ["primary=failing"] : [], "\(origin)")
+
+            // Asking again for what the display already shows changes nothing, and is still the
+            // user's choice only when the user asked.
+            try await store.activateWallpaperAsync(id: "failing", displayId: "primary", origin: origin)
+            XCTAssertEqual(chosen, origin.isUserChoice ? ["primary=failing", "primary=failing"] : [], "\(origin)")
+        }
+    }
+
+    func testUpdateReloadLoadsTheWallpaperAgainOnTheDisplayShowingIt() async throws {
+        let bridge = ApplyFailureBridge(noPointer: .init())
+        bridge.applyError = nil
+        let store = BridgeStore(bridge: bridge)
+        try await store.refreshAllAsync()
+        try await store.activateWallpaperAsync(id: "failing", displayId: "primary", origin: .user)
+        var chosen = 0
+        store.onUserWallpaperChoice = { _, _ in chosen += 1 }
+
+        try await store.reloadWallpaperAsync(id: "failing")
+
+        XCTAssertEqual(bridge.ejects, 1)
+        XCTAssertTrue(store.isWallpaperActive(id: "failing", displayId: "primary"))
+        XCTAssertEqual(chosen, 0, "Reloading files is not the user choosing a wallpaper")
+    }
+
+    func testUpdateReloadGivesWayToAChoiceTheUserIsWaitingOn() async throws {
+        let bridge = ApplyFailureBridge(noPointer: .init())
+        bridge.applyError = nil
+        let store = BridgeStore(bridge: bridge)
+        try await store.refreshAllAsync()
+        try await store.activateWallpaperAsync(id: "failing", displayId: "primary", origin: .user)
+        let slot = BridgeStore.activationSlot(displayId: "primary")
+        var release: CheckedContinuation<Void, Never>?
+        let blocker = Task { await store.commands.run { await withCheckedContinuation { release = $0 } } }
+        for _ in 0..<1_000 where release == nil { await Task.yield() }
+        var chosen = false
+        let choice = Task { await store.commands.run(slot: slot, subject: "other") { chosen = true } }
+        for _ in 0..<1_000 where !store.commands.hasWaiting(slot: slot) { await Task.yield() }
+        XCTAssertTrue(store.commands.hasWaiting(slot: slot))
+
+        try await store.reloadWallpaperAsync(id: "failing")
+        XCTAssertEqual(bridge.ejects, 0, "A reload must not take the display away while the user's choice waits")
+
+        release?.resume()
+        await blocker.value
+        let ran = await choice.value
+        XCTAssertTrue(ran)
+        XCTAssertTrue(chosen)
+        XCTAssertEqual(bridge.ejects, 0)
+        XCTAssertTrue(store.isWallpaperActive(id: "failing", displayId: "primary"))
+    }
+
     /// Downloads and imports rescan the library on their own schedule; one landing mid-apply
     /// waits for the apply instead of failing with a "wait" error.
     func testLibraryRefreshDuringApplyWaitsForIt() async throws {
@@ -597,7 +662,8 @@ final class WallpaperActivationRecoveryTests: XCTestCase {
             "An update replaced the files, which is what the posters are rebuilt for")
     }
 
-    /// A reload that waited behind a switch on its display must not put the old wallpaper back.
+    /// A reload that waited behind a command that switches its display must not put the old
+    /// wallpaper back.
     func testARetryThatWaitedBehindASwitchOnItsDisplayLeavesTheSwitchAlone() async throws {
         let (store, bridge) = try await twoDisplayStore(showing: ["primary": "a", "secondary": "b"])
         let slot = BridgeStore.activationSlot(displayId: "primary")
@@ -606,9 +672,10 @@ final class WallpaperActivationRecoveryTests: XCTestCase {
             bridge.beforeApply = nil
             await withCheckedContinuation { release = $0 }
         }
+        // No slot of its own, as a layout has: the retry waits for it instead of giving way.
         let switching = Task {
-            try await store.commands.run(slot: slot) {
-                try await store.activateWallpaperAsync(id: "c", displayId: "primary", userInitiated: true)
+            try await store.commands.run {
+                try await store.activateWallpaperAsync(id: "c", displayId: "primary", origin: .user)
             }
         }
         let held = ContinuousClock.now.advanced(by: .seconds(5))
@@ -633,6 +700,38 @@ final class WallpaperActivationRecoveryTests: XCTestCase {
             "The retry found the display showing another wallpaper and reloaded nothing")
     }
 
+    /// A retry that arrives while the user's own switch is running on its display does not queue up
+    /// behind it: it gives way at once, as it does to a switch that waits.
+    func testARetryGivesWayToASwitchRunningOnItsDisplay() async throws {
+        let (store, bridge) = try await twoDisplayStore(showing: ["primary": "a", "secondary": "b"])
+        let slot = BridgeStore.activationSlot(displayId: "primary")
+        var release: CheckedContinuation<Void, Never>?
+        bridge.beforeApply = {
+            bridge.beforeApply = nil
+            await withCheckedContinuation { release = $0 }
+        }
+        let switching = Task {
+            try await store.commands.run(slot: slot) {
+                try await store.activateWallpaperAsync(id: "c", displayId: "primary", origin: .user)
+            }
+        }
+        let held = ContinuousClock.now.advanced(by: .seconds(5))
+        while release == nil && ContinuousClock.now < held { await Task.yield() }
+        guard let release else {
+            switching.cancel()
+            return XCTFail("The switch did not reach the bridge")
+        }
+
+        try await store.retryStoppedSceneAsync(displayId: "primary")
+        XCTAssertFalse(store.commands.hasWaiting(slot: slot), "The retry does not wait behind the switch")
+
+        release.resume()
+        try await switching.value
+
+        XCTAssertEqual(bridge.assignments, ["primary": "c", "secondary": "b"])
+        XCTAssertEqual(bridge.events, ["apply primary c"], "The retry reloaded nothing")
+    }
+
     /// The same slot as a switch: a choice made while a retry still waits replaces it.
     func testANewerChoiceOnTheDisplayReplacesARetryStillWaiting() async throws {
         let (store, bridge) = try await twoDisplayStore(showing: ["primary": "a", "secondary": "b"])
@@ -653,7 +752,7 @@ final class WallpaperActivationRecoveryTests: XCTestCase {
 
         let choice = Task {
             try await store.commands.run(slot: slot) {
-                try await store.activateWallpaperAsync(id: "c", displayId: "primary", userInitiated: true)
+                try await store.activateWallpaperAsync(id: "c", displayId: "primary", origin: .user)
             }
         }
         // The queue answers the replaced retry at once, while the first command still runs.
@@ -768,6 +867,13 @@ private final class ApplyFailureBridge: WallpaperBridge {
 
     /// Whether the wallpaper was already active when the library rescan reached the bridge.
     var refreshSawActive: Bool?
+    private(set) var ejects = 0
+
+    override func ejectWallpaperFromDisplay(displayId: String, wallpaperId: String) async throws -> BridgeDisplayMutationBundle {
+        ejects += 1
+        active = false
+        return BridgeDisplayMutationBundle(app: app, library: library, monitorInformation: monitors, settings: settings)
+    }
 
     override func refreshLibrary() async throws -> BridgeSnapshotBundle {
         refreshSawActive = active

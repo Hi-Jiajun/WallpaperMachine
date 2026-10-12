@@ -43,7 +43,7 @@ extension BridgeStore {
                     }
                 }, apply: { id, display in
                     touched.insert(display)
-                    try await self.activateWallpaperAsync(id: id, displayId: display, recordsHistory: false)
+                    try await self.activateWallpaperAsync(id: id, displayId: display, origin: .layout, recordsHistory: false)
                 }, clear: { id, display in
                     try await self.ejectWallpaperFromDisplayAsync(displayId: display, wallpaperId: id)
                 })

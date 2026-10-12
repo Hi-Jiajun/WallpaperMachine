@@ -315,7 +315,7 @@ extension WebPanelController {
       let displayID = navigation.targetDisplayID
       let slot = BridgeStore.activationSlot(displayId: displayID)
       try await store.commands.run(slot: slot, subject: id) {
-        try await store.activateWallpaperAsync(id: id, displayId: displayID, userInitiated: true)
+        try await store.activateWallpaperAsync(id: id, displayId: displayID, origin: .user)
         // Get out of the way so the freshly applied wallpaper is visible, unless another
         // switch is already waiting to replace it.
         if hidesAfterActivating, store.supportPrompt?.isPending != true,

@@ -367,6 +367,7 @@
 		DE0FBAA976EDBF68F28083BB /* WallpaperSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = 180738AE9E77A57B2A578C30 /* WallpaperSurface.swift */; };
 		DE1E9B7250C15A4EB5F562BF /* WebWallpaperAudioOutput.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6F5FF21ED8411DFB9412404 /* WebWallpaperAudioOutput.swift */; };
 		DED598932877F2C16DCDA798 /* globals.m in Sources */ = {isa = PBXBuildFile; fileRef = 912BF94698AC8848894A522F /* globals.m */; };
+		DFF200E52066C81B2127AE97 /* ActivationOrigin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA1383238A705D45103279A3 /* ActivationOrigin.swift */; };
 		E1B2DD9B2A1302B044C9B91E /* WorkshopSourceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15F8C48977CDEC3A7859F93 /* WorkshopSourceTests.swift */; };
 		E203F8AF99E008A9772BDEF6 /* SteamCMDPackages.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76F6F4E0822F9B7DA7F0C36C /* SteamCMDPackages.swift */; };
 		E30ACF41ABB6894ED536733C /* MediaArtwork.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6456F9E1DCC5FE0E969C504C /* MediaArtwork.swift */; };
@@ -877,6 +878,7 @@
 		F7220B4F3C3C74CDADE6477C /* ClientPathsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientPathsTests.swift; sourceTree = "<group>"; };
 		F786511D1E15599E7D74C3FE /* WebPanelPresets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPanelPresets.swift; sourceTree = "<group>"; };
 		F99A08B5FFF247118CA021A0 /* DisplayConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayConfiguration.swift; sourceTree = "<group>"; };
+		FA1383238A705D45103279A3 /* ActivationOrigin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivationOrigin.swift; sourceTree = "<group>"; };
 		FA8704E8F2DC99C56E448967 /* LockScreenSurfaceRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LockScreenSurfaceRegistry.swift; sourceTree = "<group>"; };
 		FB21FA7F73D0415DD8387CA1 /* LockScreenExtensionDiagnosticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LockScreenExtensionDiagnosticsTests.swift; sourceTree = "<group>"; };
 		FB971B62174C5F9F826731BB /* WebWallpaperPageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebWallpaperPageTests.swift; sourceTree = "<group>"; };
@@ -966,6 +968,7 @@
 		1176CB22BA3691AAC2D01CFA /* ViewModels */ = {
 			isa = PBXGroup;
 			children = (
+				FA1383238A705D45103279A3 /* ActivationOrigin.swift */,
 				01BA23F761AEA2A7FFA8B12E /* BridgeStore.swift */,
 				6E71B8530A8F0F68D7437E9C /* BridgeStoreDisplayLayouts.swift */,
 				9A0DAE34E87FBDEF0E3871A2 /* UserCommandQueue.swift */,
@@ -2267,6 +2270,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				DFF200E52066C81B2127AE97 /* ActivationOrigin.swift in Sources */,
 				FC5668480E08ADB389C4F7F5 /* AdapterSystemMediaProvider.swift in Sources */,
 				47612DAC45AAF2E378150CE2 /* AppAutomation.swift in Sources */,
 				F0FFC309AE03A890A5DD83F9 /* AppDelegate.swift in Sources */,

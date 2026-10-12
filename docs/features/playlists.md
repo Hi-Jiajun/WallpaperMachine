@@ -88,9 +88,13 @@ the clock or the time zone change.
 
 Every switch runs through the display's command slot, the same one the panel's
 Apply and the menu bar use, so the latest request for a display wins, and the
-next wallpaper is chosen when the switch's turn comes. In Day and night, a
-wallpaper the user applies by hand stays until the next half of the day, and
-choosing a different day or night wallpaper applies at once.
+next wallpaper is chosen when the switch's turn comes. A playlist never
+replaces a wallpaper you chose: if your Apply is waiting for its turn on that
+display, or is running there, the playlist's change (Change now included) gives way
+at once, is not retried, and the rotation tries again one interval later. It does
+not queue up behind your Apply, which would replace the wallpaper you just got. In Day and night, a wallpaper the
+user applies by hand stays until the next half of the day, and choosing a
+different day or night wallpaper applies at once.
 
 A rotating playlist skips a wallpaper whose application throws an error and tries
 another in the same change, at most five distinct wallpapers. Failed items wait
@@ -138,7 +142,8 @@ every playlist, re-dating without a change, persisted reorder and stale-order
 rejection), `PlaylistSchedulerTests` (a waited interval, a change that fell due
 while paused happening once, day and night with
 a manual choice left alone, Change now, nothing playable, bounded failure skipping,
-cooldown expiry, cancellation and manual-command precedence) and
+cooldown expiry, cancellation, manual-command precedence and a rotation giving
+way to a waiting Apply, rescheduled one interval later) and
 `WebPanelPlaylistTests` (the actions' validation).
 `ControlPanelPlaybackToolsTests` drives reorder buttons and drag/drop in an
 offscreen panel, including an edit made while a drag is in progress. Real
