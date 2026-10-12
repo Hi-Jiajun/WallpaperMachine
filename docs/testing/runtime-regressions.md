@@ -489,6 +489,16 @@ engine to redo, and when.
   UUIDs or serials differ, display sync must keep one `[[monitors]]` block per
   display under its current selector, and a panel display id from before a
   renumbering must still edit that display.
+- **A display that reports no pixels is left out of the refresh** — `display::state::tests::a_running_display_that_reports_no_pixels_keeps_its_descriptor_and_runtime`,
+  `::a_new_display_that_reports_no_pixels_gets_no_record_until_it_has_a_size` and
+  `::transitional_matching_uses_identity_when_the_display_id_changed`, with
+  `display::tests::plan_refresh_*` and `engine::tests::a_secondary_display_without_pixels_is_left_out_until_it_reports_a_size`.
+  A display that is still connecting can be listed as active with a 0x0 mode, and
+  opening a window for it fails the whole reconcile. It must stay out of the
+  refresh, yet a display that already runs a scene must keep its descriptor:
+  reading it as absent would close the scene and reload it after the glitch. All
+  descriptors are synthetic; a real display that reports 0x0 while connecting was
+  not reproduced.
 - **A reconcile keeps an unchanged scene** — `settings_intents::a_reconcile_does_not_reload_a_scene_held_to_the_frame_rate_cap`,
   `::a_reconcile_does_not_reload_a_scene_muted_for_other_audio` and
   `performance_settings::wallpapers_applied_under_a_frame_rate_cap_start_at_the_capped_rate`.

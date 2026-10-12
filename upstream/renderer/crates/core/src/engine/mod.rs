@@ -2023,6 +2023,91 @@ mod tests {
         assert_eq!(actor.state.displays_by_handle.get(&handle), Some(&key));
     }
 
+    fn actor_for_display_reports(model: DisplayStateModel) -> EngineActor {
+        let state = EngineState::with_display_model(model);
+        let snapshots = Arc::new(EngineSnapshotPublisher::new(
+            state.snapshot(),
+            Arc::new(Mutex::new(MouseButtonTracker::new())),
+        ));
+        let prepared = <EngineActor as kameo::actor::Spawn>::prepare();
+        EngineActor::new(
+            OweBackend,
+            Arc::new(|_handle| {}),
+            state,
+            snapshots,
+            prepared.actor_ref().downgrade(),
+        )
+    }
+
+    #[test]
+    fn a_display_report_where_the_primary_has_no_pixels_leaves_a_running_scene_alone() {
+        let template = crate::project::SceneTemplate::builder("/tmp/primary.json")
+            .build()
+            .unwrap();
+        let mut model = DisplayStateModel::from_config(crate::WallpaperEngineConfig {
+            displays: vec![crate::DisplayConfig {
+                selector: crate::DisplaySelector::Primary,
+                window_active: true,
+                wallpaper: Some(crate::WallpaperAssignment::Direct(template)),
+            }],
+        })
+        .unwrap();
+        model.records[0].live_display = Some(crate::DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0));
+        model.records[0].runtime_open = true;
+        let mut actor = actor_for_display_reports(model);
+        let before = actor.state.display_records[0].model.clone();
+
+        let in_flux = crate::DisplayDesc::new(1, 0, 0, 0, 0, 1.0);
+        actor
+            .apply_display_report(in_flux.clone(), vec![in_flux])
+            .expect("a report in flux is not an error");
+
+        assert_eq!(actor.state.display_records[0].model, before);
+    }
+
+    #[test]
+    fn a_secondary_display_without_pixels_is_left_out_until_it_reports_a_size() {
+        let mut actor = actor_for_display_reports(
+            DisplayStateModel::from_config(crate::WallpaperEngineConfig::default()).unwrap(),
+        );
+        let primary = crate::DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0);
+        let connecting = |width, height| {
+            crate::DisplayDesc::with_identity(
+                7,
+                crate::DisplayIdentity {
+                    uuid: Some("external".to_string()),
+                    ..crate::DisplayIdentity::default()
+                },
+                1920,
+                0,
+                width,
+                height,
+                1.0,
+            )
+        };
+
+        actor
+            .apply_display_report(primary.clone(), vec![primary.clone(), connecting(0, 0)])
+            .expect("a connecting display must not fail the refresh");
+        assert_eq!(actor.state.display_records.len(), 1);
+        assert_eq!(
+            actor.state.display_records[0].model.live_display,
+            Some(primary.clone())
+        );
+
+        actor
+            .apply_display_report(primary.clone(), vec![primary, connecting(2560, 1440)])
+            .unwrap();
+        assert_eq!(actor.state.display_records.len(), 2);
+        assert!(
+            actor
+                .state
+                .display_records
+                .iter()
+                .any(|record| record.model.live_display == Some(connecting(2560, 1440)))
+        );
+    }
+
     #[test]
     fn display_record_blank_when_active_without_assignment() {
         let record = DisplayRuntimeRecord {

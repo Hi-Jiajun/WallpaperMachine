@@ -9,7 +9,10 @@ use kameo::{
 use crate::engine::messages::{DisplayRecordCountForTest, SequenceForTest};
 use crate::{
     DisplaySelector, EngineError, WallpaperAssignment,
-    display::state::{DisplayKey, DisplayStateModel},
+    display::{
+        RefreshPlan, RefreshReportLog, plan_refresh,
+        state::{DisplayKey, DisplayStateModel},
+    },
     engine::{
         EngineSnapshotPublisher, FirstFrameCallback,
         messages::{self, Ping},
@@ -35,6 +38,7 @@ pub struct EngineActor {
     refresh_running: bool,
     #[allow(dead_code)]
     refresh_pending: bool,
+    refresh_report_log: RefreshReportLog,
     #[cfg(test)]
     pub test_sequence: u64,
     #[cfg(test)]
@@ -126,6 +130,7 @@ impl EngineActor {
             display_callback: None,
             refresh_running: false,
             refresh_pending: false,
+            refresh_report_log: RefreshReportLog::default(),
             #[cfg(test)]
             test_sequence: 0,
             #[cfg(test)]
@@ -163,7 +168,29 @@ impl EngineActor {
     pub fn refresh_displays_now(&mut self) -> Result<(), EngineError> {
         let primary = crate::DisplayDesc::primary()?;
         let displays = crate::DisplayDesc::all()?;
-        self.reconcile_display_descriptors(primary, displays)
+        self.apply_display_report(primary, displays)
+    }
+
+    /// Applies one platform display report. A display that reports no pixels
+    /// yet is left out (see [`plan_refresh`]) instead of failing the refresh
+    /// for the others; the display watcher refreshes again when it settles.
+    pub(crate) fn apply_display_report(
+        &mut self,
+        primary: crate::DisplayDesc,
+        all: Vec<crate::DisplayDesc>,
+    ) -> Result<(), EngineError> {
+        let plan = plan_refresh(primary, all);
+        if let Some(message) = self.refresh_report_log.message_for(&plan) {
+            log::warn!("{message}");
+        }
+        match plan {
+            RefreshPlan::Skip { .. } => Ok(()),
+            RefreshPlan::Apply {
+                primary,
+                displays,
+                transitional,
+            } => self.reconcile_display_descriptors_keeping(primary, displays, &transitional),
+        }
     }
 
     pub fn reconcile_display_descriptors(
@@ -171,8 +198,17 @@ impl EngineActor {
         primary: crate::DisplayDesc,
         displays: Vec<crate::DisplayDesc>,
     ) -> Result<(), EngineError> {
+        self.reconcile_display_descriptors_keeping(primary, displays, &[])
+    }
+
+    pub fn reconcile_display_descriptors_keeping(
+        &mut self,
+        primary: crate::DisplayDesc,
+        displays: Vec<crate::DisplayDesc>,
+        transitional: &[crate::DisplayDesc],
+    ) -> Result<(), EngineError> {
         self.update_display_state(|model| {
-            model.refresh_connected(primary, displays)?;
+            model.refresh_connected_keeping(primary, displays, transitional)?;
             Ok(())
         })
     }

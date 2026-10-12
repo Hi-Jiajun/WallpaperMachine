@@ -275,7 +275,12 @@ setter through optional private CoreGraphics and HIServices symbols, falling bac
   updates compare the native geometry before writing it and commit without implicit layer
   animations, so moving a display or changing the primary does not redraw a window or reset an
   unchanged Metal drawable. Renderer windows and Metal layers default to opaque black rather
-  than white, matching the native-video and web hosts.
+  than white, matching the native-video and web hosts. A display that CoreGraphics lists while
+  it still reports no pixels (0x0, as a display can while it connects) is left as it was and
+  picked up on the next refresh, which the display reconfiguration watcher schedules when it
+  settles: one that already runs a scene keeps its previous descriptor, so the scene is not
+  closed and reloaded, and a new one gets no window yet. If the primary display reports no
+  pixels, the whole refresh waits.
 
 ### Renderer bridge (generated uniffi)
 
