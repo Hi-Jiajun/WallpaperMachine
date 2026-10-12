@@ -27,14 +27,14 @@ class DownloaderTestCase: XCTestCase {
     in root: URL, username: String = "localtest", itemID: String = "123456",
     libraryName: String = "Library", rememberSession: Bool = true, item: WorkshopItem? = nil,
     networkMonitor: (any ProcessNetworkMonitoring)? = nil, checkpointDirectory: URL? = nil,
-    freeSpace: (@Sendable (URL) -> Int64?)? = nil
+    freeSpace: (@Sendable (URL) -> Int64?)? = nil, retryDelays: [TimeInterval] = [0, 0, 0]
   ) -> WorkshopDownloader {
     let downloader = WorkshopDownloader(
       sessionDirectory: root.appendingPathComponent("SteamSession"),
       runtimeProvider: ShellRuntimeProvider(),
       networkMonitor: networkMonitor ?? FixtureNetworkMonitor(),
       checkpointDirectory: checkpointDirectory,
-      freeSpace: freeSpace ?? WorkshopDownloader.systemFreeSpace)
+      freeSpace: freeSpace ?? WorkshopDownloader.systemFreeSpace, retryDelays: retryDelays)
     let requestedItem = item ?? WorkshopItem(
       id: itemID, title: "Session fixture", creator: "Test", summary: "", previewURL: nil,
       tags: ["Video"], size: 0, subscriptions: 0)

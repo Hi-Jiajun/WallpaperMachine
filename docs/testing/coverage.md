@@ -913,7 +913,8 @@ that window and OS visibility events.
 - `SteamCMDApprovalTests` use isolated fixtures: exact SHA-256 receipts, policy
   failure rejection, stale candidates, changed resources, private copies,
   quarantine scope and explicit discard. `SteamCMDReportedFailureTests` — which
-  reported reasons count as credential rejection.
+  reported reasons count as credential rejection and which are only a connection
+  that can be retried.
 
 Not covered: whether Valve's current distribution passes this Mac's policy. The
 opt-in `SteamCMDLiveInstallTests` check that with a temporary native package
@@ -1043,7 +1044,20 @@ and `WorkshopDownloadPersistenceTests`:
   fit fails before SteamCMD launches with the needed and available sizes, Try again
   checks again, partial data already staged lowers the requirement, and an unknown
   size, an unreadable disk or a sign-in-only run never blocks. Scene assets use a
-  fixed floor. The floor's real footprint is unmeasured.
+  fixed floor, less what a resumed attempt already staged. The floor's real
+  footprint is unmeasured.
+- Retry (`DownloaderRetryTests`, scripted runtime counting its launches): a
+  timeout after the sign-in is retried in the same staging without a new prompt
+  and then completes; the budget is three retries, but a silent stall is
+  repeated only once; free space is read again before a retry and before
+  SteamCMD's own restart; a stall after sign-in is retried on an injected clock,
+  and one in a retry's own sign-in is the connection, with no authentication
+  retry offered; pause and cancel during the wait keep and discard the partial
+  data; access denied, a generic failure, an exit without confirmation, a
+  failure or stall while the first sign-in is pending are never retried; a
+  failure line is judged only once whole, whether a read stops before its reason
+  or the process ends without a newline. Real SteamCMD output for a dropped
+  connection is not covered.
 - `DownloadTelemetryTests` — download-speed sampling, including real `nettop`
   streaming (detail in [renderer.md](renderer.md)); `DownloaderLifecycleTests`
   report progress from disk growth against the listed size and stay

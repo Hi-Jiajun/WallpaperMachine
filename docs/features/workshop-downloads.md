@@ -428,6 +428,9 @@ work.
   (`sessionConflictDetected`). A session Steam ends while no sibling is running is
   reported as an ordinary failure with a retry. Settings says when the queue is
   running one at a time.
+- **Dropped connections.** A download whose connection drops after sign-in
+  retries itself up to three times before it fails (see [Prompt and retry
+  handling](#prompt-and-retry-handling)); it keeps its slot while it waits.
 - **Cost of parallelism.** Every job signs in separately, a fixed cost per job, so
   extra slots mainly help batches of small items; large items share the link.
   SteamCMD's `@cMaxInitialDownloadSources` is not set.
@@ -599,21 +602,50 @@ process's network total, the content landed on disk and an asset installation's
 own counts each restart the five minutes when they grow. A pass is also stopped
 after 30 minutes, but only once its bytes have stopped arriving as well, so a slow
 transfer that keeps moving is never cut short. A run that stalls after sign-in
-says it stopped receiving the download; only a stall while signing in points to
-Steam Guard.
+says it stopped receiving the download; only a stall in the run's first sign-in, or
+at a prompt that waits for you, points to Steam Guard. A retry that goes quiet while
+it signs in again is the connection, since Steam had already accepted the sign-in,
+and offers no authentication retry.
 
 After authentication is rejected or times out, **Try again** (or the failed tile's
 retry) starts a new private SteamCMD session for the selected wallpaper or asset
 installation and for the account name still in the form. The prior process is
 stopped and its private staging removed first. Supply a password or a fresh code
 when Steam asks: rejected requests are never reused, approval is never bypassed,
-and retries are never automatic. If Steam reports rate limiting, wait before
-retrying. Workshop content-access errors are a separate failure and offer no
-authentication retry.
+and authentication retries are never automatic. If Steam reports rate limiting,
+wait before retrying. Workshop content-access errors are a separate failure and
+offer no authentication retry.
+
+**Dropped connections.** Once Steam has accepted the sign-in, a Workshop item or
+scene-resource download whose connection drops is retried by itself: three
+times, after about 2, 8 and 30 seconds (each wait varies by up to 20% so parallel
+jobs do not return together), with the status reading "Connection lost; retrying
+(n of 3)…". A drop means Steam reporting a timeout, no connection or an
+unavailable service for a Workshop item, or the five-minute silence described
+above (for scene resources too). A silence is repeated only once, because each
+repeat can cost the whole five minutes again; a download whose connection gives no
+sign of life therefore fails after about ten minutes, and the three retries are for
+drops that Steam reports. The retry is a new SteamCMD launch in the same
+private staging, so Steam resumes from its partial manifests and the saved sign-in
+is still there: no password or Steam Guard prompt appears. The count starts over
+for a preset's base wallpaper. Pause and cancel work during the wait as at any
+other time. Once the retries are spent, the download fails with **Try again** and
+keeps what was downloaded; a reported drop says the connection dropped, where it
+used to be reported with the purchase requirement below. Nothing the user has
+to decide is retried: rejected passwords or Steam Guard, rate limits, access
+denied, a session ended by a sign-in elsewhere, a rejected saved sign-in, a
+generic or unrecognised failure (a removed or private item fails at once), a
+sign-in-only run, a failure or silence before Steam accepted the first sign-in,
+and SteamCMD exiting without confirming the download. Real SteamCMD output for a
+dropped connection has been checked only against a scripted stand-in.
 
 Parenthesized SteamCMD failures distinguish explicit credential rejection, Steam
 Guard, connection/service failures and rate limits, including compact result names
-such as `ServiceUnavailable` and `RateLimitExceeded`. Unrecognised reasons do not
+such as `ServiceUnavailable` and `RateLimitExceeded`. A download failure line is
+judged only once it is whole, because its reason comes last and decides whether
+the connection or the purchase is blamed: a read that ends at `failed` or inside
+the parentheses waits for the rest, and output that ends without a newline is
+judged when the process exits. Unrecognised reasons do not
 establish bad credentials: the app asks to check connectivity and export [a
 diagnostics report](diagnostics.md#diagnostics-report) if retries keep failing.
 Logs include the failure category, never the raw terminal reason or secrets.
@@ -638,7 +670,10 @@ staging directories it can prove nothing is writing to.
 **Free space.** Before SteamCMD starts, the downloader checks that the disk holding
 the library can take the download, so one that cannot fit fails at once instead of
 stalling for the inactivity limit and blaming the connection. The check runs on
-every start, including a resume, an automatic restart and **Try again**. A
+every start, including a resume and **Try again**, and again before every
+automatic relaunch of SteamCMD (a retry after a dropped connection or a wake, or
+Steam asking to be started again), so a disk that filled during the first pass
+fails the retry with the same message instead of costing another pass. A
 Workshop item needs the part of its listed size not already staged, plus 15% for
 Steam's staging and 64 MiB of margin; whatever a paused or failed attempt kept as
 partial download data is counted from disk, so a retry only needs what is still
