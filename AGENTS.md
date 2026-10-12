@@ -6,16 +6,15 @@ sandboxed ExtensionKit lock screen. `CLAUDE.md` must stay a relative symlink to 
 ## Read on demand
 
 Read only task-relevant sections; keep this file to durable rules and routing.
-For any doc over ~300 lines (`testing/renderer.md`, `release.md`, `LICENSING.md`,
-`architecture.md`, `build.md`, the larger feature docs), use its section index or
-`rg -n '^##' <file>` and read with offset/limit; never read the whole file.
-`.ignore` keeps `rg` out of `docs/archive/`, `docs/testing/archive/`,
-`App/Bridge/Generated/` and `upstream/`; use `rg -u` only when those are the target.
+For any doc over ~300 lines, list its headings with `rg -n '^#' <file>` and read
+with offset/limit; never read the whole file. `.ignore` keeps `rg` out of
+`docs/archive/`, `docs/testing/archive/`, `App/Bridge/Generated/` and `upstream/`;
+use `rg -u` only when those are the target.
 
 - Placement / runtime: [layout](docs/repository-layout.md), [architecture](docs/architecture.md).
 - Code / tests / docs: [conventions](docs/conventions.md), [testing](docs/testing/README.md).
 - Build / package / versions: [build](docs/build.md), [release](docs/release.md).
-- Product / features: [README](README.md), [docs index](docs/README.md). Humans: [CONTRIBUTING](CONTRIBUTING.md).
+- Product / features: [README](README.md), [docs index](docs/README.md).
 
 ## Ownership and invariants
 
@@ -28,41 +27,46 @@ For any doc over ~300 lines (`testing/renderer.md`, `release.md`, `LICENSING.md`
 - `scripts/`: Python CLI; reuse `scripts/lib/` (paths, glyphs, `xcode.py` quiet tool
   runner); tests in `scripts/tests/`.
 - `project.yml` owns targets/settings/versions: run `xcodegen generate`, never hand-edit
-  `WallpaperMachine.xcodeproj`; change versions only via `scripts/bump_version.py` or a
-  commit-message `release:` line ([release](docs/release.md)). Regenerate
-  `App/Bridge/Generated/` via `scripts/build.py` after bridge changes; never patch
-  generated bindings.
+  `WallpaperMachine.xcodeproj`. Never edit versions by hand: CI bumps them when a
+  pushed commit message carries a `release:` line, and that also cuts a release, so
+  write one only when the user asks for a release ([release](docs/release.md)).
+  Never extend a `CHANGELOG.md` section whose tag exists; unpublished fixes go into
+  the next version ([recovery](docs/release.md#recovering-a-failed-release)).
+  Regenerate `App/Bridge/Generated/` via `scripts/build.py` after bridge changes;
+  never patch generated bindings.
 - `upstream/` is vendored renderer code, not app code. Every change requires updating
   `upstream/provenance.json`; preserve notices and [licensing constraints](LICENSING.md).
-- Match surrounding conventions; reuse `ClientPaths`, `AppLog`, localization and
-  dependency injection. Isolate tests with `WALLPAPER_MACHINE_HOME`; assert behavior,
-  not wording/wiring. Migrate changed APIs completely; preserve others' concurrent edits.
-- `artifacts/` = disposable evidence; `build/` = disposable Xcode output. Neither is
-  durable evidence or committable; keep secrets/private assets/screenshots/traces out too.
-  Coordinate cleanup; preview with `python3 scripts/clean.py --dry-run`, then use
-  `python3 scripts/clean.py` (keeps built apps). `--all` deletes the delivered app;
+- Every new user-facing string goes into every shipped catalog in the same change
+  (`App/Resources/*.xcstrings`, `Extension/Localizable.xcstrings`, `WebUI/locales/`);
+  `README.md` and `README.zh-CN.md` change together ([localization](docs/localization.md)).
+- Match surrounding conventions; reuse `ClientPaths`, `AppLog` and dependency injection.
+  Unit tests run inside the real app, so `UserDefaults.standard` is the installed app's
+  preferences: isolate with `WALLPAPER_MACHINE_HOME` and `TemporaryDefaults`, never a
+  plain suite name. Assert behavior, not wording/wiring. Migrate changed APIs
+  completely; preserve others' concurrent edits.
+- `artifacts/` (evidence) and `build/` (Xcode output) are disposable: never commit them
+  or cite them as durable evidence, and keep secrets, private assets, screenshots and
+  traces out of Git. Only `scripts/test.py` prunes its own output; everything else stays
+  until deleted. Keep a task's ad-hoc output (investigations, probe output, CI downloads,
+  drafts) in one `artifacts/<task>/` folder. Before finishing, list what the task left
+  in `artifacts/` (including renderer/Rust check runs) with sizes and ask the user
+  whether to delete it; delete only on a yes. For wider cleanup, show
+  `python3 scripts/clean.py --dry-run` and run `python3 scripts/clean.py` (keeps built
+  apps) only after the user agrees. `--all` deletes the delivered app;
   `--user-assets`/`--managed-user-assets` delete live user wallpaper data (the latter
   irreversibly): only on explicit request.
-- Agent files: commit policy, never state. Shared agent policy lives only in tracked
-  files: `AGENTS.md` (the `CLAUDE.md` symlink) and `docs/`. Agent tool dirs (`.agents/`,
-  `.claude/`, `.commandcode/`, `.conductor/`, `.omo/`, `.omp/`, `.pi/`) and
-  `CLAUDE.local.md` are Git-ignored and machine-local: sessions, caches, workspaces,
-  `*.local.*` and personal rules. Never `git add -f` them or link them from tracked
-  docs; a rule the team needs goes into `AGENTS.md`/`docs/`. New agent tool → ignore
-  its dir in the same change. Sharing one policy file inside an ignored dir is a
-  deliberate exception: follow the recipe in `.gitignore` and list it here.
-  Check `git status` for agent paths before every commit.
+- Agent files: commit policy, never state. Team agent rules live only in `AGENTS.md`
+  and `docs/`. Agent tool dirs (`.agents/`, `.claude/`, `.commandcode/`, `.conductor/`,
+  `.omo/`, `.omp/`, `.pi/`) and `CLAUDE.local.md` are Git-ignored, machine-local state
+  and personal rules: never `git add -f` them or link them from tracked docs. Ignore a
+  new agent tool's dir in the same change; a shared file inside one follows the
+  `.gitignore` recipe and is listed here (none today). Check `git status` for agent
+  paths before every commit.
 
-## Skills and permissions
+## Permissions
 
-- System/developer instructions, explicit user scope and these rules outrank skills.
-  Skills grant neither authorization nor read-only restrictions; respect actual harness
-  limits and review-only requests. Continue permitted work when optional steps are
-  unavailable; ask questions in chat, not a browser UI.
-- `impeccable` → UI/UX; `swiftui-webkit` → primary WebKit; `webkit-integration` →
-  explicit-only reference. Use each only for its concern. The selected SDK and
-  `project.yml` decide APIs/deployment target, not examples; no skill-driven migration.
-  Local skill adaptations and source pins live in each developer's own `.agents/`.
+- Skills never outrank the user's scope or these rules and never grant authorization;
+  ask questions in chat, not in a browser UI.
 - No desktop control, opening windows, screenshots, wallpaper/appearance changes, audio
   hardware, permission prompts, live Steam login or app install/restart without explicit
   authorization. Feature/test approval is not desktop approval. Peekaboo and
@@ -72,24 +76,22 @@ For any doc over ~300 lines (`testing/renderer.md`, `release.md`, `LICENSING.md`
 
 ## Verify and deliver
 
-- Scale verification to the change (see [tiers](docs/testing/README.md#verification-tiers)).
-  Small fix (bug fix, refactor, test-only, single domain): iterate with
-  `python3 scripts/test.py --only <TestClass>` for the touched domain, then run the
-  full gate **once** at the end; no Release build, no log entry unless the user asks
-  or the fix changed a documented behavior. Feature or cross-domain change: full gate
-  plus a log entry. Never run the full gate more than once per task unless it failed.
-- Routine gate: `python3 scripts/test.py` (Python → XcodeGen → native unit/integration).
-  Add `python3 scripts/check_renderer.py` for renderer/bridge changes; preserve applicable
+- Scale verification to the change ([tiers](docs/testing/README.md#verification-tiers)).
+  Iterate with `python3 scripts/test.py --only <TestClass>` for the touched domain, then
+  run the routine gate `python3 scripts/test.py` (Python → XcodeGen → native
+  unit/integration) **once** at the end; rerun it only if it failed. Add
+  `python3 scripts/check_rust.py` for Rust crate changes and
+  `python3 scripts/check_renderer.py` for renderer/bridge changes; preserve applicable
   [renderer/download regressions](docs/testing/renderer.md#regression-areas-that-must-stay-covered).
-  Report skipped asset checks as skipped; the [local corpus](docs/testing/wallpaper-corpus.md)
-  is not a passing suite. Docs/skill-only changes: check links, paths and commands;
-  no app build or desktop test. `test.py` and `build.py` print only failures and a
-  verdict; the full tool output is in the `artifacts/` log they name. Do not rerun with
-  `--verbose` unless the filtered output is not enough to act on.
-- Release builds on request, not by default: build when the user asks to build,
-  deliver, install or try it, and when a change
-  cannot be verified any other way. Otherwise finish at the gate and say the app was
-  not rebuilt. Build only after the gate passes.
+  Docs-only changes: check links, paths and commands; no app build or desktop test.
+- `test.py` and `build.py` print only failures and a verdict; the full tool output is in
+  the `artifacts/` log they name. Rerun with `--verbose` only when that output is not
+  enough to act on. A missing verdict is a blocked gate, not a pass. Report skipped
+  asset checks as skipped; the [local corpus](docs/testing/wallpaper-corpus.md) is not
+  a passing suite.
+- Release builds on request, not by default: build when the user asks to build, deliver,
+  install or try it, or when a change cannot be verified any other way. Otherwise finish
+  at the gate and say the app was not rebuilt. Build only after the gate passes:
   `python3 scripts/build.py --swift-only --configuration Release` for Swift/WebUI/resources/config
   with current renderer/bindings; `python3 scripts/build.py --configuration Release`
   for renderer/bridge changes or missing outputs.
@@ -101,18 +103,19 @@ For any doc over ~300 lines (`testing/renderer.md`, `release.md`, `LICENSING.md`
   (`git add -p` when purposes share a file); stage only this task's files and leave
   others' edits unstaged; messages follow
   [conventions](docs/conventions.md#commits-and-pull-requests) (`feat`/`fix`/`perf`
-  subjects and bodies feed the user-facing release notes). Never push, amend,
-  rebase, force or rewrite history unless asked.
+  subjects and bodies feed the user-facing release notes). Pull request titles use the
+  same format, because a squash merge can make the title the commit subject. Never
+  push, amend, rebase, force or rewrite history unless asked.
 - Personal opt-ins: a developer's local rules (`CLAUDE.local.md`, an agent tool dir)
   may enable exactly two things: committing without asking, and ending app-code tasks
   with a Release build. They never relax any other rule here; on conflict, follow
   `AGENTS.md` and say so.
-- Update the owning docs; index new/removed documents in [docs/README.md](docs/README.md).
-  For features and cross-domain changes, record commands, results, skips and gaps with
-  `python3 scripts/log_verification.py --title "…" --line "…"` (about ten lines per entry;
-  do not read or hand-edit the [verification log](docs/testing/verification-log.md)
-  to append; the script keeps the ten newest and archives the rest). Historical
-  results aren't current proof, so promote anything durable (known-failing tests,
-  recurring traps) into the owning doc instead of leaving it in the log.
-  Report shared-workspace blockers and unchecked visual behavior explicitly.
-
+- Update the owning docs in the same change as the behavior; index new/removed documents
+  in [docs/README.md](docs/README.md). Bug fixes, refactors and test-only changes get no
+  verification-log entry unless the user asks or a documented behavior changed; features
+  and cross-domain changes record commands, results, skips and gaps with
+  `python3 scripts/log_verification.py --title "…" --line "…"` (about ten lines; never
+  read or hand-edit the [verification log](docs/testing/verification-log.md) to append).
+  The log is history, not current proof: promote anything durable (known-failing tests,
+  recurring traps) into the owning doc. Report shared-workspace blockers and unchecked
+  visual behavior explicitly.

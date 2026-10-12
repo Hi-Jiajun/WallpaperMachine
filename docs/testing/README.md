@@ -3,10 +3,14 @@
 How this project is verified, which layer a new test belongs in, and what
 "verified" is allowed to mean in a report.
 
+- [coverage.md](coverage.md) — what the native tests assert, domain by domain,
+  and the limits of each claim.
 - [renderer.md](renderer.md) — headless renderer/GPU checks, probe environment
   variables, regression areas that must stay covered.
 - [manual-smoke.md](manual-smoke.md) — manual release smoke checklist
   (requires authorization; not automated).
+- [power-benchmark.md](power-benchmark.md) — how power and CPU/GPU comparisons
+  are measured and when a power claim is allowed.
 - [verification-log.md](verification-log.md) — dated history of what was
   verified, with results and explicit gaps; the ten newest entries, with older
   ones in [archive/](archive/).
@@ -66,7 +70,7 @@ with an installed newer interpreter (for example, `python3.12`).
 | Media/device integration | `Tests/Unit/NativeVideo/` | `WALLPAPER_MACHINE_MEDIA_TESTS=1 python3 scripts/test.py` — opt-in only |
 | Live Steam pages / native SteamCMD install | `Tests/Unit/Workshop/WorkshopTests.swift`, `Tests/Unit/Steam/SteamCMDLiveInstallTests.swift` | `WALLPAPER_MACHINE_NETWORK_TESTS=1 python3 scripts/test.py` — opt-in only |
 | Rust crates | `upstream/renderer/crates/` | `python3 scripts/check_rust.py` runs the isolated release checks and reports exclusions/skips; individual Cargo commands remain available |
-| C++ renderer tests | `upstream/renderer/external/open-wallpaper-engine` | `python3 scripts/check_renderer.py` uses one `REGRESSION_BINARIES` registry for build, execution and the verdict, plus image/reload probes. `scene_schema_tests`, `script_runtime_compat_test` and `mouse_input_test` are not in that list: build them in `artifacts/renderer/bin` with `cmake --build artifacts/renderer/bin --target <name>` and run `artifacts/renderer/bin/tests/<name>`; see [renderer.md](renderer.md#ccmake-test-binaries) |
+| C++ renderer tests | `upstream/renderer/external/open-wallpaper-engine` | `python3 scripts/check_renderer.py` uses one `REGRESSION_BINARIES` registry for build, execution and the verdict, plus image/reload probes. Some test binaries (`scene_schema_tests`, `script_runtime_compat_test`, `mouse_input_test` and others) are not in that list and are built and run by hand; [renderer.md](renderer.md#ccmake-test-binaries) lists them and the commands |
 | Headless GPU probes | same CMake tree | explicitly invoked executables (`offscreen_scene_probe`, `scene_reload_cycle_probe`, `playback_gpu_test`, `wpdump`); see [renderer.md](renderer.md) |
 
 `python3 scripts/test.py` is the routine gate: it runs the Python script test
@@ -96,9 +100,10 @@ detached background service. A temporary same-user launch job can run the
 non-desktop gate there without opening a Terminal window; remove the job
 afterwards. Standalone isolated checks do not replace the app-hosted gate.
 
-`Tests/Unit/` is grouped by domain: Appearance, Desktop, Diagnostics, GitHub,
-Library, Localization, LockScreen, NativeVideo, Panel, Steam, SystemMedia,
-UserAssets, WebWallpaper, Workshop; shared fixtures live in `Support/`.
+`Tests/Unit/` is grouped by domain, mirroring `App/Services/`: Appearance,
+Automation, Desktop, Diagnostics, GitHub, Library, Localization, LockScreen,
+NativeVideo, Panel, Pixiv, Playlist, Preview, Steam, SystemMedia, UserAssets,
+WebWallpaper, Workshop; shared fixtures live in `Support/`.
 
 ### Opt-in layers
 
@@ -147,15 +152,13 @@ path. A test that passes alone but fails in the gate is the symptom; reproduce
 it with `python3 scripts/test.py --serial` and fix the shared state rather than
 the scheduling. UI runs are always serial: they drive one desktop.
 
-CI's `test` job is serial too. On the `macos-26` runner, parallel gates for 1.2.0
-failed one or two offscreen control-panel tests per run, a different one each
-time, with `InvalidTransition { phase: idle targetPhase: failed(deinit) }`:
-WebKit dropped a `callAsyncJavaScript` call unanswered. The same tests pass
-locally, in parallel and under CPU load, and a panel left idle for 25 seconds
-still answers. Serial costs the runner almost nothing (300 s against 278 s in
-parallel), unlike a local run (220 s against 50 s). When it recurs, the panel
-fixture's error says whether the page reloaded meanwhile, and `test-logs-<tag>`
-carries the run's WebKit and jetsam reports.
+CI's `test` job runs `--serial` too. On hosted macOS runners, parallel runs
+intermittently fail one offscreen control-panel test with
+`InvalidTransition { phase: idle targetPhase: failed(deinit) }` — WebKit drops a
+`callAsyncJavaScript` call unanswered — while the same tests pass locally in
+parallel; on the runner, serial costs almost no wall clock. When it recurs, the
+panel fixture's error says whether the page reloaded meanwhile, and the
+`test-logs-<tag>` artifact carries the run's WebKit and jetsam reports.
 
 The per-test `UserDefaults` suite is not only a parallelism concern: the unit
 bundle runs inside the real app as its test host, so `UserDefaults.standard`
@@ -183,8 +186,7 @@ marks onboarding/launch announcements complete. Launch arguments pin Foundation'
 native language without changing the system domain. Teardown stops the test app,
 then removes the suite and support root, including when setup or a test fails.
 System-global readers (title-bar double-click behavior, system language and
-desktop-click preferences) keep their original domains. UI assertions read the
-actual page-number field value instead of expecting a combined pagination label.
+desktop-click preferences) keep their original domains.
 
 The same rule covers a second shape: a test that measures a *wall-clock window*
 rather than shared state. It is still a race, it can lose alone as well as in
@@ -201,28 +203,28 @@ page can report rather than for a duration.
 
 Before blaming your own change for a timing-shaped gate failure, confirm
 ownership: revert the change and run the gate again. A failure that survives
-the revert is not yours, and that check is what separated a renderer dispatch
-fix from an unrelated panel race here. Check the load average too — a gate
-taking three to five times its usual wall clock is measuring contention.
+the revert is not yours. Check the load average too — a gate taking three to
+five times its usual wall clock is measuring contention.
 
 ## Verification tiers
 
-The full gate compiles the Debug app and test bundle and then runs ~530 native
-tests, several of which drive offscreen WebKit or a real PTY downloader; on this
-machine the test phase takes about 90 seconds in parallel, before any Release
-build. Match the effort to the change:
+The full gate compiles the Debug app and test bundle and then runs well over a
+thousand native tests, several of which drive offscreen WebKit or a real PTY
+downloader; the test phase alone takes minutes, before any Release build. Match
+the effort to the change:
 
 | Change | While iterating | Before reporting |
 | --- | --- | --- |
 | Bug fix, refactor, test-only, one domain | `python3 scripts/test.py --only <TestClass>` (repeatable; `Class/testMethod` also works) | full gate once; no Release build, no log entry unless asked or a documented behavior changed |
 | New feature or cross-domain change | targeted runs as above | full gate once, log entry; Release build only if delivery was requested |
-| Renderer / bridge | `cargo test` in the touched crate | full gate plus `scripts/check_renderer.py` |
-| Docs / skills only | link, path and command check | nothing else |
+| Rust crates | `cargo test` in the touched crate | full gate plus `scripts/check_rust.py` |
+| Renderer / bridge | `cargo test` or the touched CMake target | full gate plus `scripts/check_rust.py` and `scripts/check_renderer.py` |
+| Docs only | link, path and command check | nothing else |
 
 `--only` skips the Python script tests and prints a warning: it is an
 iteration tool, not evidence. Rerun the full gate only when it failed; a second
 identical run adds minutes and no information. `xcodegen generate --use-cache`
-(what `scripts/test.py` now runs) leaves the project untouched when
+(what `scripts/test.py` runs) leaves the project untouched when
 `project.yml` has not changed, so Xcode's incremental build survives between
 runs.
 
@@ -238,7 +240,11 @@ runs.
 | `build/Build/Products/{Debug,Release}/WallpaperMachine.app` | `python3 scripts/build.py` |
 
 `artifacts/` and `build/` are both Git-ignored and disposable; `python3
-scripts/clean.py` removes them. Result bundles are local: cite the numbers and
+scripts/clean.py` removes them (`--dry-run` previews). Only `scripts/test.py`
+prunes its own output: renderer runs (a few hundred megabytes each), Rust check
+runs, build logs and hand-made investigation folders stay until someone deletes
+them, so whoever produced them lists them and asks before deleting (see
+[AGENTS.md](../../AGENTS.md)). Result bundles are local: cite the numbers and
 the command, not a bundle path, when you report a result. Private GPU output,
 local asset inventories, screenshots, and traces stay out of Git.
 
@@ -267,10 +273,12 @@ they do not establish.
    checkout runs green — see [wallpaper-corpus.md](wallpaper-corpus.md).
 5. **Use original synthetic fixtures** when you need content; do not check in
    Workshop packages or other copyrighted assets.
-6. **Record the result** in [verification-log.md](verification-log.md) with the
-   counts, the command, and what you did not verify. Keep it to about ten
-   lines; a fact that outlives the round belongs in the doc that owns it, not
-   in the log. Use `python3 scripts/log_verification.py --title "…" --line "…"`
+6. **Record the result** when the change calls for a log entry (a feature or
+   cross-domain change, a changed documented behavior, or on request — see
+   [Verification tiers](#verification-tiers)): the counts, the command, and what
+   you did not verify in [verification-log.md](verification-log.md). Keep it to
+   about ten lines; a fact that outlives the round belongs in the doc that owns
+   it, not in the log. Use `python3 scripts/log_verification.py --title "…" --line "…"`
    (repeat `--line`; `--context` for one paragraph; `--dry-run` to preview): it
    prepends the entry, keeps the ten newest and moves the rest into
    [archive/](archive/) with links fixed, so nobody has to read the log to

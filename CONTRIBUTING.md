@@ -7,25 +7,23 @@ topic; it does not repeat them.
 
 Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md). Found a
 vulnerability? Report it privately, as [SECURITY.md](SECURITY.md) describes, not in
-an issue.
+an issue. Bugs and ideas go through the issue forms; questions go to the
+Discussions Q&A.
 
 ## Setup
 
 Apple Silicon, macOS 15.6 or later, and a full Xcode 26 selected with
-`xcode-select`. Then:
+`xcode-select`. Install the Homebrew packages and the project's LGPL FFmpeg that
+[docs/build.md](docs/build.md#prerequisites) lists, then:
 
 ```sh
-brew install rust cmake ninja pkg-config xcodegen
-brew install quickjs-ng glslang freetype lz4 vulkan-loader \
-  vulkan-headers molten-vk eigen nlohmann-json argparse shaderc spirv-tools glm
-python3 scripts/install_ffmpeg.py   # the project's LGPL FFmpeg build, see LICENSING.md
 python3 scripts/build.py
 python3 scripts/test.py
 python3 scripts/check_dev_tools.py   # optional diagnostics only
 ```
 
 The first build compiles the renderer, generates the Swift bridge bindings,
-generates the Xcode project and builds the app. Details, flags and failure modes:
+generates the Xcode project and builds the app. Flags and failure modes:
 [docs/build.md](docs/build.md).
 
 ## Day-to-day loop
@@ -33,16 +31,23 @@ generates the Xcode project and builds the app. Details, flags and failure modes
 1. Edit sources. Swift/`WebUI`/resource changes rebuild with
    `python3 scripts/build.py --swift-only`; renderer changes need a full
    `python3 scripts/build.py`.
-2. Run `python3 scripts/test.py` — Python script tests, project generation, then
-   `WallpaperMachineTests`. This never touches the desktop. Only failures and
-   a verdict reach the terminal; the full log sits next to the result bundle in
-   `artifacts/tests/` (`--verbose` streams it).
-3. Run the targeted check your change needs:
-   `python3 scripts/check_renderer.py` for renderer or scene work,
-   `python3 scripts/test.py --ui` only when a desktop run is explicitly wanted.
-4. Update the document that owns the behavior you changed, record the run with
-   `python3 scripts/log_verification.py --title "…" --line "…"` when the
-   change warrants an entry, then `python3 scripts/clean.py` before you commit.
+2. While iterating, run `python3 scripts/test.py --only <TestClass>` for the
+   domain you touched; run the full `python3 scripts/test.py` (Python script
+   tests, project generation, then `WallpaperMachineTests`) once before you open
+   the PR. Neither touches the desktop. Only failures and a verdict reach the
+   terminal; the full log is in `artifacts/tests/` (`--verbose` streams it). The
+   [verification tiers](docs/testing/README.md#verification-tiers) scale this to
+   the size of the change.
+3. Run the targeted check your change needs: `python3 scripts/check_rust.py` for
+   Rust crates, `python3 scripts/check_renderer.py` for renderer, bridge or scene
+   work, `python3 scripts/test.py --ui` only when a desktop run is explicitly
+   wanted.
+4. Update the document that owns the behavior you changed. For a feature or
+   cross-domain change, record the run with
+   `python3 scripts/log_verification.py --title "…" --line "…"`. Before you
+   commit, `git status` should show only your change. `python3 scripts/clean.py`
+   clears `artifacts/` and stray byproducts but keeps Xcode's derived data and the
+   built app (`--dry-run` previews).
 
 ## Where to read next
 
@@ -61,24 +66,25 @@ generates the Xcode project and builds the app. Details, flags and failure modes
 
 ## Hard rules
 
+The rules contributors trip over; [AGENTS.md](AGENTS.md) and
+[docs/conventions.md](docs/conventions.md) hold the full set.
+
 - **Never hand-edit generated files.** `WallpaperMachine.xcodeproj` comes from
   `project.yml`; `App/Bridge/Generated` comes from `uniffi-bindgen`. Change the
   source, regenerate, commit both.
 - **Never change `upstream/` without updating `upstream/provenance.json`.** That
   file is the record of which third-party revision is vendored.
-- **Never commit `artifacts/` or `build/`.** Both are Git-ignored, disposable, and
-  removed by `python3 scripts/clean.py` (`--derived` also clears Xcode caches,
-  `--all` removes `build/` entirely, `--dry-run` lists only). Screenshots,
-  traces, wallpaper payloads, Steam session data and personal paths stay out of
-  Git too.
+- **Never commit `artifacts/` or `build/`.** Both are Git-ignored and disposable.
+  Screenshots, traces, wallpaper payloads, Steam session data and personal paths
+  stay out of Git too. Preview a cleanup with `python3 scripts/clean.py
+  --dry-run`: its `--all` flag also deletes the locally delivered app, and
+  `--user-assets` and `--managed-user-assets` delete live wallpaper data.
 - **Commit agent policy, never agent state.** Shared rules for AI agents live in
   tracked files only: `AGENTS.md` (plus its `CLAUDE.md` symlink) and `docs/`.
-  Agent tool directories (`.agents/`, `.claude/`, `.commandcode/`, `.conductor/`,
-  `.omo/`, `.omp/`, `.pi/`) and `CLAUDE.local.md` are Git-ignored: they hold
-  per-machine sessions, caches, workspaces and personal rules. Never `git add -f`
-  them or link to them from tracked docs. Using a new agent tool? Ignore its
-  directory in the same change. To share one policy file from such a directory,
-  follow the exception recipe in `.gitignore` and list the file in `AGENTS.md`.
+  Agent tool directories and `CLAUDE.local.md` are Git-ignored per-machine state:
+  never `git add -f` them or link to them from tracked docs. Using a new agent
+  tool? Ignore its directory in the same change; the directory list and the
+  exception recipe are in `AGENTS.md` and `.gitignore`.
 - **Routine verification never takes over the desktop.** No screen capture, no
   synthetic input, no opening app windows, no changing the user's wallpapers
   unless a desktop run was explicitly requested. `scripts/test.py --ui` is that
@@ -86,31 +92,40 @@ generates the Xcode project and builds the app. Details, flags and failure modes
 - **Report what you did not verify.** Headless-only coverage is a fine result;
   claiming visual correctness you never observed is not.
 
-## Pull requests
+## Commits and pull requests
 
-- [ ] One coherent change, with a Conventional-Commit subject
-      (`fix(scene): …`, `feat(downloads): …`).
-- [ ] `python3 scripts/build.py --swift-only` (or a full build for renderer
-      changes) succeeds.
-- [ ] `python3 scripts/test.py` passes; targeted checks for the area you touched
-      were run.
-- [ ] Tests added for behavior a plausible bug would break; tests that only pinned
-      wording or internals removed.
-- [ ] `project.yml` and the regenerated project committed together if either
-      changed.
-- [ ] Docs updated in the owning file; [docs/README.md](docs/README.md) updated if
-      you added a document.
-- [ ] No byproducts, secrets or absolute personal paths in the diff.
-- [ ] Description states what was verified and what was not.
+- Commit subjects and PR titles are Conventional Commits (`fix(scene): …`,
+  `feat(downloads): …`); [docs/conventions.md](docs/conventions.md#commits-and-pull-requests)
+  has the rules. The type is not decoration: `scripts/release_notes.py` hands the
+  commits of a release to the release-notes model, and the subjects and bodies of
+  `feat`, `fix` and `perf` commits become the notes users read.
+- Pull requests are normally squash-merged. The PR title becomes the commit
+  subject when the PR has several commits (the commit's own subject when it has
+  one), and the commit messages become the body, so title a PR as you would the
+  commit.
+- A `release:` line in a PR title or in any commit message cuts a version when the
+  change lands on `main` ([docs/release.md](docs/release.md#release-specs-in-commit-messages)).
+  Leave it out unless a maintainer asked for that release.
+- CI commits to `main` on its own (version bumps and the Supporter list), so a
+  long-lived branch falls behind quickly; update it from `origin/main` before you
+  ask for review.
+- The [PR template](.github/pull_request_template.md) carries the checklist, and
+  the definition of done is in [docs/conventions.md](docs/conventions.md#definition-of-done).
 
-The full checklist, including the definition of done, is in
-[docs/conventions.md](docs/conventions.md).
+## Automated review
+
+Same-repository PRs are reviewed by Claude Code
+(`.github/workflows/claude-code-review.yml`), which posts inline comments. A fork
+PR gets that review when a maintainer adds the `claude-review` label; the review
+never checks out or runs the PR's code, and the label is removed afterwards so a
+maintainer can add it again for new commits. Mentioning `@claude` in an issue or a
+comment runs `.github/workflows/claude.yml`.
 
 ## Automated contributors
 
 Agents working in this repository must follow [AGENTS.md](AGENTS.md) in addition
-to everything above; it is the authoritative rule file for skill routing, build
-delivery, commits and verification boundaries.
+to everything above; it is the authoritative rule file for ownership, permissions,
+verification, build delivery and commits.
 
 By default an agent asks before it commits and builds Release only when you ask.
 It never pushes, amends, rebases or rewrites history unless you ask. To give your own

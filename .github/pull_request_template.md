@@ -1,4 +1,4 @@
-<!-- Thanks for sending a change. CONTRIBUTING.md has the full working agreement. -->
+<!-- Thanks for sending a change. CONTRIBUTING.md has the full working agreement. Title the PR as a Conventional Commit subject (`fix(scene): …`): a squash merge uses it as the commit subject, and `feat`, `fix` and `perf` subjects feed the release notes. -->
 
 ## What and why
 
@@ -14,8 +14,9 @@
 
 ## Checklist
 
-- [ ] One coherent change with a Conventional Commit subject (`fix(scene): …`, `feat(downloads): …`)
+- [ ] One coherent change, and the PR title is a Conventional Commit subject (`fix(scene): …`, `feat(downloads): …`)
+- [ ] No `release:` line in the title or any commit message (it cuts a version when merged)
 - [ ] Tests for behavior a plausible bug would break
-- [ ] Generated files regenerated, not hand-edited (`project.yml` → Xcode project; bridge bindings through `scripts/build.py`)
+- [ ] Generated files regenerated, not hand-edited (`project.yml` → Xcode project; bridge bindings through `scripts/build.py`); `upstream/` changes update `upstream/provenance.json`
 - [ ] The document that owns the behavior updated
 - [ ] No build output, secrets, private wallpapers or personal paths in the diff

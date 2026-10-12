@@ -35,10 +35,10 @@ Adding a new target, source directory, resource or build setting means editing
 - **Imports first, alphabetically**, one per line: `import AppKit` / `import
   Darwin` / `import Foundation`. Test files open with `import XCTest` followed by
   `@testable import WallpaperMachine`.
-- **Indentation follows the file.** Four spaces dominate `App/Services/` and
-  `Tests/`; the control-panel views, `Extension/` and `Shared/` use two. Braces
-  are K&R (opening brace on the declaration line). Never reindent a file you are
-  only partly changing.
+- **Indentation follows the file.** Both two and four spaces occur: four dominate
+  `App/Services/`, two `Extension/` and `Shared/`, and `Tests/` and the
+  control-panel views mix both. Braces are K&R (opening brace on the declaration
+  line). Never reindent a file you are only partly changing.
 - **Dependency injection through default initializer arguments**, so production
   call sites stay argument-free and tests substitute fakes:
   `init(session: URLSession = .shared)`,
@@ -144,9 +144,11 @@ The rules that bind every change:
   emitted errors, ordering and precedence. Never assert wiring, defaults,
   forwarding, mock echoes, or the text of a source file.
 - Deterministic and isolated: unique temporary directories, a redirected
-  `WALLPAPER_MACHINE_HOME`, injected fakes instead of the network or the real
-  SteamCMD, cleanup in `defer`. A test must pass in the full suite and on its
-  own, in any order.
+  `WALLPAPER_MACHINE_HOME`, a `TemporaryDefaults` suite instead of
+  `UserDefaults.standard` (which is the installed app's preferences inside the
+  test host), injected fakes instead of the network or the real SteamCMD,
+  cleanup in `defer`. A test must pass in the full suite and on its own, in any
+  order.
 - Routine verification never controls the desktop, captures the screen, opens app
   windows, or changes the user's wallpapers. Desktop runs
   (`python3 scripts/test.py --ui`) happen only when explicitly requested.
@@ -194,15 +196,22 @@ The rules that bind every change:
   release page and in the app's What's new card, so write them for users. Without
   `--ai` the same script lists the commits by type instead. See
   [release.md](release.md#release-notes-and-the-changelog).
+- Pull request titles follow the same format. Squash-merging a PR with several
+  commits makes its title the commit subject, so an untyped title such as
+  `Discover fixes and new tabs` reaches the release notes without a type. When a squash body lists several
+  changes, write each as `* type(scope): subject` so they are read one by one.
 - A version bump is requested with a standalone `release: patch|minor|major|x.y.z`
   line and performed by CI; `chore: bump version to x.y.z` commits are produced
-  by the Version workflow, not by hand. See [release.md](release.md).
+  by the Version workflow, not by hand. A pushed `release:` line also cuts a
+  release, so add one only when a release is intended. See [release.md](release.md).
 - Things that must change together in one commit:
   - `project.yml` and the regenerated `WallpaperMachine.xcodeproj` (run
     `xcodegen generate`, which any `scripts/build.py` or `scripts/test.py` run
     does for you);
   - a bridge-crate interface change and the regenerated `App/Bridge/Generated`;
   - a behavior change and the documentation that describes that behavior;
+  - a new user-facing string and every shipped catalog;
+  - `README.md` and `README.zh-CN.md`;
   - a vendored `upstream/` update and `upstream/provenance.json`.
 - Never commit `artifacts/`, `build/`, screenshots, traces, wallpaper payloads,
   Steam session data, credentials, or absolute personal paths.
@@ -213,7 +222,8 @@ The rules that bind every change:
 - [ ] Every call site of a changed API migrated; no compatibility shim or unused
       old path left behind.
 - [ ] `python3 scripts/test.py` passes, plus any targeted check the change needs
-      (`scripts/check_renderer.py` for renderer work).
+      (`scripts/check_rust.py` for Rust crates, `scripts/check_renderer.py` for
+      renderer work).
 - [ ] New or changed behavior is covered by a test that would fail without the
       change; tests that no longer defend a contract are deleted.
 - [ ] `project.yml` and the generated project agree; generated bindings
@@ -221,4 +231,6 @@ The rules that bind every change:
 - [ ] Documentation updated in the file that owns the topic, and
       [README.md](README.md) updated if a document was added.
 - [ ] Verification recorded honestly, including what was not verified.
-- [ ] No byproducts left in the tree (`python3 scripts/clean.py`).
+- [ ] No byproducts outside the Git-ignored `artifacts/` and `build/`: `git status`
+      shows only the change itself. Whatever the work left in `artifacts/` has been
+      listed for the user, who decides whether it is deleted.
