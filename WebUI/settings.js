@@ -75,10 +75,13 @@ const demandReasons = {
 };
 // Every mode the bridge can emit. `unknown` is a running scene that could not be
 // read, which is not the same as one that is ticking, so it gets its own words.
+// `stopped_after_failure` is a scene whose renderer gave up after an error: it is
+// not paused by anyone, so it must never be worded like a pause.
 const sceneModes = {
   continuous: 'updating continuously', waiting_for_event: 'waiting for events',
   waiting_for_deadline: 'waiting for a timer', user_paused: 'paused by you',
-  policy_suspended: 'suspended by the app', not_applicable: 'not applicable to this wallpaper',
+  policy_suspended: 'suspended by the app', stopped_after_failure: 'stopped after a rendering failure',
+  not_applicable: 'not applicable to this wallpaper',
   unknown: 'running — state could not be read',
 };
 // Only backends that actually drew something are named here. A scene with no
@@ -388,6 +391,10 @@ function draw(view) {
   // first frame — so it is reported as starting rather than listed as a cause.
   const sceneModeLine = report => {
     const where = `${displayName(report.display, report.displayId)} — ${report.wallpaperTitle || report.wallpaperId || t('wallpaper')}`;
+    // Before the starting check: a scene whose first frame failed also has no
+    // frame yet, and reading "starting" forever is the lie this mode exists to end.
+    // The reasons describe what keeps a clock running, which is moot once it stopped.
+    if (report.mode === 'stopped_after_failure') return `${where}: ${t(sceneModes.stopped_after_failure)}`;
     const reasons = Array.isArray(report.reasons) ? report.reasons : [];
     if (reasons.includes('no_frame_yet')) return `${where}: ${t('starting — no frame drawn yet')}`;
     const named = reasons.map(reason => t(demandReasons[reason]) || reason);

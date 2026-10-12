@@ -61,6 +61,15 @@ void ExpectWithinOneDraw(uint64_t lhs, uint64_t rhs, const char* what)
     EXPECT_LE(difference, 1u) << what << ": " << lhs << " vs " << rhs;
 }
 
+/// Health and the counters are separate atomics read one after the other while
+/// the render thread runs, so a draw can straddle either edge of the window:
+/// one draw at the start and one at the end, and no more than that.
+void ExpectWithinTwoDraws(uint64_t lhs, uint64_t rhs, const char* what)
+{
+    const uint64_t difference = lhs > rhs ? lhs - rhs : rhs - lhs;
+    EXPECT_LE(difference, 2u) << what << ": " << lhs << " vs " << rhs;
+}
+
 void Print(const char* label, const Counters& c)
 {
     std::cout << label << " draws_executed=" << c[OWE_RC_DRAWS_EXECUTED]
@@ -530,13 +539,34 @@ TEST_F(UnchangedPresent, AStaticSceneStopsPresentingOnceEveryPassIsReused)
         RunningWallpaper running(project, root_ / (optimise ? "on" : "off"));
         ASSERT_TRUE(running.WaitForFirstFrame()) << "the scene never reached the surface";
         std::this_thread::sleep_for(600ms);
-        const auto before = running.Read();
+        const auto before        = running.Read();
+        const auto health_before = running.wallpaper().surfaceHealth();
         std::this_thread::sleep_for(1000ms);
-        const auto after = running.Read();
-        const auto delta = Delta(before, after);
+        const auto after        = running.Read();
+        const auto health_after = running.wallpaper().surfaceHealth();
+        const auto delta        = Delta(before, after);
         Print(optimise ? "static scene, skip on: " : "static scene, baseline:", delta);
         ASSERT_GT(delta[OWE_RC_DRAWS_EXECUTED], 10u);
         EXPECT_EQ(delta[OWE_RC_RENDER_FAILURES], 0u);
+
+        // The always-on health reading, with counting on here only because the
+        // test reads the counters too. A skipped frame is a completed frame
+        // that was not presented, so completion tracks the draws that ran
+        // while presents may stand still; a liveness check built on presents
+        // would call this healthy scene stalled.
+        const uint64_t completed = health_after.frames_completed - health_before.frames_completed;
+        const uint64_t presented = health_after.frames_presented - health_before.frames_presented;
+        ExpectWithinTwoDraws(completed, delta[OWE_RC_DRAWS_EXECUTED],
+                             "frames completed against draws executed");
+        EXPECT_EQ(health_after.stop_reason, SurfaceStopReason::Running);
+        EXPECT_EQ(health_after.failed_frames, 0u);
+        if (optimise) {
+            EXPECT_EQ(presented, 0u)
+                << "frames that repeat the picture complete without presenting";
+        } else {
+            ExpectWithinTwoDraws(presented, delta[OWE_RC_DRAWS_EXECUTED],
+                                 "baseline presents against draws executed");
+        }
         if (optimise) {
             EXPECT_EQ(delta[OWE_RC_RENDER_SUBMISSIONS], 0u)
                 << "a scene with every pass reused was still submitted";

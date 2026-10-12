@@ -194,8 +194,50 @@ re-arms the clock — one wake at that edge, not a retry per frame period.
 
 Both renderers implement this. The status line reports what each running scene is
 doing right now — updating continuously and why, waiting for events, paused by you,
-suspended by the system, or that the state could not be read. A scene that is
-running but cannot be read says so; it is never shown as updating normally.
+suspended by the system, stopped after a rendering failure, or that the state could
+not be read. A scene that is running but cannot be read says so; it is never shown as
+updating normally.
+
+### A scene that stops drawing
+
+When a frame fails after the graph was built (an acquire or present that the
+swapchain refuses, a submit that errors), or the render graph or its backend cannot be
+built or released, the scene stops drawing and stays on its last picture. That used to
+look like a pause from the outside, because the renderer's failure counter only
+counts while a diagnostic session has counting switched on.
+
+Each scene surface now carries a small health reading that is always on. It is a few
+atomics written once per frame and read when asked; it starts no thread, timer or log
+output, and it does not depend on renderer counting.
+
+| Field | Meaning |
+|---|---|
+| `frames_completed` | Frames the render loop ran to the end, whether or not they reached the display |
+| `frames_presented` | Frames that reached the surface |
+| `failed_frames` | Frames lost to a failure in the draw itself; never reset |
+| `last_present_age` | Time since the last present, or none before the first |
+| stop | Not stopped, `FrameFailed` (the draw failed) or `GraphFailed` (the graph or backend could not be built or released) |
+
+Liveness is `frames_completed` moving, never a present: with
+[scene render optimisation](#frames-that-would-repeat-the-picture) a frame that would
+repeat the picture completes without presenting, so a healthy, still scene stands
+at the same `frames_presented` and a growing `last_present_age`. A reading built on
+presents would call it stalled. Host-initiated stops, such as a surface being rebuilt
+for a display change, are not failures and never set the stop. It clears when a
+wallpaper is applied, a surface is installed or the graph rebuilds.
+
+The reading is shown in two places, both as the mode `stopped_after_failure`:
+**Settings → Performance → Live diagnostics → Updating now** says "stopped after a
+rendering failure", and the `running scene:` lines of the
+[diagnostics report](diagnostics.md#diagnostics-report) end with `mode …`. A pause the
+user chose, or a display the app suspended, outranks it, and it shows again the moment
+that is lifted; a reading the renderer could not take stays `unknown` and is never
+reported as stopped or as running.
+
+Nothing restarts a stopped scene yet: it stays on its last picture until the wallpaper
+is applied again or the display's surface is rebuilt. A real MoltenVK or Metal
+presentation failure has not been reproduced on a desktop, so the tests cover the
+reading, not a genuine failure.
 
 ## Renderer memory
 

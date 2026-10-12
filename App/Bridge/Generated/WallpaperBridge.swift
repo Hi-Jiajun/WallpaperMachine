@@ -5941,8 +5941,9 @@ public func FfiConverterTypeBridgeSceneBackendReport_lower(_ value: BridgeSceneB
  * `mode` composes the renderer's own answer with the host's pause state, in
  * that precedence: a wallpaper the user paused reads `user_paused` whatever
  * the renderer says, a display whose presentation is suspended reads
- * `policy_suspended`, and only then does the renderer's classification show
- * through. A scene that is running but cannot be read reads `unknown` — never
+ * `policy_suspended`, a surface that stopped drawing after a failure reads
+ * `stopped_after_failure`, and only then does the renderer's classification
+ * show through. A scene that is running but cannot be read reads `unknown` — never
  * `continuous`, because "we could not tell" and "it is definitely ticking"
  * are different facts and only one of them is evidence.
  *

@@ -6,6 +6,7 @@
 #include <string>
 #include <string_view>
 #include "Type.hpp"
+#include "Core/SurfaceHealth.hpp"
 #include "Scene/include/Scene/SceneBackendSelection.hpp"
 #include "Scene/include/Scene/SceneVideoPath.hpp"
 #include "Scene/include/Scene/SceneUpdateDemand.hpp"
@@ -120,6 +121,15 @@ public:
     /// value that reads as "nothing to do".
     [[nodiscard]] SceneUpdateDemand::Kind sceneUpdateKind() const;
     [[nodiscard]] uint32_t                sceneDemandReasons() const;
+
+    /// Whether this surface's frame loop is alive, and whether it stopped
+    /// after a failure.
+    ///
+    /// Pull-only, always on and independent of diagnostic counting, for the
+    /// same reason as the update mode: it is state a settings pane shows and a
+    /// host acts on. A caller with no renderer yet gets a zeroed snapshot that
+    /// reports `Running`.
+    [[nodiscard]] SurfaceHealthSnapshot surfaceHealth() const;
 
     /// Which renderer actually drew this scene, and why it is not the
     /// preferred one.

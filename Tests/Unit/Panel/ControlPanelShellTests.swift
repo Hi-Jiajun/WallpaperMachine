@@ -1048,6 +1048,41 @@ final class ControlPanelShellTests: ControlPanelTestCase {
     }
   }
 
+  /// A scene whose renderer stopped after a failure is not paused and not still
+  /// starting, even when it never drew a first frame: both of those would send the
+  /// user looking for something they did not do.
+  func testASceneThatStoppedAfterAFailureIsNeverWordedAsAPauseOrAsStarting() async throws {
+    try await withPanel { panel in
+      try await panel.finishWelcome()
+      let lines = try await panel.js("""
+        const base = await window.webkit.messageHandlers.native.postMessage({action:'ready'});
+        const report = (displayId, mode, reasons) => ({displayId, display:`Display ${displayId}`,
+          wallpaperId:`w${displayId}`, wallpaperTitle:`Wallpaper ${displayId}`, mode, reasons});
+        window.wallpaperUI.receive({...base, page:'settings', settings:{...base.settings, sceneUpdateModes:[
+          report(1, 'stopped_after_failure', ['no_frame_yet']),
+          report(2, 'stopped_after_failure', ['video']),
+          report(3, 'user_paused', []),
+          report(4, 'continuous', ['no_frame_yet']),
+        ]}});
+        document.querySelector('[data-section="performance"]').click();
+        return [...document.querySelectorAll('[data-key="scene-update-report"] li')].map(item => item.textContent);
+        """) as? [String]
+
+      let rows = try XCTUnwrap(lines)
+      XCTAssertEqual(rows.count, 4)
+      XCTAssertEqual(
+        rows[0], "Display 1 — Wallpaper 1: stopped after a rendering failure",
+        "A scene that failed before its first frame is stopped, not starting")
+      XCTAssertEqual(
+        rows[1], "Display 2 — Wallpaper 2: stopped after a rendering failure",
+        "Why the clock was needed is moot once the scene has stopped")
+      XCTAssertTrue(rows[2].hasSuffix("paused by you"), rows[2])
+      XCTAssertTrue(
+        rows[3].hasSuffix("starting — no frame drawn yet"),
+        "A scene that is genuinely starting keeps its own wording: \(rows[3])")
+    }
+  }
+
   func testSettingsSnapshotPreservesActiveDraftDisclosureAndScroll() async throws {
     try await withPanel { panel in
       try await panel.finishWelcome()

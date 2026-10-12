@@ -90,6 +90,9 @@ final class WebPanelSceneSettingsTests: XCTestCase {
         BridgeSceneUpdateModeReport(
           displayId: 5, displayName: "Display 5", wallpaperId: "sea", wallpaperTitle: "Sea",
           mode: "unknown", reasons: ["unknown_input"]),
+        BridgeSceneUpdateModeReport(
+          displayId: 6, displayName: "Display 6", wallpaperId: "ice", wallpaperTitle: "Ice",
+          mode: "stopped_after_failure", reasons: []),
       ])
 
     let settings = try XCTUnwrap(context.controller.snapshot()["settings"] as? [String: Any])
@@ -97,8 +100,12 @@ final class WebPanelSceneSettingsTests: XCTestCase {
 
     XCTAssertEqual(
       rows.map { $0["mode"] as? String },
-      ["waiting_for_event", "continuous", "user_paused", "policy_suspended", "unknown"],
-      "Each state has to survive the trip intact; an unreadable scene must not become continuous")
+      [
+        "waiting_for_event", "continuous", "user_paused", "policy_suspended", "unknown",
+        "stopped_after_failure",
+      ],
+      "Each state has to survive the trip intact; an unreadable scene must not become continuous, "
+        + "and a failure must not become a pause")
     XCTAssertEqual(rows[0]["display"] as? String, "Display 1")
     XCTAssertEqual(rows[1]["reasons"] as? [String], ["video", "audio_response"])
     XCTAssertEqual(

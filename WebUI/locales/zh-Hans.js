@@ -828,6 +828,7 @@ export default {
   'waiting for a timer': '等待计时器',
   'paused by you': '已由你暂停',
   'suspended by the app': '已由应用挂起',
+  'stopped after a rendering failure': '渲染失败后已停止',
   'not applicable to this wallpaper': '不适用于此壁纸',
   'running — state could not be read': '运行中 — 无法读取状态',
   'Scene renderer': '场景渲染器',

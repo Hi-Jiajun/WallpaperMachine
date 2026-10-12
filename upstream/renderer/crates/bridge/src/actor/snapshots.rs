@@ -50,6 +50,9 @@ const SCENE_MODE_WAITING_FOR_EVENT: &str = "waiting_for_event";
 const SCENE_MODE_WAITING_FOR_DEADLINE: &str = "waiting_for_deadline";
 const SCENE_MODE_USER_PAUSED: &str = "user_paused";
 const SCENE_MODE_POLICY_SUSPENDED: &str = "policy_suspended";
+/// A scene whose renderer stopped drawing after a failure nobody asked for. Not
+/// a pause: nothing the user or the app chose is holding it still.
+const SCENE_MODE_STOPPED_AFTER_FAILURE: &str = "stopped_after_failure";
 const SCENE_MODE_NOT_APPLICABLE: &str = "not_applicable";
 /// A scene that is running and could not be read. Never `continuous`.
 const SCENE_MODE_UNKNOWN: &str = "unknown";
@@ -422,9 +425,13 @@ impl BridgeActorState {
     /// Precedence is deliberate and is not the renderer's to decide. A
     /// wallpaper the user paused reads `user_paused` however the renderer has
     /// classified it; a display whose presentation the host suspended reads
-    /// `policy_suspended`; only then does the renderer's own answer show
-    /// through. Those three are separate states, so an event wake must never
-    /// look like the user un-pausing.
+    /// `policy_suspended`; a surface that stopped drawing after a failure reads
+    /// `stopped_after_failure`; only then does the renderer's own answer show
+    /// through. Those are separate states, so an event wake must never look
+    /// like the user un-pausing, and a failure must never look like either
+    /// kind of pause. The pauses outrank the failure because they are what the
+    /// user chose and can undo; the stop is still latched underneath and shows
+    /// the moment they are lifted.
     ///
     /// `None` from the renderer means it could not answer, which becomes
     /// `unknown`. It never becomes `continuous`: "we could not tell" is not
@@ -441,6 +448,9 @@ impl BridgeActorState {
         }
         if self.presentation_suspended || self.suspended_displays.contains(&report.display_id) {
             return SCENE_MODE_POLICY_SUSPENDED;
+        }
+        if report.surface.is_some_and(|surface| surface.stop.is_some()) {
+            return SCENE_MODE_STOPPED_AFTER_FAILURE;
         }
         match report.update_mode {
             Some(SceneUpdateMode::Continuous) => SCENE_MODE_CONTINUOUS,

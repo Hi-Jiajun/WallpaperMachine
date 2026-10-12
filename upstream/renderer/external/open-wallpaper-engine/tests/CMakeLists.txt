@@ -410,6 +410,20 @@ gtest_discover_tests(
     DISCOVERY_TIMEOUT 60
 )
 
+# What a surface says about its own frame loop. Header-only atomics with the
+# clock passed in, so the counter-examples need no device, no renderer and no
+# wall-clock wait.
+add_executable(surface_health_test surface_health_test.cpp)
+target_link_libraries(surface_health_test PRIVATE GTest::gtest_main)
+target_include_directories(surface_health_test PRIVATE . ${CMAKE_SOURCE_DIR}/src)
+target_compile_features(surface_health_test PRIVATE cxx_std_20)
+gtest_discover_tests(
+    surface_health_test
+    TEST_PREFIX surface_health_test.
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 60
+)
+
 # Conversion-destination budgeting is slot arithmetic, admission and an
 # exhaustion policy over opaque handles, so its counter-examples need neither a
 # Metal device nor a decoder.

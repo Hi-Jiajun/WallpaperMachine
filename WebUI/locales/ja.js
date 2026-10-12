@@ -828,6 +828,7 @@ export default {
   'waiting for a timer': 'タイマー待ち',
   'paused by you': '手動で一時停止中',
   'suspended by the app': 'Appによって中断中',
+  'stopped after a rendering failure': 'レンダリングの失敗により停止中',
   'not applicable to this wallpaper': 'この壁紙には適用されません',
   'running — state could not be read': '実行中 — 状態を読み取れません',
   'Scene renderer': 'シーンレンダラ',

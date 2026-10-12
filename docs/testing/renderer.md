@@ -401,8 +401,19 @@ first-decode and warm in-memory decoder timings are not disk-cold startup,
 whole-app performance or energy measurements. `miniaudio_failure_paths_test`
 covers allocation failures without opening audio hardware.
 
+`surface_health_test` (CPU only, in the check) pins the always-on surface health
+reading with an injected clock: completed and presented frames advance
+independently, a graph failure and a frame failure latch different reasons,
+clearing the stop never clears the failure count, and the present age is unknown
+before the first present.
+
 `unchanged_present_test` exercises Compatibility frames that would repeat the
-picture through a real swapchain on a `CAMetalLayer` no window owns. The native
+picture through a real swapchain on a `CAMetalLayer` no window owns. In
+`AStaticSceneStopsPresentingOnceEveryPassIsReused` it also reads
+`surfaceHealth()` across the 1000 ms window: with the skip on, frames completed
+tracks the draws that ran while frames presented stays flat and no stop is
+latched. That is the semantic a liveness check relies on: skipped frames are
+completed, not presented. The native
 Metal backend adds `metal_backend_test` (capability and graph gate, no device
 needed), `metal_scene_draw_smoke` (author shaders and same-frame intermediates
 drawn and read back, plus target reuse, dynamic-geometry upload, sprite-sheet

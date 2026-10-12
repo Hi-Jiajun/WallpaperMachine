@@ -168,6 +168,10 @@ per-Space assignments; see
   file, a header without a body and a malformed body are passed over.
 - `UncaughtExceptionLogTests` — an exception is logged as one line with its name
   and reason, and the next launch reads it from the ledger.
+- `DiagnosticEnvironmentTests` — a running scene's report line carries the
+  renderer's live mode (a scene stopped after a failure reads apart from a paused
+  one), keeps where it runs and what drew it, and says nothing about the mode
+  when there is no reading.
 - `RuntimeCountersTests`, `RuntimeDiagnosticsReportTests` and
   `RuntimeDiagnosticsWindowTests` — counters record only inside an open,
   self-expiring session, per surface, with a bounded table; the report keeps

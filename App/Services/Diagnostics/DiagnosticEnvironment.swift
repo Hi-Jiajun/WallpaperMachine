@@ -39,6 +39,25 @@ enum DiagnosticEnvironment {
         return lines
     }
 
+    /// One running scene as the report states it: where it plays, which renderer
+    /// drew it and, when the renderer's live read-back has a row for the same
+    /// display, what it is doing right now.
+    ///
+    /// `mode` is the bridge's own name for the live state. A scene that stopped
+    /// drawing after a failure reads `stopped_after_failure` here, which is the
+    /// line a bug report needs to tell it from one the user paused. No row means
+    /// no reading, and the line then says nothing about the mode rather than
+    /// guessing one.
+    static func runningSceneLine(_ scene: BridgeSceneBackendReport, mode: String?) -> String {
+        var line =
+            "running scene: display \(scene.displayId) \"\(scene.displayName)\", wallpaper "
+            + "\(scene.wallpaperId) \"\(scene.wallpaperTitle)\", backend \(scene.backend)"
+        if let reason = scene.fallbackReason { line += " (fell back: \(reason))" }
+        line += ", video path \(scene.videoPath)"
+        if let mode { line += ", mode \(mode)" }
+        return line
+    }
+
     /// One display's size and rate as a load header names them.
     @MainActor
     static func display(_ displayID: UInt32) -> String {

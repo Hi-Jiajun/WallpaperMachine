@@ -310,6 +310,45 @@ int      owe_scene_wallpaper_update_mode(void* scene);
 uint32_t owe_scene_wallpaper_demand_reasons(void* scene);
 
 /*
+ * Whether one scene's frame loop is alive, and whether it stopped after a
+ * failure.
+ *
+ * Like the update mode this is pull-only and unaffected by whether renderer
+ * counting is enabled: a settings pane shows it and a host acts on it, so it
+ * cannot depend on a diagnostic switch. Reading it takes no lock and does no
+ * work on the render thread.
+ *
+ * `frames_completed` counts frames that ran to the end, whether or not they
+ * reached the display. A frame that would repeat the picture completes without
+ * presenting, so a healthy still scene keeps this number moving while
+ * `frames_presented` stays flat; liveness must be read from this one.
+ * `failed_frames` counts frames lost to a failure inside the draw and is never
+ * reset. `last_present_age_ms` is UINT64_MAX until something has been
+ * presented, and on a still scene it grows without anything being wrong.
+ *
+ * `stop_reason` is an `owe_surface_stop_reason`. A non-running value means the
+ * surface stopped drawing because something failed, not because it was paused
+ * or is idle, and stays latched until a scene, a surface or a rebuilt graph
+ * lets it draw again.
+ */
+typedef enum owe_surface_stop_reason {
+    OWE_SURFACE_STOP_RUNNING = 0,
+    OWE_SURFACE_STOP_FRAME_FAILED = 1,
+    OWE_SURFACE_STOP_GRAPH_FAILED = 2
+} owe_surface_stop_reason;
+
+typedef struct owe_surface_health {
+    uint64_t frames_completed;
+    uint64_t frames_presented;
+    uint64_t failed_frames;
+    uint64_t last_present_age_ms;
+    uint32_t stop_reason;
+} owe_surface_health;
+
+/* 0 on success. Non-zero, and `out` untouched, when `scene` or `out` is null. */
+int owe_scene_wallpaper_surface_health(void* scene, owe_surface_health* out);
+
+/*
  * Scene renderer preference, process-wide. Compatibility by default.
  *
  * A preference, not an outcome. A scene the native backend cannot draw falls

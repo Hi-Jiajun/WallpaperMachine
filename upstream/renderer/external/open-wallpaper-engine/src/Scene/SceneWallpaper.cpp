@@ -724,7 +724,7 @@ public:
             if (error.empty()) error = "the native renderer could not be prepared";
             metal::RecordMetalPrepareFailure(*m_scene, error);
             if (! m_render->createVulkan(*m_render_init_info)) {
-                suspendRendering();
+                suspendAfterGraphFailure();
                 return;
             }
             setSceneBackendSelection(SceneBackendSelection { SceneBackend::LegacyVulkan, error });
@@ -740,7 +740,7 @@ public:
             return;
         }
         if (! m_render->createVulkan(*m_render_init_info)) {
-            suspendRendering();
+            suspendAfterGraphFailure();
             return;
         }
         setSceneBackendSelection(selection);
@@ -908,6 +908,23 @@ private:
         publishPauseReasons();
     }
 
+    /// Stops rendering because the graph or the backend under it failed, which
+    /// nobody asked for. The host sees the difference from a pause: a stop the
+    /// host started itself (a surface being reconfigured) goes through
+    /// `suspendRendering` alone and is never reported as a failure.
+    void suspendAfterGraphFailure() {
+        m_health.NoteGraphFailed();
+        suspendRendering();
+    }
+
+    /// The surface may draw again. The only place `m_render_blocked` is
+    /// lowered, so the failure latch the host reads can never outlive the
+    /// block it describes.
+    void clearRenderBlock() {
+        m_render_blocked = false;
+        m_health.ClearStop();
+    }
+
     /// Runs the frame clock exactly when there is something for it to drive:
     /// a loaded scene, rendering not blocked, and no pause asked for. Before
     /// a scene lands, and after a load that never delivered one, there is
@@ -948,7 +965,7 @@ private:
         if (m_scene == nullptr) return true;
 
         if (m_rg && ! m_render->clearLastRenderGraph()) {
-            suspendRendering();
+            suspendAfterGraphFailure();
             return false;
         }
         // Seed the scale before the graph is compiled so render targets are
@@ -964,11 +981,11 @@ private:
             // actually trips the Metal compiler. Suspending would leave that
             // wallpaper black; the compatibility backend draws it.
             if (! fallBackToCompatibility()) {
-                suspendRendering();
+                suspendAfterGraphFailure();
                 return false;
             }
             if (! m_render->compileRenderGraph(*m_scene, *m_rg)) {
-                suspendRendering();
+                suspendAfterGraphFailure();
                 return false;
             }
         }
@@ -981,7 +998,7 @@ private:
         if (m_scene->runtime != nullptr) {
             m_scene->runtime->ConsumeSceneGraphMutationFlag();
         }
-        m_render_blocked = false;
+        clearRenderBlock();
         return true;
     }
 
@@ -1184,6 +1201,9 @@ private:
             }
 
             bool presented = false;
+            // A failure from here on belongs to the draw; one before it came
+            // from building the graph, which has already said so.
+            const bool reached_draw = frame_ok;
             if (frame_ok) {
                 frame_ok = m_render->drawFrame(*m_scene, &presented);
                 // A native frame can fail after the graph compiled -- a video
@@ -1202,8 +1222,18 @@ private:
                                    std::memory_order_relaxed);
                 m_scene->PassFrameTime(frame_time);
                 counters.Add(OWE_RC_SIMULATION_TICKS);
+                // Completed, not presented: a frame that would repeat the
+                // picture returns success without reaching the surface, and a
+                // healthy still scene must keep this number moving.
+                m_health.NoteFrameCompleted();
+                if (presented) m_health.NotePresented();
             } else {
                 counters.Add(OWE_RC_RENDER_FAILURES);
+                if (reached_draw) {
+                    m_health.NoteFrameFailed();
+                } else {
+                    m_health.NoteGraphFailed();
+                }
                 suspendRendering();
             }
 
@@ -1342,7 +1372,7 @@ private:
             // refusing the next scene over it would leave the surface holding
             // a scene nobody can replace.
             if (m_rg && m_render->hasBackend() && ! m_render->clearLastRenderGraph()) {
-                suspendRendering();
+                suspendAfterGraphFailure();
                 return;
             }
             m_rg.reset();
@@ -1364,7 +1394,7 @@ private:
             }
             commitAudioRequirement();
             main_handler.sendPointerInputCapability(accepts_pointer_input);
-            m_render_blocked = false;
+            clearRenderBlock();
             // Before the backend is chosen: creating one re-applies the video
             // pause from whether the clock runs.
             syncFrameClock();
@@ -1412,7 +1442,7 @@ private:
         if (! msg->findObject("info", &info) || info == nullptr) return;
 
         adoptRenderInitInfo(std::move(info));
-        m_render_blocked = false;
+        clearRenderBlock();
         // A surface this wallpaper is already running on can be replaced when
         // the display changes, so the resolution is republished here too.
         publishScreenResolution();
@@ -1422,7 +1452,7 @@ private:
         // keep behaving exactly as they did.
         if (m_render_init_info->offscreen || m_render_init_info->metal_layer == nullptr) {
             if (! m_render->createVulkan(*m_render_init_info)) {
-                suspendRendering();
+                suspendAfterGraphFailure();
                 return;
             }
             setSceneBackendSelection(SceneBackendSelection { SceneBackend::LegacyVulkan, {} });
@@ -1502,7 +1532,7 @@ private:
                 // surface to reset and no graph to compile. Replacing the info
                 // is the whole job; the backend is created from it when the
                 // scene lands.
-                m_render_blocked = false;
+                clearRenderBlock();
                 syncFrameClock();
                 refreshFrameDemand();
                 publishPauseReasons();
@@ -1515,8 +1545,11 @@ private:
             bool surface_ok = m_render->resetSurface(*m_render_init_info);
             if (! surface_ok) surface_ok = fallBackToCompatibility();
             const bool ok = surface_ok && rebuildRenderGraph();
+            // The host asked for this stop; failing to end it is not the host's
+            // doing. A graph that failed to rebuild has already said so.
+            if (! ok) m_health.NoteGraphFailed();
             if (ok) {
-                m_render_blocked = false;
+                clearRenderBlock();
                 // A paused wallpaper stays paused across a display change.
                 syncFrameClock();
                 m_render->SetVideoPlaybackPaused(! frame_timer.Running());
@@ -1525,6 +1558,7 @@ private:
             }
             promise->set_value(ok);
         } catch (...) {
+            m_health.NoteGraphFailed();
             suspendRendering();
             promise->set_value(false);
         }
@@ -1560,6 +1594,12 @@ public:
     }
     [[nodiscard]] uint32_t sceneDemandReasons() const {
         return m_scene_demand_reasons.load(std::memory_order_relaxed);
+    }
+
+    /// Always-on frame-loop health; see `SurfaceHealth`. Written by the render
+    /// thread, read by the host without one.
+    [[nodiscard]] SurfaceHealthSnapshot surfaceHealth() const {
+        return m_health.Snapshot();
     }
 
     /// Published by the render thread after each drawn frame, read by the host
@@ -1628,6 +1668,10 @@ private:
     std::shared_ptr<RenderInitInfo>      m_render_init_info;
     std::unique_ptr<rg::RenderGraph>      m_rg { nullptr };
     bool                                m_render_blocked { false };
+    /// Whether the frame loop is alive and why it stopped. Unlike the
+    /// counters, never gated: a stop nobody can see cannot be told apart from
+    /// a pause.
+    SurfaceHealth                       m_health;
 
     FillMode                                 m_fillmode { FillMode::ASPECTFIT };
     bool                                     m_fillmode_explicit { false };
@@ -1850,6 +1894,13 @@ SceneUpdateDemand::Kind SceneWallpaper::sceneUpdateKind() const {
     auto handler = m_main_handler->renderHandler();
     if (handler == nullptr) return SceneUpdateDemand::Kind::Continuous;
     return handler->sceneUpdateKind();
+}
+
+SurfaceHealthSnapshot SceneWallpaper::surfaceHealth() const {
+    if (m_main_handler == nullptr) return SurfaceHealthSnapshot {};
+    auto handler = m_main_handler->renderHandler();
+    if (handler == nullptr) return SurfaceHealthSnapshot {};
+    return handler->surfaceHealth();
 }
 
 SceneBackendSelection SceneWallpaper::sceneBackendSelection() const {

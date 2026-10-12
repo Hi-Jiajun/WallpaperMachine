@@ -1155,11 +1155,8 @@ extension WebPanelController {
       \(settings.onBatteryPower), verbose logging \(settings.verboseLogging)
       """)
     for scene in settings.sceneRenderers {
-      environment.append("""
-        running scene: display \(scene.displayId) "\(scene.displayName)", wallpaper \(scene.wallpaperId) \
-        "\(scene.wallpaperTitle)", backend \(scene.backend)\(scene.fallbackReason.map { " (fell back: \($0))" } ?? ""), \
-        video path \(scene.videoPath)
-        """)
+      let mode = settings.sceneUpdateModes.first { $0.displayId == scene.displayId }?.mode
+      environment.append(DiagnosticEnvironment.runningSceneLine(scene, mode: mode))
     }
     // Read once, here: the report is the only consumer, so nothing polls the window server.
     environment.append(contentsOf: DesktopWindowDiagnostics.current())

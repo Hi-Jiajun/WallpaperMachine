@@ -939,6 +939,21 @@ extern "C" int owe_scene_wallpaper_update_mode(void* scene)
     return OWE_SCENE_UPDATE_UNKNOWN;
 }
 
+extern "C" int owe_scene_wallpaper_surface_health(void* scene, owe_surface_health* out)
+{
+    auto* wallpaper_scene = static_cast<wallpaper::SceneWallpaper*>(scene);
+    // Nothing observed is not a healthy surface: the caller is told it got no
+    // reading instead of being handed zeroes that read as "running, no frames".
+    if (wallpaper_scene == nullptr || out == nullptr) return 1;
+    const auto health = wallpaper_scene->surfaceHealth();
+    out->frames_completed = health.frames_completed;
+    out->frames_presented = health.frames_presented;
+    out->failed_frames = health.failed_frames;
+    out->last_present_age_ms = health.last_present_age_ms;
+    out->stop_reason = static_cast<uint32_t>(health.stop_reason);
+    return 0;
+}
+
 extern "C" void owe_set_scene_renderer_preference(int preference)
 {
     // An unrecognised value falls back to compatibility rather than being

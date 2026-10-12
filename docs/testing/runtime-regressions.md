@@ -387,6 +387,18 @@ device.
   in `static_subgraph_cache_test`: `EventMesh` and `DynamicMesh` must both cost a
   target its cacheability and must differ at the scene level. Collapsing them
   into one bit either stops static text idling or idles a particle system.
+- **A stop after a failure is visible, and a still scene is not a stalled one** —
+  `surface_health_test` and `UnchangedPresent.AStaticSceneStopsPresentingOnceEveryPassIsReused`:
+  the always-on surface health keeps completed and presented frames apart, so a
+  scene whose every pass is reused keeps completing frames while presenting none and
+  is never called stopped; a draw failure and a graph failure latch different
+  reasons, a graph failure is not downgraded by the draw failure that follows it, and
+  clearing the stop keeps the failure count. A liveness check built on presents or on
+  the present age would misread every static scene. On the Rust side
+  `tests::scene_settings` pins the precedence (the user's pause and a suspended
+  display outrank a stop, an unread surface is `unknown` and never `stopped`).
+  A genuine presentation failure cannot be produced without a desktop, so the latch
+  is covered through its setter, not through MoltenVK.
 
 ## Audio
 
