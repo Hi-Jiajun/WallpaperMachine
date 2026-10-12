@@ -568,7 +568,9 @@ follows the developer's in-app language choice.
   it mirrors) from a click on the real page),
   `WebPanelPropertyLabelTests` (author markup is reduced to text; built-in
   `ui_` tokens become readable words in labels and combo choices, a curated
-  phrase wins, option values stay untouched, and a catalog phrase is translated),
+  phrase wins, option values stay untouched, and a catalog phrase is translated;
+  a group record reaches the page as a heading in its place among the controls and
+  a group with no words is dropped),
   `WebPanelSupportPromptTests`, `WebPanelWorkshopSourceTests`,
   `WebPanelWorkshopUpdateTests`, `WebPanelImagePlacementRaceTests` and
   `WebPanelAssetProvenanceTests`. `WallpaperEditorStateTests` cover locale

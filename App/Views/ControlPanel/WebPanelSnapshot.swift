@@ -943,7 +943,8 @@ extension WebPanelController {
         case .combo: kind = "combo"
         case .color: kind = "color"
         case .textInput: kind = "textInput"
-        case .text, .group, .unknown: kind = "text"
+        case .group: kind = "group"
+        case .text, .unknown: kind = "text"
         }
         var row: [String: Any] = [
           "id": property.id, "kind": kind, "label": plainLabel(property.labelHtml),

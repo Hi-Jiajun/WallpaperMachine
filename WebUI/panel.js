@@ -933,6 +933,9 @@ function renderProperty(id, property, lock) {
     case 'texture': control = `<p class="file-value">${escapeHTML(value || t('No image selected'))}</p><div class="actions">${button(t('Choose image'), 'choosePropertyFile', { id, propertyID: property.id }, { icon: 'folder', disabled: unavailable })}${value ? button(t('Clear'), 'clearProperty', { id, propertyID: property.id }, { disabled: unavailable }) : ''}</div>`; break;
     case 'file': case 'directory': control = assetProperty(id, property, fieldID, unavailable, name); break;
     case 'text': { const extra = value && value !== property.label ? `<p>${escapeHTML(value)}</p>` : ''; return label || extra ? `<div ${keyAttr(property.id)} class="property-description property-label">${label}${extra}</div>` : ''; }
+    // A group only names the controls after it. A div with a heading role, not an <h3>, because an
+    // author's own label may carry headings of its own and a heading cannot hold one.
+    case 'group': return label ? `<div ${keyAttr(property.id)} class="property-group property-label" role="heading" aria-level="3">${label}</div>` : '';
     default: return `<p ${keyAttr(property.id)} class="muted">${escapeHTML(t('{name}: unsupported property type.', { name }))}</p>`;
   }
   const restore = property.defaultValue !== undefined && property.defaultValue !== null ? button('', 'restoreProperty', { id, propertyID: property.id }, { icon: 'refresh', className: 'quiet icon-button property-reset', title: t('Restore default: {name}', { name }), disabled: unavailable }) : '';

@@ -158,6 +158,108 @@ final class WebPanelPropertyLabelTests: XCTestCase {
     XCTAssertEqual(page["descriptionHeading"] as? String, "Effect settings")
   }
 
+  func testGroupKindReachesThePageAsGroup() throws {
+    let context = try Context()
+    defer { context.tearDown() }
+    let rows: [(id: String, kind: BridgePropertyKind)] = [
+      ("section", .group), ("note", .text), ("other", .unknown), ("toggle", .bool),
+    ]
+    context.store.wallpaperOptionsSnapshot = BridgeSnapshotFixtures.options(
+      wallpaperId: "scene-1", kind: .projectScene,
+      properties: rows.map { Self.property(id: $0.id, kind: $0.kind, labelHtml: "Characters") })
+
+    let payload = try XCTUnwrap(
+      (context.controller.snapshot()["options"] as? [String: Any])?["properties"]
+        as? [[String: Any]])
+    let kinds = Dictionary(
+      uniqueKeysWithValues: payload.compactMap { row -> (String, String)? in
+        guard let id = row["id"] as? String, let kind = row["kind"] as? String else { return nil }
+        return (id, kind)
+      })
+
+    XCTAssertEqual(kinds["section"], "group", "A group is a heading, not a description")
+    XCTAssertEqual(kinds["note"], "text", "A text record is still a description")
+    XCTAssertEqual(kinds["other"], "text", "So is a record the app does not know")
+    XCTAssertEqual(kinds["toggle"], "boolean")
+  }
+
+  func testGroupsAreHeadingsAndEmptyOnesAreDropped() async throws {
+    let context = try Context()
+    defer { context.tearDown() }
+    context.store.wallpaperOptionsSnapshot = BridgeSnapshotFixtures.options(
+      wallpaperId: "scene-1", kind: .projectScene,
+      properties: [
+        Self.property(id: "chars", kind: .group, labelHtml: "Characters"),
+        Self.property(id: "hair", kind: .bool, labelHtml: "Show hair"),
+        Self.property(id: "blank", kind: .group, labelHtml: ""),
+        Self.property(
+          id: "light", kind: .group,
+          labelHtml: "<font color=red>Lighting</font><script>window.injected = true</script>"),
+        Self.property(id: "glow", kind: .bool, labelHtml: "Glow"),
+      ])
+    let options = try XCTUnwrap(context.controller.snapshot()["options"] as? [String: Any])
+    guard let (web, base) = try await loadedPage(context) else { return }
+
+    let result =
+      try await web.callAsyncJavaScript(
+        """
+        window.wallpaperUI.receive(Object.assign({}, base, {
+          page: 'installed', selectedID: 'scene-1',
+          wallpapers: [{ id: 'scene-1', title: 'Scene one', kind: 'Scene', preview: null, active: false, supported: true, tags: [] }],
+          options }));
+        const field = id => document.querySelector(`#inspector [data-key="${id}"]`);
+        const deadline = Date.now() + 5000;
+        while (!field('glow')) {
+          if (Date.now() > deadline) throw new Error('The inspector did not settle');
+          await new Promise(resolve => setTimeout(resolve, 20));
+        }
+        const heading = id => {
+          const node = field(id);
+          return node && {
+            role: node.getAttribute('role'),
+            level: node.getAttribute('aria-level'),
+            text: node.textContent,
+            controls: node.querySelectorAll('input, button, select, textarea, [data-change], [data-action]').length,
+            color: node.querySelector('font')?.getAttribute('color') ?? null,
+            scripts: node.querySelectorAll('script').length,
+          };
+        };
+        return {
+          order: [...document.querySelectorAll('#inspector .property-group, #inspector .property-row')]
+            .map(node => node.dataset.key),
+          chars: heading('chars'),
+          light: heading('light'),
+          injected: Boolean(window.injected),
+          hair: {
+            label: field('hair').querySelector('.field-title label')?.textContent,
+            checkbox: field('hair').querySelectorAll('input[type="checkbox"]').length,
+            heading: field('hair').getAttribute('role'),
+          },
+        };
+        """, arguments: ["base": base, "options": options], in: nil, contentWorld: .page)
+      as? [String: Any]
+    let page = try XCTUnwrap(result)
+
+    XCTAssertEqual(
+      page["order"] as? [String], ["chars", "hair", "light", "glow"],
+      "Groups keep their place among the controls, and a group with no words is left out")
+    let characters = try XCTUnwrap(page["chars"] as? [String: Any])
+    XCTAssertEqual(characters["role"] as? String, "heading")
+    XCTAssertEqual(characters["level"] as? String, "3")
+    XCTAssertEqual(characters["text"] as? String, "Characters")
+    XCTAssertEqual(characters["controls"] as? Int, 0, "A heading names controls; it is not one")
+    let lighting = try XCTUnwrap(page["light"] as? [String: Any])
+    XCTAssertEqual(lighting["role"] as? String, "heading")
+    XCTAssertEqual(lighting["text"] as? String, "Lighting", "A script in the label is not text")
+    XCTAssertEqual(lighting["color"] as? String, "red", "An author's colour is kept")
+    XCTAssertEqual(lighting["scripts"] as? Int, 0)
+    XCTAssertEqual(page["injected"] as? Bool, false)
+    let hair = try XCTUnwrap(page["hair"] as? [String: Any])
+    XCTAssertEqual(hair["label"] as? String, "Show hair", "A control after a group is unchanged")
+    XCTAssertEqual(hair["checkbox"] as? Int, 1)
+    XCTAssertNil(hair["heading"] as? String, "Only a group is a heading")
+  }
+
   func testEngineTokensBecomeReadableWords() {
     let words: [(token: String, label: String)] = [
       ("ui_editor_properties_pivot_offset_x", "Pivot offset x"),

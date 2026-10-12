@@ -113,6 +113,12 @@ attributes are discarded. Plain labels remain available for accessibility and
 native file pickers. An empty text property is omitted; a control without a
 readable name uses **Unnamed option**, never the editor's markup-derived id.
 
+A `group` record is a section heading for the controls after it, so it is shown
+as a bold, ruled heading (exposed to assistive technology as a level-3 heading)
+rather than as muted description text. It takes the same sanitised label as any
+other, is omitted when it has no words, and is not collapsible: Wallpaper Engine
+groups only label what follows and own no rows of their own.
+
 Author artwork is loaded only through registered `mwe-ui://property-image/`
 routes. `PropertyImageCache` fetches HTTPS raster images natively from the
 allowlisted image CDNs (`i.ibb.co`, `i.imgur.com`, the supported Steam image hosts
