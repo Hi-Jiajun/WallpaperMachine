@@ -126,6 +126,10 @@ engine.
 - A launch that opens several displays at once makes every wallpaper still opening a
   suspect; the journal cannot tell which one killed the process.
 - A crash later than the settle window is not attributed to a load.
+- Whether the run before a launch really crashed is a separate record. The session
+  ledger logs `previous session: …` at every launch, so a strike that comes with
+  `ended by a restart, shutdown or power loss` is not necessarily the wallpaper's doing; see
+  [diagnostics.md](diagnostics.md#how-the-previous-session-ended).
 - Isolated support roots (`WALLPAPER_MACHINE_HOME`, tests) have their own journal,
   because it lives beside `config.toml`.
 - The journal is not in the Settings backup package. It is in the diagnostics report (see

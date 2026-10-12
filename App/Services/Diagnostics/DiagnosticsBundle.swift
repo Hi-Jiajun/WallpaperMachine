@@ -57,7 +57,7 @@ struct DiagnosticsBundle {
         Sources(
             logsRoot: logsRoot,
             extensionLog: home.appending(path: LockScreenConfiguration.exchangeRelativePath).appending(path: "extension.log"),
-            crashReports: home.appending(path: "Library/Logs/DiagnosticReports"),
+            crashReports: CrashReportIndex.userReportsFolder(home: home),
             loadJournal: supportRoot.appending(path: loadJournalFileName),
             systemReports: systemReports)
     }

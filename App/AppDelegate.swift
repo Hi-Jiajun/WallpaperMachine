@@ -665,6 +665,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             self.diagnostics = nil
             Task { await diagnostics.stop() }
         }
+        // Last, so a run that dies while tearing down is not recorded as a clean quit.
+        SessionLedger.shared?.markEnded()
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -678,6 +680,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
 
         shutdownInProgress = true
+        SessionLedger.shared?.markQuitting(reason: nil)
         previewWindow?.session.close()
         previewWindow?.close()
         previewWindow = nil
@@ -720,6 +723,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 AppLog.error("Quit cancelled because wallpaper restoration failed: \(error.localizedDescription)")
                 lastError = error
                 shutdownInProgress = false
+                SessionLedger.shared?.markRunning()
                 // Native restoration may already have released the desktop even
                 // though poster restoration failed. Resume without waiting for
                 // another bridge snapshot, but never overwrite an owned provider.

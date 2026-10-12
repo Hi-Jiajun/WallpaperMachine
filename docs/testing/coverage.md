@@ -141,6 +141,18 @@ per-Space assignments; see
   count, the host name dropped from stored names, an oversized file's tail, an
   unreadable system folder noted without failing the export), and the zip's
   actual entries.
+- `SessionLedgerTests` — a record is classified as clean quit, stalled quit,
+  unexpected end, system restart or exception (the exception outranks the phase),
+  with the boot session compared exactly and an unknown one never called a restart;
+  the ring keeps five sessions and counts unexpected ends in a row; an unreadable
+  or foreign-format file reads as a first run and is replaced; a refused quit goes
+  back to running; a session writes the file three times and nothing writes it
+  again; an older copy does not rewrite a newer copy's record.
+- `CrashReportIndexTests` — a report is matched by process id and boot session in
+  its body, not by name; wrong prefix, wrong extension, another boot, an older
+  file, a header without a body and a malformed body are passed over.
+- `UncaughtExceptionLogTests` — an exception is logged as one line with its name
+  and reason, and the next launch reads it from the ledger.
 - `RuntimeCountersTests`, `RuntimeDiagnosticsReportTests` and
   `RuntimeDiagnosticsWindowTests` — counters record only inside an open,
   self-expiring session, per surface, with a bounded table; the report keeps

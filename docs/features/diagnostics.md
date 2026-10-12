@@ -60,11 +60,69 @@ the load.
   build, macOS, hardware model, CPU, core count, memory, GPU, low-power and
   thermal state, languages, locale, time zone, and each display's pixel size,
   scale, refresh rate and name.
+- `previous session: …`, how the run before this one ended (see
+  [below](#how-the-previous-session-ended)), and for a run that died,
+  `previous session crash report: …` about 20 seconds later.
 - Startup milestones (`startup: …`).
 
 Each time the quality settings are applied (a battery-mode, frame-rate-limit or
 battery-profile change, or a power-source change in reduced-quality mode), the
 frame-rate ceiling and render scale in force are logged.
+
+### How the previous session ended
+
+A log session says what the app did, not whether it was allowed to finish. Without
+that, a report about a lost wallpaper cannot be told apart from a crash, a force
+quit or a restart. The **session ledger** (`SessionLedger`,
+`<support>/Session/ledger.json`) keeps one record per run with a phase: `running`
+from launch, `quitting` once a quit starts, `ended` as the last act of
+`applicationWillTerminate`. The next launch reads the record, classifies it and logs
+one line, at the very start of `main` and so before any other startup line (it is
+held until the log opens and keeps its own time). The message looks like this, at
+`WARN` for anything but a normal quit:
+
+```
+previous session: ended unexpectedly (a crash, a force quit or a kill) (1.3.2 (45), pid 4821); 2 of the last 4 sessions ended unexpectedly
+```
+
+| Record found | Logged as | Meaning |
+|---|---|---|
+| none, or a file that cannot be read | `none recorded` | first launch, or the ledger was lost |
+| `ended` | `quit normally` | the app quit through its own shutdown |
+| `quitting` | `quit did not finish` | a quit began and the process died before it ended: a stage hung and was killed, or the system cut the quit short |
+| `running`, same boot | `ended unexpectedly` | a crash, a force quit, a `kill` or an out-of-memory kill |
+| `running`, another boot | `ended by a restart, shutdown or power loss` | the machine went down while the app ran |
+| any phase, with an exception named | `ended by uncaught exception <name>` | see below |
+
+"Same boot" is exact: the record carries `kern.bootsessionuuid`, the value macOS
+writes into a crash report as `bootSessionUUID`, so there is no clock tolerance to
+get wrong. A boot the kernel would not name is never called a restart. The line
+ends with how many of the recent sessions (the last five at most) ended
+unexpectedly, a crash or an uncaught exception, and how many in a row when that is
+two or more.
+
+For a run that ended unexpectedly, `previous session crash report: <file>
+(<type>/<signal>)` follows once the app has been up 20 seconds, naming the report
+in `~/Library/Logs/DiagnosticReports` (`WallpaperMachine*.ips`) whose body carries
+the same process id and boot session, looking through the newest eight written since
+that run started. The wait is for ReportCrash, which writes the file after the
+process is gone. A report that is not there, or cannot be parsed, is simply not
+logged.
+
+An Objective-C exception that nothing catches is logged before the process dies:
+`ERROR uncaught exception <name>: <reason>` and one line with the top 12 call-stack
+frames. The handler is chained, so one installed earlier still runs, and it writes the
+exception's name (not the reason, which may hold paths) to the ledger.
+
+What the ledger does not do: it installs no signal handlers (those could clash with
+the ones MoltenVK and FFmpeg install, or alter the crash report), writes no
+heartbeat, and is not part of the diagnostics report: the line in the log is.
+A normal session writes the file three times, at launch, at the start of a quit and
+at exit; a quit that is refused goes back to `running`, which is one more. Each write
+replaces the file atomically. If a second copy of the app is started on the same
+support folder, the older copy no longer touches the record. The ledger is per
+support folder, so `WALLPAPER_MACHINE_HOME` copies keep their own. Hosted tests and
+the import-picker helper process do not use it.
 
 ### Levels and detailed logging
 
@@ -168,7 +226,8 @@ reproduce.
     file retention.
   - `log_context::tests` (`upstream/renderer/crates/core/src/log_context.rs`): scope nesting, project summary.
   - `settings_intents::verbose_logging_persists_across_relaunch_and_can_be_turned_off`.
-- Swift: `AppLogRouterTests`, `DiagnosticsRedactorTests`, `DiagnosticsBundleTests`.
+- Swift: `AppLogRouterTests`, `DiagnosticsRedactorTests`, `DiagnosticsBundleTests`,
+  `SessionLedgerTests`, `CrashReportIndexTests`, `UncaughtExceptionLogTests`.
 - Not established by tests:
   - that a real scene's renderer lines carry its number on the desktop;
   - the unreadable-folder note on a Mac whose account is not in `_analyticsusers`
@@ -176,5 +235,9 @@ reproduce.
   - spin and hang reports from a real hang: the fixtures are named after the
     `.diag` reports macOS wrote on this machine, and no `.spin` or `.hang` file was
     available to check the naming against;
+  - how a real force quit, `kill -9`, crash and restart appear in `previous session:` on the
+    next launch: the classification is exercised on records and injected boot sessions, and
+    `.ips` fixtures are modeled on the shape of a real report;
+  - that ReportCrash has written the report by the time the lookup runs;
   - the Save panel;
   - Finder reveal.
