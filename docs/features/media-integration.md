@@ -33,7 +33,8 @@ access since macOS 15.4. It is still a private interface and future OS changes c
 make it unavailable. The app does not invoke the adapter's playback commands or its
 test client, which would create a synthetic system Now Playing session.
 
-If the adapter cannot answer, and only then, `FallbackSystemMediaProvider` asks the
+If the adapter has not answered two seconds after it starts, whether it is silent or
+its helper failed, and only then, `FallbackSystemMediaProvider` asks the
 music players that are **already running**. Membership is decided from
 `NSWorkspace.runningApplications` by bundle identifier (`com.apple.Music`,
 `com.spotify.client`): an Apple Event sent to an application that is not running

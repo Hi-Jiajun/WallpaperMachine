@@ -4,7 +4,7 @@ import XCTest
 
 @MainActor
 final class FallbackSystemMediaProviderTests: XCTestCase {
-    func testMediaRemoteIsPreferredWhenItAnswers() {
+    func testAdapterIsPreferredWhenItAnswers() {
         let primary = RecordingSystemMediaProvider(availability: .available)
         let fallback = RecordingSystemMediaProvider(availability: .available)
         let scheduler = ManualMediaTimerScheduler()
@@ -15,14 +15,14 @@ final class FallbackSystemMediaProviderTests: XCTestCase {
         scheduler.fireDelayed()
 
         XCTAssertEqual(primary.addCount, 1)
-        XCTAssertEqual(fallback.addCount, 0, "AppleScript must stay dark while MediaRemote works")
+        XCTAssertEqual(fallback.addCount, 0, "AppleScript must stay dark while the adapter answers")
         if case .available = provider.availability {
         } else {
-            XCTFail("A working MediaRemote source must remain available")
+            XCTFail("A working adapter must remain available")
         }
     }
 
-    func testNoReplyFallsBackToAppleScript() {
+    func testUnansweredAdapterFallsBackAfterTheProbe() {
         let primary = RecordingSystemMediaProvider(
             availability: .unavailable(
                 reason: MediaRemoteUnavailable(code: .notStarted).localizedDescription))
@@ -37,9 +37,7 @@ final class FallbackSystemMediaProviderTests: XCTestCase {
         provider.onPropertiesChanged = { received.append($0) }
 
         provider.addConsumer()
-        XCTAssertEqual(fallback.addCount, 0, "The fallback waits for the MediaRemote probe")
-        primary.availability = .unavailable(
-            reason: MediaRemoteUnavailable(code: .noReply).localizedDescription)
+        XCTAssertEqual(fallback.addCount, 0, "The fallback waits for the adapter probe")
         scheduler.fireDelayed()
 
         XCTAssertEqual(primary.addCount, 1)
@@ -51,8 +49,7 @@ final class FallbackSystemMediaProviderTests: XCTestCase {
 
     func testBothSourcesEmptyStayUnavailableAndInventNothing() {
         let primary = RecordingSystemMediaProvider(
-            availability: .unavailable(
-                reason: MediaRemoteUnavailable(code: .noReply).localizedDescription))
+            availability: .unavailable(reason: "The system media service is unavailable."))
         let fallback = RecordingSystemMediaProvider(
             availability: .unavailable(reason: "Neither Music nor Spotify reported what is playing."))
         let scheduler = ManualMediaTimerScheduler()
@@ -72,35 +69,21 @@ final class FallbackSystemMediaProviderTests: XCTestCase {
         XCTAssertFalse(reason.isEmpty)
     }
 
-    func testUnansweredMediaRemoteFallsBackAfterTheProbe() {
-        let primary = RecordingSystemMediaProvider(
-            availability: .unavailable(
-                reason: MediaRemoteUnavailable(code: .notStarted).localizedDescription))
-        let fallback = RecordingSystemMediaProvider(availability: .available)
-        let scheduler = ManualMediaTimerScheduler()
-        let provider = FallbackSystemMediaProvider(
-            primary: primary, fallback: fallback, scheduler: scheduler, probeTimeout: 2)
-
-        provider.addConsumer()
-        XCTAssertEqual(fallback.addCount, 0, "The fallback waits for the MediaRemote probe")
-        scheduler.fireDelayed()
-
-        XCTAssertEqual(fallback.addCount, 1)
-    }
-
     /// The panel asks this while the wallpaper runs. A player the user starts
     /// minutes after the switch has to change the answer.
     func testAvailabilityFollowsTheLiveSourceAfterTheSwitch() {
         let primary = RecordingSystemMediaProvider(
             availability: .unavailable(
-                reason: MediaRemoteUnavailable(code: .noReply).localizedDescription))
+                reason: MediaRemoteUnavailable(code: .notStarted).localizedDescription))
         let fallback = RecordingSystemMediaProvider(
             availability: .unavailable(reason: "No music player this app can read is running."))
+        let scheduler = ManualMediaTimerScheduler()
         let provider = FallbackSystemMediaProvider(
-            primary: primary, fallback: fallback, scheduler: ManualMediaTimerScheduler(),
-            probeTimeout: 2)
+            primary: primary, fallback: fallback, scheduler: scheduler, probeTimeout: 2)
 
         provider.addConsumer()
+        scheduler.fireDelayed()
+        XCTAssertEqual(fallback.addCount, 1)
         guard case .unavailable = provider.availability else {
             return XCTFail("No player is running yet")
         }

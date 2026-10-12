@@ -1,11 +1,13 @@
 import Foundation
 
-/// MediaRemote first; Music.app / Spotify only after that path cannot answer.
+/// The bundled adapter first; Music.app / Spotify only after it cannot answer.
 ///
-/// A `noReply` probe is the ordinary macOS 15.4+ outcome without Apple's
-/// entitlement. Automation permission is requested only then, and only while a
-/// wallpaper has asked for media. Both sources staying empty is reported as
-/// unavailable: nothing here invents a track.
+/// The adapter has `probeTimeout` to become available. Anything else when the
+/// probe ends, whether it is still silent or its helper already failed, switches
+/// to the running players; no reason text short-circuits the wait. Automation
+/// permission is requested only then, and only while a wallpaper has asked for
+/// media. Both sources staying empty is reported as unavailable: nothing here
+/// invents a track.
 @MainActor
 final class FallbackSystemMediaProvider: SystemMediaProvider {
     /// Whatever the source in use says right now.
@@ -59,10 +61,6 @@ final class FallbackSystemMediaProvider: SystemMediaProvider {
         usingFallback = false
         bind(primary)
         primary.addConsumer()
-        if isImmediateNoReply {
-            activateFallback()
-            return
-        }
         settleToken = scheduler.schedule(after: probeTimeout) { [weak self] in
             self?.considerFallback()
         }
@@ -95,12 +93,6 @@ final class FallbackSystemMediaProvider: SystemMediaProvider {
         guard consumers > 0, !usingFallback else { return }
         if case .available = primary.availability { return }
         activateFallback()
-    }
-
-    /// MediaRemote already answered noReply; do not wait out the probe.
-    private var isImmediateNoReply: Bool {
-        guard case let .unavailable(reason) = primary.availability else { return false }
-        return reason == MediaRemoteUnavailable(code: .noReply).localizedDescription
     }
 
     private func activateFallback() {

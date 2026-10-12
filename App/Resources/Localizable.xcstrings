@@ -2323,9 +2323,6 @@
     "The system media service is unavailable." : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "The system media service is unavailable."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "システムのメディアサービスを利用できません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "系统媒体服务不可用。请关闭再开启媒体集成重试。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "無法使用系統媒體服務。"}}}
     },
-    "macOS did not let this app read what is playing. Since macOS 15.4 only Apple-signed apps may." : {
-      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "macOS did not let this app read what is playing. Since macOS 15.4 only Apple-signed apps may."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "macOSにより、このAppは再生中の項目の読み取りを許可されませんでした。macOS 15.4以降、読み取りが許可されるのはAppleが署名したAppのみです。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "macOS 不允许本应用读取正在播放的内容。从 macOS 15.4 起，只有 Apple 签名的应用可以读取。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "macOS 不允許此 App 讀取正在播放的內容。自 macOS 15.4 起，只有 Apple 簽署的 App 才能讀取。"}}}
-    },
     "File" : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "File"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ファイル"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "文件"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "檔案"}}}
     },

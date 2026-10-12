@@ -14,7 +14,6 @@ enum SystemMediaAvailability: Equatable {
 struct MediaRemoteUnavailable: LocalizedError, Equatable {
     enum Code: Equatable {
         case notStarted
-        case noReply
     }
 
     let code: Code
@@ -23,8 +22,6 @@ struct MediaRemoteUnavailable: LocalizedError, Equatable {
         switch code {
         case .notStarted:
             String(localized: "Media integration has not been started.")
-        case .noReply:
-            String(localized: "macOS did not let this app read what is playing. Since macOS 15.4 only Apple-signed apps may.")
         }
     }
 }
