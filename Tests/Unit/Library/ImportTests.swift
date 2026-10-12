@@ -751,4 +751,243 @@ final class ImportTests: XCTestCase {
         XCTAssertNil(id("123"))
         XCTAssertNil(id(""))
     }
+
+    // MARK: Identical content
+
+    /// A video project whose `movie.mp4` is a few megabytes, so comparing it takes several
+    /// chunks and a change of one byte keeps its size.
+    private func largeProject(_ id: String) throws -> URL {
+        let url = try project(id)
+        try Data(repeating: 7, count: 2 * 1024 * 1024 + 4_321).write(to: url.appendingPathComponent("movie.mp4"))
+        return url
+    }
+
+    /// Imports `source` with Keep both and expects a second copy of it beside `id`, which is
+    /// returned; the report names no identical project.
+    @discardableResult
+    private func assertKeptBeside(_ id: String, _ source: URL, file: StaticString = #filePath, line: UInt = #line) async throws -> String {
+        let report = try await importOne(source, policy: .keepBoth)
+        XCTAssertTrue(report.identical.isEmpty, "\(report.identical)", file: file, line: line)
+        XCTAssertTrue(report.failures.isEmpty, "\(report.failures)", file: file, line: line)
+        XCTAssertEqual(report.importedIDs.count, 1, file: file, line: line)
+        let copy = report.importedIDs.first ?? ""
+        XCTAssertTrue(copy.hasPrefix(id + "-"), copy, file: file, line: line)
+        return copy
+    }
+
+    func testKeepBothNeverCopiesAProjectTheLibraryAlreadyHolds() async throws {
+        let source = try project("123456")
+        _ = try await importOne(source)
+        let again = try await importOne(source, policy: .keepBoth)
+        XCTAssertEqual(again.identical, ["123456"])
+        XCTAssertEqual(again.skipped, ["123456"])
+        XCTAssertTrue(again.importedIDs.isEmpty)
+        XCTAssertTrue(again.failures.isEmpty)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: library.path), ["123456"])
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: library.deletingLastPathComponent().path), ["Library"],
+                       "no staging copy is left behind")
+    }
+
+    func testOneChangedByteInALargeFileMakesASecondCopy() async throws {
+        let source = try largeProject("big")
+        _ = try await importOne(source)
+        let movie = source.appendingPathComponent("movie.mp4")
+        let original = try Data(contentsOf: movie)
+        // The first byte, both sides of a chunk boundary, the middle and the last byte.
+        for offset in [0, 1024 * 1024 - 1, 1024 * 1024, original.count / 2, original.count - 1] {
+            var changed = original
+            changed[offset] ^= 0xFF
+            try changed.write(to: movie)
+            let copy = try await assertKeptBeside("big", source)
+            XCTAssertEqual(try Data(contentsOf: library.appendingPathComponent("\(copy)/movie.mp4")), changed, "offset \(offset)")
+        }
+        XCTAssertEqual(try Data(contentsOf: library.appendingPathComponent("big/movie.mp4")), original)
+        try original.write(to: movie)
+        let again = try await importOne(source, policy: .keepBoth)
+        XCTAssertEqual(again.identical, ["big"], "the untouched file is still the installed one")
+    }
+
+    func testFindersFilesDoNotMakeAProjectDifferent() async throws {
+        let source = try project("finder")
+        try Data("one".utf8).write(to: source.appendingPathComponent(".DS_Store"))
+        _ = try await importOne(source)
+        // Finder rewrites its file, then it disappears from the source.
+        try Data("two, and longer".utf8).write(to: source.appendingPathComponent(".DS_Store"))
+        let rewritten = try await importOne(source, policy: .keepBoth)
+        XCTAssertEqual(rewritten.identical, ["finder"])
+        try FileManager.default.removeItem(at: source.appendingPathComponent(".DS_Store"))
+        let removed = try await importOne(source, policy: .keepBoth)
+        XCTAssertEqual(removed.identical, ["finder"])
+        // One that only the source has, in a folder both hold.
+        let nested = try project("nested")
+        try FileManager.default.createDirectory(at: nested.appendingPathComponent("sub"), withIntermediateDirectories: true)
+        try Data("note".utf8).write(to: nested.appendingPathComponent("sub/note.txt"))
+        _ = try await importOne(nested)
+        try Data("finder".utf8).write(to: nested.appendingPathComponent("sub/.DS_Store"))
+        let added = try await importOne(nested, policy: .keepBoth)
+        XCTAssertEqual(added.identical, ["nested"])
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: library.path).sorted(), ["finder", "nested"])
+    }
+
+    /// Choosing a file for a web wallpaper's property makes the app write its bridge into the
+    /// installed folder; the project the user imports again has no such folder.
+    func testTheAppsUserAssetBridgeDoesNotMakeAnInstalledProjectDifferent() async throws {
+        let source = try project("123456")
+        _ = try await importOne(source)
+        let bridge = library.appendingPathComponent("123456/\(UserAssetStore.stagingDirectoryName)/background", isDirectory: true)
+        try FileManager.default.createDirectory(at: bridge, withIntermediateDirectories: true)
+        try Data("picked".utf8).write(to: bridge.appendingPathComponent("photo.png"))
+        try Data("123456".utf8).write(to: bridge.deletingLastPathComponent().appendingPathComponent(UserAssetStore.ownerMarkerName))
+        let installedManifest = library.appendingPathComponent("123456/project.json")
+        let before = try Data(contentsOf: installedManifest)
+
+        let kept = try await importOne(source, policy: .keepBoth)
+        XCTAssertEqual(kept.identical, ["123456"])
+        XCTAssertTrue(kept.importedIDs.isEmpty, "\(kept.importedIDs)")
+        let replaced = try await importOne(source, policy: .replaceChanged)
+        XCTAssertEqual(replaced.identical, ["123456"])
+        XCTAssertTrue(replaced.importedIDs.isEmpty, "\(replaced.importedIDs)")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: library.path), ["123456"], "no second copy")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: bridge.appendingPathComponent("photo.png").path),
+                      "an identical project is not swapped for its own copy, so the bridge stays")
+        XCTAssertEqual(try Data(contentsOf: installedManifest), before)
+
+        // A real difference is still a difference, with the bridge in the way or not.
+        try Data("video-content, longer".utf8).write(to: source.appendingPathComponent("movie.mp4"))
+        try await assertKeptBeside("123456", source)
+        // Only the app's folder at the top of a project is exempt: one of that name deeper is content.
+        let nested = try project("nested")
+        _ = try await importOne(nested)
+        let hidden = nested.appendingPathComponent("sub/\(UserAssetStore.stagingDirectoryName)", isDirectory: true)
+        try FileManager.default.createDirectory(at: hidden, withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: hidden.appendingPathComponent("file"))
+        try await assertKeptBeside("nested", nested)
+    }
+
+    func testAManifestThatChangedBySameLengthIsADifferentProject() async throws {
+        let source = try project("p1")
+        _ = try await importOne(source)
+        let manifest = source.appendingPathComponent("project.json")
+        let text = try String(contentsOf: manifest, encoding: .utf8)
+        let edited = text.replacingOccurrences(of: "Test p1", with: "Test p2")
+        XCTAssertEqual(edited.utf8.count, text.utf8.count)
+        try Data(edited.utf8).write(to: manifest)
+        let copy = try await assertKeptBeside("p1", source)
+        XCTAssertTrue(try String(contentsOf: library.appendingPathComponent("\(copy)/project.json"), encoding: .utf8).contains("Test p2"))
+        XCTAssertTrue(try String(contentsOf: library.appendingPathComponent("p1/project.json"), encoding: .utf8).contains("Test p1"))
+    }
+
+    func testAnAddedMissingOrAlteredFileMakesASecondCopy() async throws {
+        let fm = FileManager.default
+        let mutations: [(String, (URL) throws -> Void)] = [
+            ("an extra file", { try Data("x".utf8).write(to: $0.appendingPathComponent("extra.txt")) }),
+            ("an extra empty folder", { try fm.createDirectory(at: $0.appendingPathComponent("empty"), withIntermediateDirectories: false) }),
+            ("a missing file", { try fm.removeItem(at: $0.appendingPathComponent("notes.txt")) }),
+            ("a missing folder", { try fm.removeItem(at: $0.appendingPathComponent("data")) }),
+            ("a renamed file", { try fm.moveItem(at: $0.appendingPathComponent("notes.txt"), to: $0.appendingPathComponent("memo.txt")) }),
+            ("a longer file", { try Data("notes!!".utf8).write(to: $0.appendingPathComponent("notes.txt")) }),
+            ("a nested file changed by one byte", { try Data("textura".utf8).write(to: $0.appendingPathComponent("data/texture.bin")) }),
+            ("a file where the library has a folder", {
+                try fm.removeItem(at: $0.appendingPathComponent("data"))
+                try Data("flat".utf8).write(to: $0.appendingPathComponent("data"))
+            }),
+        ]
+        for (index, (change, mutate)) in mutations.enumerated() {
+            let id = "mutation\(index)"
+            let source = try project(id)
+            try Data("notes".utf8).write(to: source.appendingPathComponent("notes.txt"))
+            try fm.createDirectory(at: source.appendingPathComponent("data"), withIntermediateDirectories: true)
+            try Data("texture".utf8).write(to: source.appendingPathComponent("data/texture.bin"))
+            _ = try await importOne(source)
+            let unchanged = try await importOne(source, policy: .keepBoth)
+            XCTAssertEqual(unchanged.identical, [id], change)
+            try mutate(source)
+            try await assertKeptBeside(id, source)
+        }
+    }
+
+    func testALinkIsNeverFollowedWhileComparing() async throws {
+        let fm = FileManager.default
+        // A link in the source: the import refuses it as it always has.
+        let source = try project("link")
+        _ = try await importOne(source)
+        try fm.createSymbolicLink(at: source.appendingPathComponent("outside"), withDestinationURL: root)
+        let refused = try await importOne(source, policy: .keepBoth)
+        XCTAssertTrue(refused.identical.isEmpty)
+        XCTAssertTrue(refused.importedIDs.isEmpty)
+        XCTAssertEqual(refused.failures.count, 1)
+
+        // A link in the library where the source has a file of the very bytes it points at.
+        let regular = try project("planted")
+        try Data("target".utf8).write(to: regular.appendingPathComponent("odd"))
+        _ = try await importOne(regular)
+        let installed = library.appendingPathComponent("planted/odd")
+        try fm.removeItem(at: installed)
+        let target = root.appendingPathComponent("target.txt")
+        try Data("target".utf8).write(to: target)
+        try fm.createSymbolicLink(at: installed, withDestinationURL: target)
+        try await assertKeptBeside("planted", regular)
+        XCTAssertEqual(try fm.contentsOfDirectory(atPath: library.path).sorted().filter { !$0.hasPrefix("planted-") }, ["link", "planted"])
+    }
+
+    func testASingleFileImportedTwiceIsCopiedOnce() async throws {
+        let video = root.appendingPathComponent("My Video.mp4")
+        try Data("video-content".utf8).write(to: video)
+        let first = try await importOne(video)
+        XCTAssertEqual(first.importedIDs, ["local-My Video.mp4"])
+        let again = try await importOne(video, policy: .keepBoth)
+        XCTAssertEqual(again.identical, ["My Video.mp4"])
+        XCTAssertTrue(again.importedIDs.isEmpty)
+        // Same size, other bytes: another video of the same name.
+        try Data("video-contend".utf8).write(to: video)
+        try await assertKeptBeside("local-My Video.mp4", video)
+
+        let page = root.appendingPathComponent("Clock.html")
+        try Data("<html>clock</html>".utf8).write(to: page)
+        _ = try await importOne(page)
+        let samePage = try await importOne(page, policy: .keepBoth)
+        XCTAssertEqual(samePage.identical, ["Clock.html"])
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: library.path).sorted().count, 3)
+    }
+
+    func testAPresetIsNeverTakenForTheFolderItWasBuiltFrom() async throws {
+        let steamContent = root.appendingPathComponent("Steam/steamapps/workshop/content/431960")
+        try presetBase(at: steamContent.appendingPathComponent("100"))
+        try preset(at: steamContent.appendingPathComponent("200"))
+        _ = try await importOne(steamContent.appendingPathComponent("200"))
+        let again = try await importOne(steamContent.appendingPathComponent("200"), policy: .keepBoth)
+        XCTAssertTrue(again.identical.isEmpty)
+        let copy = try XCTUnwrap(again.importedIDs.first, "\(again.failures)")
+        XCTAssertTrue(copy.hasPrefix("200-"), copy)
+        try assertAssembledPreset(copy)
+    }
+
+    func testAnIdenticalProjectThatIsNotAWallpaperIsStillReported() async throws {
+        let source = try project("broken", file: "missing.mp4")
+        try FileManager.default.createDirectory(at: library, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: source, to: library.appendingPathComponent("broken"))
+        let report = try await importOne(source, policy: .keepBoth)
+        XCTAssertEqual(report.failures.count, 1)
+        XCTAssertTrue(report.skipped.isEmpty)
+        XCTAssertTrue(report.identical.isEmpty)
+        XCTAssertTrue(report.importedIDs.isEmpty)
+    }
+
+    func testCancellingWhileComparingImportsNothing() async throws {
+        let source = try largeProject("slow")
+        _ = try await importOne(source)
+        let task = Task {
+            // The comparison is the next thing the import does after announcing the project.
+            try await importer.importItems([source], into: library, duplicates: .keepBoth, progress: { _ in
+                withUnsafeCurrentTask { $0?.cancel() }
+            })
+        }
+        let report = try await task.value
+        XCTAssertTrue(report.cancelled)
+        XCTAssertTrue(report.skipped.isEmpty)
+        XCTAssertTrue(report.identical.isEmpty)
+        XCTAssertTrue(report.importedIDs.isEmpty)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: library.path), ["slow"])
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: library.deletingLastPathComponent().path), ["Library"])
+    }
 }

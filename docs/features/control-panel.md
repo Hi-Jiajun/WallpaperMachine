@@ -436,6 +436,22 @@ and a searched folder that resolves outside the chosen one is ignored. A large
 `defaultprojects` folder imports every project in it, each failure listed
 separately in the report.
 
+**Keep both copies** never copies what the library already holds. Before it files a
+candidate under a new id, it compares it with the installed item of the same id:
+the same folders and files, of the same sizes, with the same bytes (a project's
+`project.json` is read first, and reading stops at the first difference). Finder's
+`.DS_Store` files do not count, nor does the `.mwe-user-assets` folder the app
+writes into an installed web wallpaper once you pick a file or folder for one of its
+properties. A match is reported as skipped and nothing is
+copied, so importing a multi-gigabyte project twice costs one read of it and no
+second copy; any difference makes the second copy as before. A video or HTML file
+is compared with the copy the library kept, and a picture with its kept original
+(`image.<ext>`). Anything that cannot be shown identical counts as different: a
+link or special file, a very large tree, a file that cannot be read or that changes
+while it is read. A preset is assembled on its base, so it never matches the folder
+it came from. The comparison can be cancelled with the import and leaves nothing
+behind.
+
 A local import's temporary directory holds an ownership marker and a live file
 lock. Startup reclaims abandoned marked directories; an unmarked legacy directory
 must have a valid task name and an entire inspected tree older than 24 hours, and

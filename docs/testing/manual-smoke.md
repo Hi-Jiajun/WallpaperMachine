@@ -38,6 +38,9 @@ was run.
 - [ ] Open and cancel Import.
 - [ ] In Import's picker, a project's `scene.pkg` and `project.json` and a
       Wallpaper Engine folder are all selectable, and each imports its project(s).
+- [ ] Import a large project (several GB, ideally from an external drive) twice
+      with **Keep both copies**: the second import ends as skipped without a second
+      copy in the library, in about the time it takes to read the project once.
 - [ ] Search for a nonexistent local title, clear the search, and confirm the
       collection returns.
 - [ ] Select a wallpaper and refresh: the selection survives.

@@ -248,13 +248,20 @@ on [manual-smoke.md](manual-smoke.md).
   `.pkg` standing for its folder, and links refused in the file, its folder and
   the manifest beside it, are covered, as is the Workshop id a renamed project
   takes from its manifest or link (and the values that are not one), which
-  follows the duplicate policy when already installed. Fetching a preset's base
-  in the same SteamCMD run is in `DownloaderLifecycleTests`.
+  follows the duplicate policy when already installed. **Keep both** copying
+  nothing the library already holds is covered for folders, videos and HTML files
+  (a one-byte change across chunk boundaries, a same-length manifest edit, added,
+  missing, renamed and resized files and folders, Finder's `.DS_Store` on either
+  side, links in the source and in the library, a preset, an identical folder that
+  is not a wallpaper, and cancelling during the comparison). Not covered: the speed
+  of comparing a multi-gigabyte project on an external drive. Fetching a preset's
+  base in the same SteamCMD run is in `DownloaderLifecycleTests`.
 - `ImageImportTests` import real ImageIO pictures as the still `web` project with
   the original's bytes kept and the file name kept out of the page, the fit
   chosen from the picture's shape, a JPEG display copy for a TIFF, an undecodable
-  file refused, **Keep both** keeping the `image-` prefix, and
-  `LibraryImportStore` refusing a second import and rescanning once.
+  file refused, **Keep both** keeping the `image-` prefix for a different picture
+  and copying nothing for the same one, and `LibraryImportStore` refusing a second
+  import and rescanning once.
   `StillImagePlacementTests`, `StillImagePageUpgradeTests` and
   `StillImagePageRenderingTests` (offscreen) cover per-display placement
   persistence, fit-aware geometry, the version-bound upgrade of generated pages

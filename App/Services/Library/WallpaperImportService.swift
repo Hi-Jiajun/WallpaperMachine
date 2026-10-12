@@ -12,6 +12,9 @@ actor WallpaperImportService {
     struct Report: Sendable {
         var importedIDs: [String] = []
         var skipped: [String] = []
+        /// The part of `skipped` that Keep both copies left alone because the library already held
+        /// exactly the same content: nothing was copied.
+        var identical: [String] = []
         var failures: [String] = []
         var cancelled = false
         /// Folders whose name is not a Workshop id but whose manifest names the item they are
@@ -104,13 +107,19 @@ actor WallpaperImportService {
                         var id = preferredID
                         var destination = managedRoot.appendingPathComponent(id, isDirectory: true)
                         if fm.fileExists(atPath: destination.path) {
-                            if duplicates == .skip {
-                                try validateProject(at: destination)
+                            switch try resolveDuplicate(duplicates, candidate: candidate, isDirectory: isDirectory,
+                                                        imageExtension: isImage ? ext : nil, installed: destination) {
+                            case .skip(let identical):
                                 report.skipped.append(candidate.lastPathComponent)
+                                if identical {
+                                    report.identical.append(candidate.lastPathComponent)
+                                    AppLog.info("import: \(id) is already in the library with the same content; nothing copied")
+                                }
                                 continue
+                            case .keepBoth:
+                                id += "-" + UUID().uuidString
+                                destination = managedRoot.appendingPathComponent(id, isDirectory: true)
                             }
-                            id += "-" + UUID().uuidString
-                            destination = managedRoot.appendingPathComponent(id, isDirectory: true)
                         }
                         let staged = staging.appendingPathComponent(UUID().uuidString, isDirectory: true)
                         defer { try? fm.removeItem(at: staged) }
@@ -162,6 +171,32 @@ actor WallpaperImportService {
             }
         }
         return report
+    }
+
+    /// What an import does with a candidate whose library id is already taken.
+    private enum DuplicateOutcome {
+        /// The installed item stays. `identical` when the candidate holds exactly the same content.
+        case skip(identical: Bool)
+        /// The candidate is copied under a new id beside the installed item.
+        case keepBoth
+    }
+
+    /// Decides the fate of a candidate meeting an installed item. An installed item that is not a
+    /// valid wallpaper is an error, never a reason to skip.
+    private func resolveDuplicate(
+        _ policy: DuplicatePolicy, candidate: URL, isDirectory: Bool, imageExtension: String?, installed: URL
+    ) throws -> DuplicateOutcome {
+        switch policy {
+        case .skip:
+            try validateProject(at: installed)
+            return .skip(identical: false)
+        case .keepBoth:
+            // A second copy of what the library already holds only costs disk space and import time.
+            guard try sameContent(candidate: candidate, installed: installed, isDirectory: isDirectory,
+                                  imageExtension: imageExtension) else { return .keepBoth }
+            try validateProject(at: installed)
+            return .skip(identical: true)
+        }
     }
 
     nonisolated static func stagingRoot(forLibrary library: URL) -> URL {
@@ -738,5 +773,124 @@ actor WallpaperImportService {
         } else {
             throw ImportError(message: String(localized: "Unsupported special file: \(source.lastPathComponent). Only regular files and folders can be imported."))
         }
+    }
+
+    // MARK: Identical content
+
+    /// Entries of one tree a comparison lists before it gives up and calls the trees different.
+    private static let comparisonEntryLimit = 200_000
+    private static let comparisonChunk = 1024 * 1024
+
+    private struct TreeEntry: Equatable {
+        let isDirectory: Bool
+        let size: Int64
+    }
+
+    /// Whether the library item at `installed` is exactly what importing `candidate` would copy
+    /// into it, byte for byte. A folder must hold the same folders and files, of the same sizes,
+    /// with the same content. `.DS_Store` files are ignored on both sides: Finder adds them, and
+    /// no wallpaper reads them. So is the top-level `.mwe-user-assets` folder, the bridge the app
+    /// itself writes into an installed web wallpaper when the user picks a file or folder for one
+    /// of its properties: derived and regenerable, never part of what a project ships. A single
+    /// file is compared with the copy of it the item keeps (the file itself, or `image.<ext>` for
+    /// a picture).
+    ///
+    /// Anything doubtful counts as different: a link or special file, a tree too large to list, a
+    /// file that cannot be opened or that changes while it is read. The worst outcome is then the
+    /// old behaviour, a second copy; a project is never skipped on a guess. Reading stops at the
+    /// first difference. Throws only `CancellationError`, between chunks.
+    private func sameContent(candidate: URL, installed: URL, isDirectory: Bool, imageExtension: String?) throws -> Bool {
+        guard let installedInfo = try? downloadMetadata(at: installed), installedInfo.st_mode & S_IFMT == S_IFDIR else { return false }
+        let left = UnsafeMutableRawPointer.allocate(byteCount: Self.comparisonChunk, alignment: 16)
+        let right = UnsafeMutableRawPointer.allocate(byteCount: Self.comparisonChunk, alignment: 16)
+        defer { left.deallocate(); right.deallocate() }
+        guard isDirectory else {
+            let kept = imageExtension.map { "image.\($0)" } ?? candidate.lastPathComponent
+            return try Self.sameBytes(candidate.path, installed.appendingPathComponent(kept).path, left, right)
+        }
+        // The cheap check first: the same names and sizes, before a single byte is read.
+        guard let wanted = try Self.treeListing(candidate), let held = try Self.treeListing(installed),
+              wanted == held else { return false }
+        let files = wanted.filter { !$0.value.isDirectory }.keys.sorted()
+        // The manifest is the file most likely to differ and the quickest to read.
+        for relative in files.filter({ $0 == "project.json" }) + files.filter({ $0 != "project.json" }) {
+            guard try Self.sameBytes(candidate.path + "/" + relative, installed.path + "/" + relative, left, right) else { return false }
+        }
+        return true
+    }
+
+    /// Every file and folder below `root` by relative path, or nil when the tree holds anything
+    /// but regular files and folders (`.DS_Store` files and the app's own top-level user-asset
+    /// bridge aside), more than `comparisonEntryLimit` entries, or something that cannot be read.
+    private static func treeListing(_ root: URL) throws -> [String: TreeEntry]? {
+        var info = stat()
+        guard lstat(root.path, &info) == 0, info.st_mode & S_IFMT == S_IFDIR else { return nil }
+        var listing: [String: TreeEntry] = [:]
+        var pending = [""]
+        while let relative = pending.popLast() {
+            let folder = relative.isEmpty ? root.path : root.path + "/" + relative
+            guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder) else { return nil }
+            for name in names {
+                try Task.checkCancellation()
+                var entry = stat()
+                guard lstat(folder + "/" + name, &entry) == 0 else { return nil }
+                let path = relative.isEmpty ? name : relative + "/" + name
+                switch entry.st_mode & S_IFMT {
+                case S_IFDIR:
+                    if relative.isEmpty && name == UserAssetStore.stagingDirectoryName { continue }
+                    listing[path] = TreeEntry(isDirectory: true, size: 0)
+                    pending.append(path)
+                case S_IFREG:
+                    if name == ".DS_Store" { continue }
+                    listing[path] = TreeEntry(isDirectory: false, size: Int64(entry.st_size))
+                default:
+                    return nil
+                }
+                if listing.count > comparisonEntryLimit { return nil }
+            }
+        }
+        return listing
+    }
+
+    /// Whether two regular files, neither a link, hold the same bytes. The buffers are
+    /// `comparisonChunk` bytes each.
+    private static func sameBytes(_ first: String, _ second: String,
+                                  _ firstBuffer: UnsafeMutableRawPointer, _ secondBuffer: UnsafeMutableRawPointer) throws -> Bool {
+        let left = open(first, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
+        guard left >= 0 else { return false }
+        defer { close(left) }
+        let right = open(second, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
+        guard right >= 0 else { return false }
+        defer { close(right) }
+        var leftInfo = stat()
+        var rightInfo = stat()
+        guard fstat(left, &leftInfo) == 0, fstat(right, &rightInfo) == 0,
+              leftInfo.st_mode & S_IFMT == S_IFREG, rightInfo.st_mode & S_IFMT == S_IFREG,
+              leftInfo.st_size == rightInfo.st_size else { return false }
+        var remaining = Int64(leftInfo.st_size)
+        while true {
+            try Task.checkCancellation()
+            let count = fill(firstBuffer, from: left)
+            guard count >= 0, count == fill(secondBuffer, from: right),
+                  memcmp(firstBuffer, secondBuffer, count) == 0 else { return false }
+            // The size read must be the size the file had when it was opened.
+            if count == 0 { return remaining == 0 }
+            remaining -= Int64(count)
+        }
+    }
+
+    /// Reads up to a chunk, more than once if the file system returns less. -1 on a read error.
+    private static func fill(_ buffer: UnsafeMutableRawPointer, from descriptor: Int32) -> Int {
+        var filled = 0
+        while filled < comparisonChunk {
+            let count = Darwin.read(descriptor, buffer + filled, comparisonChunk - filled)
+            if count < 0 {
+                if errno == EINTR { continue }
+                return -1
+            }
+            if count == 0 { break }
+            filled += count
+        }
+        return filled
     }
 }
