@@ -249,6 +249,58 @@ final class WallpaperActivationRecoveryTests: XCTestCase {
         }
     }
 
+    /// A held wallpaper keeps its display assignment, so the display reads as showing it. Choosing
+    /// it again is still how the user gets it back: that activation must reach the bridge instead
+    /// of stopping at "the display already shows it".
+    func testChoosingAHeldWallpaperAgainReachesTheBridgeAndLiftsTheHold() async throws {
+        let bridge = ApplyFailureBridge(noPointer: .init())
+        bridge.applyError = nil
+        bridge.active = true
+        bridge.heldIds = ["failing"]
+        let store = BridgeStore(bridge: bridge)
+        try await store.refreshAllAsync()
+        XCTAssertTrue(store.isWallpaperActive(id: "failing", displayId: "primary"))
+        XCTAssertEqual(store.heldWallpaperIDs, ["failing"])
+
+        let result = try await store.performActivation(
+            id: "failing", displayId: "primary", origin: .user, returningToPrevious: false, recordsHistory: true)
+
+        XCTAssertEqual(result, .applied)
+        XCTAssertEqual(bridge.applyRequests, [true], "the user's own choice is what lifts a hold")
+        XCTAssertEqual(store.heldWallpaperIDs, [])
+    }
+
+    /// The same shortcut stays for everything else: a rotation, a rule or a layout that comes round
+    /// to a held wallpaper must not reopen it, and a wallpaper that is not held is not applied again
+    /// for nothing.
+    func testOnlyTheUsersChoiceOpensAHeldWallpaperAndOnlyWhileItIsHeld() async throws {
+        for origin in [ActivationOrigin.playlist, .automation, .layout, .updateReload] {
+            let bridge = ApplyFailureBridge(noPointer: .init())
+            bridge.applyError = nil
+            bridge.active = true
+            bridge.heldIds = ["failing"]
+            let store = BridgeStore(bridge: bridge)
+            try await store.refreshAllAsync()
+
+            let result = try await store.performActivation(
+                id: "failing", displayId: "primary", origin: origin, returningToPrevious: false, recordsHistory: true)
+
+            XCTAssertEqual(result, .noOp, "\(origin)")
+            XCTAssertEqual(bridge.applyRequests, [], "\(origin) must not reach the bridge")
+            XCTAssertEqual(store.heldWallpaperIDs, ["failing"], "\(origin) leaves the hold alone")
+        }
+
+        let bridge = ApplyFailureBridge(noPointer: .init())
+        bridge.applyError = nil
+        bridge.active = true
+        let store = BridgeStore(bridge: bridge)
+        try await store.refreshAllAsync()
+        let result = try await store.performActivation(
+            id: "failing", displayId: "primary", origin: .user, returningToPrevious: false, recordsHistory: true)
+        XCTAssertEqual(result, .noOp)
+        XCTAssertEqual(bridge.applyRequests, [], "a wallpaper that is not held is left as it is")
+    }
+
     func testAutomaticActivationAndNoOpReapplyDoNotRequestSupport() async throws {
         let defaults = try TemporaryDefaults.make(for: self).defaults
         let prompt = SupportPromptStore(defaults: defaults)
@@ -920,8 +972,9 @@ private final class ApplyFailureBridge: WallpaperBridge {
         return mutation
     }
 
-    /// Mirrors the engine: the wallpaper only becomes active once an apply succeeds.
-    private var active = false
+    /// Mirrors the engine: the wallpaper only becomes active once an apply succeeds. A test sets it
+    /// to start with the wallpaper already assigned to the display.
+    var active = false
     /// Wallpapers the load journal holds back; the display keeps its assignment to them.
     var heldIds: [String] = []
 

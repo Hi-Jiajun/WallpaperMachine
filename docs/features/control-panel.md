@@ -214,7 +214,8 @@ screen. Activation is explicit.
   again one interval later, a rule's event counts as handled, and a reload
   loads the new files at the next update or launch. A newer Apply of yours
   still replaces an older one that is waiting. The log notes each time one gives
-  way (`activation yielded to a waiting user choice`).
+  way (`activation yielded to a waiting user choice`), and every activation and
+  reload logs who asked and how it ended ([diagnostics](diagnostics.md#wallpaper-activations)).
 - Double-clicking a tile on the Installed tab activates it as well and does not
   close the window. On Discover, double-click downloads the tile (or applies it
   once it is in the library); see

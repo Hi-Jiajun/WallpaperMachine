@@ -78,7 +78,10 @@ playback-environment changes (suspend/resume, unload/reload, audio) and library
 refreshes wait for an in-flight apply and the reverse, while explicit Pause still
 interrupts; the first-wallpaper support prompt follows only a successful
 downloaded activation; only the user's own activation reports a manual choice,
-and an update reload gives way to a choice the user is waiting on. The same suite
+and an update reload gives way to a choice the user is waiting on; a wallpaper
+held back after a crash keeps its display assignment, so only the user's choice
+of it reaches the bridge to lift the hold, while a playlist, rule or layout
+finds it already shown and stops. The same suite
 covers Retry for a scene that stopped drawing over the two-display fake: it takes
 the wallpaper off the named display and applies it again and touches no other, a
 display with no wallpaper gets an error and no change, a mirroring display reloads

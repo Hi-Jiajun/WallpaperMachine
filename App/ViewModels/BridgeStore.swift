@@ -51,6 +51,8 @@ final class BridgeStore {
     let editorState = WallpaperEditorState()
     /// The user's commands, from the control panel and the menu bar, run through here.
     let commands = UserCommandQueue()
+    /// Where the activation lines go: the app's log. A test collects them instead.
+    @ObservationIgnored var activationLogWriter: (_ line: String, _ isFailure: Bool) -> Void = ActivationLog.write
     private(set) var activatingWallpaperID: String?
     private(set) var applyingWallpaperID: String?
     @ObservationIgnored private var activationWaiters: [CheckedContinuation<Void, Never>] = []
@@ -247,9 +249,27 @@ final class BridgeStore {
 
     /// Makes `id` the wallpaper of `displayId`. Only the user's own `origin` reports a manual
     /// choice and counts toward the support prompt; the other origins are the app acting on
-    /// its own, so a caller that does not say is treated as automatic.
+    /// its own, so a caller that does not say is treated as automatic. Every call leaves one
+    /// log line saying who asked and how it ended ([ActivationLog]).
     func activateWallpaperAsync(id: String, displayId: String, origin: ActivationOrigin = .automation,
                                 returningToPrevious: Bool = false, recordsHistory: Bool = true) async throws {
+        let started = ContinuousClock.now
+        do {
+            let result = try await performActivation(
+                id: id, displayId: displayId, origin: origin,
+                returningToPrevious: returningToPrevious, recordsHistory: recordsHistory)
+            logActivation(.activation, wallpaper: id, display: displayId, origin: origin,
+                          outcome: .init(result), since: started)
+        } catch {
+            logActivation(.activation, wallpaper: id, display: displayId, origin: origin,
+                          outcome: .failed(ActivationLog.failure(of: error)), since: started)
+            throw error
+        }
+    }
+
+    /// The activation itself, without the log line: internal so a test can read its result.
+    func performActivation(id: String, displayId: String, origin: ActivationOrigin,
+                           returningToPrevious: Bool, recordsHistory: Bool) async throws -> ActivationResult {
         await waitForIdleActivation()
         try requireIdleWallpaperEdits(id: id)
         guard librarySnapshot.wallpapers.contains(where: { $0.id == id }) else {
@@ -265,10 +285,16 @@ final class BridgeStore {
         guard let options = wallpaperOptionsSnapshot, options.wallpaperId == id else {
             throw WallpaperActionError(message: String(localized: "Wallpaper settings are unavailable. Refresh Library and retry."))
         }
-        if isWallpaperActive(id: id, displayId: displayId), !options.dirty,
+        // A wallpaper held back after a crash keeps its display assignment, so the display reads as
+        // showing it while it has no scene. The user choosing it again is the way back from the
+        // hold, so that choice must reach the bridge, which lifts the hold on a user-initiated
+        // apply. An automatic origin still stops here, or a rotation would reopen the wallpaper
+        // that crashed the app every time it came round to it.
+        let reopensHeld = origin.isUserChoice && heldWallpaperIDs.contains(id)
+        if !reopensHeld, isWallpaperActive(id: id, displayId: displayId), !options.dirty,
            !wallpaperAppliesNeedingSave.contains(id), !editorState.hasPendingEdits(wallpaperID: id) {
             if origin.isUserChoice { onUserWallpaperChoice?(id, displayId) }
-            return
+            return .noOp
         }
         guard options.supported else {
             throw WallpaperActionError(message: String(localized: "This wallpaper type cannot be played on macOS. You can still inspect or remove it from your library."))
@@ -314,6 +340,18 @@ final class BridgeStore {
         if origin.isUserChoice, !previouslyActive {
             supportPrompt?.recordSuccessfulActivation(wallpaperID: id)
         }
+        return .applied
+    }
+
+    private func logActivation(_ kind: ActivationLog.Kind, wallpaper: String, display: String,
+                               origin: ActivationOrigin, outcome: ActivationLog.Outcome,
+                               since started: ContinuousClock.Instant) {
+        // A skipped reload did no work, so it has no duration to report.
+        let milliseconds = outcome == .skipped ? nil : ActivationLog.milliseconds(started.duration(to: .now))
+        activationLogWriter(
+            ActivationLog.line(kind, wallpaper: wallpaper, display: display, origin: origin,
+                               outcome: outcome, milliseconds: milliseconds),
+            outcome.isFailure)
     }
 
     /// Loads a wallpaper's files afresh on every display showing it, after an update replaced
@@ -321,7 +359,8 @@ final class BridgeStore {
     /// display goes through its own command slot, so a switch the user asks for meanwhile wins:
     /// a reload still waiting is replaced by it, and one that waited behind it finds the display
     /// showing something else and leaves it alone. A reload that finds the user's choice waiting
-    /// is dropped, and the files load on the next update or launch.
+    /// is dropped, and the files load on the next update or launch. Each display logs one
+    /// `reload` line, whether it reloaded, gave way or failed.
     ///
     /// `displayId` limits the reload to one display. That is the Retry for a scene that stopped
     /// drawing, which loads the same files again, so the posters made from them stay valid.
@@ -332,10 +371,21 @@ final class BridgeStore {
                 && (displayId == nil || $0.displayId == displayId)
         }.map(\.displayId)
         for display in displays {
-            try await commands.run(slot: Self.activationSlot(displayId: display), subject: id, origin: .updateReload) {
-                guard self.isWallpaperActive(id: id, displayId: display) else { return }
-                try await self.ejectWallpaperFromDisplayAsync(displayId: display, wallpaperId: id)
-                try await self.activateWallpaperAsync(id: id, displayId: display, origin: .updateReload)
+            let started = ContinuousClock.now
+            do {
+                var reloaded = false
+                let ran = try await commands.run(slot: Self.activationSlot(displayId: display), subject: id, origin: .updateReload) {
+                    guard self.isWallpaperActive(id: id, displayId: display) else { return }
+                    try await self.ejectWallpaperFromDisplayAsync(displayId: display, wallpaperId: id)
+                    try await self.activateWallpaperAsync(id: id, displayId: display, origin: .updateReload)
+                    reloaded = true
+                }
+                logActivation(.reload, wallpaper: id, display: display, origin: .updateReload,
+                              outcome: ran && reloaded ? .applied : .skipped, since: started)
+            } catch {
+                logActivation(.reload, wallpaper: id, display: display, origin: .updateReload,
+                              outcome: .failed(ActivationLog.failure(of: error)), since: started)
+                throw error
             }
         }
     }

@@ -635,8 +635,12 @@ engine to redo, and when.
   dead session and wallpaper, the hold persisting across launches, a failed
   load and a quit during a load leaving no strike, only scenes that really open
   being recorded, Apply reaching the engine for an unchanged draft, a rotation leaving a hold alone, and a Try
-  again that fails leaving the wallpaper held (`ControlPanelHeldWallpaperTests`
-  covers the banner and the action). A real
+  again or an Apply that fails leaving the wallpaper held, with a crash during an Apply counting a
+  third strike (`ControlPanelHeldWallpaperTests`
+  covers the banner and the action). Choosing a held wallpaper again must reach
+  the bridge even though its display still reads as showing it, while a
+  rotation's or rule's activation of it stays a no-op
+  (`WallpaperActivationRecoveryTests`). A real
   engine crash is not reproducible headlessly; see
   [crash recovery](../features/crash-recovery.md#verification).
 - **Texture decode at preparation** — `texture_prefetch_test` (CPU, in the gate):

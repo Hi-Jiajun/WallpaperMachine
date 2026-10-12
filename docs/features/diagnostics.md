@@ -50,6 +50,35 @@ The `project.json` summary is read leniently: a field of an unexpected type is
 left out, and an unreadable manifest is logged as such rather than failing
 the load.
 
+### Wallpaper activations
+
+"Why did my wallpaper change?" is answered by one line per activation, written by
+`BridgeStore` when the display's change finishes:
+
+```
+… INFO … activation: wallpaper 123456 display 1 origin playlist applied in 85 ms
+… WARN … activation: wallpaper 123456 display 1 origin user failed (refused) in 12 ms
+```
+
+- **Origin** is who asked: `user` (the panel, menu bar, a hotkey, Shortcuts or a
+  link), `playlist`, `automation` (a rule), `layout` (a saved display layout) or
+  `updateReload` (an update loading new files, or Retry for a scene that stopped
+  drawing, which loads the same files again).
+- **Result** is `applied`, `noOp` (the display already showed it, so nothing was
+  touched) or `failed` with a category: `cancelled`, `refused` (the app declined
+  with a reason it shows in the panel) or `error` (anything else). Failures are
+  warnings.
+- The line names the wallpaper by its library id, never its title, and a failure by
+  category, never its message: the message is on screen and may carry paths. The
+  duration includes any wait for an apply already in flight.
+- An update reload also writes a `reload:` line per display, with the same fields:
+  `applied`, `skipped` (a newer command, usually the user's choice, took the
+  display's turn or the display no longer showed the wallpaper, so the files load
+  at the next update or launch) or `failed`. A
+  reload that ran is preceded by the `activation:` line of its re-apply. An automatic
+  change that gives way to a choice the user is waiting on logs `activation yielded to
+  a waiting user choice` instead.
+
 ### What each session starts with
 
 - The logger's own line: process id and level in force.
@@ -463,7 +492,8 @@ them as well as for a repair. A check that fails to reach the bridge writes
   - `settings_intents::verbose_logging_persists_across_relaunch_and_can_be_turned_off`.
 - Swift: `AppLogRouterTests`, `DiagnosticsRedactorTests`, `DiagnosticsBundleTests`,
   `SessionLedgerTests`, `CrashReportIndexTests`, `UncaughtExceptionLogTests`,
-  `QuitReasonTests`, `QuitTimingsTests`, `AppUpdateTests` for when an install counts as
+  `ActivationLogTests` (the activation and reload lines, their results and failure
+  categories), `QuitReasonTests`, `QuitTimingsTests`, `AppUpdateTests` for when an install counts as
   pending, `DesktopWindowDiagnosticsTests` (state precedence, line format, window server
   description parsing and the window ID array read, against injected observations),
   and `WallpaperWindowAuditorTests` (when the audit looks and stops, what it logs and how
