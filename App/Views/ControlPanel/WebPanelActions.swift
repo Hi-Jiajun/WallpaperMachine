@@ -309,13 +309,21 @@ extension WebPanelController {
       try await store.commands.run(slot: BridgeStore.selectionSlot, subject: id) {
         try await store.selectWallpaperAsync(id: id)
       }
-    case "activate":
+    // Applying the wallpaper a display already shows does nothing. Only the inspector's
+    // **Reapply wallpaper** restarts it, so a tile's double-click, Recently used and Previous
+    // keep leaving a running wallpaper alone.
+    case "activate", "reapplyWallpaper":
       let id = try wallpaperID(request)
+      let restarts = action == "reapplyWallpaper"
       // The display is the one targeted when the user asked, not when the command runs.
       let displayID = navigation.targetDisplayID
       let slot = BridgeStore.activationSlot(displayId: displayID)
       try await store.commands.run(slot: slot, subject: id) {
-        try await store.activateWallpaperAsync(id: id, displayId: displayID, origin: .user)
+        if restarts {
+          try await store.reapplyWallpaperAsync(id: id, displayId: displayID)
+        } else {
+          try await store.activateWallpaperAsync(id: id, displayId: displayID, origin: .user)
+        }
         // Get out of the way so the freshly applied wallpaper is visible, unless another
         // switch is already waiting to replace it.
         if hidesAfterActivating, store.supportPrompt?.isPending != true,

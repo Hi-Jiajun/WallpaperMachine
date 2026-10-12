@@ -661,8 +661,10 @@ function renderInspector(discover) {
   const updating = isInstalled && download?.pending;
   const updateNotice = !discover && isInstalled && (item.updateAvailable || updating) ? `<div class="notice inspector-update" role="status"><p>${escapeHTML(updating ? (download.queued ? t('The update is waiting to download.') : percent === null ? t('Downloading the update…') : t('Downloading the update… {percent}%', { percent })) : Number.isFinite(item.updatedAt) ? t('Its author updated it on the Workshop on {date}.', { date: new Date(item.updatedAt).toLocaleDateString(language()) }) : t('Its author updated it on the Workshop.'))}</p><div class="actions">${updating ? button(t('Show in downloads'), 'openDownloads', {}, { className: 'link' }) : request ? button(t('Continue setup'), 'continueSetup', { id: request.id }, { icon: 'shield', className: 'primary' }) : button(t('Update'), 'workshopUpdate', { id: item.id }, { icon: 'download', className: 'primary', disabled: busy('workshopUpdate', { id: item.id }) })}</div></div>` : '';
   const showInLibrary = discover && isInstalled && !(download && !download.pending && !download.error) ? button(t('Show in library'), 'showInstalled', { id: item.id }, { icon: 'image', className: 'link' }) : '';
-  const activateLabel = target?.wallpaperID === item.id ? t('Reapply wallpaper') : t('Apply wallpaper');
-  const activation = isInstalled ? button('', 'activate', { id: item.id }, { icon: 'play', title: activateLabel, className: 'primary inspector-play', disabled: !canActivate }) : '';
+  // Applying what the display already shows does nothing, so that button restarts it instead.
+  const reapplies = target?.wallpaperID === item.id;
+  const activateLabel = reapplies ? t('Reapply wallpaper') : t('Apply wallpaper');
+  const activation = isInstalled ? button('', reapplies ? 'reapplyWallpaper' : 'activate', { id: item.id }, { icon: 'play', title: activateLabel, className: 'primary inspector-play', disabled: !canActivate }) : '';
   const previewAction = isInstalled && state.previewAvailable && !['Application', 'Unknown'].includes(item.kind)
     ? button(t('Preview wallpaper'), 'previewWallpaper', { id: item.id }, { icon: 'eye', className: 'wide', title: t('Open a live preview without changing your desktop') }) : '';
   morph($('inspector'), `<div class="inspector-layout" ${keyAttr(`inspector-${item.id}-${discover}`)}><div class="inspector-scroll"><div class="inspector-heading">
@@ -1243,7 +1245,7 @@ async function handleAction(action, data, element) {
     case 'clearProperty': await deliver('property', { id, propertyID: data.propertyId, value: '' }); return;
     case 'restoreProperty': drafts.delete(draftKey(id, data.propertyId)); await deliver(action, { id, propertyID: data.propertyId }); return;
     case 'revert': for (const key of drafts.keys()) if (key.startsWith(`${id}\u0000`)) drafts.delete(key); await deliver(action, { id }); return;
-    case 'activate':
+    case 'activate': case 'reapplyWallpaper':
       try { await deliver(action, { id }); activationFailures.delete(id); } catch (error) { activationFailures.set(id, error?.message || String(error)); throw error; } finally { render(); }
       return;
     case 'previewWallpaper': {

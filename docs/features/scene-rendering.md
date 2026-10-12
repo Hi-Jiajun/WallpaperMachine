@@ -312,8 +312,13 @@ A scene that reads stopped has a **Retry** button on its row in **Settings → P
 → Live diagnostics → Updating now**. That covers a scene recovery gave up on and one
 that failed before its first frame, which recovery leaves alone. Retry takes the
 wallpaper off that display and applies it again, so a new renderer opens with a fresh
-recovery budget. Applying the same wallpaper again from the Library cannot do this: a
-wallpaper a display already shows is left as it is, and so is its stopped scene.
+recovery budget. Applying the wallpaper again from the Library (double-clicking its tile
+or choosing it in Recently used) cannot do this: a wallpaper a display already shows is
+left as it is, and so is its stopped scene. The inspector's **Reapply wallpaper** takes
+the wallpaper off the display and loads it afresh, so it restarts a stopped scene too
+([control panel](control-panel.md#selection-versus-apply)); Retry does the same from the
+row that reports the fault, and unlike Reapply it does not count as the user choosing the
+wallpaper.
 
 - Only the display on the row reloads. Another display showing the same wallpaper is
   not touched, and the wallpaper's files are not counted as changed, which only a

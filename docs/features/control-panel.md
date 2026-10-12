@@ -208,6 +208,22 @@ screen. Activation is explicit.
   display; for the wallpaper already active there it reads **Reapply wallpaper**.
   An Installed tile shows an **Applying** ring while its apply runs and a quiet
   mark while it waits behind another apply.
+- **Reapply wallpaper** restarts the wallpaper on the target display: it takes the
+  wallpaper off the display and loads it afresh, for one that froze, went blank or
+  shows stale content. It is the only Library or inspector control that restarts a
+  running wallpaper: double-clicking its tile, choosing it in **Recently used** or
+  going back to it with **Previous wallpaper** leave it running. Settings has the
+  other restart, **Retry** on the row of a scene that stopped drawing
+  ([scene rendering](scene-rendering.md#retry)), and the banner's **Try again**
+  opens a wallpaper held back after a crash
+  ([crash recovery](crash-recovery.md#what-the-user-sees)). Reapply first checks
+  that the wallpaper's files, the display and any unfinished setting edit are still in
+  order, and refuses without touching the display when they are not, so a
+  wallpaper whose files are gone does not leave the display empty. It waits its
+  turn like any Apply and counts as your choice (an automatic rule leaves the
+  display alone afterwards), but not as a new apply: the display's history and
+  the [support offer](first-run.md#first-wallpaper-support-prompt) are unchanged. The log
+  notes it as a `reapply:` line ([diagnostics](diagnostics.md#wallpaper-activations)).
 - A wallpaper you apply is never replaced by an automatic change that arrives
   while it waits for its turn on that display: the display's playlist, an
   automatic rule or an update reloading files gives way. The playlist tries

@@ -68,6 +68,11 @@ was run.
       activate it, and double-click must not close the window. The window stays
       open after applying unless Settings → General → Hide window after applying
       a wallpaper is on.
+- [ ] With a wallpaper playing, press **Reapply wallpaper** in its inspector: the
+      wallpaper restarts from its first frame on that display only (watch a
+      video or scene; note whether a scene flashes to the bare desktop while it
+      reloads). Double-clicking the same tile, or choosing it in Recently used,
+      must leave it playing without a restart.
 - [ ] Try invalid media and missing scene assets: actionable failures appear
       without blocking videos or losing an already downloaded scene, and a valid
       wallpaper remains usable.

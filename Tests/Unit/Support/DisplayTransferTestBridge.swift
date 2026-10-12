@@ -24,6 +24,8 @@ final class DisplayTransferTestBridge: LayoutSnapshotBridge {
     private var selected = "a"
     private var edits: [String: [String: Bool]] = [:]
     private(set) var applications: [(String, String)] = []
+    /// Every `(display, wallpaper)` the store asked to take off a display, in order.
+    private(set) var ejections: [(String, String)] = []
 
     func installProjects(in library: URL) throws {
         for id in ["a", "b", "c"] {
@@ -95,6 +97,7 @@ final class DisplayTransferTestBridge: LayoutSnapshotBridge {
     }
     override func ejectWallpaperFromDisplay(displayId: String, wallpaperId: String) async throws -> BridgeDisplayMutationBundle {
         events.append("eject \(displayId) \(wallpaperId)")
+        ejections.append((displayId, wallpaperId))
         if assignments[displayId] == wallpaperId { assignments[displayId] = nil }
         let value = currentBundle
         return .init(app: value.app, library: value.library, monitorInformation: value.monitorInformation, settings: value.settings)

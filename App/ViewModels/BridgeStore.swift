@@ -250,14 +250,18 @@ final class BridgeStore {
     /// Makes `id` the wallpaper of `displayId`. Only the user's own `origin` reports a manual
     /// choice and counts toward the support prompt; the other origins are the app acting on
     /// its own, so a caller that does not say is treated as automatic. Every call leaves one
-    /// log line saying who asked and how it ended ([ActivationLog]).
+    /// log line saying who asked and how it ended ([ActivationLog]). `restarting` says the
+    /// display showed this wallpaper until the caller took it off to load it afresh, so the
+    /// display gains no wallpaper it did not have: that is not a first apply of it.
     func activateWallpaperAsync(id: String, displayId: String, origin: ActivationOrigin = .automation,
-                                returningToPrevious: Bool = false, recordsHistory: Bool = true) async throws {
+                                returningToPrevious: Bool = false, recordsHistory: Bool = true,
+                                restarting: Bool = false) async throws {
         let started = ContinuousClock.now
         do {
             let result = try await performActivation(
                 id: id, displayId: displayId, origin: origin,
-                returningToPrevious: returningToPrevious, recordsHistory: recordsHistory)
+                returningToPrevious: returningToPrevious, recordsHistory: recordsHistory,
+                restarting: restarting)
             logActivation(.activation, wallpaper: id, display: displayId, origin: origin,
                           outcome: .init(result), since: started)
         } catch {
@@ -269,7 +273,8 @@ final class BridgeStore {
 
     /// The activation itself, without the log line: internal so a test can read its result.
     func performActivation(id: String, displayId: String, origin: ActivationOrigin,
-                           returningToPrevious: Bool, recordsHistory: Bool) async throws -> ActivationResult {
+                           returningToPrevious: Bool, recordsHistory: Bool,
+                           restarting: Bool = false) async throws -> ActivationResult {
         await waitForIdleActivation()
         try requireIdleWallpaperEdits(id: id)
         guard librarySnapshot.wallpapers.contains(where: { $0.id == id }) else {
@@ -337,7 +342,7 @@ final class BridgeStore {
         if origin.isUserChoice { onUserWallpaperChoice?(id, displayId) }
         // Startup, playlist rotation and update reloads never solicit support. Wait until
         // saving and the final display check both succeed for an explicit activation.
-        if origin.isUserChoice, !previouslyActive {
+        if origin.isUserChoice, !previouslyActive, !restarting {
             supportPrompt?.recordSuccessfulActivation(wallpaperID: id)
         }
         return .applied
@@ -352,6 +357,39 @@ final class BridgeStore {
             ActivationLog.line(kind, wallpaper: wallpaper, display: display, origin: origin,
                                outcome: outcome, milliseconds: milliseconds),
             outcome.isFailure)
+    }
+
+    /// Restarts `id` on `displayId`: the inspector's **Reapply wallpaper**, for a wallpaper that
+    /// froze, went blank or shows stale content. Applying the wallpaper a display already shows
+    /// does nothing, so this loads it afresh the way an update reload does. A wallpaper the display
+    /// does not show yet is simply applied.
+    ///
+    /// Everything that can refuse is checked before the display lets go of the wallpaper, so a
+    /// wallpaper that can no longer load never leaves the display empty. Call it inside the
+    /// display's command slot, as the panel does, so no other change slips in between the two steps.
+    func reapplyWallpaperAsync(id: String, displayId: String) async throws {
+        guard isWallpaperActive(id: id, displayId: displayId) else {
+            try await activateWallpaperAsync(id: id, displayId: displayId, origin: .user)
+            return
+        }
+        let started = ContinuousClock.now
+        do {
+            try validateActivationTarget(displayId)
+            try requireIdleWallpaperEdits(id: id)
+            if let options = wallpaperOptionsSnapshot, options.wallpaperId == id {
+                try validatePendingWallpaperEdits(id: id, options: options)
+            }
+            try validateWallpaperForPlayback(id: id)
+            try await ejectWallpaperFromDisplayAsync(displayId: displayId, wallpaperId: id)
+            try await activateWallpaperAsync(id: id, displayId: displayId, origin: .user,
+                                             recordsHistory: false, restarting: true)
+            logActivation(.reapply, wallpaper: id, display: displayId, origin: .user,
+                          outcome: .applied, since: started)
+        } catch {
+            logActivation(.reapply, wallpaper: id, display: displayId, origin: .user,
+                          outcome: .failed(ActivationLog.failure(of: error)), since: started)
+            throw error
+        }
     }
 
     /// Loads a wallpaper's files afresh on every display showing it, after an update replaced

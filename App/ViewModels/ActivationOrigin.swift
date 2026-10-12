@@ -37,10 +37,11 @@ enum ActivationResult: String, Sendable {
 /// paths the diagnostics report would then have to redact.
 enum ActivationLog {
     /// `activation` is one `activateWallpaperAsync` call. `reload` is an update (or any other
-    /// change of files) loading the wallpaper afresh on a display; it also logs the
-    /// `activation` its re-apply performed.
+    /// change of files) loading the wallpaper afresh on a display, and `reapply` is the user
+    /// restarting the wallpaper the display already shows; both also log the `activation`
+    /// their re-apply performed.
     enum Kind: String, Sendable {
-        case activation, reload
+        case activation, reload, reapply
     }
 
     enum Failure: String, Sendable {

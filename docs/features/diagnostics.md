@@ -78,6 +78,12 @@ the load.
   reload that ran is preceded by the `activation:` line of its re-apply. An automatic
   change that gives way to a choice the user is waiting on logs `activation yielded to
   a waiting user choice` instead.
+- The inspector's **Reapply wallpaper** writes a `reapply:` line (origin `user`,
+  `applied` or `failed`) after the `activation:` line of its re-apply, so a restart
+  reads differently from a plain apply. A refusal before the display was touched
+  (the wallpaper's files, the display or an unfinished edit) is a `failed` line with
+  no `activation:` line before it. When the display did not show the wallpaper yet,
+  Reapply is a plain apply and writes only the `activation:` line.
 
 ### What each session starts with
 
@@ -507,6 +513,7 @@ them as well as for a repair. A check that fails to reach the bridge writes
   fed to the handler and an injected clock) and `ProcessFootprintTests` (the byte
   formatting, and the real footprint read of the test process, which grows when the
   process touches memory).
+  `WallpaperReapplyTests` (the `reapply:` lines).
 - Not established by tests:
   - that a real scene's renderer lines carry its number on the desktop;
   - the unreadable-folder note on a Mac whose account is not in `_analyticsusers`

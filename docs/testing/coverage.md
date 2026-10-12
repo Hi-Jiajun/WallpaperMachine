@@ -93,6 +93,15 @@ reloads every display. `UserCommandQueueTests` — commands run in arrival order
 newer command in the same slot replaces a waiting one, and a playlist, rule or
 update reload never replaces a user command waiting in its slot (it returns at
 once and leaves the slot revision alone).
+`WallpaperReapplyTests` and `WallpaperReapplyPanelTests` — the inspector's
+**Reapply wallpaper** takes the wallpaper off its display once and applies it
+again from an empty display, as the user's choice but not as a first apply
+(history and the support prompt stay as they were); it refuses before any
+eject when the wallpaper's files, the display or an unfinished edit would make
+the apply fail; a wallpaper the display does not show is simply applied; and
+through the real panel only that button restarts, while a tile's double-click
+leaves the shown wallpaper running. Not covered: whether a scene reload flashes
+on the desktop ([manual-smoke.md](manual-smoke.md)).
 
 ### Playback policy
 

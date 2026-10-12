@@ -34,7 +34,7 @@ final class ActivationLogTests: XCTestCase {
         let outcomes: [ActivationLog.Outcome] = [
             .applied, .noOp, .skipped, .failed(.cancelled), .failed(.refused), .failed(.error),
         ]
-        for kind in [ActivationLog.Kind.activation, .reload] {
+        for kind in [ActivationLog.Kind.activation, .reload, .reapply] {
             for origin in [ActivationOrigin.user, .playlist, .automation, .layout, .updateReload] {
                 var seen: Set<String> = []
                 for outcome in outcomes {
