@@ -192,7 +192,7 @@ Services are grouped by domain under `App/Services/`; each domain has a matching
 |---|---|---|
 | `Appearance/` | `AppThemePreferences`, `AppThemeStore` | Mode/accent/tone preferences shared by AppKit and the page |
 | `Automation/` | `AutomationCommand`, `AppAutomation`, `HotKeyPreferences`, `GlobalHotKeys`, `WallpaperFocusFilter`, `WallpaperAutomationStore/Planner/Scheduler/Controller`, `WallpaperSolarTimes`, App Intents in `WallpaperIntents.swift` and `WallpaperConfigurationIntents.swift` | Explicit commands through `AppDelegate.performAutomation`; per-display weekday/solar/appearance rules and temporary Focus choices through the shared command queue; see [features/automation.md](features/automation.md) |
-| `Desktop/` | `DesktopSpaceWallpaperAPI`, `DesktopWallpaperLedger`, `DesktopWallpaperSync`, `WallpaperSpaceMonitor`, `WallpaperPresentationPolicy`, `WallpaperCoverageProbes`, `WallpaperWindowAuditor`, `DesktopWindowObservation`, `PlaybackPreferences`, `AppRuleMonitor`, `OtherAudioMonitor`, `SystemConditionMonitor`, `DisplayConfiguration`, `WallpaperDisplayTransfer` | Per-Space desktop picture control, original-wallpaper journal, still-poster sync, playback rules, per-display renderer suspension, display refresh and multi-display copy/swap |
+| `Desktop/` | `DesktopSpaceWallpaperAPI`, `DesktopWallpaperLedger`, `DesktopWallpaperSync`, `WallpaperSpaceMonitor`, `WallpaperPresentationPolicy`, `WallpaperCoverageProbes`, `WallpaperWindowAuditor`, `DesktopWindowObservation`, `SystemWakeRevalidator`, `PlaybackPreferences`, `AppRuleMonitor`, `OtherAudioMonitor`, `SystemConditionMonitor`, `DisplayConfiguration`, `WallpaperDisplayTransfer` | Per-Space desktop picture control, original-wallpaper journal, still-poster sync, playback rules, per-display renderer suspension, display refresh and multi-display copy/swap |
 | `Diagnostics/` | `RuntimeDiagnosticsSession`, `DiagnosticsBundle`, `SessionLedger`, `EnergyUsageMonitor`, `WallpaperEnergyRecorder` | Runtime counters, the diagnostics report, how the previous session ended, energy readout and per-wallpaper ratings; see [features/diagnostics.md](features/diagnostics.md) |
 | `GitHub/` | `GitHubReleaseClient`, `AppUpdateStore`, `AppUpdateInstaller`, `WhatsNewStore` | GitHub Releases update check, download, in-place install; which what's-new announcements were shown |
 | `Library/` | `ClientPaths`, `WallpaperImportService`, `LibraryImportStore`, `WallpaperDeletionService`, `StillImageWallpaper`, `WallpaperBackupService`, `WallpaperCollectionStore`, `WallpaperPresetStore`, `WallpaperHistoryStore` | App-support layout, non-destructive import (run for the app, not the panel page, so Finder and Dock drops import too), still pictures packaged as `web` wallpapers, guarded deletion, collections, presets, history, backup and restore |
@@ -295,6 +295,17 @@ setter through optional private CoreGraphics and HIServices symbols, falling bac
   desktop windows are legitimately off screen. A fault is logged with its diagnostics line;
   repairing it is off unless a hidden preference is set
   ([desktop window audit](features/diagnostics.md#desktop-window-audit)).
+- **Wake check.** `SystemWakeRevalidator` asks the bridge, once per wake, whether every scene
+  that should be drawing still is (`WallpaperBridge.revalidate_scene_presentation`). The bridge
+  reads each continuous, unpaused scene's always-on `frames_completed`, waits three seconds on
+  its own runtime (outside the actor, so no request queues behind it), reads again, and passes
+  only a scene whose counter did not move, or one that stopped itself, to
+  `WallpaperEngine::recover_surface` with `RecoveryReason::Stalled`: the engine's budgeted ladder,
+  so the check cannot loop. Two checks never overlap. The revalidator starts a pass 0.65 s after
+  `didWake` or `screensDidWake` (the two for one wake are one pass), only while
+  `globalPresentation` is `.running` and after the command queue is idle; a wake that lands on a
+  locked session stays owed until `WallpaperPresentationPolicy.onResumed` announces the resume.
+  See [performance](features/performance.md#playback).
 
 ### Renderer bridge (generated uniffi)
 

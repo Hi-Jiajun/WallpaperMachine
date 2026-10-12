@@ -266,6 +266,37 @@ the choice is **Keep running**.
 **Stop** on display sleep frees renderer memory. The wallpaper is reloaded when the
 display wakes. **Pause** keeps it loaded.
 
+**After the Mac wakes** the app checks that every scene wallpaper is drawing again
+(`SystemWakeRevalidator` asks, the bridge's `revalidate_scene_presentation` answers). It
+reads each scene's frame counter, waits three seconds, reads it again, and rebuilds the
+drawing surface of only a scene whose counter did not move, or one that had already
+stopped itself after a rendering failure
+([a scene that stops drawing](scene-rendering.md#a-scene-that-stops-drawing)). On a Mac
+that woke well nothing is rebuilt: the check costs two counter reads and the wait.
+
+- **What it leaves alone:** a display that is paused for any reason (the user's pause,
+  battery, a covered desktop, sleeping or locked displays), a scene that updates only on
+  events or at a deadline (its counter standing still is how it saves power), a scene
+  the renderer could not be read for, web pages and native video. The signal is frames
+  *completed*, never frames presented: a frame that would repeat the picture completes
+  without presenting, so a healthy, still scene presents nothing for as long as it
+  likes.
+- **When it runs:** about 0.65 s after the wake, whichever of the system's and the
+  displays' wake notifications arrives first; the second notification for the same wake
+  is not a second check. It waits behind a wallpaper change that is being applied. A wake
+  that lands on the lock screen is checked once the unlock lets wallpapers draw again,
+  not at the wake itself, when every scene is suspended on purpose. Nothing polls.
+- **How it repairs:** through the same rebuild ladder a failed frame uses (a surface
+  reconfigure, then renderer rebuilds), so a check cannot loop: three attempts in a
+  minute per scene, and a scene the budget is spent on stays marked as stopped in
+  Settings, where **Retry** reloads it. A check never starts a fresh budget.
+- **What it writes:** one line per display and a summary in the
+  [application log](diagnostics.md#wake-check).
+
+Whether a scene surface ever stops producing frames across a real sleep and wake, and
+whether the reconfigure restores it, is not established here: the tests drive the check
+with scripted frame counters.
+
 **On battery** is one choice. **Keep running** leaves quality alone. **Pause**
 stops wallpapers until the Mac is plugged in. **Reduced quality** shows the battery
 render scale (100% / 75% / 50%, default 75%) and battery frame rate (1–240 fps,

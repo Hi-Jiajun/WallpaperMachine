@@ -870,6 +870,31 @@ public protocol WallpaperBridgeProtocol : AnyObject {
     func restorePropertyDefault(wallpaperId: String, propertyId: String) async throws  -> BridgeWallpaperMutationBundle
     
     /**
+     * Confirms that every scene that should be drawing still is, and has the
+     * engine rebuild the surface of any that is not. The host calls it once
+     * after the Mac or its displays wake, and again when presentation resumes
+     * after a wake that landed on a locked session.
+     *
+     * Nothing is rebuilt on a healthy Mac. The check reads each scene's frame
+     * counter, waits a few seconds and reads it again; only a continuous scene
+     * on an unpaused display whose counter did not move, or one that has
+     * stopped itself after a failure, is repaired, through the same budgeted
+     * recovery the engine uses for a failed frame. Paused and suspended
+     * displays, scenes that update on events, web pages and native video are
+     * never touched. One row comes back for every display with a scene open.
+     *
+     * The wait happens outside the actor, so it stalls no other request, and
+     * a second call waits for the first rather than overlapping it. `reason`
+     * names what triggered the check in the log.
+     *
+     * # Errors
+     *
+     * Returns an error when the bridge's runtime is gone or the check task
+     * failed.
+     */
+    func revalidateScenePresentation(reason: String) async throws  -> [BridgeSurfaceCheck]
+    
+    /**
      * Running scene wallpapers whose users enabled music information.
      */
     func sceneMediaWallpaperIds() async throws  -> [String]
@@ -2167,6 +2192,46 @@ open func restorePropertyDefault(wallpaperId: String, propertyId: String)async t
             completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
             freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeBridgeWallpaperMutationBundle.lift,
+            errorHandler: FfiConverterTypeBridgeError.lift
+        )
+}
+    
+    /**
+     * Confirms that every scene that should be drawing still is, and has the
+     * engine rebuild the surface of any that is not. The host calls it once
+     * after the Mac or its displays wake, and again when presentation resumes
+     * after a wake that landed on a locked session.
+     *
+     * Nothing is rebuilt on a healthy Mac. The check reads each scene's frame
+     * counter, waits a few seconds and reads it again; only a continuous scene
+     * on an unpaused display whose counter did not move, or one that has
+     * stopped itself after a failure, is repaired, through the same budgeted
+     * recovery the engine uses for a failed frame. Paused and suspended
+     * displays, scenes that update on events, web pages and native video are
+     * never touched. One row comes back for every display with a scene open.
+     *
+     * The wait happens outside the actor, so it stalls no other request, and
+     * a second call waits for the first rather than overlapping it. `reason`
+     * names what triggered the check in the log.
+     *
+     * # Errors
+     *
+     * Returns an error when the bridge's runtime is gone or the check task
+     * failed.
+     */
+open func revalidateScenePresentation(reason: String)async throws  -> [BridgeSurfaceCheck] {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wallpaper_bridge_fn_method_wallpaperbridge_revalidate_scene_presentation(
+                    self.uniffiClonePointer(),
+                    FfiConverterString.lower(reason)
+                )
+            },
+            pollFunc: ffi_wallpaper_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeBridgeSurfaceCheck.lift,
             errorHandler: FfiConverterTypeBridgeError.lift
         )
 }
@@ -6699,6 +6764,99 @@ public func FfiConverterTypeBridgeStorageStatus_lower(_ value: BridgeStorageStat
 
 
 /**
+ * What the check after the Mac wakes concluded about one display's scene.
+ *
+ * `outcome` is one of a fixed set of names: `ok` (the scene's frame loop
+ * moved), `repaired` (it had stopped and the engine rebuilt its surface),
+ * `recovery_pending` (a repair was already under way), `gave_up` (this
+ * minute's repair attempts were spent, so the scene stays stopped),
+ * `recovery_failed`, and `skipped_paused`, `skipped_not_continuous`,
+ * `skipped_unreadable` or `skipped_changed` for a scene that was not probed.
+ * The frame counts are the renderer's `frames_completed` at the two readings.
+ */
+public struct BridgeSurfaceCheck {
+    public var displayId: UInt32
+    public var outcome: String
+    public var framesBefore: UInt64
+    public var framesAfter: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(displayId: UInt32, outcome: String, framesBefore: UInt64, framesAfter: UInt64) {
+        self.displayId = displayId
+        self.outcome = outcome
+        self.framesBefore = framesBefore
+        self.framesAfter = framesAfter
+    }
+}
+
+
+
+extension BridgeSurfaceCheck: Equatable, Hashable {
+    public static func ==(lhs: BridgeSurfaceCheck, rhs: BridgeSurfaceCheck) -> Bool {
+        if lhs.displayId != rhs.displayId {
+            return false
+        }
+        if lhs.outcome != rhs.outcome {
+            return false
+        }
+        if lhs.framesBefore != rhs.framesBefore {
+            return false
+        }
+        if lhs.framesAfter != rhs.framesAfter {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(displayId)
+        hasher.combine(outcome)
+        hasher.combine(framesBefore)
+        hasher.combine(framesAfter)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBridgeSurfaceCheck: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BridgeSurfaceCheck {
+        return
+            try BridgeSurfaceCheck(
+                displayId: FfiConverterUInt32.read(from: &buf), 
+                outcome: FfiConverterString.read(from: &buf), 
+                framesBefore: FfiConverterUInt64.read(from: &buf), 
+                framesAfter: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: BridgeSurfaceCheck, into buf: inout [UInt8]) {
+        FfiConverterUInt32.write(value.displayId, into: &buf)
+        FfiConverterString.write(value.outcome, into: &buf)
+        FfiConverterUInt64.write(value.framesBefore, into: &buf)
+        FfiConverterUInt64.write(value.framesAfter, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBridgeSurfaceCheck_lift(_ buf: RustBuffer) throws -> BridgeSurfaceCheck {
+    return try FfiConverterTypeBridgeSurfaceCheck.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBridgeSurfaceCheck_lower(_ value: BridgeSurfaceCheck) -> RustBuffer {
+    return FfiConverterTypeBridgeSurfaceCheck.lower(value)
+}
+
+
+/**
  * One `engine.openUserShortcut` request from a running wallpaper.
  *
  * `value` is what the wallpaper's user chose for that property, and is the
@@ -9134,6 +9292,31 @@ fileprivate struct FfiConverterSequenceTypeBridgeSceneUpdateModeReport: FfiConve
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeBridgeSurfaceCheck: FfiConverterRustBuffer {
+    typealias SwiftType = [BridgeSurfaceCheck]
+
+    public static func write(_ value: [BridgeSurfaceCheck], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeBridgeSurfaceCheck.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [BridgeSurfaceCheck] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [BridgeSurfaceCheck]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeBridgeSurfaceCheck.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeBridgeVideoBackendReport: FfiConverterRustBuffer {
     typealias SwiftType = [BridgeVideoBackendReport]
 
@@ -9397,6 +9580,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_restore_property_default() != 28754) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_revalidate_scene_presentation() != 55430) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_scene_media_wallpaper_ids() != 29687) {

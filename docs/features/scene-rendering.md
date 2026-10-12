@@ -283,7 +283,13 @@ A caller that knows something the renderer does not can ask the engine for the n
 rung directly with `WallpaperEngine::recover_surface`. It spends the same budget the
 failures do, so a liveness check cannot buy back a spent one within the minute;
 [Retry](#retry) gets a fresh budget by loading the wallpaper afresh, which opens a new
-renderer.
+renderer. The
+[check after the Mac wakes](performance.md#playback) is such a caller: it finds a scene
+that stopped itself, or one still counted as running whose `frames_completed` stood
+still for three seconds, and asks for a repair as `Stalled`. That covers a scene the
+failure callback never reported (one that failed before its first frame) and a surface
+that stopped drawing without any failed frame. A scene whose minute of attempts is already spent
+stays stopped, the check says so in the log, and **Retry** is still the way back.
 
 Each step is logged under the load it belongs to: "display N stopped drawing after a
 failed frame; trying a surface reconfigure in 500ms (attempt 1/3)", then "display N

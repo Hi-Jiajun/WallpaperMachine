@@ -105,6 +105,17 @@ final class WallpaperPresentationPolicy {
     /// does not set this.
     var isSuspended: Bool { globalPresentation != .running }
 
+    /// Called once the bridge has accepted a resume: the whole desktop running
+    /// again after a suspend or unload, or one display running again after its
+    /// own suspension. Not called for a suspension, for a first delivery to a
+    /// display that was never told anything, for a resume the bridge refused
+    /// (a refused one is delivered again and is announced when it lands), or for
+    /// the resume `stop()` delivers on teardown.
+    var onResumed: (@MainActor () -> Void)?
+
+    /// Between `start()` and `stop()`.
+    private var isRunning: Bool { !observers.isEmpty }
+
     /// Closures are optional so their `@MainActor` defaults are built inside
     /// this (already `@MainActor`) initializer rather than in a default-argument
     /// expression evaluated in the caller's isolation.
@@ -437,6 +448,7 @@ final class WallpaperPresentationPolicy {
         // follows, then per-display occlusion, one acknowledgement at a time.
         if appliedGlobal != globalPresentation {
             let presentation = globalPresentation
+            let resumes = isRunning && presentation == .running && appliedGlobal != .running
             deliveryInFlight = true
             applyGlobal(presentation) { [self] result in
                 deliveryInFlight = false
@@ -449,6 +461,7 @@ final class WallpaperPresentationPolicy {
                 }
                 appliedGlobal = presentation
                 record(presentation != .running, for: RuntimeSurfaceKey(kind: .desktopScene, displayID: 0))
+                if resumes { onResumed?() }
                 // Deliveries are serialized, so the rest of the queue — and any
                 // decision that changed while this one was in flight — follows
                 // the acknowledgement.
@@ -476,6 +489,10 @@ final class WallpaperPresentationPolicy {
                 pendingDisplays.remove(displayID)
                 continue
             }
+            // A display never told anything was presenting; one whose last delivery
+            // failed may have been suspended, so its resume counts.
+            let resumes = isRunning && !target
+                && (appliedDisplays[displayID] == true || failedDisplays.contains(displayID))
             deliveryInFlight = true
             applyDisplay(displayID, target) { [self] result in
                 deliveryInFlight = false
@@ -489,6 +506,7 @@ final class WallpaperPresentationPolicy {
                 appliedDisplays[displayID] = target
                 failedDisplays.remove(displayID)
                 record(target, for: RuntimeSurfaceKey(kind: .desktopScene, displayID: displayID))
+                if resumes { onResumed?() }
                 // The decision may have changed while this one was in flight,
                 // in which case the display stays pending and is sent again.
                 if appliedDisplays[displayID] == suspendedDisplayIDs.contains(displayID) {

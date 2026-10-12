@@ -18,8 +18,8 @@ use futures_util::future::{BoxFuture, FutureExt};
 use wallpaper_core::project::SceneTemplate;
 use wallpaper_core::{
     AudioSpectrum128, DisplaySelector, DisplaySnapshotEntry, EngineError, FirstFrameCallback,
-    SceneBackend, SceneDemandReasons, SceneRendererPreference, SceneUpdateMode,
-    WallpaperAssignment, WallpaperEngine,
+    RecoveryOutcome, RecoveryReason, SceneBackend, SceneDemandReasons, SceneRendererPreference,
+    SceneUpdateMode, WallpaperAssignment, WallpaperEngine,
     media::audio::{
         AudioCaptureBackend, AudioCaptureController, AudioVolume, PlatformAudioCaptureBackend,
         RESTART_RETRY_DELAYS, RestartOutcome, device_watch::OutputDeviceWatcher,
@@ -260,6 +260,25 @@ pub trait EngineFacade: Send + Sync + 'static {
     fn scene_runtime_reports(&self) -> Vec<SceneRuntimeReport> {
         Vec::new()
     }
+    /// Asks the engine to bring back the surface of the scene on `display_id`
+    /// by the next rung of that scene's recovery ladder, without waiting for the
+    /// rung's delay.
+    ///
+    /// Required to be forwarded by every wrapper: the default answers that no
+    /// scene was found, so a wrapper that drops this call turns every repair it
+    /// is asked for into a quiet no-op.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error of the attempt when the engine tried and failed.
+    fn recover_surface(
+        &self,
+        display_id: u32,
+        reason: RecoveryReason,
+    ) -> EngineFuture<RecoveryOutcome> {
+        let _ = (display_id, reason);
+        async move { Ok(RecoveryOutcome::NoScene) }.boxed()
+    }
     /// The most recent process-wide audio analysis, or `None` when no analysis
     /// has been produced yet.
     ///
@@ -464,6 +483,15 @@ impl EngineFacade for RealEngineFacade {
         // dropping it would make an unreadable scene indistinguishable from an
         // absent one.
         self.engine.scene_runtime_reports()
+    }
+
+    fn recover_surface(
+        &self,
+        display_id: u32,
+        reason: RecoveryReason,
+    ) -> EngineFuture<RecoveryOutcome> {
+        let engine = self.engine.clone();
+        async move { engine.recover_surface(display_id, reason).await }.boxed()
     }
 
     fn current_audio_spectrum(&self) -> Result<Option<AudioSpectrum128>, EngineError> {
@@ -1085,6 +1113,12 @@ pub struct FakeEngineFacade {
     scene_video_plane_sampling_calls: Arc<ArcSwap<Vec<bool>>>,
     scene_renderer_calls: Arc<ArcSwap<Vec<SceneRendererPreference>>>,
     scene_runtime_reports: Arc<ArcSwap<Vec<SceneRuntimeReport>>>,
+    /// Readings handed out one per read before the stored value is used again,
+    /// so a test can say how a scene changes between two looks without a clock.
+    scene_runtime_report_script: Arc<std::sync::Mutex<std::collections::VecDeque<Vec<SceneRuntimeReport>>>>,
+    display_snapshot_script: Arc<std::sync::Mutex<std::collections::VecDeque<Vec<DisplaySnapshotEntry>>>>,
+    recover_calls: Arc<ArcSwap<Vec<(u32, RecoveryReason)>>>,
+    recover_result: Arc<ArcSwap<Option<Result<RecoveryOutcome, String>>>>,
     audio_spectrum: Arc<ArcSwap<Option<AudioSpectrum128>>>,
     mouse_poll_calls: Arc<ArcSwap<Vec<()>>>,
     mouse_poll_block: Arc<SegQueue<ReconcileBlockGate>>,
@@ -1163,6 +1197,18 @@ pub struct ReconcileDone {
 struct ReconcileBlockGate {
     blocked_tx: Sender<()>,
     release_rx: Receiver<()>,
+}
+
+/// The next scripted reading: each is handed out once, in order, and the last
+/// stays. `None` when nothing is scripted.
+#[cfg(test)]
+fn next_scripted<T: Clone>(script: &std::sync::Mutex<std::collections::VecDeque<T>>) -> Option<T> {
+    let mut script = script.lock().unwrap_or_else(|error| error.into_inner());
+    if script.len() > 1 {
+        script.pop_front()
+    } else {
+        script.front().cloned()
+    }
 }
 
 #[cfg(test)]
@@ -1458,6 +1504,36 @@ impl FakeEngineFacade {
         self.scene_runtime_reports.store(Arc::new(reports));
     }
 
+    /// Makes the next reads of the scene reports return `readings` in order,
+    /// one per read, and then the last of them for every read after. The
+    /// stored value is used again only once the script is empty.
+    pub fn script_scene_runtime_reports(&self, readings: Vec<Vec<SceneRuntimeReport>>) {
+        *self
+            .scene_runtime_report_script
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = readings.into();
+    }
+
+    /// As [`Self::script_scene_runtime_reports`], for the display snapshot.
+    pub fn script_display_snapshots(&self, readings: Vec<Vec<DisplaySnapshotEntry>>) {
+        *self
+            .display_snapshot_script
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = readings.into();
+    }
+
+    /// Every surface repair the engine was asked for, in order.
+    #[must_use]
+    pub fn recover_calls(&self) -> Vec<(u32, RecoveryReason)> {
+        load_log(&self.recover_calls)
+    }
+
+    /// What every later [`EngineFacade::recover_surface`] call answers. Left
+    /// unset the fake reports a repair by a surface reconfigure.
+    pub fn set_recover_result(&self, result: Result<RecoveryOutcome, String>) {
+        self.recover_result.store(Arc::new(Some(result)));
+    }
+
     /// Sets what the next spectrum read returns. `None` is "no analysis yet".
     pub fn set_audio_spectrum(&self, spectrum: Option<AudioSpectrum128>) {
         self.audio_spectrum.store(Arc::new(spectrum));
@@ -1740,6 +1816,9 @@ impl EngineFacade for FakeEngineFacade {
     }
 
     fn display_snapshot(&self) -> Vec<DisplaySnapshotEntry> {
+        if let Some(scripted) = next_scripted(&self.display_snapshot_script) {
+            return scripted;
+        }
         self.snapshot.load_full().as_ref().clone()
     }
 
@@ -2046,7 +2125,25 @@ impl EngineFacade for FakeEngineFacade {
     }
 
     fn scene_runtime_reports(&self) -> Vec<SceneRuntimeReport> {
+        if let Some(scripted) = next_scripted(&self.scene_runtime_report_script) {
+            return scripted;
+        }
         self.scene_runtime_reports.load().as_ref().clone()
+    }
+
+    fn recover_surface(
+        &self,
+        display_id: u32,
+        reason: RecoveryReason,
+    ) -> EngineFuture<RecoveryOutcome> {
+        push_log(&self.recover_calls, (display_id, reason));
+        let result = self.recover_result.load_full().as_ref().clone().unwrap_or(Ok(
+            RecoveryOutcome::Recovered {
+                step: wallpaper_core::RecoveryStep::Reconfigure,
+                attempt: 1,
+            },
+        ));
+        async move { result.map_err(EngineError::Render) }.boxed()
     }
 
     fn current_audio_spectrum(&self) -> Result<Option<AudioSpectrum128>, EngineError> {

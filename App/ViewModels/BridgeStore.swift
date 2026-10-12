@@ -905,6 +905,14 @@ final class BridgeStore {
         try await bridge.rendererCounters()
     }
 
+    /// Has the renderer confirm that every scene which should be drawing still is,
+    /// and rebuild the surface of any that is not. Waits a few seconds inside the
+    /// bridge; it takes none of the store's lanes, so a command is never held up
+    /// behind it. The caller decides when the check is safe to start.
+    func revalidateScenePresentationAsync(reason: String) async throws -> [BridgeSurfaceCheck] {
+        try await bridge.revalidateScenePresentation(reason: reason)
+    }
+
     func ejectWallpaperFromDisplayAsync(
         displayId: String,
         wallpaperId: String

@@ -211,6 +211,29 @@ impl<E: EngineFacade> BridgeActorHandle<E> {
         self.actor.ask(message).await.map_err(map_send_error)
     }
 
+    /// Runs `future` on the runtime that drives this bridge's actor, and
+    /// waits for it. For work that waits on a timer and so cannot run on
+    /// whatever executor the host happens to poll a call with.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the runtime has been shut down or the task
+    /// panicked.
+    pub async fn run_on_runtime<F, T>(&self, future: F) -> Result<T, BridgeError>
+    where
+        F: std::future::Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let runtime = self
+            .runtime
+            .as_ref()
+            .ok_or_else(|| BridgeError::engine("the bridge runtime has shut down"))?;
+        runtime
+            .spawn(future)
+            .await
+            .map_err(|error| BridgeError::engine(format!("a background check failed: {error}")))
+    }
+
     pub fn blocking_ask<M, T>(&self, message: M) -> Result<T, BridgeError>
     where
         BridgeActor<E>: Message<M>,

@@ -558,6 +558,27 @@ engine to redo, and when.
   reading it as absent would close the scene and reload it after the glitch. All
   descriptors are synthetic; a real display that reports 0x0 while connecting was
   not reproduced.
+- **A wake repairs only a scene that stopped drawing** — `wake_revalidation::*` in the bridge
+  (`a_scene_whose_frames_advanced_is_left_alone`,
+  `::a_continuous_scene_with_flat_frames_is_recovered_once`,
+  `::a_paused_or_suspended_display_is_never_probed`,
+  `::a_waiting_for_event_scene_is_never_recovered_even_with_flat_frames`,
+  `::a_stopped_latch_is_recovered_without_waiting_for_the_grace`,
+  `::a_replaced_renderer_whose_counter_restarted_is_not_stale`,
+  `::the_call_reaches_the_engine_through_both_facade_halves` and
+  `::two_checks_at_once_run_one_after_the_other`), and `SystemWakeRevalidatorTests` and the
+  resume tests in `WallpaperPresentationPolicyTests` (`testAGlobalResumeIsAnnouncedAndASuspendIsNot`,
+  `testResumingOneDisplayIsAnnouncedAndHidingOrNeverHidingIsNot`,
+  `testAResumeTheBridgeRefusesIsAnnouncedWhenItLands`). The check reads each continuous,
+  unpaused scene's `frames_completed` twice and hands the engine's budgeted recovery only
+  the one that stood still, so a Mac that woke well rebuilds nothing. The signal must stay
+  completed frames: a still scene completes frames without presenting, so a check built on
+  presents would rebuild every static wallpaper. Paused, event-driven and unreadable scenes
+  must never be repaired, a counter that went backwards is a replaced renderer, not a stalled
+  one, the forward through `ArcEngineFacade` must reach the engine (a missing one answers
+  "no scene" to every repair), and two checks must not overlap or one stall spends two rungs
+  of the ladder. The readings are scripted: whether a real surface stops across a sleep, and
+  whether the reconfigure restores it, needs an authorized sleep and wake.
 - **A reconcile keeps an unchanged scene** — `settings_intents::a_reconcile_does_not_reload_a_scene_held_to_the_frame_rate_cap`,
   `::a_reconcile_does_not_reload_a_scene_muted_for_other_audio` and
   `performance_settings::wallpapers_applied_under_a_frame_rate_cap_start_at_the_capped_rate`.

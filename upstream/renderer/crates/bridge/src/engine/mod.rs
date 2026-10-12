@@ -1,6 +1,7 @@
 mod activation;
 mod facade;
 mod load_journal;
+pub(crate) mod revalidate;
 
 pub use activation::{
     ActivationInputs, NativeVideoRejection, NativeVideoRejections, RenderBackendSurvey,

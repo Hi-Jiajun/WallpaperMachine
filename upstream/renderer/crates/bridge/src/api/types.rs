@@ -641,6 +641,23 @@ pub struct BridgeRendererCountersReport {
     pub presentation_feedback_available: bool,
 }
 
+/// What the check after the Mac wakes concluded about one display's scene.
+///
+/// `outcome` is one of a fixed set of names: `ok` (the scene's frame loop
+/// moved), `repaired` (it had stopped and the engine rebuilt its surface),
+/// `recovery_pending` (a repair was already under way), `gave_up` (this
+/// minute's repair attempts were spent, so the scene stays stopped),
+/// `recovery_failed`, and `skipped_paused`, `skipped_not_continuous`,
+/// `skipped_unreadable` or `skipped_changed` for a scene that was not probed.
+/// The frame counts are the renderer's `frames_completed` at the two readings.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct BridgeSurfaceCheck {
+    pub display_id: u32,
+    pub outcome: String,
+    pub frames_before: u64,
+    pub frames_after: u64,
+}
+
 /// A plain local video routed to the native platform player instead of the
 /// scene engine.
 ///

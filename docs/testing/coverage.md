@@ -94,8 +94,18 @@ waiting one.
   (asked only when it can have changed, re-asked on wake and user switch, a
   missed unlock clearing at the next evaluation), full occlusion and a covered
   working area suspending after the settle delay, per-display independence,
-  reconnect handling, retried failed suspends and resumes, and `stop()` resuming
-  every suspended surface.
+  reconnect handling, retried failed suspends and resumes, `stop()` resuming
+  every suspended surface, and the resume announcement (`onResumed`) after a global
+  or per-display resume, but not after a suspend, a refused delivery or teardown.
+- `SystemWakeRevalidatorTests` — against a private notification center and
+  injected delays, idle wait and bridge call: a wake's two notifications are one
+  check, a check waits for the command queue, a wake at the lock screen is checked
+  when presentation resumes, a newer wake supersedes a waiting one, `stop()`
+  cancels, a bridge failure is reported and not thrown, and the summary counts
+  repaired, skipped and still-stopped displays (as counts, with the warning that
+  goes with a repair; one test pins the wording of the log lines, which are the
+  ones the diagnostics doc shows). The bridge's half is `wake_revalidation` in
+  `wallpaper-bridge`.
 - `PlaybackPolicyCompositionTests`, `PlaybackPreferencesTests`,
   `AppRuleMonitorTests`, `OtherAudioMonitorTests` — how sleep, lock, app rules
   and other-app audio compose (Stop beats Pause, Keep running ignores audio),
@@ -122,8 +132,9 @@ waiting one.
   throttled; only a new window number or a moved display starts a check.
 
 Not covered: the real Focus Settings pane and a real Low Power Mode; real
-wallpaper windows on another Space and the effect of either repair step (needs a
-desktop run).
+wallpaper windows on another Space and the effect of either repair step; whether
+a scene surface stops producing frames across a real sleep and wake, and whether
+the wake check's repair restores it (needs a desktop run).
 
 ### Spaces
 

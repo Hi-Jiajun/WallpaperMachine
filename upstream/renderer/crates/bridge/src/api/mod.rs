@@ -4,6 +4,7 @@ mod types;
 use std::{
     pin::Pin,
     sync::{Arc, Condvar, Mutex, MutexGuard},
+    time::Duration,
 };
 
 pub use error::{BridgeError, BridgeErrorKind};
@@ -18,8 +19,8 @@ pub use types::{
     BridgePropertyKind, BridgePropertyValue, BridgeRendererCountersReport,
     BridgeRendererSurfaceCounters, BridgeScalingMode, BridgeSceneBackendReport,
     BridgeSceneUpdateModeReport, BridgeSettingsSnapshot, BridgeUserShortcut,
-    BridgeSliderMetadata, BridgeSnapshotBundle, BridgeStorageStatus, BridgeVideoBackendReport,
-    BridgeWallpaperEntry,
+    BridgeSliderMetadata, BridgeSnapshotBundle, BridgeStorageStatus, BridgeSurfaceCheck,
+    BridgeVideoBackendReport, BridgeWallpaperEntry,
     BridgeWallpaperKind, BridgeWallpaperMutationBundle, BridgeWallpaperOptionsSnapshot,
     BridgeWebWallpaper,
 };
@@ -129,6 +130,7 @@ pub struct BridgeBuilder<E: EngineFacade> {
     mouse_polling_enabled: bool,
     power_watching_enabled: bool,
     startup_power_source: Option<PowerSource>,
+    wake_check_grace: Duration,
 }
 
 impl<E: EngineFacade> BridgeBuilder<E> {
@@ -143,6 +145,7 @@ impl<E: EngineFacade> BridgeBuilder<E> {
             mouse_polling_enabled: true,
             power_watching_enabled: !cfg!(test),
             startup_power_source: None,
+            wake_check_grace: crate::engine::revalidate::GRACE,
         }
     }
 
@@ -183,6 +186,13 @@ impl<E: EngineFacade> BridgeBuilder<E> {
     #[cfg(test)]
     pub fn with_startup_power_source(mut self, source: PowerSource) -> Self {
         self.startup_power_source = Some(source);
+        self
+    }
+
+    /// How long the check after a wake waits between its two readings.
+    #[cfg(test)]
+    pub fn with_wake_check_grace(mut self, grace: Duration) -> Self {
+        self.wake_check_grace = grace;
         self
     }
 
@@ -311,6 +321,8 @@ impl<E: EngineFacade> BridgeBuilder<E> {
             _config_store: self.config_store,
             load_journal,
             user_shortcuts: tokio::sync::Mutex::new(shortcut_receiver),
+            wake_check_turn: Arc::default(),
+            wake_check_grace: self.wake_check_grace,
         })
     }
 }
@@ -598,6 +610,11 @@ pub struct WallpaperBridge {
     /// actor: awaiting one inside a message handler would stall the mailbox for
     /// every other request while nobody is pressing anything.
     user_shortcuts: tokio::sync::Mutex<tokio::sync::mpsc::Receiver<BridgeUserShortcut>>,
+    /// One check after a wake at a time. Two overlapping checks would each find
+    /// the same stalled scene and spend two rungs of its recovery ladder on one
+    /// fault.
+    wake_check_turn: Arc<tokio::sync::Mutex<()>>,
+    wake_check_grace: Duration,
 }
 
 #[derive(Clone)]
@@ -706,6 +723,19 @@ impl EngineFacade for ArcEngineFacade {
 
     fn scene_runtime_reports(&self) -> Vec<crate::engine::SceneRuntimeReport> {
         self.0.scene_runtime_reports()
+    }
+
+    fn recover_surface(
+        &self,
+        display_id: u32,
+        reason: wallpaper_core::RecoveryReason,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<wallpaper_core::RecoveryOutcome, wallpaper_core::EngineError>>
+                + Send,
+        >,
+    > {
+        self.0.recover_surface(display_id, reason)
     }
 
     fn current_audio_spectrum(
@@ -1569,6 +1599,57 @@ impl WallpaperBridge {
     /// Returns an error when the renderer rejects the call.
     pub async fn renderer_counters(&self) -> Result<BridgeRendererCountersReport, BridgeError> {
         self.actor.ask(RendererCounters).await
+    }
+
+    /// Confirms that every scene that should be drawing still is, and has the
+    /// engine rebuild the surface of any that is not. The host calls it once
+    /// after the Mac or its displays wake, and again when presentation resumes
+    /// after a wake that landed on a locked session.
+    ///
+    /// Nothing is rebuilt on a healthy Mac. The check reads each scene's frame
+    /// counter, waits a few seconds and reads it again; only a continuous scene
+    /// on an unpaused display whose counter did not move, or one that has
+    /// stopped itself after a failure, is repaired, through the same budgeted
+    /// recovery the engine uses for a failed frame. Paused and suspended
+    /// displays, scenes that update on events, web pages and native video are
+    /// never touched. One row comes back for every display with a scene open.
+    ///
+    /// The wait happens outside the actor, so it stalls no other request, and
+    /// a second call waits for the first rather than overlapping it. `reason`
+    /// names what triggered the check in the log.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the bridge's runtime is gone or the check task
+    /// failed.
+    pub async fn revalidate_scene_presentation(
+        &self,
+        reason: String,
+    ) -> Result<Vec<BridgeSurfaceCheck>, BridgeError> {
+        let engine = self.engine.clone();
+        let turn = Arc::clone(&self.wake_check_turn);
+        let grace = self.wake_check_grace;
+        // The check waits on a timer, which needs the bridge's own runtime: the
+        // future the host polls is not running on one.
+        let checks = self
+            .actor
+            .run_on_runtime(async move {
+                let _turn = turn.lock().await;
+                log::info!(
+                    "[wallpaper-bridge power] wake check ({reason}): looking at scene surfaces"
+                );
+                crate::engine::revalidate::revalidate_presentation(&engine, grace).await
+            })
+            .await?;
+        Ok(checks
+            .into_iter()
+            .map(|check| BridgeSurfaceCheck {
+                display_id: check.display_id,
+                outcome: check.outcome().to_owned(),
+                frames_before: check.frames_before,
+                frames_after: check.frames_after,
+            })
+            .collect())
     }
 
     /// Chooses which renderer plays plain local videos.

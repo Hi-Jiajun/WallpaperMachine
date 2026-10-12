@@ -35,6 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var nativeVideoHost: NativeVideoWallpaperHost?
     private var presentationPolicy: WallpaperPresentationPolicy?
     private var windowAuditor: WallpaperWindowAuditor?
+    private var wakeRevalidator: SystemWakeRevalidator?
     private var appRuleMonitor: AppRuleMonitor?
     private var otherAudioMonitor: OtherAudioMonitor?
     private var systemConditionMonitor: SystemConditionMonitor?
@@ -401,6 +402,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 isDesktopSpace: { WallpaperWindowAuditor.spaceIsDesktop(displayID: $0, in: .shared) })
             windowAuditor = auditor
             auditor.start()
+            let revalidator = SystemWakeRevalidator(
+                isPresenting: { [weak self] in self?.presentationPolicy?.globalPresentation == .running },
+                // Behind a running Apply, in its turn and without polling.
+                waitForIdle: { [weak store] in _ = await store?.commands.run {} },
+                perform: { [weak self, weak store] reason in
+                    guard let self, let store, !self.shutdownInProgress, !self.shutdownComplete else { return [] }
+                    return try await store.revalidateScenePresentationAsync(reason: reason)
+                })
+            wakeRevalidator = revalidator
+            revalidator.start()
+            policy.onResumed = { [weak self] in
+                guard let self, !self.shutdownInProgress else { return }
+                self.wakeRevalidator?.presentationResumed()
+            }
             startPlaylistScheduler(store: store)
             startAutomaticWallpapers(store: store)
             // The Shortcuts app lists these; commands wait for the handler set after bootstrap.
@@ -684,6 +699,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         presentationPolicy = nil
         windowAuditor?.stop()
         windowAuditor = nil
+        wakeRevalidator?.stop()
+        wakeRevalidator = nil
         desktopWallpaperSync?.stop()
         previewWindow?.session.close()
         previewWindow?.close()
@@ -854,6 +871,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 presentationPolicy = nil
                 windowAuditor?.stop()
                 windowAuditor = nil
+                wakeRevalidator?.stop()
+                wakeRevalidator = nil
                 desktopWallpaperSync = nil
                 sceneMediaSink?.shutdown()
                 sceneMediaSink = nil

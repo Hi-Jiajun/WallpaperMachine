@@ -34,7 +34,7 @@ pub use api::{
     BridgeMonitorInfoRow, BridgeMonitorInformationSnapshot, BridgePlaybackState, BridgeBatteryMode,
     BridgePropertyDescriptor, BridgePropertyKind, BridgePropertyValue, BridgeScalingMode,
     BridgeSceneBackendReport, BridgeSceneUpdateModeReport, BridgeSettingsSnapshot,
-    BridgeSliderMetadata, BridgeSnapshotBundle, BridgeStorageStatus,
+    BridgeSliderMetadata, BridgeSnapshotBundle, BridgeStorageStatus, BridgeSurfaceCheck,
     BridgeVideoBackendReport, BridgeWallpaperEntry, BridgeWallpaperKind,
     BridgeWallpaperMutationBundle,
     BridgeWallpaperOptionsSnapshot, WallpaperBridge,

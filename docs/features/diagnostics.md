@@ -383,9 +383,44 @@ The default is off because moving windows can make the window server recompose a
 the fault has not been seen on macOS 27.x. Whether to turn it on waits for a log from a
 Mac that shows the fault.
 
+### Wake check
+
+After the Mac wakes the app confirms that its scenes draw again
+([performance](performance.md#playback) has what is checked and what is left alone). A
+healthy wake writes information lines; a scene that was found stalled is a warning.
+
+```
+[wallpaper-bridge power] wake check (didWake): looking at scene surfaces
+[wallpaper-bridge power] wake check: display 2 skipped (paused)
+[wallpaper-bridge power] wake check: display 1 ok (frames 412 -> 598)
+wake check (didWake): 1 display checked, 0 repaired, 1 skipped
+```
+
+The bridge writes the first lines while the check runs, one per display, and the app
+writes the summary when it returns. A check that found trouble looks like this:
+
+```
+[wallpaper-bridge power] wake check (didWake): looking at scene surfaces
+[wallpaper-bridge power] wake check: display 1 stalled (no frames in 3.0 s, frames 412 -> 412); reconfigured the surface (attempt 1)
+wake check (didWake, once presentation resumed): 1 display checked, 1 repaired
+```
+
+`once presentation resumed` means the wake landed while the wallpaper was suspended (the
+lock screen, usually) and the check ran when it resumed. The outcomes the bridge reports
+per display are `ok`, `repaired`, `recovery_pending` (a repair was already under way),
+`gave_up` (this minute's attempts are spent, so the scene stays stopped),
+`recovery_failed`, and `skipped_paused`, `skipped_not_continuous` (an event-driven scene),
+`skipped_unreadable` (the renderer returned no reading) and `skipped_changed` (the display's
+scene was replaced while the check waited). The summary counts `gave_up`,
+`recovery_pending` and `recovery_failed` as "still not drawing" and writes a warning for
+them as well as for a repair. A check that fails to reach the bridge writes
+`wake check (…) failed: …` and is not retried.
+
 ## Verification
 
 - Rust:
+  - `tests::wake_revalidation` (`upstream/renderer/crates/bridge/src/tests/`): which scenes
+    the wake check probes and repairs, against scripted frame counters.
   - `logging::tests` (`upstream/renderer/crates/bridge/src/logging.rs`): line format, load tag, session and
     file retention.
   - `log_context::tests` (`upstream/renderer/crates/core/src/log_context.rs`): scope nesting, project summary.
@@ -398,6 +433,9 @@ Mac that shows the fault.
   and `WallpaperWindowAuditorTests` (when the audit looks and stops, what it logs and how
   often, the repair ladder and its budget, and when it stays silent, with injected
   observations and delays).
+  `SystemWakeRevalidatorTests` (when the wake check is asked for, deferred and
+  superseded, and how its answer is logged, with injected notifications, delays and
+  bridge answers).
 - Not established by tests:
   - that a real scene's renderer lines carry its number on the desktop;
   - the unreadable-folder note on a Mac whose account is not in `_analyticsusers`

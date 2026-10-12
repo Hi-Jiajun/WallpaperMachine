@@ -696,4 +696,111 @@ final class WallpaperPresentationPolicyTests: XCTestCase {
             probe.displayDecisions(for: 1), [true, false],
             "Teardown must resume a display it had suspended")
     }
+
+    // MARK: Resume announcements
+
+    func testAGlobalResumeIsAnnouncedAndASuspendIsNot() {
+        let probe = PolicyProbe()
+        let policy = makePolicy(probe)
+        var resumes = 0
+        policy.onResumed = { resumes += 1 }
+        policy.start()
+        defer { policy.stop() }
+        XCTAssertEqual(resumes, 0, "a desktop that was never suspended has nothing to resume")
+
+        workspaceCenter.post(name: NSWorkspace.screensDidSleepNotification, object: nil)
+        XCTAssertEqual(resumes, 0, "suspending is not a resume")
+
+        workspaceCenter.post(name: NSWorkspace.screensDidWakeNotification, object: nil)
+        XCTAssertEqual(resumes, 1)
+        XCTAssertEqual(probe.applied, [true, false])
+    }
+
+    func testAUnloadedDesktopThatOnlyBecomesSuspendedHasNotResumed() {
+        let probe = PolicyProbe()
+        var action = DisplaySleepAction.stop
+        let policy = WallpaperPresentationPolicy(
+            workspaceCenter: workspaceCenter, lockCenter: lockCenter, windowCenter: windowCenter,
+            surfaces: { probe.surfaces }, isSessionLocked: { probe.sessionLocked },
+            displaySleepAction: { action },
+            applyGlobal: { _, completion in completion(.success(())) },
+            applyDisplay: { _, _, completion in completion(.success(())) })
+        var resumes = 0
+        policy.onResumed = { resumes += 1 }
+        policy.start()
+        defer { policy.stop() }
+
+        workspaceCenter.post(name: NSWorkspace.screensDidSleepNotification, object: nil)
+        action = .pause
+        policy.evaluate()
+        XCTAssertEqual(resumes, 0, "unloaded to suspended still shows nothing")
+
+        workspaceCenter.post(name: NSWorkspace.screensDidWakeNotification, object: nil)
+        XCTAssertEqual(resumes, 1)
+    }
+
+    func testAResumeTheBridgeRefusesIsAnnouncedWhenItLands() {
+        let probe = PolicyProbe()
+        var accepting = true
+        let policy = WallpaperPresentationPolicy(
+            workspaceCenter: workspaceCenter, lockCenter: lockCenter, windowCenter: windowCenter,
+            surfaces: { probe.surfaces }, isSessionLocked: { probe.sessionLocked },
+            applyGlobal: { _, completion in completion(accepting ? .success(()) : .failure(CancellationError())) },
+            applyDisplay: { _, _, completion in completion(.success(())) })
+        var resumes = 0
+        policy.onResumed = { resumes += 1 }
+        policy.start()
+        defer { policy.stop() }
+
+        workspaceCenter.post(name: NSWorkspace.screensDidSleepNotification, object: nil)
+        accepting = false
+        workspaceCenter.post(name: NSWorkspace.screensDidWakeNotification, object: nil)
+        XCTAssertEqual(resumes, 0, "the scenes are still suspended: nothing has resumed")
+
+        accepting = true
+        policy.evaluate()
+        XCTAssertEqual(resumes, 1, "the retried resume is the one that is announced, once")
+        policy.evaluate()
+        XCTAssertEqual(resumes, 1)
+    }
+
+    func testResumingOneDisplayIsAnnouncedAndHidingOrNeverHidingIsNot() {
+        let probe = PolicyProbe()
+        probe.surfaces = [
+            WallpaperSurfaceVisibility(displayID: 1, isVisible: true),
+            WallpaperSurfaceVisibility(displayID: 2, isVisible: true),
+        ]
+        let policy = makePolicy(probe, settle: .zero)
+        var resumes = 0
+        policy.onResumed = { resumes += 1 }
+        policy.start()
+        defer { policy.stop() }
+        XCTAssertEqual(resumes, 0, "displays that were never told anything are presenting already")
+
+        probe.setVisible(false, display: 1)
+        policy.evaluate()
+        XCTAssertEqual(probe.displayDecisions(for: 1), [true])
+        XCTAssertEqual(resumes, 0, "hiding a display is not a resume")
+
+        probe.setVisible(true, display: 1)
+        policy.evaluate()
+        XCTAssertEqual(probe.displayDecisions(for: 1), [true, false])
+        XCTAssertEqual(resumes, 1)
+        XCTAssertEqual(probe.displayDecisions(for: 2), [], "the other display never changed")
+    }
+
+    func testTearingDownDoesNotAnnounceItsOwnResume() {
+        let probe = PolicyProbe()
+        let policy = makePolicy(probe)
+        var resumes = 0
+        policy.onResumed = { resumes += 1 }
+        policy.start()
+        workspaceCenter.post(name: NSWorkspace.screensDidSleepNotification, object: nil)
+        XCTAssertTrue(policy.isSuspended)
+
+        policy.stop()
+
+        XCTAssertEqual(probe.applied.last, false, "teardown still resumes the engine")
+        XCTAssertEqual(resumes, 0, "but it is not the wallpaper presenting again for a wake to be checked")
+    }
 }
