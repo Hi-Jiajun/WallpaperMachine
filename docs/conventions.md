@@ -191,7 +191,7 @@ The rules that bind every change:
 - The type is not decoration. `scripts/release_notes.py` hands every commit in a
   release to the release-notes model, which writes the user-facing notes: `feat`,
   `fix`, `perf` and breaking commits arrive with their body, `docs`, `test`,
-  `chore`, `ci`, `build` and `style` with their subject only, as internal work to
+  `chore`, `ci`, `build`, `style` and `refactor` with their subject only, as internal work to
   leave out. The subject and body are therefore what users end up reading on the
   release page and in the app's What's new card, so write them for users. Without
   `--ai` the same script lists the commits by type instead. See

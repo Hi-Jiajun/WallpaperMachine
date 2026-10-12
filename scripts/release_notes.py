@@ -87,6 +87,7 @@ GROUPS = {
     "ci": "internal",
     "build": "internal",
     "style": "internal",
+    "refactor": "internal",
 }
 SECTIONS = (
     ("breaking", "Breaking changes"),
@@ -388,8 +389,8 @@ def install_footer(version, target=None, built_from=None):
         f"1. Download `{image}` and open it.",
         f"2. Drag {APPLICATION} onto the Applications folder in the window that opens. In-app updates",
         "   replace a copy in `/Applications` or `~/Applications` and nowhere else.",
-        "3. The build is ad-hoc signed and not notarized, so macOS stops its first launch: open",
-        "   System Settings → Privacy & Security, click Open Anyway, and confirm.",
+        "3. The app is signed with the project's own certificate but not notarized, so macOS stops",
+        "   its first launch: open System Settings → Privacy & Security, click Open Anyway, and confirm.",
         "",
         "### Verify the download",
         "",

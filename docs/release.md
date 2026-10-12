@@ -115,7 +115,7 @@ The release pipeline always passes `--ai`.
 | `RELEASE_NOTES_MODEL` | `claude-opus-5-5` | The model that writes the notes |
 
 The model reads every non-merge commit in the range, newest first, except CI's own
-`chore: bump version to x.y.z`. `docs`, `test`, `chore`, `ci`, `build` and `style`
+`chore: bump version to x.y.z`. `docs`, `test`, `chore`, `ci`, `build`, `style` and `refactor`
 commits bring only their subject; every other commit (`feat`, `fix`, `perf`,
 breaking ones, and types or subjects the convention does not recognise) brings
 its body, cut at 1,500 characters, until 120,000 characters of bodies are spent.
@@ -178,7 +178,7 @@ would introduce an English-only section; translate missing history before applyi
 | `fix` | **Fixed** |
 | `perf` | **Performance** |
 | `!` suffix or a `BREAKING CHANGE:` trailer | **Breaking changes** |
-| `docs`, `test`, `chore`, `ci`, `build`, `style` | counted in one closing line |
+| `docs`, `test`, `chore`, `ci`, `build`, `style`, `refactor` | counted in one closing line |
 | anything else, including non-conventional subjects | **Other changes** |
 
 Nothing is dropped silently: a subject the convention does not recognise is

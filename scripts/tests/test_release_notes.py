@@ -45,7 +45,8 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(release_notes.classify("b", "perf(renderer): skip a pass").group, "performance")
 
     def test_documentation_and_tooling_are_internal(self):
-        for subject in ("docs: record a run", "test(panel): settle first", "chore(xcode): regenerate", "ci: cache cargo"):
+        for subject in ("docs: record a run", "test(panel): settle first", "chore(xcode): regenerate", "ci: cache cargo",
+                        "refactor(media): remove an unused provider"):
             self.assertEqual(release_notes.classify("a", subject).group, "internal", subject)
 
     def test_unconventional_subject_is_listed_not_dropped(self):
