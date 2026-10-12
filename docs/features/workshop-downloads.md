@@ -431,6 +431,14 @@ work.
 - **Dropped connections.** A download whose connection drops after sign-in
   retries itself up to three times before it fails (see [Prompt and retry
   handling](#prompt-and-retry-handling)); it keeps its slot while it waits.
+- **Sleep and wake.** A connection usually dies with the sleep and SteamCMD says
+  nothing, which used to leave the transfer idle until the five-minute inactivity
+  limit. When the Mac wakes (`NSWorkspace.didWakeNotification`, observed by the
+  manager and passed to every job that holds a slot) a transfer in progress is
+  watched for bytes: if none arrive within about 45 seconds it is restarted
+  through the same retry path as a dropped connection (see [Prompt and retry
+  handling](#prompt-and-retry-handling)); one that keeps receiving is left alone.
+  Jobs that are signing in, requesting, finishing or waiting are not touched.
 - **Cost of parallelism.** Every job signs in separately, a fixed cost per job, so
   extra slots mainly help batches of small items; large items share the link.
   SteamCMD's `@cMaxInitialDownloadSources` is not set.
@@ -638,6 +646,20 @@ generic or unrecognised failure (a removed or private item fails at once), a
 sign-in-only run, a failure or silence before Steam accepted the first sign-in,
 and SteamCMD exiting without confirming the download. Real SteamCMD output for a
 dropped connection has been checked only against a scripted stand-in.
+
+**After sleep.** When the Mac wakes while a transfer is running, the downloader
+starts a 45-second watch (`WorkshopDownloader.noteSystemResume`). A byte counter
+that grows after the wake ends the watch and changes nothing. If the grace period
+passes without a single new byte, the connection is taken to have died with the
+sleep and the pass is relaunched through the retry above, with the same count and
+waits: a wake restart uses up one of the three retries, and when none is left the
+download fails saying the connection stopped responding after the Mac woke. The
+watch belongs to the process that slept, so a relaunch (for any reason) starts
+without it, and a wake while the run is signing in or requesting is ignored. A
+sleep longer than the five-minute limit trips the inactivity check straight
+away, since it compares wall-clock dates (from the code; not observed on a real
+sleep). The 45 seconds is a guess that leaves Wi-Fi time to rejoin; it has not
+been measured on a real sleep.
 
 Parenthesized SteamCMD failures distinguish explicit credential rejection, Steam
 Guard, connection/service failures and rate limits, including compact result names

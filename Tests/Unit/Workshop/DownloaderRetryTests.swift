@@ -496,4 +496,196 @@ final class DownloaderRetryTests: DownloaderTestCase {
       throw error
     }
   }
+
+  // MARK: Waking from sleep
+
+  /// Waits for the downloader's next byte reading, which it checks its limits against in the
+  /// same main-actor turn.
+  private func nextCheck(_ monitor: FixtureNetworkMonitor, _ downloader: WorkshopDownloader)
+    async throws
+  {
+    let readings = monitor.receivedReadings
+    try await waitUntil { monitor.receivedReadings > readings || !downloader.isRunning }
+  }
+
+  /// A sleep usually kills the connection without a word from SteamCMD. Once the Mac has been
+  /// awake for the grace period without a single new byte, the transfer starts over, long before
+  /// the inactivity limit would have noticed.
+  func testSilentTransferAfterWakeIsRestarted() async throws {
+    let root = try makeRetryRuntime(
+      """
+      if [ "$attempt" -eq 1 ]; then
+          IFS= read -r finish
+          exit 0
+      fi
+      \(deliverItem)
+      """)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let (downloader, monitor, clock) = startClocked(in: root)
+    do {
+      try await waitUntil { monitor.startedPIDs.count == 1 }
+      downloader.noteSystemResume()
+      clock.date += 44
+      try await nextCheck(monitor, downloader)
+      XCTAssertTrue(downloader.isRunning, downloader.errorMessage ?? "")
+      XCTAssertEqual(attempts(in: root), 1, "Inside the grace period the connection gets the benefit of the doubt")
+      clock.date += 2
+      try await assertImported(downloader, in: root, itemID: "123456")
+      XCTAssertEqual(attempts(in: root), 2)
+      XCTAssertEqual(downloader.retryAttempt, 1)
+      XCTAssertNil(downloader.errorMessage)
+      XCTAssertNil(downloader.prompt, "The restart reuses the sign-in in its staging")
+      try assertNoStaging(in: root)
+    } catch {
+      await downloader.shutdown()
+      throw error
+    }
+  }
+
+  /// The same silence without a wake is left to the inactivity limit, so the restart above is
+  /// the wake's doing and not a shorter stall limit.
+  func testSilenceWithoutAWakeIsNotRestartedEarly() async throws {
+    let root = try makeRetryRuntime("IFS= read -r finish")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let (downloader, monitor, clock) = startClocked(in: root)
+    do {
+      try await waitUntil { monitor.startedPIDs.count == 1 }
+      clock.date += 120
+      try await nextCheck(monitor, downloader)
+      try await nextCheck(monitor, downloader)
+      XCTAssertTrue(downloader.isRunning, downloader.errorMessage ?? "")
+      XCTAssertEqual(attempts(in: root), 1)
+      XCTAssertNil(downloader.resumedAt)
+      await downloader.shutdown()
+    } catch {
+      await downloader.shutdown()
+      throw error
+    }
+  }
+
+  func testTransferThatKeepsGrowingAfterWakeIsLeftAlone() async throws {
+    let root = try makeRetryRuntime(
+      """
+      while [ ! -f ../go ]; do sleep 0.02; done
+      \(deliverItem)
+      """)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let (downloader, monitor, clock) = startClocked(in: root)
+    do {
+      try await waitUntil { monitor.startedPIDs.count == 1 }
+      downloader.noteSystemResume()
+      clock.date += 10
+      monitor.received = 4096
+      try await nextCheck(monitor, downloader)
+      XCTAssertNil(downloader.resumedAt, "Bytes after the wake show the connection survived")
+      // Well past the grace period, and still short of the inactivity limit.
+      clock.date += 100
+      try await nextCheck(monitor, downloader)
+      try await nextCheck(monitor, downloader)
+      XCTAssertTrue(downloader.isRunning, downloader.errorMessage ?? "")
+      XCTAssertEqual(attempts(in: root), 1)
+      try Data().write(to: root.appendingPathComponent("go"))
+      try await assertImported(downloader, in: root, itemID: "123456")
+      XCTAssertEqual(attempts(in: root), 1)
+      XCTAssertEqual(downloader.retryAttempt, 0)
+    } catch {
+      await downloader.shutdown()
+      throw error
+    }
+  }
+
+  /// Steam Guard may still be waiting for the user when the Mac wakes: nothing to restart, and
+  /// the wake must not count against the transfer that starts once the user has answered.
+  func testWakeIsIgnoredWhileSigningIn() async throws {
+    let root = try makeRuntime(
+      """
+      \(countLaunch)
+      printf 'password: '
+      IFS= read -r password
+      \(signedIn)
+      while [ ! -f ../go ]; do sleep 0.02; done
+      \(deliverItem)
+      """)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let (downloader, monitor, clock) = startClocked(in: root)
+    do {
+      try await waitUntil { downloader.prompt == .password }
+      downloader.noteSystemResume()
+      XCTAssertNil(downloader.resumedAt)
+      clock.date += 100
+      downloader.submitSecret("local-password")
+      try await waitUntil { monitor.startedPIDs.count == 1 }
+      try await nextCheck(monitor, downloader)
+      try await nextCheck(monitor, downloader)
+      XCTAssertTrue(downloader.isRunning, downloader.errorMessage ?? "")
+      XCTAssertEqual(attempts(in: root), 1, "A wake before the transfer began says nothing about it")
+      try Data().write(to: root.appendingPathComponent("go"))
+      try await assertImported(downloader, in: root, itemID: "123456")
+      XCTAssertEqual(attempts(in: root), 1)
+    } catch {
+      await downloader.shutdown()
+      throw error
+    }
+  }
+
+  /// The watch belongs to the process that slept. When something else ends it first, the
+  /// replacement must not be cut short for being silent since a wake it never lived through.
+  func testWakeWatchDoesNotOutliveTheProcessThatSlept() async throws {
+    let root = try makeRetryRuntime(
+      """
+      if [ "$attempt" -eq 1 ]; then
+          while [ ! -f ../drop ]; do sleep 0.02; done
+          printf 'ERROR! Download item 123456 failed (Timeout).\\n'
+          exit 1
+      fi
+      while [ ! -f ../go ]; do sleep 0.02; done
+      \(deliverItem)
+      """)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let (downloader, monitor, clock) = startClocked(in: root)
+    do {
+      try await waitUntil { monitor.startedPIDs.count == 1 }
+      downloader.noteSystemResume()
+      XCTAssertNotNil(downloader.resumedAt)
+      try Data().write(to: root.appendingPathComponent("drop"))
+      try await waitUntil { monitor.startedPIDs.count == 2 }
+      XCTAssertNil(downloader.resumedAt)
+      // Silent for longer than the grace period measured from the wake, which says nothing
+      // about a process that was not asleep.
+      clock.date += 60
+      try await nextCheck(monitor, downloader)
+      try await nextCheck(monitor, downloader)
+      XCTAssertTrue(downloader.isRunning, downloader.errorMessage ?? "")
+      XCTAssertEqual(attempts(in: root), 2)
+      try Data().write(to: root.appendingPathComponent("go"))
+      try await assertImported(downloader, in: root, itemID: "123456")
+      XCTAssertEqual(attempts(in: root), 2)
+      XCTAssertEqual(downloader.retryAttempt, 1)
+    } catch {
+      await downloader.shutdown()
+      throw error
+    }
+  }
+
+  /// A wake restart is a retry like any other, and the budget is the same: with none left the
+  /// download ends and says what happened.
+  func testWakeRestartEndsTheDownloadWhenNoRetriesAreLeft() async throws {
+    let root = try makeRetryRuntime("IFS= read -r finish")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let (downloader, monitor, clock) = startClocked(in: root, retryDelays: [])
+    do {
+      try await waitUntil { monitor.startedPIDs.count == 1 }
+      downloader.noteSystemResume()
+      clock.date += 46
+      try await waitForStop(downloader)
+      XCTAssertEqual(attempts(in: root), 1)
+      XCTAssertNotNil(downloader.errorMessage)
+      XCTAssertFalse(downloader.completedSuccessfully)
+      XCTAssertFalse(downloader.canRetryAuthentication, "A lost connection is not a sign-in failure")
+      try assertNoStaging(in: root)
+    } catch {
+      await downloader.shutdown()
+      throw error
+    }
+  }
 }

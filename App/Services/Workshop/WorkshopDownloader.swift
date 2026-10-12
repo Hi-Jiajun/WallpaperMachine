@@ -113,6 +113,14 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     @ObservationIgnored private var transientFailure = false
     /// Retries the pass in progress has used; a preset's base wallpaper starts its own count.
     private(set) var retryAttempt = 0
+    /// When the Mac last woke while a transfer was running, until bytes arrive again or SteamCMD is
+    /// relaunched. Sleep usually kills the connection without a word from SteamCMD, so the wait
+    /// for the inactivity limit is replaced by a short watch for bytes.
+    @ObservationIgnored private(set) var resumedAt: Date?
+    /// How long after a wake a transfer may stay silent before it is restarted.
+    @ObservationIgnored private let resumeGrace: TimeInterval
+    /// What the log calls this run, for lines written outside the run itself.
+    @ObservationIgnored private var runLabel = ""
     private(set) var isAuthenticating = true
     private static let failurePattern = try! NSRegularExpression(pattern: #"(?:failed|error!?)\s*\(([^)\r\n]+)\)"#)
 
@@ -132,7 +140,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
          inactivityTimeout: TimeInterval = 300, passTimeout: TimeInterval = 1800,
          now: @escaping () -> Date = Date.init,
          freeSpace: @escaping @Sendable (URL) -> Int64? = WorkshopDownloader.systemFreeSpace,
-         retryDelays: [TimeInterval] = [2, 8, 30]) {
+         retryDelays: [TimeInterval] = [2, 8, 30], resumeGrace: TimeInterval = 45) {
         self.sessionDirectory = sessionDirectory
         self.checkpointDirectory = checkpointDirectory
         self.inactivityTimeout = inactivityTimeout
@@ -140,6 +148,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         self.now = now
         self.freeSpace = freeSpace
         self.retryDelays = retryDelays
+        self.resumeGrace = resumeGrace
         self.runtimeProvider = runtimeProvider
         self.networkMonitor = networkMonitor ?? ProcessNetworkMonitor()
         savedAccount = Self.readSavedAccount(at: sessionDirectory)
@@ -245,6 +254,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         silentRetries = 0
         endedBySilence = false
         transientFailure = false
+        resumedAt = nil
         endedBySessionConflict = false
         signInHandedOff = false
         prompt = nil
@@ -255,6 +265,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         phase = .preparing
         status = signInOnly ? String(localized: "Preparing a private SteamCMD sign-in…") : String(localized: "Preparing a private SteamCMD download…")
         let label = itemID ?? (signInOnly ? "sign-in" : "shared assets")
+        runLabel = label
         loggedStatus = ""
         task = Task {
             let staging = root.appendingPathComponent(Self.stagingPrefix + UUID().uuidString, isDirectory: true)
@@ -335,6 +346,20 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
                                 bytesPerSecond = nil
                             }
                             let checked = now()
+                            if let woke = resumedAt {
+                                if let moved = lastTransferProgress, moved > woke {
+                                    // Bytes are arriving again: the connection survived the sleep.
+                                    resumedAt = nil
+                                } else if receivesNetwork, phase == .transferring, failure == nil,
+                                          checked.timeIntervalSince(woke) > resumeGrace {
+                                    // Nothing arrived since the Mac woke, so the connection died with
+                                    // the sleep. Relaunching resumes from Steam's partial manifests.
+                                    resumedAt = nil
+                                    transientFailure = true
+                                    failure = String(localized: "The connection to Steam stopped responding after the Mac woke from sleep. Check your connection and try again; what was already downloaded is kept.")
+                                    AppLog.warn("SteamCMD \(label): no bytes \(Int(resumeGrace.rounded())) s after the Mac woke; restarting the transfer")
+                                }
+                            }
                             let stalled = checked.timeIntervalSince(lastActivity) > inactivityTimeout
                             // A long pass is cut short only once its bytes have stopped arriving too.
                             let overlong = checked.timeIntervalSince(started) > passTimeout
@@ -566,6 +591,16 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         AppLog.warn("SteamCMD \(label): connection lost after sign-in; retry \(retryAttempt) of \(retryDelays.count) in \(Int(delay.rounded())) s")
     }
 
+    /// The Mac woke from sleep. A transfer that was running is watched rather than trusted: if no
+    /// byte arrives within `resumeGrace`, SteamCMD is relaunched through the retry path, and one
+    /// that keeps receiving is left alone. A run that was signing in or requesting has nothing to
+    /// restart (Steam Guard may be waiting for the user), so only a transfer in progress counts.
+    func noteSystemResume() {
+        guard isRunning, !isSigningInOnly, receivesNetwork, phase == .transferring, failure == nil else { return }
+        resumedAt = now()
+        AppLog.info("SteamCMD \(runLabel): Mac woke; watching for bytes")
+    }
+
     func submitSecret(_ value: String) {
         guard isRunning, prompt != nil, !value.isEmpty,
               !value.contains(where: { $0.isNewline || $0 == "\0" }), let terminal else { return }
@@ -662,6 +697,8 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         networkStarted = false
         lastActivity = now()
         lastTransferProgress = nil
+        // A new process has not slept; whatever the last one was waiting for no longer applies.
+        resumedAt = nil
         transferMarks = [:]
         do {
             process = try SteamCMDTerminalProcess(executable: executable, arguments: arguments,

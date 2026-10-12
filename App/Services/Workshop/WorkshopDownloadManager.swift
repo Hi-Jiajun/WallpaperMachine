@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 
@@ -105,6 +106,8 @@ final class WorkshopDownloadManager: SteamCMDDownloadActivity {
   @ObservationIgnored private let networkMonitorFactory: (@MainActor () -> any ProcessNetworkMonitoring)?
   @ObservationIgnored private var isShuttingDown = false
   @ObservationIgnored private var persistenceDirectory: URL?
+  @ObservationIgnored private let wakeCenter: NotificationCenter
+  @ObservationIgnored private var wakeObserver: NSObjectProtocol?
 
   private struct SavedDownload: Codable {
     let id: String
@@ -170,13 +173,31 @@ final class WorkshopDownloadManager: SteamCMDDownloadActivity {
       "SteamSession", isDirectory: true),
     runtimeProvider: any SteamCMDRuntimeProviding = SteamCMDRuntimeService(),
     maximumConcurrentDownloads: Int = WorkshopDownloadManager.defaultConcurrentDownloads,
-    networkMonitorFactory: (@MainActor () -> any ProcessNetworkMonitoring)? = nil
+    networkMonitorFactory: (@MainActor () -> any ProcessNetworkMonitoring)? = nil,
+    wakeCenter: NotificationCenter = NSWorkspace.shared.notificationCenter
   ) {
     self.sessionDirectory = sessionDirectory
     self.runtimeProvider = runtimeProvider
     self.networkMonitorFactory = networkMonitorFactory
+    self.wakeCenter = wakeCenter
     self.maximumConcurrentDownloads = Self.clampedConcurrentDownloads(maximumConcurrentDownloads)
     savedAccount = WorkshopDownloader.readSavedAccount(at: sessionDirectory)
+    // A connection often dies with the sleep; each running transfer checks that bytes still arrive.
+    wakeObserver = wakeCenter.addObserver(
+      forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+    ) { [weak self] _ in
+      MainActor.assumeIsolated { self?.systemDidWake() }
+    }
+  }
+
+  /// A manager that is dropped without `shutdown()` (every test builds one) must not leave its
+  /// observer on the shared workspace center for the rest of the process.
+  deinit {
+    if let wakeObserver { wakeCenter.removeObserver(wakeObserver) }
+  }
+
+  private func systemDidWake() {
+    for job in downloads where job.occupiesSlot { job.worker.noteSystemResume() }
   }
 
   func download(for itemID: String?) -> WorkshopDownload? {
@@ -298,6 +319,8 @@ final class WorkshopDownloadManager: SteamCMDDownloadActivity {
 
   func shutdown() async {
     isShuttingDown = true
+    if let wakeObserver { wakeCenter.removeObserver(wakeObserver) }
+    wakeObserver = nil
     // Stop every child before awaiting any one. Download bytes survive; sign-in prompts do not.
     for job in downloads where job.isPending {
       if job.isSignIn { cancel(job) } else { pause(job) }

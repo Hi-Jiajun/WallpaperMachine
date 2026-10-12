@@ -1058,6 +1058,14 @@ and `WorkshopDownloadPersistenceTests`:
   failure line is judged only once whole, whether a read stops before its reason
   or the process ends without a newline. Real SteamCMD output for a dropped
   connection is not covered.
+- Sleep and wake (`DownloaderRetryTests` on an injected clock and a frozen byte
+  meter; `DownloadQueueTests` with a private `NotificationCenter`): a transfer
+  silent for the grace period after a wake is relaunched in the same staging without
+  a prompt, one that receives bytes after the wake or never woke is left alone, a
+  wake while signing in or a watch left by a process that has since been replaced
+  never restarts anything, a restart uses the retry budget, and only running jobs
+  are told; a manager dropped without `shutdown()` takes its observer off the
+  center. A real sleep and wake during a live download is not covered.
 - `DownloadTelemetryTests` — download-speed sampling, including real `nettop`
   streaming (detail in [renderer.md](renderer.md)); `DownloaderLifecycleTests`
   report progress from disk growth against the listed size and stay
