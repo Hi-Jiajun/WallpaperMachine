@@ -174,8 +174,10 @@ have **Skip**:
    quality, or Pause. They are drafts: **Continue** commits only the ones that
    changed (`setting` actions, including `batteryMode`), **Skip** discards them.
    Launch at login is disabled with its reason while the app is outside
-   Applications; when renderer settings are unavailable the page says so and
-   disables the controls.
+   Applications. Started at login, the app stays in the menu bar without
+   opening the panel, unless this guide is unfinished or the renderer failed to
+   start (`ControlPanelLaunch`). When renderer settings are unavailable the
+   page says so and disables the controls.
    The last row, **Animate lock screen** (off by default, marked experimental),
    is not a draft: like Settings it sends `setting` / `lockScreenEnabled` at
    once, shows the native status while busy, is disabled when the integration

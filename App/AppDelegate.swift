@@ -60,6 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             NSApp.setActivationPolicy(.prohibited)
             return
         }
+        let launchEvent = NSAppleEventManager.shared().currentAppleEvent
         themeSubscription = AppThemeStore.shared.$preferences
             .map(\.mode).removeDuplicates()
             .sink { mode in NSApp.appearance = mode.appearance }
@@ -410,8 +411,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         finishedLaunching = true
         let opened = pendingOpenedFiles
         pendingOpenedFiles = []
+        let opensPanel = ControlPanelLaunch.opensPanel(
+            launchEvent: launchEvent,
+            welcomeSeen: ClientPreferences.defaults.bool(forKey: WebPanelController.welcomeSeenKey),
+            startupFailed: store == nil)
+        if !opensPanel { AppLog.info("startup: launched at login; control panel stays closed") }
         DispatchQueue.main.async { [weak self] in
-            self?.showControlPanel(selection: .wallpaper)
+            if opensPanel { self?.showControlPanel(selection: .wallpaper) }
             self?.showWhatsNewAfterUpdate()
             if !opened.isEmpty { self?.importOpenedFiles(opened) }
         }

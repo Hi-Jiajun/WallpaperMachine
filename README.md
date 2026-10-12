@@ -84,7 +84,8 @@ One window, four tabs: Discover, pixiv, Installed and Settings. The website runs
 same interface on a demo library, so you can
 [try it in your browser](https://www.wallpapermachine.app/#app). Close the
 window and the app keeps running in the menu bar, where you can pause, resume
-or go to the previous or next wallpaper.
+or go to the previous or next wallpaper. When it launches at login, it starts there
+without opening the window.
 
 | Feature | What it does |
 | --- | --- |
