@@ -370,9 +370,12 @@ cargo test -p shader --test pipeline -- --nocapture
   overall bytes) and the language-list cleaning in the same way; `power::tests`
   for the power-source watcher: a sleeping or just-started watcher stops promptly
   when dropped (the old five-second wake would fail it), a wake signalled before
-  the run loop starts is not lost, and a delivery the actor rejected is offered
-  again. They use the real run loop and `IOKit` source but fake the read and the
-  actor, and prove the sleep-until-signalled structure, not a measured saving.
+  the run loop starts is not lost, a delivery the actor rejected is offered again,
+  and a resample requested by the host delivers a changed source once, leaves an
+  unreadable one alone and does not delay shutdown (`tests::power_settings` applies
+  the battery policy from such a change through the bridge). They use the real run
+  loop and `IOKit` source but fake the read and the actor, and prove the
+  sleep-until-signalled structure, not a measured saving.
 - `shader`'s `pipeline` test skips asset-dependent cases (for example
   `genericimage4` and a Workshop package) with a printed `skipping …` reason; read
   those lines before claiming shader coverage. See

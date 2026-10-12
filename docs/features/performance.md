@@ -324,14 +324,18 @@ sent together: changing one resends the other as the engine currently reports it
 Reduced quality is in force only while that mode is selected and the Mac is on
 battery. A configuration saved with the former pause-on-battery switch maps to
 **Pause**, otherwise the former battery profile switch maps to **Reduced quality**.
+The power source is also read when the Mac wakes and again two seconds later,
+because a plug or unplug during sleep may not be reported; a change found that way
+applies the same rule, and a read that finds the same source as the one last applied
+changes nothing.
 
 The renderer applies all of this itself when the power source changes, and reports
-nothing back. The app watches the source too (`PowerSourceMonitor`, the system
-notification only) and then reads the snapshot again, repeating a few times until the
-renderer reports the source the system did, so the web pages and native video it
-hosts take in the pause, frame rate and render scale at once instead of at the next
-unrelated snapshot. The notification itself has not been exercised by unplugging a
-Mac in a test.
+nothing back. The app watches the source too (`PowerSourceMonitor`: the system
+notification, and the same two reads after a wake) and then reads the snapshot again,
+repeating a few times until the renderer reports the source the system did, so the
+web pages and native video it hosts take in the pause, frame rate and render scale at
+once instead of at the next unrelated snapshot. The notification itself has not been
+exercised by unplugging a Mac in a test.
 
 ### Low Power Mode, heat and Focus
 
@@ -523,7 +527,9 @@ nothing could see or hear.
   sleeps until macOS reports a change or the app quits. It used to wake every five
   seconds only to read a stop flag, and quitting could wait for that wake; it now
   stops at once. A power change the app could not apply is offered again at the next
-  change instead of being dropped. No power saving is claimed.
+  change instead of being dropped. The app can also ask it to read again when the Mac
+  wakes ([Playback](#playback)), which wakes the thread once before it sleeps again.
+  No power saving is claimed.
 
 The regression coverage for these is in
 [renderer verification](../testing/renderer.md#regression-areas-that-must-stay-covered).

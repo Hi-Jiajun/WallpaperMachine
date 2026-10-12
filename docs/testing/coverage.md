@@ -140,6 +140,14 @@ on the desktop ([manual-smoke.md](manual-smoke.md)).
   the last delay and on cancellation. The notification itself, and the race between
   the renderer's power thread and the app's observer, need a real plug or unplug and
   are not covered.
+- `PowerSourceResamplerTests` use a private notification center and a sleep the test
+  releases: a wake reads at once and once more at the follow-up, a display wake
+  right after a system wake gives two reads now and one follow-up, a later wake
+  gets its own follow-up, and `stop()` cancels a pending follow-up and ends
+  observation. The Rust `power::tests` and `tests::power_settings` prove the other
+  half with a fake reader: a changed source is delivered once, a delivery the
+  actor rejected is offered again, an unreadable source is left alone, and the
+  battery policy is applied through the bridge from a change nobody reported.
 - `DisplayRefreshCoalescerTests` — a burst during a refresh is answered by one
   more; screen changes that leave the displays as they were refresh nothing; a
   failed refresh is retried. `DisplayTitleResolverTests` — localized display
@@ -155,10 +163,11 @@ on the desktop ([manual-smoke.md](manual-smoke.md)).
   paused or for a Space fault in a full-screen Space; repeated reports are
   throttled; only a new window number or a moved display starts a check.
 
-Not covered: the real Focus Settings pane and a real Low Power Mode; real
-wallpaper windows on another Space and the effect of either repair step; whether
-a scene surface stops producing frames across a real sleep and wake, and whether
-the wake check's repair restores it (needs a desktop run).
+Not covered: the real Focus Settings pane and a real Low Power Mode; a real plug or
+unplug during sleep, including whether `IOKit` answers correctly the moment the Mac
+wakes; real wallpaper windows on another Space and the effect of either repair step;
+whether a scene surface stops producing frames across a real sleep and wake, and
+whether the wake check's repair restores it (needs a desktop run).
 
 ### Spaces
 

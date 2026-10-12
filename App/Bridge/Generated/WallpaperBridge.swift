@@ -863,6 +863,14 @@ public protocol WallpaperBridgeProtocol : AnyObject {
     func reportHostWallpaperStartup(displayId: UInt32, wallpaperId: String, startupRevision: UInt64, nativeAdmissionKey: UInt64?, ready: Bool) async throws  -> BridgeSnapshotBundle
     
     /**
+     * Asks the power watcher to read the power source again and apply the battery policy if
+     * it differs from the one last applied. The host calls it when the Mac wakes, because a
+     * plug or unplug during sleep may not have been reported. Safe at any time; it returns at
+     * once, and does nothing when the bridge is not watching the power source.
+     */
+    func resamplePowerSource() 
+    
+    /**
      * Stages the authored default for every property of the wallpaper except
      * the files and folders the user chose; cancelling the options undoes it.
      *
@@ -2195,6 +2203,18 @@ open func reportHostWallpaperStartup(displayId: UInt32, wallpaperId: String, sta
             liftFunc: FfiConverterTypeBridgeSnapshotBundle.lift,
             errorHandler: FfiConverterTypeBridgeError.lift
         )
+}
+    
+    /**
+     * Asks the power watcher to read the power source again and apply the battery policy if
+     * it differs from the one last applied. The host calls it when the Mac wakes, because a
+     * plug or unplug during sleep may not have been reported. Safe at any time; it returns at
+     * once, and does nothing when the bridge is not watching the power source.
+     */
+open func resamplePowerSource() {try! rustCall() {
+    uniffi_wallpaper_bridge_fn_method_wallpaperbridge_resample_power_source(self.uniffiClonePointer(),$0
+    )
+}
 }
     
     /**
@@ -9703,6 +9723,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_report_host_wallpaper_startup() != 52458) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_resample_power_source() != 10408) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_restore_all_property_defaults() != 2827) {

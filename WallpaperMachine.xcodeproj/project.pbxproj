@@ -251,6 +251,7 @@
 		8A252221624CD425BE02949D /* ControlPanelShellTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80826F4A235FD5E6D91FCB26 /* ControlPanelShellTests.swift */; };
 		8B2E46CD0015496172FA3246 /* WallpaperMachineExtension.appex in Embed ExtensionKit Extensions */ = {isa = PBXBuildFile; fileRef = 06C762182CE14CCFAE5FEDA1 /* WallpaperMachineExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		8BACA536AEFA565A965F2D20 /* LibraryMetricsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EC8F26EEAEC3C347AC30E6A /* LibraryMetricsTests.swift */; };
+		8C0FD1D9138C9378877BD82E /* PowerSourceResampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07B725B421F1A97C2D4D91AB /* PowerSourceResampler.swift */; };
 		8C5D8C509FC5E13D41C91B4D /* UpdatePromptGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24EEFEAB7F566C81C5589C11 /* UpdatePromptGate.swift */; };
 		8C96FD99318EBBA41565C1C1 /* BridgeStoreDisplayLayouts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E71B8530A8F0F68D7437E9C /* BridgeStoreDisplayLayouts.swift */; };
 		8CA179812986CD14B970D964 /* UserCommandQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD323FA35344BDFB8F88B9FB /* UserCommandQueueTests.swift */; };
@@ -293,6 +294,7 @@
 		A6900543C52CB37A7587339B /* speed.m in Sources */ = {isa = PBXBuildFile; fileRef = 3A2E1510FB4BE969E39E96F8 /* speed.m */; };
 		A6963C7CC4D31B87420C172A /* SteamCMDApprovalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FEA1C6890F850AD1367E5F0 /* SteamCMDApprovalTests.swift */; };
 		A7BB3E6D7C0185FD72074E82 /* WallpaperWindowAuditorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C77A010A4254DC88EBEE6AE2 /* WallpaperWindowAuditorTests.swift */; };
+		A7E6DFA1C2A7D6E59F6ED240 /* PowerSourceResamplerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06F846DDE993A9DCBA21E6E9 /* PowerSourceResamplerTests.swift */; };
 		A8EDDB9264A3F5988A95B60E /* WallpaperIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6B21A7F9180C667CC0A390F /* WallpaperIntents.swift */; };
 		A96D6CDEEE75C63B228BC196 /* WebPanelAssetPropertiesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 993D8952E8B60B4EFFCB3E79 /* WebPanelAssetPropertiesTests.swift */; };
 		AA0C6525A428CCBC712BFB2B /* WebPanelPropertyLabelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C928477B0AC64000398BBC5C /* WebPanelPropertyLabelTests.swift */; };
@@ -515,9 +517,11 @@
 		05805AC2C38AF2B41A590844 /* WebPanelActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPanelActions.swift; sourceTree = "<group>"; };
 		0599FFBCA71E4DB36338EED0 /* DesktopMediaSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesktopMediaSession.swift; sourceTree = "<group>"; };
 		06C762182CE14CCFAE5FEDA1 /* WallpaperMachineExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.extensionkit-extension"; includeInIndex = 0; path = WallpaperMachineExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		06F846DDE993A9DCBA21E6E9 /* PowerSourceResamplerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerSourceResamplerTests.swift; sourceTree = "<group>"; };
 		078014A1ECC04882D93A38E1 /* DownloaderLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloaderLifecycleTests.swift; sourceTree = "<group>"; };
 		07A8672C9A03D8353209ACD5 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		07B6C8CF715E0CDB75ABE2B1 /* WallpaperDisplayTransferIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperDisplayTransferIntegrationTests.swift; sourceTree = "<group>"; };
+		07B725B421F1A97C2D4D91AB /* PowerSourceResampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerSourceResampler.swift; sourceTree = "<group>"; };
 		07CD7B6FE9163C43AB1B7C54 /* ClientPaths.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientPaths.swift; sourceTree = "<group>"; };
 		085A3667FAFFA9E3872ABB9D /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		0AD496DF2CFFF4AE74B42071 /* DesktopWindowDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesktopWindowDiagnostics.swift; sourceTree = "<group>"; };
@@ -981,6 +985,7 @@
 				294CC02380EF3DB03FD31F13 /* PlaybackPolicyCompositionTests.swift */,
 				37D3C3C4AFA603E96958AA9C /* PlaybackPreferencesTests.swift */,
 				D41F7005770CF2C284071CCE /* PowerSourceMonitorTests.swift */,
+				06F846DDE993A9DCBA21E6E9 /* PowerSourceResamplerTests.swift */,
 				124B0E34FCA8854A7022EEDF /* SystemConditionMonitorTests.swift */,
 				BA6B98F313CBF97C8AC3ECAD /* SystemWakeRevalidatorTests.swift */,
 				FD323FA35344BDFB8F88B9FB /* UserCommandQueueTests.swift */,
@@ -1603,6 +1608,7 @@
 				EF840DBFECBCEF1AC7D98542 /* OtherAudioMonitor.swift */,
 				50C25B094039C8D7E8CA22C0 /* PlaybackPreferences.swift */,
 				C7D80BA380F27B95D0470A7A /* PowerSourceMonitor.swift */,
+				07B725B421F1A97C2D4D91AB /* PowerSourceResampler.swift */,
 				2D3168ED82EE642DD85BE1D1 /* ScreenLock.swift */,
 				1F7BDB126629799EB315626B /* SystemConditionMonitor.swift */,
 				9DD24C27D347E8C4238FCC08 /* SystemWakeRevalidator.swift */,
@@ -2249,6 +2255,7 @@
 				7480BCA94C20F3E02E635AA6 /* PlaylistSchedulerTests.swift in Sources */,
 				E9ADD0B8E67129CD35FE9678 /* PlaylistStoreTests.swift in Sources */,
 				098FF008DD1275892693CE5B /* PowerSourceMonitorTests.swift in Sources */,
+				A7E6DFA1C2A7D6E59F6ED240 /* PowerSourceResamplerTests.swift in Sources */,
 				EC7468E4F05E65AAC914E052 /* ProcessFootprintTests.swift in Sources */,
 				EC42403C40F673079E1EC54B /* ProcessSignalsTests.swift in Sources */,
 				5335C8468F65EEF38BCF99E0 /* PropertyImageCacheTests.swift in Sources */,
@@ -2442,6 +2449,7 @@
 				EBDB30D20F74AA422634FC21 /* PlaylistScheduler.swift in Sources */,
 				018EE73FEE1646105CAF2599 /* PlaylistStore.swift in Sources */,
 				73646D953D318EDF45D310D0 /* PowerSourceMonitor.swift in Sources */,
+				8C0FD1D9138C9378877BD82E /* PowerSourceResampler.swift in Sources */,
 				5F8E3B8BDAA9E7A536C71AB2 /* ProcessFootprint.swift in Sources */,
 				1672A12BCBBD96DACE4C3B3B /* ProcessSignals.swift in Sources */,
 				46C0B39D1F8DBEF90B9BF89E /* PropertyImageCache.swift in Sources */,

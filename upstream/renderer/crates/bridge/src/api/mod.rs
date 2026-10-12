@@ -132,6 +132,8 @@ pub struct BridgeBuilder<E: EngineFacade> {
     power_watching_enabled: bool,
     startup_power_source: Option<PowerSource>,
     wake_check_grace: Duration,
+    /// Where the power watcher reads the power source from.
+    power_reader: Arc<dyn Fn() -> PowerSource + Send + Sync>,
 }
 
 impl<E: EngineFacade> BridgeBuilder<E> {
@@ -147,6 +149,7 @@ impl<E: EngineFacade> BridgeBuilder<E> {
             power_watching_enabled: !cfg!(test),
             startup_power_source: None,
             wake_check_grace: crate::engine::revalidate::GRACE,
+            power_reader: Arc::new(SystemPowerSource::current),
         }
     }
 
@@ -194,6 +197,15 @@ impl<E: EngineFacade> BridgeBuilder<E> {
     #[cfg(test)]
     pub fn with_wake_check_grace(mut self, grace: Duration) -> Self {
         self.wake_check_grace = grace;
+        self
+    }
+
+    #[cfg(test)]
+    pub fn with_power_reader(
+        mut self,
+        reader: Arc<dyn Fn() -> PowerSource + Send + Sync>,
+    ) -> Self {
+        self.power_reader = reader;
         self
     }
 
@@ -293,7 +305,8 @@ impl<E: EngineFacade> BridgeBuilder<E> {
             None
         };
         let power_watcher = if self.power_watching_enabled {
-            Some(PowerWatcher::spawn(actor.clone()))
+            let power_reader = self.power_reader;
+            Some(PowerWatcher::spawn(actor.clone(), move || power_reader()))
         } else {
             None
         };
@@ -592,7 +605,6 @@ pub struct WallpaperBridge {
     actor: BridgeActorHandle<ArcEngineFacade>,
     #[allow(dead_code)]
     mouse_poller: Option<MousePoller>,
-    #[allow(dead_code)]
     power_watcher: Option<PowerWatcher>,
     /// Last known system media state, held for replay into pages that load
     /// after the fact. Process-wide, like the system player it describes, so
@@ -2296,6 +2308,16 @@ impl WallpaperBridge {
                 wallpaper_id,
             })
             .await
+    }
+
+    /// Asks the power watcher to read the power source again and apply the battery policy if
+    /// it differs from the one last applied. The host calls it when the Mac wakes, because a
+    /// plug or unplug during sleep may not have been reported. Safe at any time; it returns at
+    /// once, and does nothing when the bridge is not watching the power source.
+    pub fn resample_power_source(&self) {
+        if let Some(watcher) = &self.power_watcher {
+            watcher.resample();
+        }
     }
 
     /// # Errors

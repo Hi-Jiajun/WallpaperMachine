@@ -49,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var playlistScheduler: PlaylistScheduler?
     private var automaticWallpapers: WallpaperAutomationController?
     private var desktopSpaces: WallpaperSpaceMonitor?
+    private var powerSourceResampler: PowerSourceResampler?
     private var posterRefreshTask: Task<Void, Never>?
     private var globalHotKeys: GlobalHotKeys?
     private var playbackPreferencesObserver: NSObjectProtocol?
@@ -455,6 +456,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             })
             memoryPressureMonitor = pressure
             pressure.start()
+            // A plug or unplug during sleep may never be reported. On wake the bridge reads
+            // the source again, and so does the monitor, which refreshes the hosts' snapshot
+            // when the source differs from the one it last reported.
+            powerSourceResampler = PowerSourceResampler { [weak self] in
+                guard let self, !self.shutdownInProgress, !self.shutdownComplete else { return }
+                self.store?.bridge.resamplePowerSource()
+                self.powerSourceMonitor?.handleChange()
+            }
+            powerSourceResampler?.start()
             startPlaylistScheduler(store: store)
             startAutomaticWallpapers(store: store)
             // The Shortcuts app lists these; commands wait for the handler set after bootstrap.
@@ -1086,6 +1096,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         otherAudioMonitor?.stop()
         systemConditionMonitor?.stop()
         powerSourceMonitor?.stop()
+        powerSourceResampler?.stop()
         powerSourceRefresh?.cancel()
         powerSourceRefresh = nil
     }

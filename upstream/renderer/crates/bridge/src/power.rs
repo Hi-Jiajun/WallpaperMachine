@@ -45,9 +45,13 @@ pub(crate) struct PowerWatcher {
 }
 
 impl PowerWatcher {
+    /// Follows the source `read` reports and hands each change to `actor`.
     #[allow(clippy::single_call_fn)]
-    pub(crate) fn spawn<E: EngineFacade + Clone>(actor: BridgeActorHandle<E>) -> Self {
-        Self::spawn_with(SystemPowerSource::current, move |source| {
+    pub(crate) fn spawn<E: EngineFacade + Clone>(
+        actor: BridgeActorHandle<E>,
+        read: impl Fn() -> PowerSource + Send + 'static,
+    ) -> Self {
+        Self::spawn_with(read, move |source| {
             match actor.blocking_ask(SetPowerSource {
                 source,
                 initial_sample: false,
@@ -59,6 +63,15 @@ impl PowerWatcher {
                 }
             }
         })
+    }
+
+    /// Asks the thread to read the power source again and hand it over if it differs from what
+    /// the consumer last took. Cheap, never waits for the read, and safe at any time: a request
+    /// made while one is waiting to run is the same request, and one made after the thread
+    /// stopped does nothing.
+    #[allow(clippy::single_call_fn)]
+    pub(crate) fn resample(&self) {
+        self.signal.request_resample();
     }
 
     /// Starts the watcher thread. `read` samples the power source; `deliver` hands a changed
@@ -102,6 +115,8 @@ impl Drop for PowerWatcher {
 #[derive(Debug, Default)]
 struct WatcherSignal {
     stop: AtomicBool,
+    /// Set by [`PowerWatcher::resample`], cleared by the thread as it starts reading.
+    resample: AtomicBool,
     /// Present from the moment the thread's run loop is ready to be woken until it stops.
     wake: Mutex<Option<RunLoopWake>>,
 }
@@ -109,6 +124,17 @@ struct WatcherSignal {
 impl WatcherSignal {
     fn should_stop(&self) -> bool {
         self.stop.load(Ordering::SeqCst)
+    }
+
+    fn request_resample(&self) {
+        self.resample.store(true, Ordering::SeqCst);
+        self.notify();
+    }
+
+    /// Whether a resample was requested since the last call; asking clears the request, so a
+    /// request that arrives while the thread reads is kept for the next pass.
+    fn take_resample_request(&self) -> bool {
+        self.resample.swap(false, Ordering::SeqCst)
     }
 
     fn publish(&self, wake: RunLoopWake) {
@@ -263,7 +289,10 @@ impl PowerEventLoop {
             log::debug!("power source watcher skipped: wake source unavailable");
             return;
         };
-        let Some(power_source) = self.context.create_run_loop_source() else {
+        // One pointer serves both users of the context, the IOKit callback and the resample pass
+        // below. Taking a second one from `self.context` would invalidate this one.
+        let context = ptr::from_mut(&mut *self.context);
+        let Some(power_source) = PowerNotificationContext::create_run_loop_source(context) else {
             log::debug!("power source watcher skipped: IOKit notification source unavailable");
             return;
         };
@@ -277,6 +306,15 @@ impl PowerEventLoop {
             source: wake_source.clone(),
         });
         while !self.signal.should_stop() {
+            if self.signal.take_resample_request() {
+                // SAFETY: `context` points into the box `self.context` owns, which is neither
+                // moved nor dropped before `run` returns. Only this thread uses it, and the
+                // IOKit callback that shares it runs inside `run_in_mode` below, never while
+                // this call is in progress.
+                if let Some(context) = unsafe { context.as_mut() } {
+                    context.reconcile(SampleOrigin::Resample);
+                }
+            }
             let outcome = CFRunLoop::run_in_mode(Some(mode), IDLE_WAIT, true);
             if outcome == CFRunLoopRunResult::Finished {
                 // Nothing is left to wait for; looping again would spin.
@@ -294,6 +332,16 @@ impl PowerEventLoop {
     }
 }
 
+/// What prompted a reading of the power source.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SampleOrigin {
+    /// `IOKit` reported a change.
+    Notification,
+    /// The owner asked for a fresh reading, for instance because the Mac woke from sleep and a
+    /// change during sleep may not have been reported.
+    Resample,
+}
+
 struct PowerNotificationContext {
     read: Box<dyn Fn() -> PowerSource + Send>,
     deliver: Box<dyn FnMut(PowerSource) -> bool + Send>,
@@ -303,21 +351,37 @@ struct PowerNotificationContext {
 }
 
 impl PowerNotificationContext {
-    fn create_run_loop_source(&mut self) -> Option<CFRetained<CFRunLoopSource>> {
-        let context = ptr::from_mut(self).cast::<c_void>();
-        // SAFETY: `context` points to the boxed `PowerNotificationContext` owned by
-        // `PowerEventLoop::run`. That box outlives the run-loop source and is not moved
-        // while callbacks may fire. The callback casts it back to the same type.
-        unsafe { IOPSNotificationCreateRunLoopSource(Some(handle_power_change), context) }
+    /// Creates the run-loop source that calls [`handle_power_change`] with `context`.
+    ///
+    /// `context` must point to the boxed context owned by `PowerEventLoop::run`, which has to
+    /// keep it alive and in place until the returned source is removed and invalidated.
+    #[allow(clippy::single_call_fn)]
+    fn create_run_loop_source(context: *mut Self) -> Option<CFRetained<CFRunLoopSource>> {
+        // SAFETY: The caller keeps `context` pointing to the live boxed
+        // `PowerNotificationContext` while the source exists. The callback casts it back to the
+        // same type.
+        unsafe {
+            IOPSNotificationCreateRunLoopSource(Some(handle_power_change), context.cast::<c_void>())
+        }
     }
 
-    fn reconcile(&mut self) {
+    fn reconcile(&mut self, origin: SampleOrigin) {
         let next = (self.read)();
         if next == self.delivered {
             return;
         }
+        // A reading that failed says nothing about the source, and the consumer must not lose
+        // what it knows because the system was slow to answer after waking.
+        if origin == SampleOrigin::Resample && next == PowerSource::Unknown {
+            log::debug!("power source resample skipped: the source could not be read");
+            return;
+        }
+        let previous = self.delivered;
         if (self.deliver)(next) {
             self.delivered = next;
+            if origin == SampleOrigin::Resample {
+                log::info!("power source corrected after wake: {previous:?} -> {next:?}");
+            }
         }
     }
 }
@@ -335,7 +399,7 @@ pub unsafe extern "C-unwind" fn handle_power_change(context: *mut c_void) {
     let Some(context) = (unsafe { context.cast::<PowerNotificationContext>().as_mut() }) else {
         return;
     };
-    context.reconcile();
+    context.reconcile(SampleOrigin::Notification);
 }
 
 #[cfg(test)]
@@ -343,7 +407,11 @@ mod tests {
     use std::{
         ffi::c_void,
         ptr,
-        sync::{Arc, Mutex, mpsc},
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicUsize, Ordering},
+            mpsc,
+        },
         thread,
         time::{Duration, Instant},
     };
@@ -352,13 +420,17 @@ mod tests {
     use objc2_io_kit::{kIOPMACPowerKey, kIOPMBatteryPowerKey, kIOPMUPSPowerKey};
 
     use super::{
-        PowerNotificationContext, PowerSource, PowerWatcher, RunLoopWake, WatcherSignal,
-        create_wake_source, handle_power_change,
+        PowerNotificationContext, PowerSource, PowerWatcher, RunLoopWake, SampleOrigin,
+        WatcherSignal, create_wake_source, handle_power_change,
     };
 
     /// How long a watcher that has nothing left to wait for may take to finish. The loop used to
     /// wake every five seconds to check a flag, so a shutdown that waits on a timeout misses it.
     const PROMPT: Duration = Duration::from_secs(1);
+
+    /// Only a bound for the failing case: a delivery that never comes fails the test after this
+    /// long, and one that does come is seen as soon as it is made.
+    const GIVE_UP: Duration = Duration::from_secs(10);
 
     #[test]
     fn power_source_classifier_maps_ac_to_external_power() {
@@ -465,6 +537,95 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_resample_delivers_a_source_that_changed_without_a_report() {
+        let mut probe = Probe::start(PowerSource::External, 0);
+
+        probe.set(PowerSource::Battery);
+        probe.resample_and_wait_for_the_read();
+        assert_eq!(probe.next_attempt(), PowerSource::Battery);
+
+        // Asking again with nothing changed delivers nothing, so the next attempt is the change
+        // that follows and not a repeat of the one already taken.
+        probe.resample_and_wait_for_the_read();
+        probe.set(PowerSource::External);
+        probe.resample_and_wait_for_the_read();
+        assert_eq!(probe.next_attempt(), PowerSource::External);
+        assert_eq!(probe.finish(), []);
+    }
+
+    #[test]
+    fn a_resample_offers_again_what_the_actor_turned_down() {
+        let mut probe = Probe::start(PowerSource::External, 1);
+
+        probe.set(PowerSource::Battery);
+        probe.resample_and_wait_for_the_read();
+        assert_eq!(probe.next_attempt(), PowerSource::Battery);
+
+        probe.resample_and_wait_for_the_read();
+        assert_eq!(probe.next_attempt(), PowerSource::Battery);
+
+        // Taken this time, so it is not offered a third time.
+        probe.resample_and_wait_for_the_read();
+        probe.set(PowerSource::External);
+        probe.resample_and_wait_for_the_read();
+        assert_eq!(probe.next_attempt(), PowerSource::External);
+        assert_eq!(probe.finish(), []);
+    }
+
+    #[test]
+    fn a_resample_that_could_not_read_the_source_leaves_the_consumer_alone() {
+        let mut probe = Probe::start(PowerSource::External, 0);
+
+        probe.set(PowerSource::Unknown);
+        probe.resample_and_wait_for_the_read();
+        probe.set(PowerSource::Battery);
+        probe.resample_and_wait_for_the_read();
+
+        // The unreadable moment was not handed over, so the consumer still believes external
+        // power until a real answer arrives.
+        assert_eq!(probe.next_attempt(), PowerSource::Battery);
+        assert_eq!(probe.finish(), []);
+    }
+
+    #[test]
+    fn a_change_reported_by_iokit_is_still_delivered_even_when_unreadable() {
+        let source = Arc::new(Mutex::new(PowerSource::External));
+        let delivered = Arc::new(Mutex::new(Vec::new()));
+        let mut context = fake_context(&source, &delivered, 0);
+
+        *source.lock().unwrap() = PowerSource::Unknown;
+        context.reconcile(SampleOrigin::Resample);
+        assert!(delivered.lock().unwrap().is_empty());
+        context.reconcile(SampleOrigin::Notification);
+
+        assert_eq!(*delivered.lock().unwrap(), [PowerSource::Unknown]);
+    }
+
+    #[test]
+    fn a_resample_asked_for_as_the_watcher_stops_does_not_delay_it() {
+        for round in 0..20 {
+            let watcher = PowerWatcher::spawn_with(|| PowerSource::External, |_| true);
+            watcher.resample();
+            assert!(
+                drops_within(watcher, PROMPT),
+                "watcher {round} was still running a second after it was dropped"
+            );
+        }
+    }
+
+    #[test]
+    fn a_resample_asked_for_after_the_watcher_stopped_does_nothing() {
+        let mut probe = Probe::start(PowerSource::External, 0);
+        let signal = Arc::clone(&probe.watcher.as_ref().expect("watcher").signal);
+        probe.set(PowerSource::Battery);
+        drop(probe.watcher.take());
+
+        signal.request_resample();
+
+        assert_eq!(probe.finish(), []);
+    }
+
     /// A context reading `source`, recording what it delivers, and turning down the first
     /// `rejections` deliveries. It starts out having delivered external power.
     fn fake_context(
@@ -493,6 +654,80 @@ mod tests {
         // SAFETY: `context` is a live `PowerNotificationContext`, which is what the callback
         // casts its pointer back to.
         unsafe { handle_power_change(ptr::from_mut(context).cast::<c_void>()) };
+    }
+
+    /// A running watcher over a power source the test controls. Every delivery the watcher
+    /// makes is recorded in order, whether or not the fake consumer took it.
+    struct Probe {
+        watcher: Option<PowerWatcher>,
+        source: Arc<Mutex<PowerSource>>,
+        reads: Arc<AtomicUsize>,
+        attempts: mpsc::Receiver<PowerSource>,
+    }
+
+    impl Probe {
+        /// Starts a watcher whose consumer turns down its first `rejections` deliveries.
+        fn start(initial: PowerSource, rejections: usize) -> Self {
+            let source = Arc::new(Mutex::new(initial));
+            let reads = Arc::new(AtomicUsize::new(0));
+            let (attempted, attempts) = mpsc::channel();
+            let mut rejections_left = rejections;
+            let watcher = PowerWatcher::spawn_with(
+                {
+                    let source = Arc::clone(&source);
+                    let reads = Arc::clone(&reads);
+                    move || {
+                        let _ = reads.fetch_add(1, Ordering::SeqCst);
+                        *source.lock().unwrap()
+                    }
+                },
+                move |next| {
+                    attempted.send(next).expect("probe outlives the watcher");
+                    if rejections_left > 0 {
+                        rejections_left -= 1;
+                        return false;
+                    }
+                    true
+                },
+            );
+            Self {
+                watcher: Some(watcher),
+                source,
+                reads,
+                attempts,
+            }
+        }
+
+        fn set(&self, next: PowerSource) {
+            *self.source.lock().unwrap() = next;
+        }
+
+        /// Asks for a resample and waits until the watcher has read the source for it, so what
+        /// the test changes next cannot be mistaken for what this request saw.
+        fn resample_and_wait_for_the_read(&self) {
+            let before = self.reads.load(Ordering::SeqCst);
+            self.watcher.as_ref().expect("watcher").resample();
+            let give_up = Instant::now() + GIVE_UP;
+            while self.reads.load(Ordering::SeqCst) == before {
+                assert!(
+                    Instant::now() < give_up,
+                    "the watcher never read the source"
+                );
+                thread::sleep(Duration::from_millis(1));
+            }
+        }
+
+        fn next_attempt(&self) -> PowerSource {
+            self.attempts
+                .recv_timeout(GIVE_UP)
+                .expect("the watcher made no delivery")
+        }
+
+        /// Stops the watcher and returns the deliveries nobody collected.
+        fn finish(&mut self) -> Vec<PowerSource> {
+            drop(self.watcher.take());
+            self.attempts.try_iter().collect()
+        }
     }
 
     /// Waits until the watcher's thread is asleep in its run loop. This is the state the old

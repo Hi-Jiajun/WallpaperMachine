@@ -9,6 +9,19 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-10 — Lock-screen check skips unchanged store re-syncs
+
+Release 1.3.2 (31) at HEAD bd55717, M5 Pro, macOS 27.0.1, AC power; animated lock screen and screen saver on one display with 45 Spaces (93 journal entries). Every two-second check and every snapshot apply re-synced the native selection.
+
+- Before, live: `stat` of `native-selection.plist` 2 s apart showed a new inode each check; per-second coalition sampler (`ri_energy_nj`) idle ticks 12–16 ms app CPU and 4–6 mJ every 2 s; `sample <pid> 2` ×3: 8–12 of 10–14 on-CPU main-thread samples in `LockScreenWallpaperSelection.synchronize`, 2–3 in `persistEntries`
+- Cause: re-encoding journaled baselines (global override, inherited and linked originals) reorders dictionary keys, so equal entries compared unequal and the journal was rewritten; the store was reread and every entry decoded each time
+- `Index.plist` unchanged for over 15 min while idle (`stat` every 5 s), so an unchanged check now costs one `stat`
+- Scratch `swiftc -O` benchmark, HEAD vs change, on copies of the real store and journal, 200 syncs ×2: unchanged store 2.9–3.6 ms → 1.6–2.6 µs per sync, journal writes 139–200 → 0; store rewritten with only an unrelated key 2.6–3.1 ms → 2.3–2.5 ms, writes 101–200 → 0
+- New journal test's fixture replayed in scratch: HEAD rewrote the journal in 30/30 runs, change in 0/30
+- `python3 scripts/test.py --only LockScreenWallpaperTests --only LockScreenWallpaperServiceTests` — 91 passed
+- `python3 scripts/test.py` — 1334 passed, 0 failed, 14 skipped (shared tree with the concurrent session-lock and asset-path change)
+- Not run: live after-measurement, which needs the rebuilt app relaunched; no desktop, wallpaper or lock-screen change was made
+
 ## 2026-10-10 — Screen changes that move nothing no longer refresh displays
 
 Cause of the ~12 J bursts: on the built-in XDR display (M5 Pro, macOS 27.0.1) every EDR headroom ramp (1.0↔1.2 over 2 s, raised by a menu-bar banner or HDR content) posts 241 didChangeScreenParameters notifications with only maximumExtendedDynamicRangeColorComponentValue changed. A passive watcher saw 5,995 such notifications in 30 min and no frame, visibleFrame, scale or Space-driven change. Fix b3d3921 compares DisplayConfiguration (AppKit's copy of what DisplayDesc::all() reads, 11 µs per read) before refreshing; the Space monitor and presentation policy filter the same notification.
