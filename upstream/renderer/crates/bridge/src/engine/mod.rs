@@ -7,7 +7,10 @@ pub use activation::{
     VideoBackendRouting, WallpaperAssignmentExt,
 };
 #[cfg(test)]
-pub(crate) use facade::apply_audio_capture_demand;
+pub(crate) use facade::{
+    AudioRestartState, OutputWatchGate, RestartAction, apply_audio_capture_demand,
+    handle_audio_restart_retry, handle_output_device_change,
+};
 #[cfg(test)]
 pub use facade::FakeEngineFacade;
 pub(crate) use facade::displays_awaiting_first_frame;

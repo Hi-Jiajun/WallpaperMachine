@@ -1,11 +1,12 @@
 #[cfg(test)]
-use std::{sync::mpsc::Receiver, time::Duration};
+use std::sync::mpsc::Receiver;
 use std::{
     sync::{
         Arc,
         mpsc::{self, Sender},
     },
     thread,
+    time::Duration,
 };
 
 #[cfg(test)]
@@ -19,7 +20,10 @@ use wallpaper_core::{
     AudioSpectrum128, DisplaySelector, DisplaySnapshotEntry, EngineError, FirstFrameCallback,
     SceneBackend, SceneDemandReasons, SceneRendererPreference, SceneUpdateMode,
     WallpaperAssignment, WallpaperEngine,
-    media::audio::{AudioCaptureBackend, AudioCaptureController, AudioVolume, PlatformAudioCaptureBackend},
+    media::audio::{
+        AudioCaptureBackend, AudioCaptureController, AudioVolume, PlatformAudioCaptureBackend,
+        RESTART_RETRY_DELAYS, RestartOutcome, device_watch::OutputDeviceWatcher,
+    },
     project::{ScalingMode, SceneDesc, SceneHandle, SceneResult},
     render::RendererSurfaceCounters,
 };
@@ -697,9 +701,196 @@ pub(crate) fn apply_audio_capture_demand<B: AudioCaptureBackend>(
         .map_err(|error| format!("Audio response could not update: {error}. Check WallpaperMachine in System Settings > Privacy & Security > Screen & System Audio Recording."))
 }
 
+/// What the audio worker does next about a changed output device.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RestartAction {
+    /// Nothing more to do: the tap was rebuilt, was not running, or the
+    /// request was superseded.
+    Done,
+    /// The tap could not be started; try again after `delay`.
+    RetryIn {
+        delay: Duration,
+        generation: u64,
+        attempt: usize,
+    },
+    /// Every retry failed. The next scene or demand change starts the tap.
+    GaveUp,
+}
+
+/// Which output-device change a scheduled retry belongs to. A newer change
+/// starts a new generation, so a retry left over from an older one is ignored
+/// instead of tearing down a tap the newer change has since rebuilt.
+#[derive(Debug, Default)]
+pub(crate) struct AudioRestartState {
+    generation: u64,
+}
+
+impl AudioRestartState {
+    fn begin(&mut self) -> u64 {
+        self.generation += 1;
+        self.generation
+    }
+
+    fn is_current(&self, generation: u64) -> bool {
+        self.generation == generation
+    }
+}
+
+/// The default output device changed: rebuild the tap if one is running.
+///
+/// Shared by the production worker and device-free regressions, like
+/// [`apply_audio_capture_demand`].
+pub(crate) fn handle_output_device_change<B: AudioCaptureBackend>(
+    controller: &mut AudioCaptureController<B>,
+    state: &mut AudioRestartState,
+) -> RestartAction {
+    let generation = state.begin();
+    if controller.is_capturing() {
+        log::info!(
+            "[wallpaper-core audio] default output device changed; rebuilding the system audio tap"
+        );
+    } else {
+        log::info!(
+            "[wallpaper-core audio] default output device changed; no system audio tap is running"
+        );
+    }
+    attempt_audio_restart(controller, generation, 0)
+}
+
+/// A retry scheduled by an earlier [`RestartAction::RetryIn`] came due.
+///
+/// It does nothing when a newer device change has started, or when capture is
+/// running again because a scene or demand change started it in the meantime.
+pub(crate) fn handle_audio_restart_retry<B: AudioCaptureBackend>(
+    controller: &mut AudioCaptureController<B>,
+    state: &AudioRestartState,
+    generation: u64,
+    attempt: usize,
+) -> RestartAction {
+    if !state.is_current(generation) || controller.is_capturing() {
+        return RestartAction::Done;
+    }
+    attempt_audio_restart(controller, generation, attempt)
+}
+
+fn attempt_audio_restart<B: AudioCaptureBackend>(
+    controller: &mut AudioCaptureController<B>,
+    generation: u64,
+    attempt: usize,
+) -> RestartAction {
+    match controller.restart_capture() {
+        Ok(RestartOutcome::Restarted | RestartOutcome::NotRunning) => RestartAction::Done,
+        Err(error) => match RESTART_RETRY_DELAYS.get(attempt) {
+            Some(&delay) => {
+                log::warn!(
+                    "[wallpaper-core audio] system audio tap rebuild attempt {} failed: {error}; retrying in {} ms",
+                    attempt + 1,
+                    delay.as_millis()
+                );
+                RestartAction::RetryIn { delay, generation, attempt: attempt + 1 }
+            }
+            None => {
+                log::warn!(
+                    "[wallpaper-core audio] system audio tap could not be rebuilt after {} attempts: {error}; it restarts at the next scene or demand change",
+                    attempt + 1
+                );
+                RestartAction::GaveUp
+            }
+        },
+    }
+}
+
+/// Asks the worker to try again after `delay`, from a short-lived thread so the
+/// worker itself never sleeps.
+fn schedule_audio_restart(action: RestartAction, events: &Sender<AudioCaptureCommand>) {
+    let RestartAction::RetryIn { delay, generation, attempt } = action else {
+        return;
+    };
+    let events = events.clone();
+    let spawned = thread::Builder::new()
+        .name("wallpaper-bridge-audio-retry".to_string())
+        .spawn(move || {
+            thread::sleep(delay);
+            let _ = events.send(AudioCaptureCommand::RetryRestart { generation, attempt });
+        });
+    if let Err(error) = spawned {
+        log::warn!("[wallpaper-core audio] could not schedule a system audio tap retry: {error}");
+    }
+}
+
+/// Starts an output-device watcher for the worker. Without one the tap is
+/// still started and stopped as before; only the rebuild on a device change is
+/// lost.
+fn watch_output_device(events: Sender<AudioCaptureCommand>) -> Option<OutputDeviceWatcher> {
+    let on_change = Arc::new(move || {
+        let _ = events.send(AudioCaptureCommand::OutputDeviceChanged);
+    });
+    match OutputDeviceWatcher::start(on_change) {
+        Ok(watcher) => Some(watcher),
+        Err(error) => {
+            log::warn!(
+                "[wallpaper-core audio] could not watch the default output device: {error}; the system audio tap is not rebuilt when it changes"
+            );
+            None
+        }
+    }
+}
+
+/// Holds the output-device watcher exactly while capture is wanted.
+///
+/// A watcher is a subscriber and a parked thread, and every default-output
+/// change wakes it and writes a log line. A process whose wallpapers never read
+/// audio has no tap to rebuild, so it carries none: one starts when capture
+/// becomes wanted and is dropped when it no longer is, which also keeps the
+/// HAL listener unregistered until audio is first used.
+///
+/// It acts only when "wanted" changes. A start that failed (already logged) is
+/// therefore not attempted again on every command, only the next time capture
+/// is wanted after it was not.
+pub(crate) struct OutputWatchGate<W> {
+    watcher: Option<W>,
+    wanted: bool,
+}
+
+impl<W> Default for OutputWatchGate<W> {
+    fn default() -> Self {
+        Self { watcher: None, wanted: false }
+    }
+}
+
+impl<W> OutputWatchGate<W> {
+    /// Brings the watcher in line with whether capture is wanted now. `start`
+    /// runs only on the change to wanted.
+    pub(crate) fn sync(&mut self, wanted: bool, start: impl FnOnce() -> Option<W>) {
+        if wanted == self.wanted {
+            return;
+        }
+        self.wanted = wanted;
+        self.watcher = if wanted { start() } else { None };
+    }
+
+    /// Whether a watcher is running.
+    #[cfg(test)]
+    pub(crate) fn is_watching(&self) -> bool {
+        self.watcher.is_some()
+    }
+}
+
+/// Ends the worker thread when the last handle to it goes away. The worker
+/// holds a sender of its own for the device watcher and retries, so the
+/// channel closing is no longer the signal.
+struct AudioWorkerLifetime(Sender<AudioCaptureCommand>);
+
+impl Drop for AudioWorkerLifetime {
+    fn drop(&mut self) {
+        let _ = self.0.send(AudioCaptureCommand::Shutdown);
+    }
+}
+
 #[derive(Clone)]
 struct AudioCaptureWorker {
     sender: Sender<AudioCaptureCommand>,
+    _lifetime: Arc<AudioWorkerLifetime>,
 }
 
 enum AudioCaptureCommand {
@@ -715,6 +906,11 @@ enum AudioCaptureCommand {
     RetainScenes {
         reply: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
+    /// The default output device changed (debounced).
+    OutputDeviceChanged,
+    /// A scheduled attempt to bring the tap back after a failed rebuild.
+    RetryRestart { generation: u64, attempt: usize },
+    Shutdown,
 }
 
 enum AudioCaptureRequest {
@@ -725,12 +921,19 @@ enum AudioCaptureRequest {
 impl AudioCaptureWorker {
     fn spawn(engine: WallpaperEngine) -> Self {
         let (sender, receiver) = mpsc::channel::<AudioCaptureCommand>();
+        let events = sender.clone();
+        let lifetime = Arc::new(AudioWorkerLifetime(sender.clone()));
         thread::Builder::new()
             .name("wallpaper-bridge-audio-capture".to_string())
             .spawn(move || {
                 let mut controller = PlatformAudioCaptureBackend::new()
                     .map(|backend| AudioCaptureController::new(Arc::new(engine.clone()), backend))
                     .map_err(|error| error.to_string());
+                // Declared after the controller, so it is dropped first and no
+                // device change can arrive while the tap is being released. It
+                // holds a watcher only while capture is wanted.
+                let mut output_watch = OutputWatchGate::<OutputDeviceWatcher>::default();
+                let mut restart = AudioRestartState::default();
                 while let Ok(command) = receiver.recv() {
                     let (request, reply) = match command {
                         AudioCaptureCommand::SetEnabled { handle, enabled, reply } =>
@@ -738,6 +941,23 @@ impl AudioCaptureWorker {
                         AudioCaptureCommand::SetDemand { demand, reply } =>
                             (Some(AudioCaptureRequest::Demand(demand)), reply),
                         AudioCaptureCommand::RetainScenes { reply } => (None, reply),
+                        AudioCaptureCommand::OutputDeviceChanged => {
+                            if let Ok(controller) = controller.as_mut() {
+                                let action = handle_output_device_change(controller, &mut restart);
+                                schedule_audio_restart(action, &events);
+                            }
+                            continue;
+                        }
+                        AudioCaptureCommand::RetryRestart { generation, attempt } => {
+                            if let Ok(controller) = controller.as_mut() {
+                                let action = handle_audio_restart_retry(
+                                    controller, &restart, generation, attempt,
+                                );
+                                schedule_audio_restart(action, &events);
+                            }
+                            continue;
+                        }
+                        AudioCaptureCommand::Shutdown => break,
                     };
                     let result = (|| {
                         let controller = controller.as_mut().map_err(|error| error.clone())?;
@@ -766,11 +986,16 @@ impl AudioCaptureWorker {
                         }
                         Ok(())
                     })();
+                    if let Ok(controller) = controller.as_ref() {
+                        output_watch.sync(controller.wants_capture(), || {
+                            watch_output_device(events.clone())
+                        });
+                    }
                     let _ = reply.send(result);
                 }
             })
             .expect("audio capture worker thread should start");
-        Self { sender }
+        Self { sender, _lifetime: lifetime }
     }
 
     async fn set_enabled(&self, handle: SceneHandle, enabled: bool) -> Result<(), String> {

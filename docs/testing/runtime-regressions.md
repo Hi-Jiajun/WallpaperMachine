@@ -419,6 +419,26 @@ device.
   against emitted sample counts, including different callback sizes,
   pause/resume, stop/restart and seeded bounds, on the null backend, which never
   opens an audio device. All sound fixtures use the null backend.
+- **Output device rebuild** — `wallpaper-core` `media::audio::device_watch::tests`
+  (a burst of changes is one report after the quiet period, a change wakes an idle
+  watcher, `cancel` drops a pending report without waiting it out, every subscriber
+  hears a change until it is dropped) and `capture_controller_tests`
+  (`restart_*`, `a_failed_restart_*` and
+  `a_pending_restart_is_dropped_once_nobody_wants_capture`: a running tap is
+  stopped and started once and still serves every scene; stopped, suspended and
+  permission-pending controllers do nothing; a failed start leaves capture
+  stopped, is retried without another device change, is healed by the next
+  sync, and is forgotten once nobody wants capture). The
+  bridge's `web_audio_media::output_device_change::*` replays the worker's
+  handlers on a scripted backend: a web-only session is rebuilt, each retry waits
+  its own delay and then gives up after a bounded number of attempts, a newer
+  change supersedes an older pending retry, and a retry never tears down a tap
+  that a demand change has started; `output_device_change::the_output_watcher_exists_only_while_capture_is_wanted`
+  and `::a_watcher_that_could_not_start_is_tried_again_only_when_capture_is_wanted_anew`
+  pin that no watcher exists until capture is wanted, that one is released when it
+  stops being wanted, and that a failed start is not retried on every command. The
+  CoreAudio listener registration is not
+  covered; see [audio response](../features/audio-response.md#output-device-changes).
 - **Audio capture follows what the scene reads** — `SceneSchema.AudioRequirementComesOnlyFromContentThatReadsAudio`
   and `.AudioRequirementIsReportedOncePerSceneAndResetByReplacement` in
   `scene_schema_tests`, `VideoSourceInput.PlainVideoProjectNeverReportsAnAudioRequirement`

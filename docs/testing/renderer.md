@@ -335,7 +335,10 @@ cargo test -p shader --test pipeline -- --nocapture
 - `wallpaper-core` audio coverage: capture ownership and failures,
   mono/multichannel conversion, resampling including sample-rate changes.
   `capture_controller_tests` includes non-scene consumers sharing one tap with
-  scenes, cleanup, suspension, permission and failed-transition rollback. The
+  scenes, cleanup, suspension, permission and failed-transition rollback, and the
+  rebuild after an output device change (`restart_*`); `device_watch::tests`
+  covers its debounce and subscriber table with real timers of a few tens of
+  milliseconds, never the CoreAudio listener. The
   bridge's `tests::web_audio_media` replays web capture decisions through the
   production demand handler and real controller with a device-free backend:
   checking only the fake engine's suspension flag cannot prove capture starts.

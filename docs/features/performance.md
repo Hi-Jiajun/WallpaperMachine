@@ -431,6 +431,14 @@ nothing could see or hear.
 - **System audio capture.** Runs only for a presenting wallpaper that actually reads
   the sound; see [audio response](audio-response.md). A wallpaper that reads audio
   still runs the tap, and no drop in coreaudiod cost is claimed for it.
+- **Output device watcher.** The app listens for a change of the default output device
+  only while a tap is wanted (a presenting scene reads the sound, or a page listens, and
+  nothing is suspended), to rebuild that tap
+  ([audio response](audio-response.md#output-device-changes)). With none wanted there is
+  no watcher thread or subscription, so switching to a Bluetooth or USB device wakes
+  nothing and writes nothing. The system-wide device-change listener is registered the
+  first time a watcher starts and stays registered; between watchers it finds nobody to
+  wake.
 - **Pointer sampling.** Scenes receive the cursor from a sampler that runs when
   macOS reports pointer motion or a button, when an interactive scene appears or
   resumes, or when its pointer delivery is reset, at most once per 16 ms, with a
