@@ -63,14 +63,21 @@ automation schedulers, the web and native-video wallpaper hosts, system media).
   [playlists](features/playlists.md) and [automation](features/automation.md).
 - **Closing the panel.** `windowWillClose` releases the page and its WebKit processes; reopening
   builds a fresh view around the existing stores and navigation.
-- **Shutdown.** `applicationShouldTerminate` returns `.terminateLater` and runs an ordered
-  asynchronous teardown: lock-screen and desktop-poster restoration first (a failure cancels the
-  quit), then import, update, SteamCMD, Workshop and pixiv work, and the renderer bridge last.
-  The bridge's `Shutdown` also ends the load journal's in-flight record, so quitting during a
+- **Shutdown.** `applicationShouldTerminate` returns `.terminateLater` and hands an ordered
+  asynchronous teardown to `QuitSupervisor`: lock-screen and desktop-poster restoration first,
+  then the services, import, update, SteamCMD, Workshop and pixiv work, and the renderer bridge
+  last. Every stage has a deadline. Restoration gets 20 seconds, and a failure or a stall
+  cancels the quit: the panel comes back, an alert says why, a pending update install is
+  called off and the menu shows the error. The other stages share 10 seconds; one that
+  outlives its time is named, left behind and the rest still run, and the bridge keeps at
+  least 2 seconds whatever is left. Once the app has replied it arms an exit fuse (5 seconds,
+  1 second if a stage was left behind) that ends the process if a slow exit has hung. The
+  bridge's `Shutdown` also ends the load journal's in-flight record, so quitting during a
   load is not counted as a crash ([crash recovery](features/crash-recovery.md)). Each quit logs
   who asked for it (`QuitReason`: the user, an update, logout, restart, shutdown, a signal) and
-  how long each stage took (`QuitTimings`); both are logging only and change no behavior
-  ([diagnostics](features/diagnostics.md#why-the-app-quit)).
+  how long each stage took (`QuitTimings`)
+  ([diagnostics](features/diagnostics.md#why-the-app-quit)); the deadlines and the visible
+  failure are in [desktop picture](features/desktop-picture.md#quitting).
 - **Hosted tests.** Under a hosted test run (`NSClassFromString("XCTestCase") != nil`) the
   delegate short-circuits: no services are created against the user's real app-support folder.
 

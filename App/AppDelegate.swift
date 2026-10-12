@@ -52,6 +52,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var playbackSnapshotCurrent = false
     private var shutdownInProgress = false
     private var shutdownComplete = false
+    /// Teardown stages the quit gave up waiting for, so the exit fuse is shorter and the
+    /// session ledger does not call the run a clean quit.
+    private var stalledQuitStages: [String] = []
     private var themeSubscription: AnyCancellable?
     private var iconSubscription: AnyCancellable?
     private var diagnostics: RuntimeDiagnosticsSession?
@@ -673,8 +676,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             self.diagnostics = nil
             Task { await diagnostics.stop() }
         }
-        // Last, so a run that dies while tearing down is not recorded as a clean quit.
-        SessionLedger.shared?.markEnded()
+        // Last, so a run that dies while tearing down is not recorded as a clean quit. A quit
+        // that left a stage running stays `quitting`, which the next launch reports as one
+        // that did not finish.
+        if stalledQuitStages.isEmpty { SessionLedger.shared?.markEnded() }
+        armExitFuse()
+    }
+
+    /// The quit has finished, so nothing is left to restore: if the process is still here
+    /// shortly after, ending it is safe and a hang in the exit path is not. Preferences are
+    /// flushed first because `_exit` skips the flush a normal exit does.
+    private func armExitFuse() {
+        if NSClassFromString("XCTestCase") != nil { return }
+        let delay = QuitSupervisor.Budgets.interactive.exitFuse(stalled: stalledQuitStages)
+        let defaults = ClientPreferences.defaults
+        ExitFuse.arm(after: delay) {
+            AppLog.error("quit: the process was still running \(delay.wholeMilliseconds) ms after the quit finished; ending it")
+            defaults.synchronize()
+            _exit(0)
+        }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -691,7 +711,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
         shutdownInProgress = true
         SessionLedger.shared?.markQuitting(reason: reason.rawValue)
-        let timings = QuitTimings()
+        let supervisor = QuitSupervisor()
+        let panelWasVisible = controlPanelWindow?.isVisible == true
+        let whatsNewWasVisible = whatsNewWindow?.isVisible == true
         previewWindow?.session.close()
         previewWindow?.close()
         previewWindow = nil
@@ -703,16 +725,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         NSApp.setActivationPolicy(.accessory)
 
         Task {
-            do {
-                try await timings.measure("restore") {
-                    if let lockScreen = store?.lockScreenWallpaper {
-                        try await lockScreen.shutdown {
-                            try await wallpaperRestorer?.restoreForTermination()
-                        }
-                    } else {
-                        try await wallpaperRestorer?.restoreForTermination()
-                    }
+            let outcome = await supervisor.run(
+                restoration: .init(name: "restore") { [self] in try await restoreDesktopForQuit(wallpaperRestorer) },
+                teardown: servicesToTearDownForQuit())
+            switch outcome {
+            case .cancel(let cancellation):
+                await cancelQuit(
+                    cancellation, restorationBudget: supervisor.budgets.restoration,
+                    restoringPanel: panelWasVisible, whatsNew: whatsNewWasVisible)
+                sender.reply(toApplicationShouldTerminate: false)
+                presentQuitFailure(cancellation)
+            case .proceed(let stalled):
+                if !stalled.isEmpty {
+                    AppLog.warn("quit: going on without \(stalled.joined(separator: ", ")), which did not finish in time")
+                    // Stays `quitting` through the exit (see `applicationWillTerminate`), so
+                    // the next launch can say which stage was left behind.
+                    SessionLedger.shared?.markQuitting(
+                        reason: "\(reason.rawValue); left running: \(stalled.joined(separator: ", "))")
                 }
+                stalledQuitStages = stalled
+                shutdownInProgress = false
+                shutdownComplete = true
+                sender.reply(toApplicationShouldTerminate: true)
+            }
+        }
+
+        return .terminateLater
+    }
+
+    /// Puts the user's own desktop picture back, the lock screen's first. A failure or a
+    /// stall cancels the quit.
+    private func restoreDesktopForQuit(_ wallpaperRestorer: DesktopWallpaperSync?) async throws {
+        if let lockScreen = store?.lockScreenWallpaper {
+            try await lockScreen.shutdown {
+                try await wallpaperRestorer?.restoreForTermination()
+            }
+        } else {
+            try await wallpaperRestorer?.restoreForTermination()
+        }
+    }
+
+    /// What is torn down once the desktop is restored, in order. The renderer's own shutdown
+    /// is last, so earlier stages that stall cannot starve it (the supervisor keeps it a
+    /// minimum of time).
+    private func servicesToTearDownForQuit() -> [QuitSupervisor.Stage] {
+        [
+            .init(name: "services") { [self] in
                 globalHotKeys?.stop()
                 AppAutomation.shared.handler = nil
                 AppAutomation.shared.displays = nil
@@ -732,47 +790,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 sceneMediaSink = nil
                 webWallpaperHost?.shutdown()
                 webWallpaperHost = nil
-            } catch {
-                AppLog.error("Quit cancelled because wallpaper restoration failed: \(error.localizedDescription)")
-                lastError = error
-                shutdownInProgress = false
-                SessionLedger.shared?.markRunning()
-                // The system was told no, so an earlier announcement no longer applies.
-                powerOffNotice.clear()
-                timings.finish("cancelled")
-                // Native restoration may already have released the desktop even
-                // though poster restoration failed. Resume without waiting for
-                // another bridge snapshot, but never overwrite an owned provider.
-                if store?.lockScreenWallpaper?.ownsDesktopProvider != true {
-                    do { try startDesktopWallpaperSync() } catch {
-                        AppLog.error("Desktop poster sync could not be restarted: \(error.localizedDescription)")
-                    }
+                automaticUpdates?.cancel()
+                appUpdater.cancel()
+            },
+            .init(name: "imports") { [self] in await libraryImports.shutdown() },
+            .init(name: "steamcmd") { [self] in await workshopStore.steamCMDSetup.shutdown() },
+            .init(name: "workshop") { [self] in await workshopStore.downloader.shutdown() },
+            .init(name: "pixiv") { [self] in await pixivStore.downloads.shutdown() },
+            .init(name: "bridge") { [self] in
+                do {
+                    try await store?.shutdownAsync()
+                    lastError = nil
+                } catch {
+                    lastError = error
+                    throw error
                 }
-                presentationPolicy?.evaluate()
-                rebuildMenu()
-                sender.reply(toApplicationShouldTerminate: false)
-                return
-            }
-            await timings.measure("imports") { await libraryImports.shutdown() }
-            automaticUpdates?.cancel()
-            appUpdater.cancel()
-            await timings.measure("steamcmd") { await workshopStore.steamCMDSetup.shutdown() }
-            await timings.measure("workshop") { await workshopStore.downloader.shutdown() }
-            await timings.measure("pixiv") { await pixivStore.downloads.shutdown() }
-            do {
-                try await timings.measure("bridge") { try await store?.shutdownAsync() }
-                lastError = nil
-            } catch {
-                lastError = error
-            }
+            },
+        ]
+    }
 
-            timings.finish("finished")
-            shutdownInProgress = false
-            shutdownComplete = true
-            sender.reply(toApplicationShouldTerminate: true)
+    /// The desktop could not be restored in time or at all, so the app keeps running:
+    /// everything the quit stopped starts again, the panel comes back and a pending
+    /// update is called off. The caller replies to the system afterwards.
+    private func cancelQuit(
+        _ cancellation: QuitSupervisor.Cancellation, restorationBudget: Duration,
+        restoringPanel: Bool, whatsNew: Bool
+    ) async {
+        let failure = QuitFailure(cancellation)
+        switch cancellation {
+        case .restorationFailed:
+            AppLog.error("Quit cancelled because wallpaper restoration failed: \(failure.localizedDescription)")
+        case .restorationTimedOut:
+            AppLog.error("Quit cancelled because wallpaper restoration did not finish within \(restorationBudget.wholeMilliseconds) ms")
         }
+        lastError = failure
+        shutdownInProgress = false
+        SessionLedger.shared?.markRunning()
+        // The system was told no, so an earlier announcement no longer applies.
+        powerOffNotice.clear()
+        // Native restoration may already have released the desktop even
+        // though poster restoration failed. Resume without waiting for
+        // another bridge snapshot, but never overwrite an owned provider.
+        if store?.lockScreenWallpaper?.ownsDesktopProvider != true {
+            do { try startDesktopWallpaperSync() } catch {
+                AppLog.error("Desktop poster sync could not be restarted: \(error.localizedDescription)")
+            }
+        }
+        presentationPolicy?.evaluate()
+        if restoringPanel {
+            showControlPanel(selection: controlPanelNavigation.selection ?? .wallpaper)
+        }
+        if whatsNew, let whatsNewWindow {
+            NSApp.setActivationPolicy(.regular)
+            whatsNewWindow.makeKeyAndOrderFront(nil)
+        }
+        // An installer waiting for this app to quit would replace it whenever it did.
+        await appUpdater.cancelPendingInstall()
+        rebuildMenu()
+    }
 
-        return .terminateLater
+    /// Tells the user the quit did not happen. The menu line alone is easy to miss when the
+    /// quit came from the Dock, a logout dialog or an update.
+    private func presentQuitFailure(_ cancellation: QuitSupervisor.Cancellation) {
+        presentErrorAlert(QuitFailure(cancellation), bringForward: true)
     }
 
     /// Works out who asked for this quit and logs it, also for a request that arrives
@@ -1108,7 +1188,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
 
         menu.addItem(.separator())
-        menu.addItem(menuItem("Exit", action: #selector(exitApplication)))
+        // A second Exit is refused while a quit runs, so say that it is running.
+        if shutdownInProgress {
+            menu.addItem(disabledMenuItem(String(localized: "Quitting…")))
+        } else {
+            menu.addItem(menuItem("Exit", action: #selector(exitApplication)))
+        }
     }
 
     private func menuItem(_ title: String.LocalizationValue, action: Selector) -> NSMenuItem {
@@ -1208,10 +1293,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     /// An error alert, shown from the main run loop for the reason `promptUpdate` gives; the
     /// callers run inside main-actor tasks and main-queue jobs.
-    private func presentErrorAlert(_ error: Error) {
+    private func presentErrorAlert(_ error: Error, bringForward: Bool = false) {
         AppUpdateStore.performOnMainRunLoop { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, !self.shutdownInProgress, !self.shutdownComplete else { return }
+                // An accessory app's alert opens behind the active app unless it is brought forward.
+                if bringForward { NSApp.activate(ignoringOtherApps: true) }
                 NSAlert(error: error).runModal()
             }
         }

@@ -12,8 +12,6 @@ final class QuitTimingsTests: XCTestCase {
         func pass(_ amount: Duration) { elapsed += amount }
     }
 
-    private struct Refused: Error {}
-
     private let clock = ScriptedClock()
     private var lines: [String] = []
 
@@ -21,11 +19,18 @@ final class QuitTimingsTests: XCTestCase {
         QuitTimings(now: { [clock] in clock.instant }, log: { [unowned self] in self.lines.append($0) })
     }
 
-    func testEachStageKeepsItsOwnDurationInTheOrderItFinished() async {
+    /// A stage that takes `amount`, recorded the way the supervisor records it.
+    private func stage(_ name: String, _ amount: Duration, in timings: QuitTimings, failed: Bool = false) {
+        let start = clock.instant
+        clock.pass(amount)
+        timings.record(name, since: start, failed: failed)
+    }
+
+    func testEachStageKeepsItsOwnDurationInTheOrderItWasSettled() {
         let timings = makeTimings()
 
-        await timings.measure("restore") { clock.pass(.milliseconds(1_250)) }
-        await timings.measure("bridge") { clock.pass(.milliseconds(40)) }
+        stage("restore", .milliseconds(1_250), in: timings)
+        stage("bridge", .milliseconds(40), in: timings)
 
         XCTAssertEqual(timings.stages, [
             .init(name: "restore", duration: .milliseconds(1_250), failed: false),
@@ -33,37 +38,36 @@ final class QuitTimingsTests: XCTestCase {
         ])
     }
 
-    func testAStageHandsBackItsResult() async {
+    func testAStageThatFailedIsStillTimedAndSaysWhyInTheLog() {
         let timings = makeTimings()
+        let start = clock.instant
+        clock.pass(.milliseconds(5_003))
 
-        let value = await timings.measure("count") { 42 }
+        timings.record("restore", since: start, failed: true, detail: "still restoring")
 
-        XCTAssertEqual(value, 42)
-    }
-
-    func testAStageThatThrowsIsStillTimedAndTheErrorStillReachesTheCaller() async {
-        let timings = makeTimings()
-        var caught: Error?
-
-        do {
-            try await timings.measure("restore") {
-                clock.pass(.milliseconds(5_003))
-                throw Refused()
-            }
-        } catch {
-            caught = error
-        }
-
-        XCTAssertTrue(caught is Refused)
         XCTAssertEqual(timings.stages, [.init(name: "restore", duration: .milliseconds(5_003), failed: true)])
+        XCTAssertTrue(lines[0].contains("5003 ms") && lines[0].contains("failed") && lines[0].contains("still restoring"),
+                      "the line names the duration and the reason: \(lines[0])")
     }
 
-    func testTheWholeQuitIsTimedFromTheStartNotAsTheSumOfItsStages() async {
+    func testAStageThatWasLeftBehindIsMarkedAndKeepsHowLongItWasWaitedFor() {
+        let timings = makeTimings()
+        let start = clock.instant
+        clock.pass(.milliseconds(10_000))
+
+        timings.recordStalled("steamcmd", since: start)
+        timings.finish("finished without steamcmd")
+
+        XCTAssertEqual(timings.stages, [.init(name: "steamcmd", duration: .milliseconds(10_000), failed: false, stalled: true)])
+        XCTAssertTrue(lines.last?.contains("steamcmd 10000 ms (stalled)") == true, "the summary marks it: \(lines.last ?? "")")
+    }
+
+    func testTheWholeQuitIsTimedFromTheStartNotAsTheSumOfItsStages() {
         let timings = makeTimings()
         clock.pass(.milliseconds(10))
-        await timings.measure("imports") { clock.pass(.milliseconds(30)) }
+        stage("imports", .milliseconds(30), in: timings)
         clock.pass(.milliseconds(5))
-        await timings.measure("bridge") { clock.pass(.milliseconds(20)) }
+        stage("bridge", .milliseconds(20), in: timings)
 
         timings.finish("finished")
 
@@ -73,10 +77,10 @@ final class QuitTimingsTests: XCTestCase {
                       "the summary names every stage that ran")
     }
 
-    func testEveryStageAndTheSummaryAreLoggedOnce() async {
+    func testEveryStageAndTheSummaryAreLoggedOnce() {
         let timings = makeTimings()
-        await timings.measure("a") {}
-        await timings.measure("b") {}
+        stage("a", .zero, in: timings)
+        stage("b", .zero, in: timings)
         timings.finish("finished")
 
         XCTAssertEqual(lines.count, 3)
@@ -97,5 +101,10 @@ final class QuitTimingsTests: XCTestCase {
         XCTAssertEqual(Duration.milliseconds(1_999).wholeMilliseconds, 1_999)
         XCTAssertEqual(Duration.seconds(3).wholeMilliseconds, 3_000)
         XCTAssertEqual(Duration.microseconds(1_900).wholeMilliseconds, 1, "a fraction of a millisecond is dropped")
+    }
+
+    func testDurationsConvertToSecondsForThreadSleep() {
+        XCTAssertEqual(Duration.milliseconds(1_500).timeInterval, 1.5, accuracy: 1e-9)
+        XCTAssertEqual(Duration.zero.timeInterval, 0)
     }
 }

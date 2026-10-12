@@ -251,14 +251,28 @@ on [manual-smoke.md](manual-smoke.md).
   code is not taken for the user's; the codes match the SDK's; the reason is read from a
   real `NSAppleEventDescriptor` parameter and not from an attribute, text or an integer; an
   announcement stops counting after its lifetime and after a refused quit.
-- `QuitTimingsTests` — stages keep their own duration in finishing order, a stage that
-  throws is timed and still rethrows, the total covers the work between stages, one line
-  per stage plus one summary. A scripted clock, no sleeping.
+- `QuitTimingsTests` — stages keep their own duration in the order they were settled, a stage
+  that failed is timed and says why in the log, a stage that was left behind is marked and keeps
+  how long it was waited for, the total covers the work between stages, one line per stage plus
+  one summary. A scripted clock, no sleeping.
+- `QuitSupervisorTests` — stages run in order and every duration is logged once; restoration
+  that throws or never returns cancels the quit and teardown does not start; a stage that
+  finishes after its deadline changes neither the outcome nor the log; a hanging teardown
+  stage is named and the stages after it still run; teardown stages share one budget, a stage
+  with no time left is still started, and the last one keeps its floor; a teardown stage that
+  throws does not stop the quit; the exit fuse is shorter after a stalled stage and fires
+  once, off the main thread. The deadline is a scripted sleep fired by the test and the
+  budget each stage was given is the sleep it waits for, so nothing depends on machine
+  speed; one test runs the real timer with tiny budgets. `FirstResultTests` pin that the race
+  resumes its waiter once however many results arrive.
 - `AppUpdateTests` (GitHub) also pin when an install counts as pending: not while the
   update is prepared, yes once the installer waits and the app is asked to quit, not when
-  the installer could not start.
+  the installer could not start. They also pin that a refused quit stops the waiting
+  installer once, leaves the update to install again, does nothing when no installer
+  waits, and keeps a helper that would not stop owned.
 - Not covered: a real quit, logout or restart; `applicationShouldTerminate` itself needs
-  the running app (hosted tests short-circuit it).
+  the running app (hosted tests short-circuit it), so the alert, the panel coming back, the
+  "Quitting…" menu line and the exit fuse's `_exit` are desktop-only observations.
 
 ## Localization
 

@@ -250,8 +250,9 @@ If the native provider replaced a desktop poster, quit restores the native selec
 first, then waits for WallpaperAgent's asynchronous reload and restores the poster's
 saved original (poster ownership and the quit wait are described in
 [desktop picture](desktop-picture.md#quitting)).
-If restoration still fails after the wait, quit is cancelled and the error is exposed
-in the menu bar (and native-feature status) so the user can retry. A failed activation
+If restoration still fails after the wait, or takes longer than 20 seconds, quit is cancelled
+and an alert gives the error; it also stays in the menu bar (and native-feature status) so the
+user can retry. A failed activation
 also restores native selections, but resumes live desktop playback afterward.
 
 ## Background checks and recovery

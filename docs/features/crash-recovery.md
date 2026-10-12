@@ -81,6 +81,14 @@ log line says who asked for the quit and how long each stage took, so a quit tha
 by a logout or a kill can be told apart from one the user chose; see
 [diagnostics.md](diagnostics.md#why-the-app-quit).
 
+Every stage of a quit has a deadline, so a quit cannot hang half done. A stage that does not
+finish in time is left behind and the quit goes on; the bridge's `shutdown`, which closes the
+scenes, is the last stage and always gets at least two seconds. It closes the journal's record
+the moment it starts, before it waits for anything, so a bridge stage that is left behind, even
+one still queued behind a startup load, has already closed it and the next launch counts no
+strike for a scene that was still loading. The next launch's `previous session:` line says the
+quit did not finish and names the stage.
+
 ## Strikes and the hold
 
 At launch `LoadJournal::open` reads the file. Entries left by a different session mean

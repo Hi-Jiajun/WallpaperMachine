@@ -170,11 +170,32 @@ still in flight; one that lands late is restored again.
 
 A poster the store still names after every writable desktop is restored and read back
 is logged and does not block quit, since macOS 27 can keep a reference no per-Space
-write can remove. Any other failure cancels the quit: the error appears in the menu
-bar (macOS is still restoring the desktop wallpaper, or the original could not be
-recovered and the user should select their wallpaper again in System Settings),
-poster synchronization restarts unless the native lock-screen provider has the desktop,
-and the user can quit again.
+write can remove. Any other failure cancels the quit, and so does restoration that
+takes longer than 20 seconds (`QuitSupervisor`). Nothing after restoration starts for a
+cancelled quit. Because the app is hidden while it quits, a cancelled quit puts things back
+and says so:
+
+- poster synchronization restarts unless the native lock-screen provider has the desktop;
+- the control panel (and What's New) comes back if it was open, on the section it was on;
+- an alert gives the reason: the restoration error's own text (macOS is still restoring the
+  desktop wallpaper, or the original could not be recovered and the user should select
+  their wallpaper again in System Settings), or that restoring took too long, and that
+  quitting again retries;
+- an update installer that was waiting for the app to quit is called off, so it cannot
+  replace the app at some later quit; the update stays downloaded and About offers it again;
+- the error also stays as a line in the menu bar menu, and the user can quit again.
+
+The restoration stage is cancelled when its time is up. `restoreForTermination` checks for
+cancellation before every one of its 25 attempts and its wait between them is cancellable, so it
+stops promptly and leaves the originals journal as it was. A step that never returns and
+ignores cancellation (a hung call into WallpaperAgent) cannot be stopped; the quit is still
+refused on time, but that step may finish later.
+
+While a quit is running the menu shows a disabled **Quitting…** in place of **Exit**, and a
+second request to quit is refused. The stages after restoration (services, imports,
+SteamCMD, Workshop, pixiv, the renderer) share 10 seconds. See
+[architecture](../architecture.md#appkit-shell) for the budgets and the exit fuse and
+[diagnostics](diagnostics.md#why-the-app-quit) for the log lines.
 
 ## The native lock-screen provider and Space selection
 

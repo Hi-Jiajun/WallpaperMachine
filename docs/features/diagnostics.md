@@ -89,7 +89,7 @@ previous session: ended unexpectedly (a crash, a force quit or a kill) (1.3.2 (4
 |---|---|---|
 | none, or a file that cannot be read | `none recorded` | first launch, or the ledger was lost |
 | `ended` | `quit normally (<reason>)` | the app quit through its own shutdown; the reason is the one logged at the start of the quit ([below](#why-the-app-quit)) |
-| `quitting` | `quit did not finish (<reason>)` | a quit began and the process died before it ended: a stage hung and was killed, or the system cut the quit short |
+| `quitting` | `quit did not finish (<reason>)` | a quit began and the process died before it ended: a stage hung and was killed, the system cut the quit short, or the quit went on without a stage it gave up on (the reason then ends `; left running: <stages>`) |
 | `running`, same boot | `ended unexpectedly` | a crash, a force quit, a `kill` or an out-of-memory kill |
 | `running`, another boot | `ended by a restart, shutdown or power loss` | the machine went down while the app ran |
 | any phase, with an exception named | `ended by uncaught exception <name>` | see below |
@@ -118,7 +118,8 @@ What the ledger does not do: it installs no signal handlers (those could clash w
 the ones MoltenVK and FFmpeg install, or alter the crash report), writes no
 heartbeat, and is not part of the diagnostics report: the line in the log is.
 A normal session writes the file three times, at launch, at the start of a quit and
-at exit; a quit that is refused goes back to `running`, which is one more. Each write
+at exit; a quit that is refused goes back to `running`, and one that leaves a stage
+behind updates its reason, which is one more each. Each write
 replaces the file atomically. If a second copy of the app is started on the same
 support folder, the older copy no longer touches the record. The ledger is per
 support folder, so `WALLPAPER_MACHINE_HOME` copies keep their own. Hosted tests and
@@ -157,16 +158,32 @@ The stages of the quit are timed, also when they fail:
 
 ```
 quit: stage restore took 840 ms
+quit: stage services took 3 ms
 quit: stage imports took 2 ms
-quit: finished after 1310 ms: restore 840 ms, imports 2 ms, steamcmd 1 ms, workshop 1 ms, pixiv 0 ms, bridge 455 ms
+quit: finished after 1310 ms: restore 840 ms, services 3 ms, imports 2 ms, steamcmd 1 ms, workshop 1 ms, pixiv 0 ms, bridge 455 ms
 ```
 
-`restore` is the lock-screen and desktop-picture restoration, `bridge` the renderer's shutdown;
-the others are the import, SteamCMD, Workshop and pixiv work. When restoration fails the quit is
-refused and the summary reads `quit: cancelled after … ms: restore … ms (failed)`. The total runs
-from the start of the quit, so it also counts the work between stages. These durations are what
-a stage's time limit has to be chosen from; the lines change no behavior. The remaining
-synchronous teardown in `applicationWillTerminate` is not timed.
+`restore` is the lock-screen and desktop-picture restoration, `services` stops the timers,
+monitors and hosts the app runs, `bridge` is the renderer's shutdown; the others are the
+import, SteamCMD, Workshop and pixiv work. The total runs from the start of the quit, so it
+also counts the work between stages. The synchronous teardown in `applicationWillTerminate`
+is not timed. Every stage has a deadline (`QuitSupervisor`, [budgets](../architecture.md#appkit-shell)),
+and the lines say what happened when one is missed:
+
+| Log | Meaning |
+|---|---|
+| `quit: stage restore took N ms and failed: <error>`, then `quit: cancelled after …` | restoration threw; the quit is refused and the app keeps running |
+| `quit: stage restore had not finished after N ms and was left behind`, then `quit: cancelled after …` | restoration took longer than 20 s; the quit is refused. `Quit cancelled because wallpaper restoration did not finish within N ms` follows at `ERROR` |
+| `quit: stage <name> had not finished after N ms and was left behind`, then `quit: finished without <names> after …` | a later stage outlived its share of the 10 s teardown budget; the quit went on without it. `quit: going on without <names>, which did not finish in time` follows at `WARN`. A stage that had no time left at all is still started, and logged this way too |
+| `quit: stage <name> took N ms and failed: <error>` | a later stage threw; the quit went on |
+| `quit: the process was still running N ms after the quit finished; ending it` | the exit fuse: `applicationWillTerminate` ran, and the process did not exit within 5 s (1 s after a stalled stage), so it was ended with `_exit` after the preferences were flushed. It is armed only once restoration is done, so it can never cut restoration short |
+
+The summary marks each stage that did not finish as `(stalled)` and one that threw as
+`(failed)`. A quit that left a stage behind does not mark the session ledger `ended`: the
+record stays `quitting` with the stage named in its reason, so the next launch logs
+`previous session: quit did not finish (user; left running: bridge)`. A stage that stalls
+is a sign of what to look at (a SteamCMD that does not stop, a renderer shutdown that
+hangs), and the stage durations of ordinary quits are what its budget has to be tuned from.
 
 ### Levels and detailed logging
 
