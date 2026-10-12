@@ -48,6 +48,15 @@ enum BridgeSnapshotFixtures {
       volume: volume)
   }
 
+  /// A bare text property whose label is `labelHtml`, for tests about what the label says.
+  static func textProperty(id: String, labelHtml: String) -> BridgePropertyDescriptor {
+    BridgePropertyDescriptor(
+      id: id, kind: .text, labelHtml: labelHtml, value: .empty, defaultValue: .empty, slider: nil,
+      comboOptions: [], fileFilter: nil, directoryMode: nil, dirty: false,
+      canRestoreDefaults: false, enabled: true, assetManaged: false, assetMissing: false,
+      assetSourcePath: nil)
+  }
+
   /// A settings snapshot carrying shipped defaults: compatibility backend, full
   /// render scale, keep-running on battery, no frame-rate cap, both experiments
   /// off and scene optimisation on. Tests that care about one of those pass it

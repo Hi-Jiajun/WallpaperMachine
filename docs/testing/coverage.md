@@ -422,7 +422,14 @@ on [manual-smoke.md](manual-smoke.md).
 
 `AppLanguageTests` cover the preference store: system matching, persistence, the
 `AppleLanguages` mirror, rejected tags and the snapshot offering every shipped
-language under its own name. The Python catalog checks
+language under its own name, and that every language names a distinct, well
+formed Wallpaper Engine locale for a wallpaper's own label tables. How those
+tables resolve is covered by the bridge crate's `tests::property_snapshot` and
+`project::localization` tests, since a Swift test cannot put a project in a real
+bridge; `PropertyLabelLanguageTests` cover the app's side of it: the language
+list sent, the open inspector read again and relabelled, a read that finishes
+after another wallpaper opened dropped, and a refused request never undoing the
+language choice. The Python catalog checks
 (`scripts/tests/test_panel_localization.py`) keep the registries, catalogs and
 `.xcstrings` naming the same languages and keys; see
 [localization](../localization.md).

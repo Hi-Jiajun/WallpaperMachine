@@ -49,6 +49,13 @@ extension WebPanelController {
       // The page switches from the snapshot it gets back; the user script is refreshed so a
       // later reload or WebContent recovery starts in the same language.
       installUserScript()
+      // A wallpaper's own label tables follow the language too. The change has already
+      // happened, so a failure here is logged and never fails it.
+      do {
+        try await store.setLabelLanguageAsync(appLanguage.effective)
+      } catch {
+        AppLog.warn("Property labels could not follow the new language: \(error.localizedDescription)")
+      }
       return
     case "dismissError":
       actionError = nil

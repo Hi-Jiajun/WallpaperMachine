@@ -357,9 +357,14 @@ cargo test -p shader --test pipeline -- --nocapture
   edits/default restoration/discard, a rule-hidden row staying in the snapshot
   (not enabled, with its value and modified state), hidden-value preservation, the visibility
   grammar (groups, constants, quoted text, `===`, list membership) deciding row
-  visibility with synthetic ids, and fail-open behavior for unreadable rules;
+  visibility with synthetic ids, and fail-open behavior for unreadable rules,
+  and a wallpaper's own `general.localization` tables following the language the
+  host sets (whole-label matches only, English fallback, no change to the draft,
+  no effect on a project without a table);
   `project::condition` also pins the input bounds (length, nesting, list size) and
-  that hostile input returns an error instead of recursing.
+  that hostile input returns an error instead of recursing, and
+  `project::localization` pins the table bounds (languages, tokens, text size,
+  overall bytes) and the language-list cleaning in the same way.
 - `shader`'s `pipeline` test skips asset-dependent cases (for example
   `genericimage4` and a Workshop package) with a printed `skipping …` reason; read
   those lines before claiming shader coverage. See

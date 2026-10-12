@@ -18,7 +18,7 @@ use crate::{
     },
     config::{AppConfig, SerializedSelector, WallpaperConfig},
     engine::NativeVideoRejections,
-    project::ProjectModel,
+    project::{ProjectModel, localization::FALLBACK_LOCALE},
 };
 
 #[allow(clippy::struct_excessive_bools)]
@@ -36,6 +36,11 @@ pub struct BridgeActorState {
     /// Transient mute applied on top of each wallpaper's saved mute. Never
     /// persisted. A user unmute while this is set stays muted until it clears.
     pub audio_suppressed: bool,
+    /// Languages a wallpaper's own label tables are read in, most preferred
+    /// first, as Wallpaper Engine locale codes. Supplied by the host from the
+    /// app's language and never persisted, like `audio_suppressed`. English is
+    /// always in the list as the fallback.
+    pub label_locales: Vec<String>,
     /// Displays suspended on their own, by occlusion for example. Kept apart
     /// from the global flag so one hidden screen cannot pause a visible one,
     /// and from `playback_state` so resuming visibility never clears the user's
@@ -97,6 +102,7 @@ impl Default for BridgeActorState {
             presentation_suspended: false,
             presentation_unloaded: false,
             audio_suppressed: false,
+            label_locales: vec![FALLBACK_LOCALE.to_owned()],
             suspended_displays: BTreeSet::new(),
             renderer_counters_enabled: false,
             native_video_rejected: BTreeMap::new(),

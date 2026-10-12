@@ -30,7 +30,9 @@ macOS language list) and every shipped language under its own name.
 - Missing keys fall back to English. Wallpaper titles, descriptions, creator
   names, custom property labels and upstream diagnostic details remain as
   supplied; the panel translates its own labels and recognized Wallpaper Engine
-  UI tokens, not authored prose (see
+  UI tokens, not authored prose. The one exception is a property or choice
+  label that the wallpaper's own translation table covers: it follows the
+  language, also in an inspector that is already open (see
   [Properties](wallpaper-properties.md#properties)). Steam filter
   values and bridge action identifiers do not change when labels are translated.
 

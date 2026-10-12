@@ -1017,6 +1017,19 @@ public protocol WallpaperBridgeProtocol : AnyObject {
     func setFrameRateCap(cap: UInt32?) async throws  -> BridgeSnapshotBundle
     
     /**
+     * Names the languages a wallpaper's own translated labels are read in,
+     * most preferred first, as Wallpaper Engine locale codes such as `zh-chs`
+     * or `ja-jp`. English is added as the fallback. Not persisted: the host
+     * supplies it at start and again whenever its language changes, and the
+     * next options snapshot reflects it.
+     *
+     * # Errors
+     *
+     * Returns an error when the actor cannot take the request.
+     */
+    func setLabelLanguages(locales: [String]) async throws 
+    
+    /**
      * # Errors
      *
      * Returns an error when launch at login is unavailable or
@@ -2549,6 +2562,34 @@ open func setFrameRateCap(cap: UInt32?)async throws  -> BridgeSnapshotBundle {
             completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
             freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeBridgeSnapshotBundle.lift,
+            errorHandler: FfiConverterTypeBridgeError.lift
+        )
+}
+    
+    /**
+     * Names the languages a wallpaper's own translated labels are read in,
+     * most preferred first, as Wallpaper Engine locale codes such as `zh-chs`
+     * or `ja-jp`. English is added as the fallback. Not persisted: the host
+     * supplies it at start and again whenever its language changes, and the
+     * next options snapshot reflects it.
+     *
+     * # Errors
+     *
+     * Returns an error when the actor cannot take the request.
+     */
+open func setLabelLanguages(locales: [String])async throws  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wallpaper_bridge_fn_method_wallpaperbridge_set_label_languages(
+                    self.uniffiClonePointer(),
+                    FfiConverterSequenceString.lower(locales)
+                )
+            },
+            pollFunc: ffi_wallpaper_bridge_rust_future_poll_void,
+            completeFunc: ffi_wallpaper_bridge_rust_future_complete_void,
+            freeFunc: ffi_wallpaper_bridge_rust_future_free_void,
+            liftFunc: { $0 },
             errorHandler: FfiConverterTypeBridgeError.lift
         )
 }
@@ -9672,6 +9713,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_frame_rate_cap() != 42906) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_label_languages() != 3001) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_launch_at_login() != 35969) {

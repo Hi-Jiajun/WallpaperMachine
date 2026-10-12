@@ -582,3 +582,147 @@ async fn user_shortcut_offers_the_actions_this_host_can_carry_out() {
             .to_vec()
     );
 }
+
+fn text_labels(snapshot: &BridgeWallpaperOptionsSnapshot) -> Vec<(&str, &str)> {
+    snapshot
+        .properties
+        .iter()
+        .map(|property| (property.id.as_str(), property.label_html.as_str()))
+        .collect()
+}
+
+#[tokio::test]
+async fn a_wallpapers_own_label_tables_follow_the_chosen_language() {
+    // Synthetic ids; the shape is a Workshop project that keeps every label as
+    // a `ui_` token with a table per language beside it.
+    let bridge = WallpaperBridge::new_for_test();
+    bridge
+        .inject_scene_project_for_test(
+            "100",
+            "Scene",
+            r#"{
+                "type":"scene",
+                "general":{
+                    "localization":{
+                        "en-us":{"ui_size":"Size","ui_mode":"Mode","ui_fast":"Fast","ui_normal":"Normal","ui_hint":"<b>Hint</b>"},
+                        "zh-chs":{"ui_size":"大小","ui_mode":"模式","ui_normal":"普通","ui_hint":"<i>提示</i>"}
+                    },
+                    "properties":{
+                        "size":{"type":"slider","text":"ui_size","value":1,"min":0,"max":2,"step":1,"precision":0,"index":0},
+                        "mode":{"type":"combo","text":"  ui_mode ","value":"a","index":1,"options":[
+                            {"label":"ui_fast","value":"a"},
+                            {"label":"Slow","value":"b"},
+                            {"label":"ui_normal","value":"c"}
+                        ]},
+                        "missing":{"type":"bool","text":"ui_missing","value":false,"index":2},
+                        "hint":{"type":"text","text":"ui_hint","index":3},
+                        "prose":{"type":"bool","text":"ui_size is not replaced mid-sentence","value":false,"index":4}
+                    }
+                }
+            }"#,
+        )
+        .await;
+    bridge.select_wallpaper("100".to_string()).await.unwrap();
+
+    let english = bridge.wallpaper_options_snapshot("100".to_string()).await.unwrap();
+    assert_eq!(
+        text_labels(&english),
+        [
+            ("size", "Size"),
+            ("mode", "Mode"),
+            ("missing", "ui_missing"),
+            ("hint", "<b>Hint</b>"),
+            ("prose", "ui_size is not replaced mid-sentence"),
+        ]
+    );
+    let combo_labels = |snapshot: &BridgeWallpaperOptionsSnapshot| {
+        snapshot.properties[1]
+            .combo_options
+            .iter()
+            .map(|option| option.label.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(combo_labels(&english), ["Fast", "Slow", "Normal"]);
+
+    bridge
+        .edit_property(
+            "100".to_string(),
+            "size".to_string(),
+            BridgePropertyValue::Number { value: 2.0 },
+        )
+        .await
+        .unwrap();
+    // Options are stored by value, so the draft never sees the label text.
+    let draft_before = bridge.wallpaper_options_snapshot("100".to_string()).await.unwrap();
+
+    bridge
+        .set_label_languages(vec!["zh-CHS".to_owned(), "en-us".to_owned()])
+        .await
+        .unwrap();
+    let chinese = bridge.wallpaper_options_snapshot("100".to_string()).await.unwrap();
+    assert_eq!(
+        text_labels(&chinese),
+        [
+            ("size", "大小"),
+            // The token had spaces around it in the project; it still matches.
+            ("mode", "模式"),
+            ("missing", "ui_missing"),
+            ("hint", "<i>提示</i>"),
+            ("prose", "ui_size is not replaced mid-sentence"),
+        ]
+    );
+    // zh-chs has no ui_fast, so English answers; Slow is no token at all.
+    assert_eq!(combo_labels(&chinese), ["Fast", "Slow", "普通"]);
+    // Switching language changes nothing but the words.
+    assert_eq!(chinese.dirty, draft_before.dirty);
+    assert_eq!(
+        chinese.properties.iter().map(|p| (&p.id, &p.value, p.dirty)).collect::<Vec<_>>(),
+        draft_before.properties.iter().map(|p| (&p.id, &p.value, p.dirty)).collect::<Vec<_>>()
+    );
+
+    bridge
+        .set_label_languages(vec!["ja-jp".to_owned()])
+        .await
+        .unwrap();
+    let japanese = bridge.wallpaper_options_snapshot("100".to_string()).await.unwrap();
+    assert_eq!(
+        text_labels(&japanese),
+        text_labels(&english),
+        "a language the project has no table for reads in English"
+    );
+
+    // Back to the first language, with no wallpaper reload in between.
+    bridge
+        .set_label_languages(vec!["en-us".to_owned()])
+        .await
+        .unwrap();
+    let again = bridge.wallpaper_options_snapshot("100".to_string()).await.unwrap();
+    assert_eq!(text_labels(&again), text_labels(&english));
+    assert_eq!(combo_labels(&again), ["Fast", "Slow", "Normal"]);
+}
+
+#[tokio::test]
+async fn a_project_without_a_label_table_is_unaffected_by_the_language() {
+    let bridge = WallpaperBridge::new_for_test();
+    bridge
+        .inject_scene_project_for_test(
+            "100",
+            "Scene",
+            r#"{
+                "type":"scene",
+                "general":{"properties":{
+                    "mode":{"type":"combo","text":"ui_mode","value":"a","options":[{"label":"ui_fast","value":"a"}]}
+                }}
+            }"#,
+        )
+        .await;
+    bridge.select_wallpaper("100".to_string()).await.unwrap();
+    bridge
+        .set_label_languages(vec!["zh-chs".to_owned(), "".to_owned(), "!!".to_owned()])
+        .await
+        .unwrap();
+
+    let snapshot = bridge.wallpaper_options_snapshot("100".to_string()).await.unwrap();
+    assert_eq!(snapshot.properties[0].label_html, "ui_mode");
+    assert_eq!(snapshot.properties[0].combo_options[0].label, "ui_fast");
+}

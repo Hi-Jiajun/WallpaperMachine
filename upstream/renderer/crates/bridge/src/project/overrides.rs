@@ -184,6 +184,7 @@ mod tests {
                 condition: None,
                 metadata: PropertyMetadata::Bool,
             }],
+            localization: std::sync::Arc::default(),
         }
     }
 

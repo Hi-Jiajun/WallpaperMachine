@@ -795,6 +795,20 @@ final class BridgeStore {
         }
     }
 
+    /// Names the language a wallpaper's own label tables are read in. The bridge keeps it only
+    /// for this run, so the app sends it at launch and again whenever the language changes.
+    /// An inspector that is already open is read again, so its labels change with the language
+    /// instead of waiting for the next edit.
+    func setLabelLanguageAsync(_ language: AppLanguage) async throws {
+        try await bridge.setLabelLanguages(locales: language.labelLocales)
+        guard let id = wallpaperOptionsSnapshot?.wallpaperId else { return }
+        let options = try await bridge.wallpaperOptionsSnapshot(wallpaperId: id)
+        // Another wallpaper may have been opened while the read was in flight.
+        guard wallpaperOptionsSnapshot?.wallpaperId == id else { return }
+        wallpaperOptionsSnapshot = options
+        finishSnapshotApply()
+    }
+
     func setContentPacingEnabledAsync(_ enabled: Bool) async throws {
         let bundle = try await bridge.setContentPacingEnabled(enabled: enabled)
         apply(bundle)

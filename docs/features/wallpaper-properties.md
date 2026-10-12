@@ -82,6 +82,21 @@ Recognized Wallpaper Engine label tokens (brightness, position, default, and
 similar built-in vocabulary) are localized rather than displayed as `ui_editor_…`
 identifiers.
 
+A wallpaper may carry its own translations in `general.localization`: a table per
+Wallpaper Engine language code (`en-us`, `zh-chs`, `zh-cht`, `ja-jp`) that maps
+the `ui_…` tokens its labels and combo options use to text. A label or combo
+option that is exactly one of those tokens (surrounding spaces ignored) shows the
+text from the app's language, then from `en-us`, and otherwise stays as the author
+wrote it, so a token missing from every table is left to the built-in vocabulary
+above. Text that only mentions a token is never rewritten, and a translated value
+passes through the same label sanitiser as any other label. Titles and
+descriptions are not translated. The tables come from downloaded projects and are
+bounded (64 languages, 4,096 tokens each, 2 KiB per text, 1 MiB overall); anything
+beyond the bounds or not text is ignored without failing the wallpaper. The app
+sends its language to the bridge at launch and whenever the language changes, and
+the open inspector relabels at once without reloading the wallpaper or touching
+pending edits.
+
 Authors use HTML labels as a layout surface. `WebUI/property-label.js` parses them
 inertly and reconstructs a small presentation allowlist: headings, paragraphs, line
 breaks, emphasis, font colors, centered content, dividers, links and images. Author

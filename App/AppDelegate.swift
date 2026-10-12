@@ -1891,6 +1891,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
         Task {
             do {
+                // Before the library loads, so the first options snapshot is already in the
+                // language the app shows.
+                do {
+                    try await store.setLabelLanguageAsync(AppLanguageStore.shared.effective)
+                } catch {
+                    AppLog.warn("Property labels could not start in the app language: \(error.localizedDescription)")
+                }
                 try await store.bootstrapAsync()
                 startupError = nil
                 lastError = nil

@@ -218,6 +218,10 @@ pub struct SetAudioSuppressed {
     pub suppressed: bool,
 }
 
+pub struct SetLabelLanguages {
+    pub locales: Vec<String>,
+}
+
 pub struct SetRendererCountersEnabled {
     pub enabled: bool,
 }
@@ -441,6 +445,7 @@ pub type SetPresentationSuspendedReply = Result<(), BridgeError>;
 pub type SetDisplayPresentationSuspendedReply = Result<(), BridgeError>;
 pub type SetPresentationUnloadedReply = AllSnapshotsReply;
 pub type SetAudioSuppressedReply = AllSnapshotsReply;
+pub type SetLabelLanguagesReply = Result<(), BridgeError>;
 pub type SetPowerSourceReply = AllSnapshotsReply;
 pub type InitialFrameReadyReply = AllSnapshotsReply;
 pub type ShutdownReply = Result<(), BridgeError>;

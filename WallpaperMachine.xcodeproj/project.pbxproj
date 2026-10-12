@@ -377,6 +377,7 @@
 		D96FEA3734756F7348586A62 /* LibraryPreviewFetcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E5FB71981DFB52F719A30F8 /* LibraryPreviewFetcherTests.swift */; };
 		D98A488CDA34D495F0A46865 /* SteamCMDSetupStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D9942D37F042F22D20BF2A4 /* SteamCMDSetupStore.swift */; };
 		DA47FC4B047ECEFE064DE1F0 /* MediaRemote.m in Sources */ = {isa = PBXBuildFile; fileRef = 52B0EDE62E0082E34BB3EF18 /* MediaRemote.m */; };
+		DB24EF4A18062B5E014347BE /* PropertyLabelLanguageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2884C3F9892119A8F801B275 /* PropertyLabelLanguageTests.swift */; };
 		DBA8EADFD19CB7B9CDED12FC /* WebPanelEnergyUsageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CE8BE79643355FDEA5F9C5C /* WebPanelEnergyUsageTests.swift */; };
 		DBF4F8723214D0345334EF34 /* preview.jpg in Resources */ = {isa = PBXBuildFile; fileRef = 878762788E9E83199016FD20 /* preview.jpg */; };
 		DC000AA8C69989BE8FC8FEE7 /* WebWallpaperUserScripts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B44A330893EA116EEFD20D1 /* WebWallpaperUserScripts.swift */; };
@@ -559,6 +560,7 @@
 		26A03221A4D2B4AD000FB7B2 /* WallpaperMachineTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WallpaperMachineTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		274F390A8228BA202CDD7900 /* MediaRemoteAdapter.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = MediaRemoteAdapter.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		279EA9A0FBA438E4D75E86F9 /* SteamCMDReportedFailure.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SteamCMDReportedFailure.swift; sourceTree = "<group>"; };
+		2884C3F9892119A8F801B275 /* PropertyLabelLanguageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PropertyLabelLanguageTests.swift; sourceTree = "<group>"; };
 		28F5CD7E82C5AE72FA8A0A4B /* InstanceLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstanceLock.swift; sourceTree = "<group>"; };
 		294BC0CF74507522CAA9A8C0 /* RuntimeDiagnosticsReportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeDiagnosticsReportTests.swift; sourceTree = "<group>"; };
 		294CC02380EF3DB03FD31F13 /* PlaybackPolicyCompositionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackPolicyCompositionTests.swift; sourceTree = "<group>"; };
@@ -1542,6 +1544,7 @@
 				C379BDC29C91D4F1DE26AAFC /* ControlPanelWindowSizingTests.swift */,
 				768008A7AF11956F882F5575 /* PanelViewStateTests.swift */,
 				38C5D6AA7C7A97F32DE552C2 /* PropertyImageCacheTests.swift */,
+				2884C3F9892119A8F801B275 /* PropertyLabelLanguageTests.swift */,
 				1DB4BE71ACE2675951C28DE2 /* WallpaperEditorStateTests.swift */,
 				993D8952E8B60B4EFFCB3E79 /* WebPanelAssetPropertiesTests.swift */,
 				E43FB84B09EF1235150DF8F3 /* WebPanelAssetsTests.swift */,
@@ -2245,6 +2248,7 @@
 				EC7468E4F05E65AAC914E052 /* ProcessFootprintTests.swift in Sources */,
 				EC42403C40F673079E1EC54B /* ProcessSignalsTests.swift in Sources */,
 				5335C8468F65EEF38BCF99E0 /* PropertyImageCacheTests.swift in Sources */,
+				DB24EF4A18062B5E014347BE /* PropertyLabelLanguageTests.swift in Sources */,
 				4EF2FF0275BC21A564066192 /* QuitReasonTests.swift in Sources */,
 				3736EE568B4E7B4B634040ED /* QuitSupervisorTests.swift in Sources */,
 				4F970B1F67C56D02CD491A21 /* QuitTimingsTests.swift in Sources */,

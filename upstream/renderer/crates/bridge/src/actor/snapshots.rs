@@ -144,6 +144,14 @@ impl BridgeActorState {
             .project_models
             .get(&wallpaper_id)
             .map(|model| {
+                // A label that is exactly one of the project's own tokens becomes
+                // its text in the app's language; anything else is left as written.
+                let localized = |raw: &str| {
+                    model
+                        .localization
+                        .resolve(raw, &self.label_locales)
+                        .map_or_else(|| raw.to_owned(), str::to_owned)
+                };
                 let overrides = model.override_values(&config.property_overrides);
                 let lookup = |id: &str| {
                     overrides.get(id).cloned().or_else(|| {
@@ -189,7 +197,7 @@ impl BridgeActorState {
                             PropertyMetadata::Combo { options } => options
                                 .iter()
                                 .map(|option| BridgeComboOption {
-                                    label: option.label.clone(),
+                                    label: localized(&option.label),
                                     value: BridgePropertyValue::from(PropertyValue::String(
                                         option.value.clone(),
                                     )),
@@ -243,7 +251,7 @@ impl BridgeActorState {
                         BridgePropertyDescriptor {
                             id: property.id.clone(),
                             kind: BridgePropertyKind::from(&property.kind),
-                            label_html: property.label_html.clone(),
+                            label_html: localized(&property.label_html),
                             value: BridgePropertyValue::from(value),
                             default_value: BridgePropertyValue::from(default_value),
                             slider,

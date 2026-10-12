@@ -85,6 +85,21 @@ class LayoutSnapshotBridge: WallpaperBridge {
   @MainActor var releaseHeldCalls: [String] = []
   /// What a release throws instead of answering, for a test that needs the bridge to refuse it.
   @MainActor var releaseHeldFailure: Error?
+  /// The label-language lists the app sent, in order. `onLabelLanguages` runs when one arrives,
+  /// as the bridge's own relabelling would, and `failLabelLanguages` makes the request fail.
+  @MainActor var labelLanguageCalls: [[String]] = []
+  @MainActor var onLabelLanguages: (@MainActor ([String]) -> Void)?
+  @MainActor var failLabelLanguages = false
+
+  override func setLabelLanguages(locales: [String]) async throws {
+    try await recordLabelLanguages(locales)
+  }
+
+  @MainActor private func recordLabelLanguages(_ locales: [String]) throws {
+    labelLanguageCalls.append(locales)
+    if failLabelLanguages { throw CancellationError() }
+    onLabelLanguages?(locales)
+  }
 
   override func setBatteryMode(mode: BridgeBatteryMode) async throws -> BridgeSnapshotBundle {
     try await reply { $0.batteryModeCalls.append(mode) }

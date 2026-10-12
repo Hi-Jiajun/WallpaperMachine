@@ -75,7 +75,7 @@ use crate::{
             SetFilter, SetGlobalPlayback, SetLaunchAtLogin, SetMirrorMuted, SetMirrorScalingFactor,
             SetMirrorScalingMode, SetMirrorTarget, SetMirrorTargetFps, SetMirrorVolume, SetMuted,
             SetAudioSuppressed, SetBatteryMode, SetBatteryQualityProfile, SetContentPacingEnabled,
-            SetFrameRateCap, SetMediaIntegrationEnabled,
+            SetFrameRateCap, SetLabelLanguages, SetMediaIntegrationEnabled,
             SetPresentationUnloaded, SetPresentationSuspended, SetPropertyPath, SetRenderScale,
             SetVerboseLogging,
             SetRendererCountersEnabled, SetScalingFactor, SetScalingMode,
@@ -1538,6 +1538,19 @@ impl WallpaperBridge {
         suppressed: bool,
     ) -> Result<BridgeSnapshotBundle, BridgeError> {
         self.actor.ask(SetAudioSuppressed { suppressed }).await
+    }
+
+    /// Names the languages a wallpaper's own translated labels are read in,
+    /// most preferred first, as Wallpaper Engine locale codes such as `zh-chs`
+    /// or `ja-jp`. English is added as the fallback. Not persisted: the host
+    /// supplies it at start and again whenever its language changes, and the
+    /// next options snapshot reflects it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the actor cannot take the request.
+    pub async fn set_label_languages(&self, locales: Vec<String>) -> Result<(), BridgeError> {
+        self.actor.ask(SetLabelLanguages { locales }).await
     }
 
     /// Suspends or resumes rendering and system-audio capture for every

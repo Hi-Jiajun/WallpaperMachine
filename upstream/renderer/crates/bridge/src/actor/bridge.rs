@@ -45,8 +45,8 @@ use crate::{
             SetLaunchAtLogin, SetMediaIntegrationEnabled,
             SetMirrorMuted, SetMirrorScalingFactor,
             SetMirrorScalingMode, SetMirrorTarget, SetMirrorTargetFps, SetMirrorVolume, SetMuted,
-            SetAudioSuppressed, SetBatteryMode, SetPowerSource, SetPresentationSuspended,
-            SetPresentationUnloaded, SetPropertyPath,
+            SetAudioSuppressed, SetBatteryMode, SetLabelLanguages, SetPowerSource,
+            SetPresentationSuspended, SetPresentationUnloaded, SetPropertyPath,
             SetRenderScale,
             SetRendererCountersEnabled, SetScalingFactor, SetScalingMode,
             SetSceneOnDemandEnabled, SetSceneOptimizationEnabled, SetSceneRenderer,
@@ -3318,6 +3318,25 @@ impl<E: EngineFacade + Clone> Message<SetVerboseLogging> for BridgeActor<E> {
         crate::logging::ApplicationLogger::set_verbose(msg.enabled);
         self.bump_generation();
         Ok(self.all_snapshots())
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<SetLabelLanguages> for BridgeActor<E> {
+    type Reply = messages::SetLabelLanguagesReply;
+
+    async fn handle(
+        &mut self,
+        msg: SetLabelLanguages,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let locales = crate::project::localization::preferred_locales(&msg.locales);
+        if self.state.label_locales != locales {
+            log::info!("property label languages: {locales:?}");
+            // Only what the options snapshot reads changes; no scene is
+            // touched, so nothing here can make a running reconcile stale.
+            self.state.label_locales = locales;
+        }
+        Ok(())
     }
 }
 
