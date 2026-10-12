@@ -89,8 +89,8 @@ previous session: ended unexpectedly (a crash, a force quit or a kill) (1.3.2 (4
 |---|---|---|
 | none, or a file that cannot be read | `none recorded` | first launch, or the ledger was lost |
 | `ended` | `quit normally (<reason>)` | the app quit through its own shutdown; the reason is the one logged at the start of the quit ([below](#why-the-app-quit)) |
-| `quitting` | `quit did not finish (<reason>)` | a quit began and the process died before it ended: a stage hung and was killed, the system cut the quit short, or the quit went on without a stage it gave up on (the reason then ends `; left running: <stages>`) |
-| `running`, same boot | `ended unexpectedly` | a crash, a force quit, a `kill` or an out-of-memory kill |
+| `quitting` | `quit did not finish (<reason>)` | a quit began and the process died before it ended: a stage hung and was killed, a second termination signal ended it, the system cut the quit short, or the quit went on without a stage it gave up on (the reason then ends `; left running: <stages>`) |
+| `running`, same boot | `ended unexpectedly` | a crash, a force quit, a `kill -9`, an out-of-memory kill, or a SIGTERM that arrived before launching had finished (after that it is a quit) |
 | `running`, another boot | `ended by a restart, shutdown or power loss` | the machine went down while the app ran |
 | any phase, with an exception named | `ended by uncaught exception <name>` | see below |
 
@@ -114,8 +114,9 @@ An Objective-C exception that nothing catches is logged before the process dies:
 frames. The handler is chained, so one installed earlier still runs, and it writes the
 exception's name (not the reason, which may hold paths) to the ledger.
 
-What the ledger does not do: it installs no signal handlers (those could clash with
-the ones MoltenVK and FFmpeg install, or alter the crash report), writes no
+What the ledger does not do: it installs no handlers for crash signals (those could clash
+with the ones MoltenVK and FFmpeg install, or alter the crash report; SIGTERM and SIGHUP are
+a separate matter, see [signals](crash-recovery.md#signals)), writes no
 heartbeat, and is not part of the diagnostics report: the line in the log is.
 A normal session writes the file three times, at launch, at the start of a quit and
 at exit; a quit that is refused goes back to `running`, and one that leaves a stage
@@ -132,7 +133,7 @@ anything is torn down. The line is written for a request that arrives while a qu
 already running too, which is how a second Exit or a logout during a user quit shows up:
 
 ```
-quit: reason=logout mode=powerOff frontmost=com.apple.loginwindow panelVisible=false updateInstallPending=false alreadyInProgress=false powerOffNotified=true appleEventReason='rlgo'
+quit: reason=logout mode=powerOff frontmost=com.apple.loginwindow panelVisible=false updateInstallPending=false alreadyInProgress=false powerOffNotified=true appleEventReason='rlgo' signal=none
 ```
 
 `mode` is how the quit behaves: `powerOff` when the reason is a logout, restart or shutdown or
@@ -144,7 +145,7 @@ macOS announced one (a signal that arrives during a shutdown is still `powerOff`
 
 | reason | when |
 |---|---|
-| `signal` | a termination signal was turned into the quit; reserved, the app handles no signals yet |
+| `signal` | SIGTERM or SIGHUP was turned into the quit by `TerminationSignalRelay` ([signals](crash-recovery.md#signals)); `signal=SIGTERM` in the line names it, and the session ledger keeps `terminated by SIGTERM` |
 | `logout`, `restart`, `shutdown` | the quit Apple event names that kind (`why?`: `rlgo`/`logo`, `rest`/`rrst`, `shut`/`rsdn`), or macOS announced a power-off (`NSWorkspace.willPowerOffNotification`) and the event named none. The announcement cannot say which kind it is, so that case reads `shutdown`; `appleEventReason=none` in the line tells it apart |
 | `update` | the updater has started its installer and is waiting for the app to quit (`AppUpdateStore.isInstallPending`). A Quit chosen while the update is still being prepared is the user's: it cancels the preparation |
 | `unknown` | the event carries a reason code this build does not know |
@@ -184,7 +185,10 @@ and the lines say what happened when one is missed:
 | `quit: power off; desktop restoration unfinished (<why>), the poster journal will finish it at the next launch`, then `quit: finished without restore …` | a logout, restart or shutdown: restoration threw or took longer than 3 s, and the quit went on instead of being refused. The stage line before it says which |
 | `quit: already in progress, this request waits for it` | a request to quit arrived during a quit and was not refused, because it was a logout, restart or shutdown or the quit running was one. The quit that is running answers both when it finishes |
 | `quit: a logout, restart or shutdown arrived during this quit; going on under its time limits` | the user's quit failed to restore the desktop after such a request had joined it. Instead of being refused it is run once more with the power-off limits |
-| `quit: already in progress, this request is refused` | a second user quit during a user quit |
+| `quit: already in progress, this request is refused` | a second user quit during a user quit. A SIGTERM that arrives during one is logged this way too: the quit that is running is the answer, and a further signal would end the app at once |
+| `signal: SIGTERM received; quitting in order, and a second one ends the app at once` | the first SIGTERM or SIGHUP, logged off the main thread before it is handed to the main run loop, so a stalled main thread still leaves the reason. The `quit:` line follows when the request is handled |
+| `signal: SIGTERM again, or the quit did not finish in time; ending the app by its default action` | a second signal, or the deadline for the first (37 seconds, the longest an interactive quit can take within its limits). The process ends by the signal's own action. A run whose quit had not begun is left `quitting` in the ledger with the reason `terminated by SIGTERM; ended by force`, so the next launch logs `previous session: quit did not finish (terminated by SIGTERM; ended by force)` and not a crash |
+| `signal: SIGTERM and SIGHUP will end the app without a quit: <why>` | the handlers could not be installed at launch (a pipe or `sigaction` failed); the app runs, and a stop kills it as before |
 | `quit: the process was still running N ms after the quit finished; ending it` | the exit fuse: `applicationWillTerminate` ran, and the process did not exit within 5 s (1 s after a stalled stage), so it was ended with `_exit` after the preferences were flushed. It is armed only once restoration is done, so it can never cut restoration short |
 
 The summary marks each stage that did not finish as `(stalled)` and one that threw as

@@ -201,6 +201,11 @@ imports, SteamCMD, Workshop, pixiv, the renderer) share 10 seconds. See
 [architecture](../architecture.md#appkit-shell) for the budgets and the exit fuse and
 [diagnostics](diagnostics.md#why-the-app-quit) for the log lines.
 
+A `kill` takes this path too. SIGTERM and SIGHUP are relayed to the same quit with the same
+limits, so the desktop picture is restored before the app exits; a quit refused for a failed
+restoration shows the alert like any other, and a second signal ends the app at once
+([signals](crash-recovery.md#signals)).
+
 ### Logout, restart and shutdown
 
 Refusing a quit is right for a user who can read an alert and try again. It is wrong when

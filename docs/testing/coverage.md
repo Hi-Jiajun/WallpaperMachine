@@ -281,12 +281,25 @@ on [manual-smoke.md](manual-smoke.md).
   the installer could not start. They also pin that a refused quit stops the waiting
   installer once, leaves the update to install again, does nothing when no installer
   waits, and keeps a helper that would not stop owned.
+- `TerminationSignalRelayTests` — real SIGUSR1 and SIGUSR2 stand in for SIGTERM and SIGHUP, so
+  a failed install cannot take the test host down, and the forced end is always injected: one
+  signal asks for one quit and the process survives, a second signal or the deadline forces
+  the default action instead of asking again, back-to-back signals are one request and one
+  force, a reset after a refused quit lets the next signal ask again, each signal arrives
+  with its own number, `stop` restores the disposition that was there (not the default), an
+  ignored signal stays ignored, a child started with `posix_spawn` sees the default
+  disposition (the probe is first shown to see an inherited ignore, which Foundation's
+  `Process` would hide by resetting every signal) and both pipe ends are close-on-exec and
+  non-blocking. `QuitReasonTests` pin the ledger text of a signal's quit, `QuitSupervisorTests`
+  the longest a quit can take (the signal deadline) and `SessionLedgerTests` that a run cut
+  short before it began quitting reads as a quit that did not finish, not a crash.
 - Not covered: a real quit, logout or restart; `applicationShouldTerminate` itself needs
   the running app (hosted tests short-circuit it), so the alert, the panel coming back, the
   "Quitting…" menu line, the exit fuse's `_exit`, whether macOS shows its cancelled-logout
   dialog, how AppKit treats a request answered with `terminateLater` while another is
-  pending, and the retry of a user's quit that a logout interrupted are desktop-only
-  observations ([manual smoke](manual-smoke.md#native-desktop-posters-and-mission-control)).
+  pending, the retry of a user's quit that a logout interrupted, and a real `kill -TERM`
+  ending in an ordered quit (including whether the main run loop wakes for it while the
+  panel's modal alert is up) are desktop-only observations ([manual smoke](manual-smoke.md#native-desktop-posters-and-mission-control)).
 
 ## Localization
 

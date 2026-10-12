@@ -58,6 +58,12 @@ final class QuitSupervisor {
         func exitFuse(stalled: [String]) -> Duration {
             stalled.isEmpty ? exitFuse : stalledExitFuse
         }
+
+        /// The longest a quit that keeps to these limits takes from the request to the
+        /// process exiting: restoration, the teardown (the last stage keeps its floor even
+        /// when the others used the budget up) and the exit fuse. A termination signal's
+        /// deadline is not shorter, or it would cut off a quit that is still within its limits.
+        var longestQuit: Duration { restoration + teardown + lastStageFloor + exitFuse }
     }
 
     struct Stage {

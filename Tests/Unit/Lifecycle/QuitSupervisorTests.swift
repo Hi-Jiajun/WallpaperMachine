@@ -397,6 +397,16 @@ final class QuitSupervisorTests: XCTestCase {
         }
     }
 
+    func testTheLongestQuitIsEveryPartAtItsLimit() {
+        let budgets = QuitSupervisor.Budgets(
+            restoration: .seconds(20), teardown: .seconds(10), exitFuse: .seconds(5),
+            stalledExitFuse: .seconds(1), lastStageFloor: .seconds(2))
+
+        XCTAssertEqual(budgets.longestQuit, .seconds(37),
+                       "restoration, the teardown, the last stage's floor and the exit fuse")
+        XCTAssertGreaterThan(QuitMode.interactive.budgets.longestQuit, QuitMode.powerOff.budgets.longestQuit)
+    }
+
     // MARK: Exit fuse
 
     func testAStageLeftRunningSelectsTheShorterExitFuse() {

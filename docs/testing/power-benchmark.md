@@ -93,7 +93,9 @@ A desktop run (which needs authorization, see [Authorization
 boundary](#authorization-boundary)) is taken serially, with the display set and
 power source unchanged across a comparison: quit the app with an Apple Event and
 wait until it has exited (`open` can fail with `-600` for a few seconds after
-that), launch with `open --env WALLPAPER_MACHINE_DIAGNOSTICS=60 --env
+that; `kill -TERM <pid>` quits it the same way, but a second signal ends it at once,
+perhaps before the desktop picture is restored, so wait for the exit), launch with
+`open --env WALLPAPER_MACHINE_DIAGNOSTICS=60 --env
 WALLPAPER_MACHINE_DIAGNOSTICS_DELAY=120`, and start a 60-second measurement 120
 seconds after launch. These independently started windows approximately overlap;
 the delay alone does not synchronize their boundaries. The diagnostics report's

@@ -76,7 +76,8 @@ behind it) is not recorded, and the `succeed` of the load that was cut short doe
 
 A reconcile that fails, returns early or panics drops its record without a strike: the
 process is alive and the failure was reported. Quitting on purpose clears the record too
-(`Shutdown` calls `clean_shutdown`), so quitting during a load is not a crash. The `quit:`
+(`Shutdown` calls `clean_shutdown`), so quitting during a load is not a crash, and neither is
+a `kill` or a closing terminal now that [the signals are a quit](#signals). The `quit:`
 log line says who asked for the quit and how long each stage took, so a quit that was cut short
 by a logout or a kill can be told apart from one the user chose; see
 [diagnostics.md](diagnostics.md#why-the-app-quit).
@@ -137,11 +138,56 @@ a first offence, opened at startup and crashing the app again before the user co
 anything. A release for a wallpaper that is not held changes nothing and does not touch the
 engine.
 
+## Signals
+
+`kill`, `killall`, `launchctl stop`, device management and a terminal that closes end an
+app with SIGTERM or SIGHUP. Nothing handled them before: the process died where it stood,
+without `applicationShouldTerminate`, so the poster stayed on the desktop until the next
+launch and a stop during a load counted a strike. `TerminationSignalRelay`
+(`App/Services/Lifecycle/`) now turns both into the quit the menu's Exit runs: restoration
+first, then the teardown, with the same deadlines, and the bridge's `Shutdown` closes the
+journal's record. The quit logs `reason=signal` and `signal=SIGTERM`, and the session
+ledger keeps `terminated by SIGTERM` (see [diagnostics](diagnostics.md#why-the-app-quit)).
+
+- **Caught, not ignored.** The C handler does one `write(2)` of the signal number to a pipe,
+  the only thing a handler may safely do; a dispatch source on a utility queue reads it and
+  hands it on. A caught handler goes back to the default across `exec`, so SteamCMD, perl
+  and the updater script keep the ordinary SIGTERM and SIGHUP. Ignoring the signal and
+  watching it with a dispatch source would pass `SIG_IGN` to every child, because `exec`
+  keeps an ignore, and a child that ignores its parent's SIGTERM turns each quit into a
+  wait for the two-second SIGKILL. Both pipe ends are close-on-exec and non-blocking, and
+  the handler is installed with `SA_RESTART`.
+- **An ignored signal stays ignored.** `nohup` ignores SIGHUP on purpose; the relay leaves
+  a signal that was ignored when it started alone.
+- **The first signal asks, the second ends it.** The first signal reaches
+  `NSApp.terminate` from the main run loop, never from a main-queue job (AppKit's
+  `terminateLater` wait would hang), and in every common mode
+  (`TerminationSignalRelay.performOnMainRunLoopInAnyMode`). The default mode alone would leave
+  the first signal waiting while a menu is open or an alert is up, which run the loop in
+  modes of their own; `kill` would then take until the deadline. A second
+  signal, or the deadline, restores the default action and raises the signal again, so a
+  wedged app can still be killed the usual way. The deadline is the longest an interactive
+  quit can take within its limits (restoration 20 s, teardown 10 s, the bridge's 2 s floor
+  and the 5 s exit fuse: 37 s, `QuitSupervisor.Budgets.longestQuit`), so a quit that is
+  still within its limits is not cut off. The forced end leaves what the quit had not
+  finished to the next launch, as a kill does, and the ledger records a run that had not
+  begun quitting as `quit did not finish (terminated by SIGTERM; ended by force)`, not as
+  a crash.
+- **A refused quit stands the relay down.** If the desktop picture could not be restored
+  the quit is refused, the usual alert appears and the next signal asks for a quit again
+  instead of forcing the end.
+- **During a logout, restart or shutdown** the quit that is already running answers the
+  signal's request too, and it keeps its short power-off limits.
+- **When it starts.** At the end of `applicationDidFinishLaunching`, and never under
+  XCTest. Before that the default action applies, so a stop while the app is still
+  launching ends it as before and the next launch calls it `ended unexpectedly`.
+- SIGKILL cannot be caught. SIGINT, SIGQUIT and the crash signals are left alone.
+
 ## Limits
 
-- A force quit, a `kill -9`, a power loss or a logout kill during a load or its settle
-  window looks like a crash and counts one strike. Two in a row hold the wallpaper,
-  which is why one is not enough. Releasing is one Apply or one Try again.
+- A force quit, a `kill -9`, a second SIGTERM, a power loss or a logout kill during a load
+  or its settle window looks like a crash and counts one strike. Two in a row hold the
+  wallpaper, which is why one is not enough. Releasing is one Apply or one Try again.
 - A launch that opens several displays at once makes every wallpaper still opening a
   suspect; the journal cannot tell which one killed the process.
 - A crash later than the settle window is not attributed to a load.
@@ -231,10 +277,23 @@ Device-free, against the fake engine and a temporary support root:
   and its button posts the action, and a refused retry keeps the row and shows the error.
 - `tests::activation_plan`: a held wallpaper gets no scene, web or native-video
   descriptor; `build_owned` names the owner of every scene, mirrors included.
+- `TerminationSignalRelayTests` (real SIGUSR1 and SIGUSR2 raised in the test host, never
+  SIGTERM, and `forceDefault` always injected): one signal asks for one quit, a second or the
+  deadline forces the default action, back-to-back signals are one request and one force,
+  a reset after a refused quit lets the next signal ask again, `stop` puts back the
+  disposition that was there, an ignored signal stays ignored, a child started with
+  `posix_spawn` sees `DEFAULT` for a relayed signal (the probe is checked to see an
+  inherited ignore as `IGNORE`), both pipe ends are close-on-exec and non-blocking, and the
+  quit request reaches the main run loop while it is spun in the default, event-tracking and
+  modal-panel modes.
+  `SessionLedgerTests` pin the cut-short records and `QuitReasonTests` the ledger text.
 
 Not verifiable headlessly: a real engine crash while a scene loads, and how the banner and
 the menu line look in the real panel and status menu. The fake engine cannot take the
 process down, so the crash is played by a record that never ends. The check on a desktop is
 to kill the app with `SIGSEGV` during a restore twice, relaunch, confirm the banner and the
 menu line, then press **Try again** and confirm the wallpaper loads; that needs an
-explicitly authorized run.
+explicitly authorized run. The same goes for signals: `kill -TERM <pid>` on a running copy
+should restore the desktop picture before it exits, `quit: reason=signal` should appear in
+the log, and a second `kill -TERM` during a wedged quit should end it at once; the unit
+tests never send a real SIGTERM.

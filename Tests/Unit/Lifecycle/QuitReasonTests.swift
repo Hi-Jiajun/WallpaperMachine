@@ -129,6 +129,17 @@ final class QuitReasonTests: XCTestCase {
                        "shutdown; desktop restoration unfinished; left running: bridge")
     }
 
+    func testAQuitAskedForByASignalNamesTheSignalInTheLedger() {
+        XCTAssertEqual(QuitReason.ledgerReason(for: .signal, signal: SIGTERM), "terminated by SIGTERM")
+        XCTAssertEqual(QuitReason.ledgerReason(for: .signal, signal: SIGHUP), "terminated by SIGHUP")
+        XCTAssertEqual(QuitReason.ledgerReason(for: .signal), "signal", "no signal is known: the plain reason")
+        XCTAssertEqual(QuitReason.ledgerReason(for: .user, signal: SIGTERM), "user",
+                       "only a quit classified as a signal's is named for one")
+        XCTAssertEqual(
+            QuitReason.ledgerText(for: .signal, signal: SIGTERM, desktopUnrestored: false, stalled: ["bridge"]),
+            "terminated by SIGTERM; left running: bridge")
+    }
+
     // MARK: The Apple event
 
     private func quitEvent() -> NSAppleEventDescriptor {

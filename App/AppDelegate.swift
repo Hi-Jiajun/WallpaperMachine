@@ -60,6 +60,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     /// A logout, restart or shutdown asked to quit while a user's quit was running. That quit
     /// must then not be refused, because the system would take the refusal as its own.
     private var powerOffJoinedQuit = false
+    /// Turns SIGTERM and SIGHUP into a quit; started once launching has finished.
+    private var terminationSignals: TerminationSignalRelay?
+    /// The signal that asked for the quit being requested, until `applicationShouldTerminate`
+    /// reads it. Cleared when a quit is refused, so a later Quit is not taken for the signal's.
+    private var terminationSignal: Int32?
     private var themeSubscription: AnyCancellable?
     private var iconSubscription: AnyCancellable?
     private var diagnostics: RuntimeDiagnosticsSession?
@@ -421,6 +426,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         AppLog.info("startup: bootstrap dispatched")
         startDiagnosticsSessionIfRequested()
         finishedLaunching = true
+        startTerminationSignalRelay()
         let opened = pendingOpenedFiles
         pendingOpenedFiles = []
         let opensPanel = ControlPanelLaunch.opensPanel(
@@ -705,7 +711,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         // The test host must not instantiate services against the user's app-support folder.
         if NSClassFromString("XCTestCase") != nil { return .terminateNow }
-        let (reason, mode) = logQuitRequest()
+        let (reason, mode, signal) = logQuitRequest()
         switch QuitRequestAnswer.answer(
             finished: shutdownComplete, running: shutdownInProgress ? quitMode : nil, request: mode)
         {
@@ -727,7 +733,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         shutdownInProgress = true
         quitMode = mode
         powerOffJoinedQuit = false
-        SessionLedger.shared?.markQuitting(reason: reason.rawValue)
+        SessionLedger.shared?.markQuitting(reason: QuitReason.ledgerReason(for: reason, signal: signal))
         let panelWasVisible = controlPanelWindow?.isVisible == true
         let whatsNewWasVisible = whatsNewWindow?.isVisible == true
         previewWindow?.session.close()
@@ -766,9 +772,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 await appUpdater.cancelPendingInstall()
                 rebuildMenu()
             case .proceed(let stalled):
-                completeQuit(sender, reason: reason, desktopUnrestored: false, stalled: stalled)
+                completeQuit(sender, reason: reason, signal: signal, desktopUnrestored: false, stalled: stalled)
             case .proceedUnrestored(_, let stalled):
-                completeQuit(sender, reason: reason, desktopUnrestored: true, stalled: stalled)
+                completeQuit(sender, reason: reason, signal: signal, desktopUnrestored: true, stalled: stalled)
             }
         }
 
@@ -785,13 +791,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     /// in the session ledger, which stays `quitting` (see `applicationWillTerminate`) when
     /// a stage is still running, so the next launch can say which.
     private func completeQuit(
-        _ sender: NSApplication, reason: QuitReason, desktopUnrestored: Bool, stalled: [String]
+        _ sender: NSApplication, reason: QuitReason, signal: Int32?, desktopUnrestored: Bool, stalled: [String]
     ) {
         if !stalled.isEmpty {
             AppLog.warn("quit: going on without \(stalled.joined(separator: ", ")), which did not finish in time")
         }
-        let note = QuitReason.ledgerText(for: reason, desktopUnrestored: desktopUnrestored, stalled: stalled)
-        if note != reason.rawValue { SessionLedger.shared?.markQuitting(reason: note) }
+        let note = QuitReason.ledgerText(for: reason, signal: signal, desktopUnrestored: desktopUnrestored, stalled: stalled)
+        if note != QuitReason.ledgerReason(for: reason, signal: signal) { SessionLedger.shared?.markQuitting(reason: note) }
         stalledQuitStages = stalled
         shutdownInProgress = false
         shutdownComplete = true
@@ -873,8 +879,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         lastError = failure
         shutdownInProgress = false
         SessionLedger.shared?.markRunning()
-        // The system was told no, so an earlier announcement no longer applies.
+        // The system was told no, so an earlier announcement no longer applies. The same goes
+        // for a signal: the next one asks for a quit again instead of forcing the end.
         powerOffNotice.clear()
+        terminationSignal = nil
+        terminationSignals?.reset()
         // Native restoration may already have released the desktop even
         // though poster restoration failed. Resume without waiting for
         // another bridge snapshot, but never overwrite an owned provider.
@@ -903,16 +912,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     /// Works out who asked for this quit and how it must behave, and logs both, also for a
     /// request that arrives while a quit is already running. The Apple event is only
     /// readable here, while it is being handled.
-    private func logQuitRequest() -> (reason: QuitReason, mode: QuitMode) {
+    private func logQuitRequest() -> (reason: QuitReason, mode: QuitMode, signal: Int32?) {
         let appleEventReason = QuitReason.appleEventReason(from: NSAppleEventManager.shared().currentAppleEvent)
+        let signal = terminationSignal
+        terminationSignal = nil
         let powerOffNotified = powerOffNotice.isCurrent()
         let updateInstallPending = appUpdater.isInstallPending
         let reason = QuitReason.classify(
             appleEventReason: appleEventReason,
             powerOffNotified: powerOffNotified,
             updateInstallPending: updateInstallPending,
-            // Nothing in the app turns a termination signal into a quit today.
-            terminationSignal: nil)
+            terminationSignal: signal)
         let mode = QuitMode.resolve(reason: reason, powerOffNotified: powerOffNotified)
         let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none"
         AppLog.info(
@@ -922,8 +932,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 + "updateInstallPending=\(updateInstallPending) "
                 + "alreadyInProgress=\(shutdownInProgress || shutdownComplete) "
                 + "powerOffNotified=\(powerOffNotified) "
-                + "appleEventReason=\(appleEventReason.map(QuitReason.text(forCode:)) ?? "none")")
-        return (reason, mode)
+                + "appleEventReason=\(appleEventReason.map(QuitReason.text(forCode:)) ?? "none") "
+                + "signal=\(signal.map(TerminationSignalRelay.name(of:)) ?? "none")")
+        return (reason, mode, signal)
+    }
+
+    // MARK: Termination signals
+
+    /// SIGTERM and SIGHUP become the quit the menu's Exit runs. Not before launching has
+    /// finished: until then the default action applies, and a stop is as safe as it ever was.
+    private func startTerminationSignalRelay() {
+        let relay = TerminationSignalRelay(
+            terminate: { [weak self] signal in
+                // Logged here, off the main thread, so a stalled main thread still leaves the reason.
+                AppLog.info(
+                    "signal: \(TerminationSignalRelay.name(of: signal)) received; quitting in order, "
+                        + "and a second one ends the app at once")
+                // From the main run loop, never a main-queue job: a nested run loop entered from
+                // inside one (AppKit's terminateLater wait) would never drain the main queue.
+                // In every common mode, so that an open alert or menu does not hold the quit back.
+                TerminationSignalRelay.performOnMainRunLoopInAnyMode {
+                    MainActor.assumeIsolated { self?.quitBecauseOfSignal(signal) }
+                }
+            },
+            forceDefault: Self.endAppBecauseOfSignal,
+            forceAfter: QuitMode.interactive.budgets.longestQuit)
+        do {
+            try relay.start()
+            terminationSignals = relay
+        } catch {
+            AppLog.warn("signal: SIGTERM and SIGHUP will end the app without a quit: \(error.localizedDescription)")
+        }
+    }
+
+    private func quitBecauseOfSignal(_ signal: Int32) {
+        terminationSignal = signal
+        NSApp.terminate(nil)
+    }
+
+    /// The second signal, or the deadline for the first: the quit is stuck or the main thread
+    /// is, and the sender has asked twice. Ends the process the way the signal always did.
+    /// Whatever the quit had not finished is left to the next launch, like a kill.
+    nonisolated private static let endAppBecauseOfSignal: @Sendable (Int32) -> Void = { signal in
+        let name = TerminationSignalRelay.name(of: signal)
+        AppLog.error("signal: \(name) again, or the quit did not finish in time; ending the app by its default action")
+        SessionLedger.shared?.markCutShort(reason: "terminated by \(name); ended by force")
+        TerminationSignalRelay.endByDefaultAction(signal)
     }
 
     private func syncPlaybackMonitors() {

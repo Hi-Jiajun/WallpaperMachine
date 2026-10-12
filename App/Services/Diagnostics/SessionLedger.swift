@@ -6,10 +6,10 @@ import os
 ///
 /// A run is one record with a phase: `running` from launch, `quitting` once a quit
 /// starts, `ended` as the app's last act. What a launch finds in the file tells how
-/// the run before it ended; see `classify`. There are no signal handlers, which
-/// could clash with the ones MoltenVK and FFmpeg install or alter a crash report,
-/// and no heartbeat: a normal session writes the file three times (launch, quit
-/// start, exit).
+/// the run before it ended; see `classify`. There are no handlers for crash signals,
+/// which could clash with the ones MoltenVK and FFmpeg install or alter a crash report
+/// (`TerminationSignalRelay` handles only SIGTERM and SIGHUP), and no heartbeat: a
+/// normal session writes the file three times (launch, quit start, exit).
 ///
 /// `kern.bootsessionuuid` is the same value macOS reports as `bootSessionUUID` in a
 /// crash report. A record still `running` after the machine restarted therefore
@@ -211,6 +211,23 @@ final class SessionLedger: @unchecked Sendable {
             guard launch.phase == .quitting else { return false }
             launch.phase = .running
             launch.quitReason = nil
+            return true
+        }
+    }
+
+    /// The app is about to be ended from outside its own quit: a second termination signal,
+    /// or the deadline for the first. A run whose quit never began is recorded as a quit that
+    /// did not finish, so the next launch does not take a requested stop for a crash. A quit
+    /// that began keeps the reason and the stages it already named. May be called from any
+    /// thread and gives up after a second, so a lock another thread never releases cannot
+    /// keep the app from being ended.
+    func markCutShort(reason: String) {
+        guard lock.lock(before: Date(timeIntervalSinceNow: 1)) else { return }
+        defer { lock.unlock() }
+        mutate { launch in
+            guard launch.phase == .running else { return false }
+            launch.phase = .quitting
+            launch.quitReason = reason
             return true
         }
     }

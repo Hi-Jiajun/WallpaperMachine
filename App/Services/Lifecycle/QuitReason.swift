@@ -49,11 +49,20 @@ enum QuitReason: String, Codable, CaseIterable, Sendable {
         }
     }
 
+    /// The reason as the session ledger keeps it. A quit that a signal asked for names the
+    /// signal, because `signal` alone does not say whether it was a kill or a closing terminal.
+    static func ledgerReason(for reason: QuitReason, signal: Int32? = nil) -> String {
+        guard reason == .signal, let signal else { return reason.rawValue }
+        return "terminated by " + TerminationSignalRelay.name(of: signal)
+    }
+
     /// What the session ledger keeps as the reason of a quit that did not go to plan, so
     /// the next launch's `previous session:` line says what was left undone. A quit that
     /// went to plan keeps the plain reason.
-    static func ledgerText(for reason: QuitReason, desktopUnrestored: Bool, stalled: [String]) -> String {
-        var text = reason.rawValue
+    static func ledgerText(
+        for reason: QuitReason, signal: Int32? = nil, desktopUnrestored: Bool, stalled: [String]
+    ) -> String {
+        var text = ledgerReason(for: reason, signal: signal)
         if desktopUnrestored { text += "; desktop restoration unfinished" }
         if !stalled.isEmpty { text += "; left running: " + stalled.joined(separator: ", ") }
         return text

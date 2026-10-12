@@ -81,7 +81,10 @@ automation schedulers, the web and native-video wallpaper hosts, system media).
   who asked for it (`QuitReason`: the user, an update, logout, restart, shutdown, a signal) and
   how long each stage took (`QuitTimings`)
   ([diagnostics](features/diagnostics.md#why-the-app-quit)); the deadlines and the visible
-  failure are in [desktop picture](features/desktop-picture.md#quitting).
+  failure are in [desktop picture](features/desktop-picture.md#quitting). SIGTERM and SIGHUP
+  reach the same path through `TerminationSignalRelay`, started at the end of launching: its
+  C handler only writes to a pipe, a second signal or a deadline ends the app by the
+  signal's default action ([signals](features/crash-recovery.md#signals)).
 - **Hosted tests.** Under a hosted test run (`NSClassFromString("XCTestCase") != nil`) the
   delegate short-circuits: no services are created against the user's real app-support folder.
 

@@ -231,6 +231,40 @@ final class SessionLedgerTests: XCTestCase {
         XCTAssertEqual(writes.value, 3)
     }
 
+    // MARK: Ended from outside
+
+    func testARunCutShortBeforeItsQuitBeganIsAQuitThatDidNotFinishNotACrash() {
+        let first = makeLedger()
+        _ = first.begin(app: "1.0 (1)")
+
+        first.markCutShort(reason: "terminated by SIGTERM; ended by force")
+
+        XCTAssertEqual(makeLedger(pid: 101).begin(app: "1.0 (1)").outcome,
+                       .quitStalled(reason: "terminated by SIGTERM; ended by force"))
+    }
+
+    func testARunCutShortDuringItsQuitKeepsWhatTheQuitAlreadySaid() {
+        let first = makeLedger()
+        _ = first.begin(app: "1.0 (1)")
+        first.markQuitting(reason: "terminated by SIGTERM; left running: bridge")
+
+        first.markCutShort(reason: "terminated by SIGTERM; ended by force")
+
+        XCTAssertEqual(makeLedger(pid: 101).begin(app: "1.0 (1)").outcome,
+                       .quitStalled(reason: "terminated by SIGTERM; left running: bridge"))
+    }
+
+    func testARunThatHasEndedIsNotCutShort() {
+        let first = makeLedger()
+        _ = first.begin(app: "1.0 (1)")
+        first.markQuitting(reason: "user")
+        first.markEnded()
+
+        first.markCutShort(reason: "terminated by SIGTERM; ended by force")
+
+        XCTAssertEqual(makeLedger(pid: 101).begin(app: "1.0 (1)").outcome, .cleanQuit(reason: "user"))
+    }
+
     func testAnOlderCopyDoesNotRewriteTheRecordOfTheNewerOne() {
         let older = makeLedger(pid: 1)
         _ = older.begin(app: "1.0 (1)")
