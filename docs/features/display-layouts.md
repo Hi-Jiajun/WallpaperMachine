@@ -105,7 +105,9 @@ them, and promises only this:
   log it yet.
 
 None of this has been checked against real mirror sets, AirPlay or a closed lid; the
-tests prove what the host and the refresh do with the readings they are given.
+tests prove what the host and the refresh do with the readings they are given. The
+[hot-plug and mirroring rows](../testing/manual-smoke.md#hot-plugs-mirroring-and-the-lid)
+of the manual smoke checklist are how it gets checked.
 
 ## Spaces boundary
 

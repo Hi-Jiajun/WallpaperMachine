@@ -312,11 +312,21 @@ smoothness cannot be captured and have to be judged by eye.
 ## Native video backend (experimental, opt-in)
 
 Set **Video playback** to **Native video preferred** and apply a plain video that
-**In use now** lists as `native`. Whether the system really takes a playing clip's decoder
-away during sleep or a lock, and whether a kick or a rebuild brings it back, is not
-something any headless test can show; these rows are how it is learned. Read the
-diagnostics log after each one, and record a diagnostic session's counters
-(`nativeVideoPlaybackStalled`, `nativeVideoPlaybackKick`, `nativeVideoPlaybackRebuild`).
+**In use now** lists as `native`. The rows below are what no headless test can show about
+the native player on a real desktop; the tests cover the rules and the media tests the
+player on synthetic clips ([coverage](coverage.md#nativevideo) lists what is not covered).
+Turn on **Detailed logging** ([diagnostics](../features/diagnostics.md#levels-and-detailed-logging))
+and read the log after each row. With every result, write down the macOS version and build,
+the display and its refresh rate, and whether Compatibility behaves the same on the same
+clip: a difference between the backends is the case to report, and the same behavior on
+both is the system's.
+
+### Sleep, wake, lock and unlock
+
+Whether the system really takes a playing clip's decoder away during sleep or a lock, and
+whether a kick or a rebuild brings it back, is learned here. Record a diagnostic session's
+counters (`nativeVideoPlaybackStalled`, `nativeVideoPlaybackKick`,
+`nativeVideoPlaybackRebuild`).
 
 - [ ] Sleep the displays only, wait a few minutes and wake them: the picture is moving
       within a few seconds. The log shows `playback advancing after the displays woke`, or
@@ -334,6 +344,91 @@ diagnostics log after each one, and record a diagnostic session's counters
 - [ ] Whenever a stall is logged, note whether the kick was enough, whether a rebuild was
       needed and whether the clip ended on Compatibility (the reason is in **In use now**).
       A stall that ends there is the case to report.
+
+### The menu bar and switching
+
+Two effects are open questions for window-based video wallpapers on recent macOS builds:
+the translucent menu bar keeping the tint of the first frame instead of following the
+picture, and a new picture showing only after another app is clicked. Neither has been
+seen in this app, and nothing in the code or the tests can show either. The native window
+is opaque (`isOpaque = true` in `NativeVideoWallpaperWindow`) and nothing re-commits it
+after a switch.
+
+- [ ] Play a clip whose top edge changes between dark and bright, with Reduce transparency
+      off so the menu bar is translucent. Does the menu bar's tint follow the moving
+      picture, or stay on the first frame?
+- [ ] Switch wallpaper from the menu bar item (**Next Wallpaper**, **Previous Wallpaper**
+      or an entry under **Recently used**) without touching any other app: the new
+      picture appears at once, not only after another app or window is clicked. Repeat
+      from the panel's Apply, and for native to native, native to Compatibility and
+      Compatibility to native.
+- [ ] Press **Next Wallpaper** several times in a row over native clips: only the last
+      one appears on the desktop, with no flash of the ones in between. The log says
+      `superseded while its metadata was read` for any that were overtaken.
+- [ ] Repeat the first two rows with the same clip on Compatibility.
+
+A failure here does not justify making the window non-opaque (an alpha just below 1) or
+forcing a re-commit of the window or layer after a switch. Each of those changes costs
+something the app does not measure today and needs its own measurement first: the power
+harness for WindowServer's share
+([power benchmarking](power-benchmark.md#windowservers-share)) and how the system's
+occlusion decisions treat a non-opaque window. The window stays opaque
+until such a measurement says otherwise.
+
+### Scaling and posters
+
+- [ ] With a landscape clip, set each **Scaling mode** (Fill, Fit, Stretch, Original size),
+      then a **Scale factor** above and below 1, once on Native and once on Compatibility
+      on the same display: the picture covers the same area with the same crop and the
+      same black bars. Original size shows one video pixel per point, so a 1920x1080 clip covers
+      1920x1080 points of a Retina display. An anamorphic clip is the one documented
+      difference ([performance](../features/performance.md#video-backend)).
+- [ ] Change the mode and the factor while the clip plays: the picture moves without the
+      clip restarting or going black, and the log (detailed) has a `scaling … -> …` line
+      for the change.
+- [ ] Set a large **Scale factor** (the panel sets no upper limit; try 4, then 8) on the
+      largest display: playback stays smooth. Record the factor, the display and any
+      dropped frames; the cost of a large factor is unmeasured.
+- [ ] Play a portrait clip recorded on a phone (stored rotated), and a mirrored one if
+      there is one. It is upright on the desktop, and its Mission Control thumbnail and
+      the picture on another Space are upright too and match the desktop, also with Fit
+      and with Original size.
+
+### Hot-plugs, mirroring and the lid
+
+The engine reads its displays from CoreGraphics and the native video host draws on the
+screens AppKit lists. Whether the two lists differ across hot-plugs, wakes, mirroring and a
+closed lid has not been seen on a desktop
+([display layouts](../features/display-layouts.md#mirror-sets-airplay-and-a-closed-lid)).
+
+- [ ] Native video on an external monitor, another wallpaper on the built-in display:
+      unplug and replug the monitor's cable, then put the monitor to sleep and wake it.
+      Note whether the clip restarted or flashed black, and the `display refresh:` lines
+      in the log: `a display missing for N ms came back; no refresh` for a blip, or
+      `refreshing after N ms of a display being missing` for a monitor that stayed away.
+      Record how long the display was really missing; the wait before a refresh is a fixed
+      0.8 s that has not been measured against real hot-plugs.
+- [ ] Turn on hardware mirroring in System Settings → Displays with a native video
+      assigned to the set: record which member shows the wallpaper and whether the log
+      has `is offered for display N, which this host cannot see`.
+- [ ] Repeat with an AirPlay or Sidecar display, and with the lid of the built-in display
+      closed on an external monitor and then reopened. For each, record whether that
+      warning appeared, for which display, and how long the video took to open once the
+      display was listed again.
+
+### Slow storage and cost
+
+- [ ] If a wallpaper's video file can be put on a spun-down external disk, a network share
+      or an evicted cloud file, apply it on Native. Either it plays once the volume
+      answers, or it lands on Compatibility and **In use now** names the storage and the
+      step (the metadata read or the first frame). The other displays' videos are held up
+      no longer than the metadata limit (8, 30 or 60 seconds by storage). Record the
+      storage, the time taken, and the `nativeVideoProbeTimeout` and
+      `nativeVideoFirstFrameTimeout` counters: on the internal drive any count means a
+      stall, not slowness.
+- [ ] Play a 4K native clip and sleep and wake the displays: no visible hitch around the
+      check after the wake. If there is one, measure it with the power harness before
+      changing anything; the cost of the check's video output on a 4K clip is unmeasured.
 
 ## Audio responsiveness
 

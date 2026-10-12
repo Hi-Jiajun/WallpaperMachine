@@ -757,6 +757,10 @@ hand-off), but nothing here reclaims a decoder and no test shows a repair that w
 a stuck pipeline. Those premises are answered by the `nativeVideoPlaybackStalled`,
 `nativeVideoPlaybackKick` and `nativeVideoPlaybackRebuild` counters on a real machine, and
 by the sleep, lock and unlock rows in [manual-smoke](manual-smoke.md#native-video-backend-experimental-opt-in).
+Most of the rest of this list has rows there too: a rapid switch, the menu bar's tint, Fit,
+Original size and a scale factor against Compatibility, the Mission Control picture of a
+rotated clip, a real hot-plug, mirror set, AirPlay screen or closed lid, and a slow
+volume.
 
 ## Panel
 
