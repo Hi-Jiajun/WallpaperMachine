@@ -290,7 +290,8 @@ final class DesktopWallpaperSync {
         let interval = periodicInterval
         periodic = Task { [weak self] in
             while true {
-                do { try await Task.sleep(for: interval) } catch { return }
+                // The poster only has to be roughly this old, so let the system coalesce it.
+                do { try await Task.sleep(for: interval, tolerance: interval / 10) } catch { return }
                 guard let self, !self.stopped else { return }
                 self.requestPresentingFrames()
             }

@@ -192,10 +192,17 @@ final class LockScreenWallpaperService {
     }
   }
 
+  static let monitorInterval: TimeInterval = 2
+
   static func scheduleMonitorTimer(_ callback: @escaping @MainActor () -> Void) -> Timer {
-    Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in
+    let timer = Timer.scheduledTimer(withTimeInterval: monitorInterval, repeats: true) { _ in
       MainActor.assumeIsolated { callback() }
     }
+    // The tick only reconciles state that has no notification of its own (a battery
+    // pause, a new Space, a choice in System Settings), so a check that slides by a
+    // second is harmless and lets the system coalesce it with other wakeups.
+    timer.tolerance = monitorInterval / 2
+    return timer
   }
 
   func shutdown(restoringDesktop: () async throws -> Void = {}) async throws {

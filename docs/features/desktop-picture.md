@@ -24,7 +24,8 @@ system's thumbnail compositor still take time, so an update is not instant.
 **Settings › General › Startup & desktop › Update the Mission Control picture every 5
 minutes** (`PlaybackPreferences.refreshesDesktopPicturePeriodically`, off by default)
 retakes the poster every five minutes while the wallpaper plays, for wallpapers that
-change over time. Without it the poster is taken only at the moments listed
+change over time; the wait may run up to 30 seconds longer so the system can share the
+wakeup with other timers. Without it the poster is taken only at the moments listed
 [below](#when-a-poster-is-taken), so it shows the wallpaper as it looked once it
 settled. The setting applies to the running sync at once and has no effect while the
 lock screen is animated, because poster sync is then suspended

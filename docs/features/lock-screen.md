@@ -258,7 +258,10 @@ also restores native selections, but resumes live desktop playback afterward.
 ## Background checks and recovery
 
 The service keeps one two-second monitor while a mode can still refresh safely,
-recovery is complete, and shutdown has not begun. Busy refreshes keep the timer but
+recovery is complete, and shutdown has not begun. The timer may fire up to a second
+late so the system can share the wakeup with other timers: its tick only reconciles
+state that has no notification of its own (a battery pause, a new Space, a choice in
+System Settings), and it never fires early. Busy refreshes keep the timer but
 skip its work; an active request with no wallpapers still checks for a later
 wallpaper; disabling both modes or shutting down cancels the timer immediately. A
 shared error stops automatic monitoring until an explicit retry or another existing

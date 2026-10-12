@@ -379,6 +379,15 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
   }
 
   @MainActor
+  func testMonitorTimerLetsTheSystemCoalesceItsWakeups() {
+    let timer = LockScreenWallpaperService.scheduleMonitorTimer {}
+    defer { timer.invalidate() }
+    XCTAssertEqual(timer.timeInterval, 2, "the cadence stays two seconds")
+    XCTAssertTrue(timer.isValid)
+    XCTAssertGreaterThanOrEqual(timer.tolerance, timer.timeInterval / 2)
+  }
+
+  @MainActor
   func testMonitorExistsOnlyWhileRequestedAndDoesNotRescheduleWhileBusy() async throws {
     var calls = 0
     var pending: CheckedContinuation<[BridgeLockScreenScene], Never>?
