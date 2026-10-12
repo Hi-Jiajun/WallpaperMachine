@@ -116,6 +116,27 @@ final class PlaylistScheduler {
         settledPeriods[display] = (phase.until, store.revisions[display] ?? 0)
     }
 
+    /// The longest a rotating display leaves a wallpaper the user just applied alone, whatever
+    /// the deadline it was heading for.
+    static let manualGrace: TimeInterval = 5 * 60
+
+    /// The user applied a wallpaper to `display` by hand. A rotation that was about to replace
+    /// it moments later waits `min(interval, manualGrace)` from now instead: a deadline that
+    /// falls due sooner is pushed back to that point, and a later one is never shortened, so a
+    /// long interval keeps its rhythm. A paused display whose deadline already passed is pushed
+    /// back too, so it does not swap the moment playback resumes. Day and night already keeps a
+    /// hand-picked wallpaper until its next boundary, and an Off display has nothing to hold.
+    func noteManualChoice(_ display: String) {
+        let playlist = store.playlist(for: display)
+        guard playlist.mode == .rotate, let due = store.nextChange[display] else { return }
+        let date = now()
+        let held = date.addingTimeInterval(min(Self.seconds(playlist.interval), Self.manualGrace))
+        guard due < held else { return }
+        // Dating the change posts the store's notification, which re-arms the single timer.
+        store.schedule(display, at: held)
+        AppLog.info("playlist: a manual choice on display \(display) holds the rotation for \(Int(held.timeIntervalSince(date))) s")
+    }
+
     /// Makes every change that is due, dates the next ones and arms the timer for the earliest.
     func evaluate() {
         guard !observers.isEmpty else { return }

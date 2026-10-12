@@ -596,4 +596,117 @@ final class PlaylistSchedulerTests: XCTestCase {
         XCTAssertEqual(applied, ["primary", "second"])
         XCTAssertEqual(shown["second"], "b")
     }
+
+    /// A wallpaper the user applies a minute before a rotation falls due is not replaced by
+    /// it: the rotation waits the grace from the choice, then happens once.
+    func testAManualChoiceHoldsADueRotationForTheGrace() async {
+        store.update("primary") { $0.mode = .rotate; $0.interval = 30 }
+        let scheduler = makeScheduler()
+        scheduler.start()
+        defer { scheduler.stop() }
+        await settle()
+        let started = clock
+        clock.addTimeInterval(29 * 60)
+        scheduler.noteManualChoice("primary")
+        await settle()
+        XCTAssertEqual(store.nextChange["primary"], clock.addingTimeInterval(PlaylistScheduler.manualGrace))
+
+        clock = started.addingTimeInterval(30 * 60)
+        scheduler.evaluate()
+        await settle()
+        XCTAssertTrue(applied.isEmpty, "the old deadline no longer replaces the wallpaper just chosen")
+        clock = started.addingTimeInterval(33 * 60)
+        scheduler.evaluate()
+        await settle()
+        XCTAssertTrue(applied.isEmpty)
+
+        clock = started.addingTimeInterval(34 * 60)
+        scheduler.evaluate()
+        await settle()
+        scheduler.evaluate()
+        await settle()
+        XCTAssertEqual(applied, ["b"], "the rotation resumes once the grace has passed")
+        XCTAssertEqual(store.nextChange["primary"], clock.addingTimeInterval(30 * 60))
+    }
+
+    func testAManualChoiceNeverShortensALaterDeadline() async {
+        store.update("primary") { $0.mode = .rotate; $0.interval = 30 }
+        let scheduler = makeScheduler()
+        scheduler.start()
+        defer { scheduler.stop() }
+        await settle()
+        let deadline = clock.addingTimeInterval(30 * 60)
+        clock.addTimeInterval(10 * 60)
+        XCTAssertEqual(store.nextChange["primary"], deadline)
+        scheduler.noteManualChoice("primary")
+        await settle()
+        XCTAssertEqual(store.nextChange["primary"], deadline, "twenty minutes out is already past the grace")
+
+        store.update("primary") { $0.interval = 60 }
+        scheduler.evaluate()
+        await settle()
+        XCTAssertEqual(store.nextChange["primary"], clock.addingTimeInterval(60 * 60))
+        scheduler.noteManualChoice("primary")
+        XCTAssertEqual(store.nextChange["primary"], clock.addingTimeInterval(60 * 60), "a long interval keeps its rhythm")
+    }
+
+    func testTheGraceIsNeverLongerThanTheInterval() async {
+        store.update("primary") { $0.mode = .rotate; $0.interval = 1 }
+        let scheduler = makeScheduler()
+        scheduler.start()
+        defer { scheduler.stop() }
+        await settle()
+        clock.addTimeInterval(50)
+        scheduler.noteManualChoice("primary")
+        await settle()
+        XCTAssertEqual(store.nextChange["primary"], clock.addingTimeInterval(60),
+                       "a one-minute rotation is held for one minute, not five")
+        XCTAssertTrue(applied.isEmpty)
+    }
+
+    /// A paused display keeps the deadline it missed. A choice made meanwhile must not leave it
+    /// to swap the wallpaper the moment playback resumes.
+    func testAManualChoiceOnAPausedDisplayStillHoldsTheRotationAfterResume() async throws {
+        store.update("source") { $0.mode = .rotate; $0.source = .list; $0.wallpaperIDs = ["a", "b"] }
+        let plan = try store.savePlan(from: "source", name: "Rotation")
+        running = false
+        let scheduler = makeScheduler()
+        scheduler.start()
+        defer { scheduler.stop() }
+        try store.applyPlan(plan.id, to: "primary")
+        await settle()
+        XCTAssertEqual(store.nextChange["primary"], .distantPast)
+        scheduler.noteManualChoice("primary")
+        await settle()
+        XCTAssertEqual(store.nextChange["primary"], clock.addingTimeInterval(PlaylistScheduler.manualGrace))
+
+        running = true
+        scheduler.evaluate()
+        await settle()
+        XCTAssertTrue(applied.isEmpty, "resuming within the grace leaves the chosen wallpaper alone")
+        clock.addTimeInterval(PlaylistScheduler.manualGrace)
+        scheduler.evaluate()
+        await settle()
+        XCTAssertEqual(applied, ["b"])
+    }
+
+    func testManualChoiceIgnoresOffAndDayNightPlaylists() async {
+        let scheduler = makeScheduler()
+        scheduler.start()
+        defer { scheduler.stop() }
+        scheduler.noteManualChoice("primary")
+        await settle()
+        XCTAssertNil(store.nextChange["primary"], "an Off display gets no deadline from a manual choice")
+
+        store.update("primary") { $0.mode = .dayNight; $0.dayWallpaperID = "b"; $0.nightWallpaperID = "c" }
+        await settle()
+        let boundary = calendar.date(from: DateComponents(year: 2027, month: 1, day: 15, hour: 19))
+        XCTAssertEqual(store.nextChange["primary"], boundary)
+        shown["primary"] = "a"
+        clock = calendar.date(from: DateComponents(year: 2027, month: 1, day: 15, hour: 18, minute: 58))!
+        scheduler.noteManualChoice("primary")
+        await settle()
+        XCTAssertEqual(store.nextChange["primary"], boundary, "day and night keeps its own boundary")
+        XCTAssertEqual(applied, ["b"], "the manual choice itself changes nothing")
+    }
 }

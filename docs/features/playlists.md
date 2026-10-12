@@ -96,6 +96,19 @@ not queue up behind your Apply, which would replace the wallpaper you just got. 
 user applies by hand stays until the next half of the day, and choosing a
 different day or night wallpaper applies at once.
 
+A wallpaper you apply to a rotating display is also left alone for a while: the
+rotation's next change waits at least `min(interval, 5 minutes)` from your choice
+(`PlaylistScheduler.noteManualChoice`), so a change that was a minute away does
+not replace it. Any wallpaper you apply yourself counts: the panel's Apply, one
+from the menu bar's recently used list or **Previous**, a link, Shortcuts action
+or shortcut key that applies one, a display layout or a copy to another display,
+and applying the wallpaper already on screen. A deadline further away than that is
+never shortened, so a long interval keeps its rhythm, and a paused display whose
+deadline already passed is pushed back too, so it does not swap the moment
+playback resumes. **Change now** and **Next Wallpaper** on a rotating display are
+unchanged (they start a full interval), and the playlist's own changes and an
+automatic rule's never count as a choice.
+
 A rotating playlist skips a wallpaper whose application throws an error and tries
 another in the same change, at most five distinct wallpapers. Failed items wait
 15 minutes before becoming candidates again; they do not count as successful
@@ -143,7 +156,9 @@ rejection), `PlaylistSchedulerTests` (a waited interval, a change that fell due
 while paused happening once, day and night with
 a manual choice left alone, Change now, nothing playable, bounded failure skipping,
 cooldown expiry, cancellation, manual-command precedence and a rotation giving
-way to a waiting Apply, rescheduled one interval later) and
+way to a waiting Apply, rescheduled one interval later, a manual choice holding a
+due rotation for min(interval, 5 minutes) without ever shortening a later deadline
+or touching Off and Day and night) and
 `WebPanelPlaylistTests` (the actions' validation).
 `ControlPanelPlaybackToolsTests` drives reorder buttons and drag/drop in an
 offscreen panel, including an edit made while a drag is in progress. Real

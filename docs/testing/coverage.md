@@ -925,7 +925,8 @@ signed-in answers and the real sign-in page are not covered
 across displays and detached on manual edit, cleanup when wallpapers or
 collections go), `PlaylistSchedulerTests` (fake clock, library and activation;
 no renderer: failure cooldowns, paused catch-up, a newer manual command
-outranking a failed automatic switch, a rotation yielding to a waiting Apply), `WebPanelPlaylistTests` and offscreen
+outranking a failed automatic switch, a rotation yielding to a waiting Apply, a manual choice holding a
+due rotation), `WebPanelPlaylistTests` and offscreen
 `ControlPanelPlaybackToolsTests` (drag and button sorting, keyboard focus,
 stale-drag rejection, escaped history titles, clearing only the target display).
 What each covers: [playlists](../features/playlists.md#verification).

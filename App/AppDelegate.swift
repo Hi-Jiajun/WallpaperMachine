@@ -651,6 +651,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         automaticWallpapers = controller
         store.onUserWallpaperChoice = { [weak self, weak controller] _, display in
             controller?.scheduler.noteManualChoice(display)
+            self?.playlistScheduler?.noteManualChoice(display)
             self?.schedulePosterRefresh()
         }
         controller.scheduler.start()
