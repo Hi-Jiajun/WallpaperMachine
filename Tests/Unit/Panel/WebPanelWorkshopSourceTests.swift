@@ -3,7 +3,8 @@ import XCTest
 @testable import WallpaperMachine
 
 /// What the panel accepts and shows for Discover's sources: authors, collections and the
-/// signed-in account's subscriptions. Steam is never reached: every request fails at once.
+/// signed-in account's subscriptions. Steam is never reached: every request fails at once,
+/// except the details of the one item a pasted link names.
 @MainActor
 final class WebPanelWorkshopSourceTests: XCTestCase {
   private var root: URL!
@@ -97,6 +98,31 @@ final class WebPanelWorkshopSourceTests: XCTestCase {
     XCTAssertNil(workshop.downloader.download(for: "900"))
   }
 
+  /// The panel says the sidebar does not apply only while the grid shows an item looked up
+  /// from a pasted link, and not once something else has taken its place.
+  func testTheSnapshotFlagsTheItemLookedUpFromAPastedLink() async throws {
+    XCTAssertEqual(workshopSnapshot()["lookup"] as? Bool, false)
+    func search(_ text: String) async throws {
+      try await controller.perform("workshopSearch", body: [
+        "text": text, "sort": "trend", "tags": [String](), "excludedTags": ["Mature", "Application"],
+      ])
+      for _ in 0..<400 where workshop.isLoading || !workshop.hasLoaded { try await Task.sleep(for: .milliseconds(5)) }
+    }
+
+    try await search("https://steamcommunity.com/sharedfiles/filedetails/?id=\(OfflineProtocol.itemID)")
+    XCTAssertEqual(workshopSnapshot()["lookup"] as? Bool, true)
+    let items = workshopSnapshot()["items"] as? [[String: Any]] ?? []
+    XCTAssertEqual(items.map { $0["id"] as? String }, [OfflineProtocol.itemID])
+    XCTAssertEqual(workshopSnapshot()["totalCount"] as? Int, 1)
+    XCTAssertTrue((workshopSnapshot()["steamURL"] as? String ?? "").hasSuffix("id=\(OfflineProtocol.itemID)"))
+
+    // A list that cannot be opened empties the grid, and the flag goes with the item.
+    try await controller.perform("workshopSource", body: ["source": "collections"])
+    for _ in 0..<400 where workshop.isLoading { try await Task.sleep(for: .milliseconds(5)) }
+    XCTAssertEqual(workshopSnapshot()["lookup"] as? Bool, false)
+    XCTAssertEqual((workshopSnapshot()["items"] as? [[String: Any]])?.count, 0)
+  }
+
   private func workshopSnapshot() -> [String: Any] {
     controller.snapshot()["workshop"] as? [String: Any] ?? [:]
   }
@@ -106,10 +132,30 @@ final class WebPanelWorkshopSourceTests: XCTestCase {
   }
 }
 
-/// Fails every request at once, so the panel's Discover never reaches Steam in these tests.
+/// Fails every request at once, so the panel's Discover never reaches Steam in these tests,
+/// except the details of `itemID`, the one Workshop item a pasted link can name here.
 private final class OfflineProtocol: URLProtocol, @unchecked Sendable {
+  static let itemID = "3632513108"
+
   override class func canInit(with request: URLRequest) -> Bool { true }
   override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-  override func startLoading() { client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet)) }
+  override func startLoading() {
+    guard let url = request.url, url.host == "api.steampowered.com",
+      url.path.contains("/ISteamRemoteStorage/GetPublishedFileDetails/")
+    else {
+      client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+      return
+    }
+    let row: [String: Any] = [
+      "publishedfileid": Self.itemID, "result": 1, "consumer_app_id": 431960, "creator_app_id": 431960,
+      "title": "Pasted item", "creator": "76561198000000001", "tags": [["tag": "Scene"], ["tag": "Mature"]],
+      "file_size": "2048", "subscriptions": 3, "time_updated": 1_700_000_000,
+    ]
+    let body = (try? JSONSerialization.data(withJSONObject: ["response": ["publishedfiledetails": [row]]])) ?? Data()
+    client?.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!,
+      cacheStoragePolicy: .notAllowed)
+    client?.urlProtocol(self, didLoad: body)
+    client?.urlProtocolDidFinishLoading(self)
+  }
   override func stopLoading() {}
 }

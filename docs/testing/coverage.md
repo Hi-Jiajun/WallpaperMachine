@@ -801,7 +801,9 @@ follows the developer's in-app language choice.
   it), and how the animation looks or what it saves in power.
 - `ControlPanelDiscoverTests` — pagination does not navigate with the page number
   and clamps to Steam's page limit, the grid keeps square tiles in at least three
-  columns, download rings and telemetry, and previews that play without canvas
+  columns, download rings and telemetry, the search field's handling of a pasted
+  link (looked up at once) against a bare id (only on Return) and words (after
+  their pause), and previews that play without canvas
   readback and release offscreen images. This does not reproduce a GPU-process
   hang or prove on-screen smoothness.
 - `ControlPanelSyncTests` (hidden-panel pushes, option fetches, display titles),
@@ -994,8 +996,13 @@ following (`WebWallpaperRenderScaleTests`, plus the render-scale cases of
   racing requests cannot publish over a newer search; pages are Steam's own pages
   served from cache, capped at Steam's page limit, with the next page prefetched;
   the sidebar defaults match Wallpaper Engine's.
+- `WorkshopLinkTests` — which pasted text names a Workshop item: bare ids from six
+  digits, item page and `steam://` links in their accepted spellings, and the
+  look-alikes that must stay searches (other hosts, user info or ports, bad ids,
+  free text holding an id or a link); only the wallpapers list reads an id.
 - `WorkshopTests` — query and tag encoding, sort mapping, the details request and
-  its answers (served, withdrawn and other apps' items). The two `testLive…`
+  its answers (served, withdrawn and other apps' items), and the single-item lookup
+  with a distinct reason for a removed, foreign, Application or unreadable row. The two `testLive…`
   cases fetch Steam's real pages and are opt-in
   (`WALLPAPER_MACHINE_NETWORK_TESTS=1`, see
   [README.md](README.md#opt-in-layers)); the page format stays covered offline
@@ -1005,10 +1012,13 @@ following (`WebWallpaperRenderScaleTests`, plus the render-scale cases of
   collection's order, collections marked on browse pages, the sidebar's rules on
   unfiltered pages, age-rating sampling of collections, every subscription page
   read with the session, a page whose entries cannot be read failing instead of
-  passing for empty, and the store's back history, sign-in, ended session and
-  sign-out. `WebPanelWorkshopSourceTests` (Panel) cover the panel's source
-  actions, sign-in through an injected window and refusing to download a
-  collection. Steam's real sign-in window is not covered.
+  passing for empty, the store's back history, sign-in, ended session and
+  sign-out, and a pasted link or id: one tile that no sidebar filter hides, no
+  browse page read, failures on the normal retry path, other sources ignoring the
+  id. `WebPanelWorkshopSourceTests` (Panel) cover the panel's source
+  actions, sign-in through an injected window, refusing to download a
+  collection and the snapshot's `lookup` flag. Steam's real sign-in window and a
+  real lookup against Steam are not covered.
 - `WorkshopThumbnailCacheTests` — one download per URL under concurrent requests,
   disk hits across instances, no cache entry after a failed fetch, the concurrency
   cap, oldest-first pruning, still-frame extraction from animated previews

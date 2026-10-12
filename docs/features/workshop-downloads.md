@@ -54,6 +54,35 @@ browse page has no "most voted" sort and silently treats unknown `browsesort`
 values as trending, so none is offered. Wallpaper Engine's "mobile compatible"
 box has no Steam tag behind it, so it is not offered either.
 
+### Opening an item from a link or id
+
+Pasting a Workshop item's page link (`steamcommunity.com/sharedfiles/filedetails/?id=…`
+or `/workshop/filedetails/?id=…`, `http` or `https`), a `steam://url/CommunityFilePage/<id>`
+link or a bare id of six or more digits into the search field shows that item as one
+ordinary tile instead of sending the text to Steam as search words
+(`WorkshopLink.itemID(in:)`). Links are parsed as URLs, never by a pattern over free
+text, and ids are validated like any other (digits only, above zero); a short number
+such as a year, or a sentence that merely holds an id or a link, is still a search.
+Only the wallpapers list does this: collections, authors and subscriptions read the
+text as words.
+
+The lookup answers from Steam's public details endpoint, the one that already supplies
+every other source's tiles, so the download ring, inspector, Installed mark and update
+mark work as on any tile, and a collection opens through **Open collection**. It is a
+page of one (`WorkshopService.itemPage`), and Open on Steam goes to the item's page.
+The sidebar's age rating, tags and Type, and the sort, do not apply to an item asked
+for by name; the summary line says so while it is on show (`lookup` in the
+snapshot). Creator names cost a profile page fetch, so a looked-up tile shows the
+generic name; **More by this author** still works from the creator id.
+
+An item that cannot be shown fails like any load: the error banner with **Retry**, and
+the list on show stays. The message tells the reasons apart: Steam no longer serves the
+item (removed, hidden or an id that never existed), it belongs to another Steam app, or
+it is an Application wallpaper, which runs Windows programs and is never offered
+(`WorkshopService.lookup`). The panel looks a link up as soon as it is pasted and a bare
+id (six digits or more) when Return or Search is pressed, so typing an id never looks up
+its prefixes; a link typed by hand and ordinary words wait for the usual short pause.
+
 ### Tile thumbnails
 
 Steam's `preview_url` is the full-size preview, and most trending previews are

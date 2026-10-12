@@ -140,4 +140,65 @@ final class WorkshopTests: XCTestCase {
     func testDetailsInAnUnexpectedShapeReportFailure() {
         XCTAssertThrowsError(try WorkshopService.decodeDetails(Data("<html>".utf8)))
     }
+
+    // MARK: A single item asked for by id
+
+    private func detailsAnswer(_ rows: [[String: Any]]) throws -> Data {
+        try JSONSerialization.data(withJSONObject: ["response": ["publishedfiledetails": rows]])
+    }
+
+    private func detailsRow(
+        _ id: String = "3632513108", result: Int = 1, app: Int = 431960, creatorApp: Int = 431960,
+        tags: [String] = ["Scene", "Everyone"]
+    ) -> [String: Any] {
+        [
+            "publishedfileid": id, "result": result, "consumer_app_id": app, "creator_app_id": creatorApp,
+            "title": "Item \(id)", "creator": "76561199211352973", "file_size": "161966295",
+            "tags": tags.map { ["tag": $0] }, "time_updated": 1_766_849_991,
+        ]
+    }
+
+    func testLookupReturnsTheWallpaperAskedFor() throws {
+        // Steam answers in the order asked and may carry rows for other ids.
+        let answer = try detailsAnswer([detailsRow("1"), detailsRow("3632513108", tags: ["Video", "Mature"])])
+        let item = try WorkshopService.lookup(details: answer, id: "3632513108")
+        XCTAssertEqual(item.id, "3632513108")
+        XCTAssertEqual(item.kind, .video)
+        XCTAssertEqual(item.creatorID, "76561199211352973")
+        XCTAssertNil(item.collectionSize)
+        XCTAssertEqual(item.pageURL, WorkshopItem.pageURL(id: "3632513108"))
+    }
+
+    func testLookupReturnsACollectionAsACollectionTile() throws {
+        let answer = try detailsAnswer([detailsRow("77", creatorApp: WorkshopService.collectionCreatorApp, tags: [])])
+        XCTAssertEqual(try WorkshopService.lookup(details: answer, id: "77").collectionSize, 0)
+    }
+
+    /// Each way an item cannot be shown says its own reason, so the user knows whether to try
+    /// another link or give up on this one.
+    func testLookupSaysWhyAnItemCannotBeShown() throws {
+        func failure(_ rows: [[String: Any]], id: String = "5") throws -> String {
+            let answer = try detailsAnswer(rows)
+            do {
+                _ = try WorkshopService.lookup(details: answer, id: id)
+            } catch let failure as WorkshopFailure {
+                return failure.message
+            }
+            XCTFail("\(rows) should not be shown")
+            return ""
+        }
+        let removed = try failure([detailsRow("5", result: 9)])
+        XCTAssertEqual(try failure([]), removed, "an answer without the row means the same")
+        XCTAssertEqual(try failure([detailsRow("6")]), removed, "an answer about another id means the same")
+        let otherApp = try failure([detailsRow("5", app: 440)])
+        let application = try failure([detailsRow("5", tags: ["Application", "Everyone"])])
+        let unreadable = try failure([["publishedfileid": "5", "result": 1, "consumer_app_id": 431960]])
+        let messages = [removed, otherApp, application, unreadable]
+        XCTAssertFalse(messages.contains(""))
+        XCTAssertEqual(Set(messages).count, messages.count, "four reasons, four messages")
+
+        XCTAssertThrowsError(try WorkshopService.lookup(details: Data("<html>".utf8), id: "5")) {
+            XCTAssertEqual(($0 as? WorkshopFailure)?.message, unreadable)
+        }
+    }
 }

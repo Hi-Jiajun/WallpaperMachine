@@ -142,6 +142,126 @@ final class ControlPanelDiscoverTests: ControlPanelTestCase {
     await workshop.steamCMDSetup.shutdown()
   }
 
+  /// A link pasted whole is looked up at once, but a bare id waits for Return: searching as it is
+  /// typed would look up every prefix of it. Words keep their short pause. The summary stops
+  /// counting results while the grid shows an item looked up from a link, and only the
+  /// wallpapers list invites a link.
+  func testPastedLinksSearchAtOnceAndIdsWaitForReturnWithoutWindow() async throws {
+    let fixture = makeStore()
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "web-paste-link-\(UUID().uuidString)")
+    let defaults = try TemporaryDefaults.make(for: self).defaults
+    defer { try? FileManager.default.removeItem(at: root) }
+    let workshop = WorkshopStore(
+      downloader: WorkshopDownloadManager(sessionDirectory: root), supportDirectory: root,
+      defaults: defaults)
+    let controller = WebPanelController(
+      store: fixture.store, navigation: ControlPanelNavigation(), workshop: workshop,
+      defaults: defaults, appLanguage: .english())
+    let web = controller.makeWebView()
+    defer { controller.stop() }
+    web.setFrameSize(NSSize(width: 960, height: 640))
+    let deadline = Date().addingTimeInterval(15)
+    while !controller.isReady && Date() < deadline {
+      try await Task.sleep(for: .milliseconds(100))
+    }
+    XCTAssertTrue(controller.isReady)
+    guard controller.isReady else { return }
+    _ = try await web.callAsyncJavaScript("""
+      document.querySelector('#welcome [data-action="go"][data-step="5"]').click();
+      document.querySelector('#welcome [data-action="finish"]').click();
+      """, arguments: [:], in: nil, contentWorld: .page)
+    // Messages are recorded and answered with nothing, so no search reaches Steam, and the
+    // short pause before a search is recorded instead of waited for.
+    let result =
+      try await web.callAsyncJavaScript(
+        """
+        const snapshot = await window.webkit.messageHandlers.native.postMessage({action:'ready'});
+        const sent = [];
+        // The page drops the wrapper, and the override on it, once it collects garbage unless
+        // something holds the wrapper.
+        window.heldBridge = window.webkit.messageHandlers.native;
+        window.webkit.messageHandlers.native.postMessage = message => { sent.push(message); return Promise.resolve(null); };
+        const pauses = [];
+        const realSetTimeout = window.setTimeout.bind(window);
+        window.setTimeout = (callback, delay, ...rest) => {
+          if (delay === 450) { pauses.push(delay); return 0; }
+          return realSetTimeout(callback, delay, ...rest);
+        };
+        const show = workshop => window.wallpaperUI.receive(Object.assign({}, snapshot, {
+          page: 'discover',
+          workshop: Object.assign({}, snapshot.workshop, {
+            page: 1, totalPages: 1000, totalCount: 2891159, pageSize: 30,
+            loaded: true, loading: false, items: [], error: null, lookup: false,
+            source: { key: 'browse', id: null, name: null, searchable: true, canGoBack: false }
+          }, workshop)
+        }));
+        // Native pushes can replace the snapshot between turns, so each step shows Discover again
+        // first and reads what it caused straight away: handlers post their message at once.
+        const turn = () => new Promise(resolve => realSetTimeout(resolve, 0));
+        const field = () => document.getElementById('wallpaper-search');
+        const searches = () => sent.filter(message => message.action === 'workshopSearch').map(message => message.text);
+        const begin = async text => {
+          await turn(); show({});
+          sent.length = 0; pauses.length = 0;
+          if (text !== undefined) field().value = text;
+        };
+        const enter = async (text, inputType) => {
+          await begin(text);
+          field().dispatchEvent(new InputEvent('input', { bubbles: true, inputType }));
+          return { searches: searches(), pauses: pauses.length };
+        };
+        const summary = () => document.getElementById('browser-summary').textContent.trim();
+        show({});
+        const result = { placeholder: field().placeholder, plainSummary: summary() };
+        const link = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3632513108';
+        result.pastedLink = await enter(link, 'insertFromPaste');
+        result.typedLink = await enter(link, 'insertText');
+        result.typedId = await enter('3632513108', 'insertText');
+        result.pastedId = await enter('3632513108', 'insertFromPaste');
+        result.shortNumber = await enter('12345', 'insertText');
+        result.words = await enter('forest', 'insertText');
+        result.wordsPasted = await enter('forest', 'insertFromPaste');
+        await enter('3632513108', 'insertFromPaste');
+        await begin();
+        field().form.requestSubmit();
+        result.submitted = searches();
+        await turn(); show({ lookup: true, totalPages: 1, totalCount: 1 });
+        result.lookupSummary = summary();
+        show({ source: { key: 'collections', id: null, name: null, searchable: true, canGoBack: false } });
+        result.collectionsPlaceholder = field().placeholder;
+        return result;
+        """, arguments: [:], in: nil, contentWorld: .page) as? [String: Any]
+    let link = "https://steamcommunity.com/sharedfiles/filedetails/?id=3632513108"
+    func entry(_ name: String) -> (searches: [String], pauses: Int) {
+      let value = result?[name] as? [String: Any]
+      return (value?["searches"] as? [String] ?? ["missing"], value?["pauses"] as? Int ?? -1)
+    }
+    XCTAssertEqual(entry("pastedLink").searches, [link], "a link pasted whole is looked up at once")
+    XCTAssertEqual(entry("pastedLink").pauses, 0)
+    XCTAssertEqual(entry("typedLink").searches, [], "a link typed by hand waits for a pause like words")
+    XCTAssertEqual(entry("typedLink").pauses, 1)
+    for name in ["typedId", "pastedId"] {
+      XCTAssertEqual(entry(name).searches, [], "an id is not looked up as it is entered")
+      XCTAssertEqual(entry(name).pauses, 0, "and no pause is left running to look it up")
+    }
+    XCTAssertEqual(entry("shortNumber").pauses, 1, "a short number is searched for like words")
+    XCTAssertEqual(entry("words").pauses, 1)
+    XCTAssertEqual(entry("wordsPasted").searches, [])
+    XCTAssertEqual(entry("wordsPasted").pauses, 1)
+    XCTAssertEqual(result?["submitted"] as? [String], ["3632513108"], "Return looks the id up")
+    let plain = result?["plainSummary"] as? String ?? ""
+    let looked = result?["lookupSummary"] as? String ?? ""
+    XCTAssertNotNil(plain.rangeOfCharacter(from: .decimalDigits), "a list counts its results")
+    XCTAssertFalse(looked.isEmpty)
+    XCTAssertNil(looked.rangeOfCharacter(from: .decimalDigits), "an item looked up from a link is not counted among results")
+    XCTAssertNotEqual(result?["placeholder"] as? String, result?["collectionsPlaceholder"] as? String,
+      "only the wallpapers list invites a pasted link")
+    XCTAssertFalse((result?["collectionsPlaceholder"] as? String ?? "").isEmpty)
+    XCTAssertNil(controller.actionError)
+    await workshop.steamCMDSetup.shutdown()
+  }
+
   /// Discover's lists are tabs, so subscriptions can be found without opening a menu, even at
   /// the 760px window minimum; signed in, downloading what the library lacks leads the list.
   func testDiscoverListsAreTabsAndSubscriptionsLeadWithTheirDownload() async throws {

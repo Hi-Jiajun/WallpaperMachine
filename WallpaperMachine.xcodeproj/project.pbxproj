@@ -309,6 +309,7 @@
 		9BFD338985FBCE0C3283DF13 /* WebPanelPixiv.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57DDFB7C83DCCCBF031C127C /* WebPanelPixiv.swift */; };
 		9C58A115A48A8F8158E8A8E2 /* WallpaperFocusFilterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51EAB5554535D8D9F3F2E9D2 /* WallpaperFocusFilterTests.swift */; };
 		9C8E1F22F8D39644D9144F1C /* ControlPanelPlaybackToolsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBCB87F6B6BA4768FCD32C72 /* ControlPanelPlaybackToolsTests.swift */; };
+		9CFB6E19C4D84CA8CC106F61 /* WorkshopLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = E44EC53DA20C72B032AE749E /* WorkshopLink.swift */; };
 		9D6355301D1C8931D0F7D845 /* BridgeSnapshotFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 477A4746DD39D30E6DA97B68 /* BridgeSnapshotFixtures.swift */; };
 		9EB4B51BB6A068C960F5004E /* AppLanguageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC75CE8D6365F952FDA8B028 /* AppLanguageTests.swift */; };
 		9F7ACCA42CA53D110295BD5A /* PixivStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EF9409BE13A0E8AE3DA61B1 /* PixivStoreTests.swift */; };
@@ -368,6 +369,7 @@
 		B99D9A9FBDC895FBD4EA7081 /* LockScreenConnectionTrace.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB4A47DDBB08C42EC351C028 /* LockScreenConnectionTrace.swift */; };
 		BA008041DBB8B3A786BEAA2A /* WallpaperPresentationAuthority.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C8E6F8AD574BD22BB9A8AE5 /* WallpaperPresentationAuthority.swift */; };
 		BA1EFCC88078A571F5350223 /* WallpaperEnergyRatingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8504195AB3C8302D95265F40 /* WallpaperEnergyRatingsTests.swift */; };
+		BA84E20B3267519C86DB0554 /* WorkshopLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BB27624DB22D1DE75807C47 /* WorkshopLinkTests.swift */; };
 		BB5F54A4BD313BB82A5912EF /* WorkshopUpdateStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA0CB5B5242587308948D49C /* WorkshopUpdateStoreTests.swift */; };
 		BC475695D204FFF9447E1BB6 /* WallpaperPlaylist.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D5ECA1DC1057D28BB011999 /* WallpaperPlaylist.swift */; };
 		BCEFB2810390C6C93230D0D5 /* ControlPanelSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9C4998EAFA45412BDD063F2 /* ControlPanelSyncTests.swift */; };
@@ -795,6 +797,7 @@
 		7A29353D08EE64616E110598 /* ClientPathsBackupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientPathsBackupTests.swift; sourceTree = "<group>"; };
 		7A4A698B99B5D35E9A1F8F41 /* FakeExtensionProcessTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FakeExtensionProcessTable.swift; sourceTree = "<group>"; };
 		7B44A330893EA116EEFD20D1 /* WebWallpaperUserScripts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebWallpaperUserScripts.swift; sourceTree = "<group>"; };
+		7BB27624DB22D1DE75807C47 /* WorkshopLinkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkshopLinkTests.swift; sourceTree = "<group>"; };
 		7D9753908B8059E4B43D87AD /* EnergyUsageMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnergyUsageMonitorTests.swift; sourceTree = "<group>"; };
 		7E00122A62EA15795BA15923 /* UserAssetWorker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserAssetWorker.swift; sourceTree = "<group>"; };
 		80739AE276380DE0C9978E73 /* WorkshopDownloadManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkshopDownloadManager.swift; sourceTree = "<group>"; };
@@ -986,6 +989,7 @@
 		E357352A869A85B727AF0AE1 /* WallpaperHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperHistoryStore.swift; sourceTree = "<group>"; };
 		E43FB84B09EF1235150DF8F3 /* WebPanelAssetsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPanelAssetsTests.swift; sourceTree = "<group>"; };
 		E445628679463DA269C386B3 /* DownloadTelemetryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadTelemetryTests.swift; sourceTree = "<group>"; };
+		E44EC53DA20C72B032AE749E /* WorkshopLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkshopLink.swift; sourceTree = "<group>"; };
 		E4D8C201C9212B1052997E9B /* DirectoryWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectoryWatcher.swift; sourceTree = "<group>"; };
 		E4F5DE5A66DD12C65A77011F /* PixivServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PixivServiceTests.swift; sourceTree = "<group>"; };
 		E5CEB65FCE398F74510E6C2A /* ProcessFootprintTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessFootprintTests.swift; sourceTree = "<group>"; };
@@ -1551,6 +1555,7 @@
 				F0E481186B5E539877D0DB6E /* TransferEstimatorTests.swift */,
 				5D28E789E0E33BE2773D1902 /* WorkshopApplyOnArrivalTests.swift */,
 				648F0EAFA290CB221E5FDE39 /* WorkshopDownloadPersistenceTests.swift */,
+				7BB27624DB22D1DE75807C47 /* WorkshopLinkTests.swift */,
 				B15F8C48977CDEC3A7859F93 /* WorkshopSourceTests.swift */,
 				70F99B245FF1D2D710BF22EB /* WorkshopStoreTests.swift */,
 				A38523CF5D61D51EEF466B7F /* WorkshopTests.swift */,
@@ -1810,6 +1815,7 @@
 				F17611FE37BEDBA683549A23 /* WorkshopDownloadCheckpoint.swift */,
 				7762AC596B1FD44CD50285BD /* WorkshopDownloader.swift */,
 				80739AE276380DE0C9978E73 /* WorkshopDownloadManager.swift */,
+				E44EC53DA20C72B032AE749E /* WorkshopLink.swift */,
 				93CD781A700C6C15D88FEF6B /* WorkshopService.swift */,
 				693AA95FDCEDE1207F2BBCD1 /* WorkshopSource.swift */,
 				03CD178D603A96DE61B44C8F /* WorkshopStore.swift */,
@@ -2522,6 +2528,7 @@
 				4B8E941C637C206B8AE1DFC5 /* WhatsNewTests.swift in Sources */,
 				FA725115933463D36AD33995 /* WorkshopApplyOnArrivalTests.swift in Sources */,
 				0891E26A6A44ED0EE7B56C94 /* WorkshopDownloadPersistenceTests.swift in Sources */,
+				BA84E20B3267519C86DB0554 /* WorkshopLinkTests.swift in Sources */,
 				E1B2DD9B2A1302B044C9B91E /* WorkshopSourceTests.swift in Sources */,
 				296D171829F322F7E899B9C3 /* WorkshopStoreTests.swift in Sources */,
 				08B01F7DB468BFE37BBF832B /* WorkshopTests.swift in Sources */,
@@ -2739,6 +2746,7 @@
 				8013296A7FBDE0AC9BF477B1 /* WorkshopDownloadCheckpoint.swift in Sources */,
 				C2A39D30B5DD72DE1F499C77 /* WorkshopDownloadManager.swift in Sources */,
 				4981D67002E0CAFE0985EF9D /* WorkshopDownloader.swift in Sources */,
+				9CFB6E19C4D84CA8CC106F61 /* WorkshopLink.swift in Sources */,
 				4C7AB9F298FE7DB131DA2887 /* WorkshopService.swift in Sources */,
 				C9863B3CED75D033651064EC /* WorkshopSource.swift in Sources */,
 				E90853142E5CAA1D77E31300 /* WorkshopStore.swift in Sources */,

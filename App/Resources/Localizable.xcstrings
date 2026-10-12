@@ -3050,6 +3050,15 @@
     "Steam no longer serves this collection." : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Steam no longer serves this collection."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このコレクションはSteamで提供されなくなりました。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "Steam 已不再提供这个合集。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "Steam 已不再提供此收藏集。"}}}
     },
+    "This link is not a Wallpaper Engine item." : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "This link is not a Wallpaper Engine item."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このリンクはWallpaper Engineのアイテムではありません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "这个链接指向的不是 Wallpaper Engine 的项目。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "此連結指向的不是 Wallpaper Engine 的項目。"}}}
+    },
+    "Steam no longer serves this Workshop item." : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Steam no longer serves this Workshop item."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このワークショップアイテムはSteamで提供されなくなりました。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "Steam 已不再提供这个创意工坊项目。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "Steam 已不再提供此工作坊項目。"}}}
+    },
+    "Application wallpapers run Windows programs and can’t be used on macOS." : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Application wallpapers run Windows programs and can’t be used on macOS."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "アプリケーション壁紙はWindowsプログラムを実行するため、macOSでは使用できません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "应用程序类壁纸需要运行 Windows 程序，无法在 macOS 上使用。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "應用程式桌布會執行 Windows 程式，無法在 macOS 上使用。"}}}
+    },
     "Steam’s sign-in finished without a session this app can use. Try signing in again." : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Steam’s sign-in finished without a session this app can use. Try signing in again."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "Steamのサインインは完了しましたが、このAppで使用できるセッションを取得できませんでした。もう一度サインインしてください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "Steam 登录已结束，但没有得到本应用可用的会话。请再试一次登录。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "Steam 登入已完成，但未取得此 App 可用的工作階段。請再次嘗試登入。"}}}
     },

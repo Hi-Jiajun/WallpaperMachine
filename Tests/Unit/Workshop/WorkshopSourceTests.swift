@@ -409,6 +409,118 @@ final class WorkshopSourceTests: XCTestCase {
     XCTAssertEqual(store.totalCount, kept.count)
   }
 
+  // MARK: A pasted link or id
+
+  private static let pasted = "3632513108"
+
+  /// A pasted link or id is one tile, shown whatever the sidebar's rating, tags and type say:
+  /// it was asked for by name. Steam's browse page is never asked for it.
+  func testAPastedLinkOrIdShowsThatOneItemAndNeverAsksForABrowsePage() async throws {
+    let store = fixture.store
+    fixture.browse = browseHTML(rows: [wallpaperRow("12", tags: ["Scene", "Everyone"])])
+    fixture.details = [Self.pasted: detailsRow(Self.pasted, tags: ["Video", "Mature"])]
+    store.excludedTags = ["Mature", "Application"]
+    store.kind = .scene
+    store.tags = ["Approved"]
+    for text in [
+      "https://steamcommunity.com/sharedfiles/filedetails/?id=\(Self.pasted)&searchtext=forest",
+      "steam://url/CommunityFilePage/\(Self.pasted)", Self.pasted, "  \(Self.pasted)\n",
+    ] {
+      store.searchText = text
+      store.search()
+      try await finished(store)
+      XCTAssertEqual(store.items.map(\.id), [Self.pasted], text)
+      XCTAssertEqual(store.items.first?.kind, .video)
+      XCTAssertEqual(store.page, 1)
+      XCTAssertEqual(store.totalPages, 1)
+      XCTAssertEqual(store.totalCount, 1)
+      XCTAssertEqual(store.reachableCount, 1)
+      XCTAssertTrue(store.hasLoaded)
+      XCTAssertNil(store.errorMessage)
+      XCTAssertEqual(store.committedQuery?.itemID, Self.pasted)
+      XCTAssertEqual(store.browseURL, WorkshopItem.pageURL(id: Self.pasted), "Open on Steam opens the item")
+    }
+    XCTAssertEqual(fixture.browsePagesRequested, [], "the browse page is never read for a pasted item")
+    XCTAssertEqual(fixture.detailsRequests, 4)
+
+    // Words are searched as before, and the item no longer stands in for their results.
+    store.searchText = "forest"
+    store.kind = .all
+    store.tags = []
+    store.search()
+    try await finished(store)
+    XCTAssertEqual(store.items.map(\.id), ["12"])
+    XCTAssertNil(store.committedQuery?.itemID)
+    XCTAssertEqual(fixture.browsePagesRequested, [1])
+  }
+
+  /// Steam serves a collection as an item of its own, which opens like one from a list.
+  func testAPastedCollectionIsShownAsACollectionTile() async throws {
+    var row = detailsRow("77", tags: [])
+    row["creator_app_id"] = WorkshopService.collectionCreatorApp
+    fixture.details = ["77": row]
+    let store = fixture.store
+    store.searchText = "https://steamcommunity.com/sharedfiles/filedetails/?id=77"
+    store.search()
+    try await finished(store)
+    XCTAssertEqual(store.items.map(\.id), ["77"])
+    XCTAssertNotNil(store.items.first?.collectionSize)
+  }
+
+  /// An item that cannot be shown is an ordinary failed load: the banner and Retry, with the
+  /// list on show left as it was, and Retry asks for the same item again.
+  func testAPastedItemThatCannotBeShownFailsLikeAnyLoadAndRetryAsksAgain() async throws {
+    let store = fixture.store
+    fixture.browse = browseHTML(rows: [wallpaperRow("12", tags: ["Scene", "Everyone"])])
+    store.search()
+    try await finished(store)
+    XCTAssertEqual(store.items.map(\.id), ["12"])
+
+    var otherApp = detailsRow(Self.pasted, tags: ["Scene"])
+    otherApp["consumer_app_id"] = 440
+    var messages: [String] = []
+    let answers: [[String: [String: Any]]] = [
+      [:], [Self.pasted: otherApp], [Self.pasted: detailsRow(Self.pasted, tags: ["Application"])],
+    ]
+    for answer in answers {
+      fixture.details = answer
+      store.searchText = Self.pasted
+      store.search()
+      try await finished(store)
+      messages.append(try XCTUnwrap(store.errorMessage))
+      XCTAssertEqual(store.items.map(\.id), ["12"], "the list on show stays")
+      XCTAssertEqual(store.failedRequest?.query.itemID, Self.pasted)
+      XCTAssertEqual(store.failedRequest?.page, 1)
+    }
+    XCTAssertEqual(Set(messages).count, 3, "each reason is told apart")
+
+    fixture.details = [Self.pasted: detailsRow(Self.pasted, tags: ["Scene", "Everyone"])]
+    store.retrySearch()
+    try await finished(store)
+    XCTAssertEqual(store.items.map(\.id), [Self.pasted])
+    XCTAssertNil(store.errorMessage)
+    XCTAssertNil(store.failedRequest)
+    XCTAssertEqual(fixture.browsePagesRequested, [1], "only the first, ordinary search read the browse page")
+  }
+
+  /// The other sources read the text as words, so an id typed there is not looked up.
+  func testOtherSourcesIgnoreAPastedId() async throws {
+    let store = fixture.store
+    fixture.browse = browseHTML(rows: [collectionRow("901", children: [])])
+    fixture.details = [Self.pasted: detailsRow(Self.pasted, tags: ["Scene", "Everyone"])]
+    store.excludedTags = []
+    store.searchText = Self.pasted
+    store.open(.collections)
+    try await finished(store)
+    XCTAssertEqual(store.items.map(\.id), ["901"])
+    XCTAssertEqual(fixture.browseSections, ["collections"])
+    XCTAssertEqual(fixture.detailsRequests, 0, "no item was looked up")
+    XCTAssertNil(store.committedQuery?.itemID)
+    XCTAssertEqual(
+      URLComponents(url: store.browseURL, resolvingAgainstBaseURL: false)?.queryItems?
+        .first { $0.name == "searchtext" }?.value, Self.pasted)
+  }
+
   // MARK: Fixtures
 
   private func finished(_ store: WorkshopStore) async throws {

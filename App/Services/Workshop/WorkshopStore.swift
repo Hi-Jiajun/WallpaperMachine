@@ -11,6 +11,10 @@ struct WorkshopQuery: Equatable, Sendable {
   var excludedTags: [String] = []
   /// Where the tiles come from; only the browse and collections lists read `text` and `sort`.
   var source: WorkshopSource = .browse
+
+  /// The Workshop item a pasted link or id names. Only the wallpapers list takes it: the
+  /// other sources read `text` as words to search for.
+  var itemID: String? { source == .browse ? WorkshopLink.itemID(in: text) : nil }
 }
 
 struct WorkshopRequest: Equatable, Sendable {
@@ -707,13 +711,14 @@ final class WorkshopStore {
     let query = committedQuery ?? draftQuery
     switch query.source {
     case .browse, .collections:
+      if let id = query.itemID { return WorkshopItem.pageURL(id: id) }
       let steamPage = Self.fillsPages(query) ? pageStarts[page]?.page ?? page : page
       return WorkshopService.browseURL(
         search: query.text, kind: query.source == .browse ? query.kind : .all, sort: query.sort,
         page: steamPage, tags: query.tags, excludedTags: query.excludedTags,
         section: query.source == .browse ? "readytouseitems" : "collections")
     case .collection(let id, _):
-      return URL(string: "https://steamcommunity.com/sharedfiles/filedetails/?id=\(id)")!
+      return WorkshopItem.pageURL(id: id)
     case .creator(let id, _):
       return WorkshopService.profileURL(steamID: id, subscriptions: false, page: page)
     case .subscriptions:

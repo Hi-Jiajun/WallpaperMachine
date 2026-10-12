@@ -20,7 +20,9 @@ struct WorkshopItem: Identifiable, Codable, Equatable, Sendable {
     var kind: WorkshopKind {
         WorkshopKind.allCases.first { $0 != .all && tags.contains($0.rawValue) } ?? .all
     }
-    var pageURL: URL { URL(string: "https://steamcommunity.com/sharedfiles/filedetails/?id=\(id)")! }
+    var pageURL: URL { Self.pageURL(id: id) }
+    /// The item's page on Steam; `id` is digits only.
+    static func pageURL(id: String) -> URL { URL(string: "https://steamcommunity.com/sharedfiles/filedetails/?id=\(id)")! }
 }
 
 enum WorkshopKind: String, CaseIterable, Identifiable, Sendable {
@@ -241,6 +243,41 @@ actor WorkshopService {
 
     static let collectionCreatorApp = 766
 
+    /// The one tile for a Workshop item named by a pasted link or id, as a page of one. The
+    /// sidebar's age rating and tags are not applied: the item was asked for by name.
+    func itemPage(id: String) async throws -> WorkshopPage {
+        let (data, response) = try await session.data(for: Self.detailsRequest(ids: [id]))
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw WorkshopFailure(message: String(localized: "Steam did not answer the request for Workshop details. Check your connection and try again."))
+        }
+        let item = try Self.lookup(details: data, id: id)
+        return WorkshopPage(items: [item], page: 1, totalPages: 1, totalCount: 1)
+    }
+
+    /// The item `id` from a details answer, or why it cannot be shown as a tile: Steam no longer
+    /// serves it, it belongs to another app, or it is an Application wallpaper. A collection is
+    /// returned as a collection tile, so it opens like any other.
+    static func lookup(details data: Data, id: String) throws -> WorkshopItem {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let response = root["response"] as? [String: Any],
+              let rows = response["publishedfiledetails"] as? [[String: Any]] else {
+            throw WorkshopFailure(message: String(localized: "Steam answered the request for Workshop details in a form this app does not read."))
+        }
+        guard let row = rows.first(where: { ($0["publishedfileid"] as? String) == id }), (row["result"] as? Int) == 1 else {
+            throw WorkshopFailure(message: String(localized: "Steam no longer serves this Workshop item."))
+        }
+        guard (row["consumer_app_id"] as? Int) == WorkshopApp.id else {
+            throw WorkshopFailure(message: String(localized: "This link is not a Wallpaper Engine item."))
+        }
+        guard let item = item(details: row) else {
+            throw WorkshopFailure(message: String(localized: "Steam answered the request for Workshop details in a form this app does not read."))
+        }
+        guard !item.tags.contains(WorkshopKind.application.rawValue) else {
+            throw WorkshopFailure(message: String(localized: "Application wallpapers run Windows programs and can’t be used on macOS."))
+        }
+        return item
+    }
+
     // MARK: Sources other than the browse page
 
     /// One page of `query`'s source. Steam filters and sorts the browse and collections pages
@@ -249,6 +286,8 @@ actor WorkshopService {
     func page(for query: WorkshopQuery, page: Int, account: SteamWebSession?) async throws -> WorkshopPage {
         switch query.source {
         case .browse:
+            // A pasted link or id is one item, whatever the filters and sort say.
+            if let id = query.itemID { return try await itemPage(id: id) }
             return try await browse(
                 search: query.text, kind: query.kind, sort: query.sort, page: page, tags: query.tags,
                 excludedTags: query.excludedTags)

@@ -597,6 +597,8 @@ extension WebPanelController {
       "maxPages": WorkshopStore.maxPages,
       "loading": workshop.isLoading, "loaded": workshop.hasLoaded,
       "error": workshop.errorMessage as Any? ?? null,
+      // The grid shows the one item a pasted link or id named, which no filter applies to.
+      "lookup": workshop.committedQuery?.itemID != nil,
       "source": workshopSource,
       // The Steam page listing what is on show, for Open on Steam.
       "steamURL": workshop.browseURL.absoluteString,
