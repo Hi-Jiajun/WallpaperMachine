@@ -3,7 +3,9 @@
 The wallpaper on screen is an app window, but macOS keeps its own static desktop
 picture for every desktop (Space) of every display. That picture is what Mission
 Control and the Spaces bar show, what appears for a moment beneath a renderer that is
-still loading, and what stays on screen when the app is not running. WallpaperMachine
+still loading when the app starts, and what stays on screen when the app is not running. A
+switch to another wallpaper keeps the previous picture on screen instead where it can
+([wallpaper switching](wallpaper-switching.md)). WallpaperMachine
 installs a **poster**, a still frame of the animated wallpaper, as that picture so it
 matches what the user sees, and puts the user's own wallpaper back when the app quits.
 The windows that draw the live wallpaper are described in

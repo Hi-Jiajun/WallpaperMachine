@@ -246,6 +246,45 @@ reuse, or visual behavior, which is why these items are manual.
       stretching. Previewing again for a 16:9 display reshapes the stage without
       resizing the window.
 
+## Wallpaper switching
+
+Authorized desktop run only. Use scenes that take a few seconds to load, and watch the
+desktop while applying; [wallpaper-switching.md](../features/wallpaper-switching.md)
+describes what should happen and the log lines to read afterwards.
+
+- [ ] Apply scene B while scene A plays: A stays on screen, B replaces it with a short fade,
+      and the screen is never black in between. The log has `switch hold: display N frame
+      captured`, `veil on scene layer` and `released ... (scene first frame)`.
+- [ ] Repeat with a heavy scene (a cold shader compile or a long load): the held picture stays
+      until B draws and is not stuck afterwards. With the app idle for a minute afterwards, no
+      stale picture covers the wallpaper.
+- [ ] Look at the moment of the swap: the held still looks like the picture it replaces
+      (colour, scaling, crop, no seam at the edges), and an animated wallpaper does not jump
+      noticeably.
+- [ ] Switch rapidly A→B→C between scenes: each switch starts once the one before it has
+      drawn, so A's picture stays until B draws and B's until C draws. The log shows a
+      `frame captured` for every switch, the second one a still of B. Only when B is a web
+      page or a clip that is still loading as C is chosen does the hold carry over: then
+      there is no second `frame captured` and A's picture stays until C draws.
+- [ ] Turn on System Settings › Accessibility › Display › Reduce motion and switch: the
+      picture is replaced without a fade.
+- [ ] Apply a wallpaper that fails to load (a scene with missing assets, or the forced error
+      the project owner uses): the previous wallpaper keeps drawing and the log says
+      `released ... (cancelled)`.
+- [ ] With two displays showing different scenes, apply a saved layout and Copy or swap:
+      each display keeps its own picture until its new scene draws. With a mirror set, the
+      mirror shows its own held picture.
+- [ ] Switch while the display is covered by a full-screen app or after display sleep: no
+      pause on resume, and the log shows no `frame captured` for the suspended display.
+- [ ] Switch from a paused wallpaper (Pause all): the switch takes at most about a quarter
+      of a second longer; the log says whether the paused renderer delivered a still or
+      `poster not delivered within 250 ms`.
+- [ ] Switch a scene to a web page and to a native-backend clip: the system picture or black
+      may still show for a moment, since those windows do not take the veil yet; the log shows
+      the held still released after about 8 seconds with `no window took it`.
+- [ ] Reapply wallpaper, Retry and a wallpaper update reload still empty the display first,
+      as before.
+
 ## Native desktop posters and Mission Control
 
 - [ ] Create multiple Desktops, apply a video, and immediately open Mission

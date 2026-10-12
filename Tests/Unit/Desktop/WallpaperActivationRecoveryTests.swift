@@ -344,6 +344,97 @@ final class WallpaperActivationRecoveryTests: XCTestCase {
         XCTAssertTrue(prompt.isPending)
     }
 
+    // MARK: Keeping the previous picture on screen
+
+    /// Records what the store tells a switch hold, and what the bridge was doing between.
+    private func holdEvents(of store: BridgeStore, bridge: ApplyFailureBridge) -> EventLog {
+        let log = EventLog()
+        store.willSwitchWallpaper = { log.events.append("will \($0)") }
+        store.didSettleWallpaperSwitch = { log.events.append("settle \($0)") }
+        store.didAbandonWallpaperSwitch = { log.events.append("abandon \($0)") }
+        bridge.holdApply = { log.events.append("apply") }
+        return log
+    }
+
+    func testASwitchIsAnnouncedBeforeTheApplyAndSettledAfterIt() async throws {
+        let bridge = ApplyFailureBridge(noPointer: .init())
+        bridge.applyError = nil
+        bridge.monitorTitle = "Built-in (69733254 - Primary)"
+        let store = BridgeStore(bridge: bridge)
+        try await store.refreshAllAsync()
+        let log = holdEvents(of: store, bridge: bridge)
+
+        try await store.activateWallpaperAsync(id: "failing", displayId: "primary", origin: .user)
+
+        XCTAssertEqual(log.events, ["will [69733254]", "apply", "settle [69733254]"])
+    }
+
+    func testAFailedApplyAbandonsTheSwitchInsteadOfSettlingIt() async throws {
+        let bridge = ApplyFailureBridge(noPointer: .init())
+        bridge.monitorTitle = "Built-in (69733254 - Primary)"
+        let store = BridgeStore(bridge: bridge)
+        try await store.refreshAllAsync()
+        let log = holdEvents(of: store, bridge: bridge)
+
+        await XCTAssertThrowsErrorAsync(
+            try await store.activateWallpaperAsync(id: "failing", displayId: "primary"))
+
+        XCTAssertEqual(log.events, ["will [69733254]", "apply", "abandon [69733254]"])
+    }
+
+    func testAnApplyThatLandedButWasNotReportedActiveStillCountsAsSettled() async throws {
+        let bridge = ApplyFailureBridge(noPointer: .init())
+        bridge.applyError = nil
+        bridge.reportsActivation = false
+        bridge.monitorTitle = "Built-in (69733254 - Primary)"
+        let store = BridgeStore(bridge: bridge)
+        try await store.refreshAllAsync()
+        let log = holdEvents(of: store, bridge: bridge)
+
+        await XCTAssertThrowsErrorAsync(
+            try await store.activateWallpaperAsync(id: "failing", displayId: "primary"))
+
+        XCTAssertEqual(log.events, ["will [69733254]", "apply", "settle [69733254]"],
+                       "the engine applied it, so exactly one of settle and abandon fires, and it is settle")
+    }
+
+    func testActivatingTheWallpaperAlreadyShownAnnouncesNothing() async throws {
+        let bridge = ApplyFailureBridge(noPointer: .init())
+        bridge.applyError = nil
+        bridge.monitorTitle = "Built-in (69733254 - Primary)"
+        let store = BridgeStore(bridge: bridge)
+        try await store.refreshAllAsync()
+        try await store.activateWallpaperAsync(id: "failing", displayId: "primary")
+        let log = holdEvents(of: store, bridge: bridge)
+
+        let result = try await store.performActivation(
+            id: "failing", displayId: "primary", origin: .user,
+            returningToPrevious: false, recordsHistory: true)
+
+        XCTAssertEqual(result, .noOp)
+        XCTAssertEqual(log.events, [], "nothing changes, so there is no picture to hold")
+    }
+
+    func testASwitchHoldsTheDisplayAndEveryDisplayMirroringIt() {
+        let store = BridgeStore(bridge: ApplyFailureBridge(noPointer: .init()))
+        func row(_ id: String, _ title: String, mirroring target: String? = nil) -> BridgeMonitorInfoRow {
+            BridgeMonitorInfoRow(displayId: id, title: title, wallpaperId: "failing", wallpaperTitle: "Failing",
+                                 mirrorTargetDisplayId: target, mirrorTargetTitle: nil,
+                                 scalingMode: "fill", targetFps: "30", audioResponse: false)
+        }
+        store.monitorInformationSnapshot = BridgeMonitorInformationSnapshot(rows: [
+            row("1", "Left (1 - Primary)"),
+            row("2", "Right (2 - Mirror)", mirroring: "1"),
+            row("3", "Other (3 - Secondary)"),
+            row("identity:{\"uuid\":\"A\"}", "Third (4 - Mirror)", mirroring: "1"),
+            row("5", "Elsewhere (5 - Mirror)", mirroring: "3"),
+        ])
+
+        XCTAssertEqual(store.switchHoldDisplays(for: "1"), [1, 2, 4])
+        XCTAssertEqual(store.switchHoldDisplays(for: "3"), [3, 5])
+        XCTAssertEqual(store.switchHoldDisplays(for: "missing"), [])
+    }
+
     func testPlaybackEnvironmentChangesDoNotInterruptApply() async throws {
         for change in PlaybackEnvironmentChange.allCases {
             for applyChanges in [false, true] {
@@ -861,6 +952,12 @@ private enum PlaybackEnvironmentChange: CaseIterable {
     }
 }
 
+/// Lines a test collects from closures it hands the store.
+@MainActor
+private final class EventLog {
+    var events: [String] = []
+}
+
 private final class ApplyFailureBridge: WallpaperBridge {
     var applyError: Error? = WallpaperActionError(
         message: "The wallpaper did not render a first frame within 90 seconds.")
@@ -868,6 +965,8 @@ private final class ApplyFailureBridge: WallpaperBridge {
     var kind: BridgeWallpaperKind = .projectScene
     var videoBackend = "compatibility"
     var reportsActivation = true
+    /// The display's title; the number in its `(id - Role)` suffix is its live display id.
+    var monitorTitle = "Primary"
     var holdApply: (@MainActor () async -> Void)?
     var holdEnvironmentChange: (@MainActor () async -> Void)?
     var environmentError: Error?
@@ -991,7 +1090,7 @@ private final class ApplyFailureBridge: WallpaperBridge {
 
     private var monitors: BridgeMonitorInformationSnapshot {
         BridgeMonitorInformationSnapshot(rows: [BridgeMonitorInfoRow(
-            displayId: "primary", title: "Primary",
+            displayId: "primary", title: monitorTitle,
             wallpaperId: active ? "failing" : "", wallpaperTitle: active ? "Failing" : "",
             mirrorTargetDisplayId: nil, mirrorTargetTitle: nil,
             scalingMode: "fill", targetFps: "30", audioResponse: false

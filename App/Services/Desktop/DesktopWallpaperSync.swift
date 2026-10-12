@@ -13,24 +13,26 @@ enum DesktopPosterEncoder {
     static let fileExtension = "jpg"
     static let quality = 0.9
 
-    static func jpeg(pixels: Data, width: Int, height: Int, bgra: Bool) throws -> Data {
+    /// The picture behind renderer pixels, tagged sRGB like the renderer's own layer. Nil for
+    /// pixels that do not fill `width` by `height` exactly or a size beyond what is read back.
+    static func image(pixels: Data, width: Int, height: Int, bgra: Bool) -> CGImage? {
         guard width > 0, height > 0, width <= 16_384, height <= 16_384,
               width * height <= 32 * 1024 * 1024,
               pixels.count == width * height * 4,
-              let provider = CGDataProvider(data: pixels as CFData) else {
-            throw CocoaError(.fileReadCorruptFile)
-        }
-        guard let space = CGColorSpace(name: CGColorSpace.sRGB) else {
-            throw CocoaError(.fileWriteUnknown)
-        }
+              let provider = CGDataProvider(data: pixels as CFData),
+              let space = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
         let info = bgra
             ? CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.noneSkipFirst.rawValue
             : CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.noneSkipLast.rawValue
-        guard let image = CGImage(width: width, height: height, bitsPerComponent: 8,
-                                  bitsPerPixel: 32, bytesPerRow: width * 4,
-                                  space: space,
-                                  bitmapInfo: CGBitmapInfo(rawValue: info), provider: provider,
-                                  decode: nil, shouldInterpolate: false, intent: .defaultIntent) else {
+        return CGImage(width: width, height: height, bitsPerComponent: 8,
+                       bitsPerPixel: 32, bytesPerRow: width * 4,
+                       space: space,
+                       bitmapInfo: CGBitmapInfo(rawValue: info), provider: provider,
+                       decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+    }
+
+    static func jpeg(pixels: Data, width: Int, height: Int, bgra: Bool) throws -> Data {
+        guard let image = image(pixels: pixels, width: width, height: height, bgra: bgra) else {
             throw CocoaError(.fileReadCorruptFile)
         }
         let output = NSMutableData()
@@ -80,6 +82,24 @@ struct DesktopPosterFrame: Sendable {
     func publish(for layer: CALayer, to center: NotificationCenter, context: String? = nil) {
         center.post(name: DesktopPosterNotification.ready, object: layer,
                     userInfo: ["pixels": pixels, "width": width, "height": height, "bgra": bgra, "context": context ?? ""])
+    }
+}
+
+extension DesktopPosterFrame {
+    /// The frame a `DesktopPosterNotification.ready` carries, or nil when any of its four
+    /// values is missing or of another type. An extension, so the memberwise initializer stays.
+    init?(userInfo: [AnyHashable: Any]?) {
+        guard let values = userInfo,
+              let pixels = values["pixels"] as? Data,
+              let width = values["width"] as? Int, let height = values["height"] as? Int,
+              let bgra = values["bgra"] as? Bool else { return nil }
+        self.init(pixels: pixels, width: width, height: height, bgra: bgra)
+    }
+
+    /// The frame as a picture; nil when its size and pixel count disagree or are beyond what the
+    /// encoder accepts.
+    func cgImage() -> CGImage? {
+        DesktopPosterEncoder.image(pixels: pixels, width: width, height: height, bgra: bgra)
     }
 }
 
@@ -448,9 +468,7 @@ final class DesktopWallpaperSync {
         guard !stopped, let layer = notification.object as? CALayer,
               let surface = surfaces().first(where: { $0.layer === layer }),
               let values = notification.userInfo,
-              let pixels = values["pixels"] as? Data,
-              let width = values["width"] as? Int, let height = values["height"] as? Int,
-              let bgra = values["bgra"] as? Bool else { return }
+              let frame = DesktopPosterFrame(userInfo: values) else { return }
         let receivedScope = scope(surface.display)
         guard receivedScope != .hold,
               (values["context"] as? String ?? "") == (receivedScope.context ?? "") else { return }
@@ -465,7 +483,6 @@ final class DesktopWallpaperSync {
         arrivalCount &+= 1
         let arrival = arrivalCount
         let encode = self.encode
-        let frame = DesktopPosterFrame(pixels: pixels, width: width, height: height, bgra: bgra)
         Task(priority: .userInitiated) { [weak self, weak layer] in
             let digest = await Task.detached(priority: .userInitiated) { frame.digest }.value
             guard let self, let layer, self.isNewest(revision, of: layer),

@@ -46,6 +46,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         WallpaperHosts(web: webWallpaperHost, native: nativeVideoHost)
     }
     private var presentationPolicy: WallpaperPresentationPolicy?
+    /// Keeps the previous picture on screen while a switched wallpaper loads.
+    private var switchHold: WallpaperSwitchHold?
     private var windowAuditor: WallpaperWindowAuditor?
     private var wakeRevalidator: SystemWakeRevalidator?
     private var memoryPressureMonitor: MemoryPressureMonitor?
@@ -450,6 +452,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                     }
                 })
             presentationPolicy = policy
+            let hold = WallpaperSwitchHold(
+                layers: { Self.wallpaperLayers(on: $0) },
+                // The rule the poster sync's captures follow: a suspended display is not seen,
+                // and its surface may not answer a request for a frame.
+                shouldHold: { [weak self] display in
+                    guard let policy = self?.presentationPolicy else { return false }
+                    return !policy.isSuspended && !policy.suspendedDisplayIDs.contains(display)
+                },
+                reduceMotion: { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion })
+            switchHold = hold
+            hold.start()
+            store.willSwitchWallpaper = { [weak self] displays in await self?.switchHold?.begin(displays: displays) }
+            store.didSettleWallpaperSwitch = { [weak self] displays in self?.switchHold?.engineSettled(displays: displays) }
+            store.didAbandonWallpaperSwitch = { [weak self] displays in self?.switchHold?.cancel(displays: displays) }
             syncPlaybackMonitors()
             conditions.start()
             let power = PowerSourceMonitor()
@@ -801,6 +817,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         wakeRevalidator = nil
         memoryPressureMonitor?.stop()
         memoryPressureMonitor = nil
+        switchHold?.stop()
+        switchHold = nil
         desktopWallpaperSync?.stop()
         previewWindow?.session.close()
         previewWindow?.close()
@@ -980,6 +998,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 wakeRevalidator = nil
                 memoryPressureMonitor?.stop()
                 memoryPressureMonitor = nil
+                switchHold?.stop()
+                switchHold = nil
                 desktopWallpaperSync = nil
                 sceneMediaSink?.shutdown()
                 sceneMediaSink = nil
@@ -2174,6 +2194,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     /// while this is empty, so a user who left the setting off is never asked
     /// for Automation permission, and a handle that was not there before is a
     /// scene that still has to be told what is playing.
+    /// The content layers of the wallpaper windows showing on a display, the front one first.
+    /// A window that was closed is no longer ordered in, so it is not listed.
+    private static func wallpaperLayers(on displayID: UInt32) -> [CALayer] {
+        WallpaperPresentationPolicy.orderedWallpaperWindows().compactMap { window in
+            guard window.isVisible, let screen = window.screen,
+                  SystemDesktopPictureWorkspace.id(screen) == String(displayID) else { return nil }
+            return window.contentView?.layer
+        }
+    }
+
     private static func sceneMediaHandles(store: BridgeStore) async -> Set<UInt64> {
         do {
             return Set(try await store.bridge.systemMediaSceneHandles())

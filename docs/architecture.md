@@ -289,7 +289,11 @@ ordered front, and once from each layer swap right after the new layer is under 
 shaped, before any renderer exists. `object` is the new `CAMetalLayer`; `userInfo` carries
 `displayID` (an `NSNumber`, the CoreGraphics display id, `DisplayDesc.display_id`) and `reason`
 (an `NSString`): `open` for a new window, `replace` for a scene replacement
-(`rebuild_for_desc`), `reconfigure` for a display reconfigure (`update_layer`). A host observer
+(`rebuild_for_desc`), `reconfigure` for a display reconfigure (`update_layer`). A `reconfigure`
+can reach a scene that has not presented its first frame, because the engine actor serves
+display refreshes while the apply waits for it, and that scene has no picture to carry over:
+an observer that put content on the layer it replaces has to follow it, as
+`WallpaperSwitchHold` does with its veil. A host observer
 matches the name, the keys and the three strings literally and nothing checks that at compile
 time, so `window::tests` pins them on the Rust side. The observer runs inside the window
 operation that posts it, which is inside a main-thread dispatch the engine actor is waiting on,
@@ -310,7 +314,7 @@ first write and restores it on quit, or at once when Settings turns poster writi
 (`PlaybackPreferences.writesDesktopPicture`); `DesktopSpaceWallpaperAPI` reaches the
 per-Space getter and setter through optional private CoreGraphics and HIServices symbols, falling back to the public
 `NSWorkspace` API. Timing, refusals, macOS 27 behavior and the quit wait are in
-[desktop-picture](features/desktop-picture.md). Two more behaviors sit above the windows:
+[desktop-picture](features/desktop-picture.md). More behaviors sit above the windows:
 
 - **Presentation policy.** `WallpaperPresentationPolicy` suspends or unloads presentation when no
   wallpaper pixel can reach a display, without altering the user's play/pause choice. The
@@ -385,6 +389,20 @@ per-Space getter and setter through optional private CoreGraphics and HIServices
   settles: one that already runs a scene keeps its previous descriptor, so the scene is not
   closed and reloaded, and a new one gets no window yet. If the primary display reports no
   pixels, the whole refresh waits.
+- **Switch hold.** `WallpaperSwitchHold` keeps the previous picture on a display while a
+  switched wallpaper loads. `BridgeStore.performActivation` calls three optional hooks around
+  the bridge apply (`willSwitchWallpaper`, then `didSettleWallpaperSwitch` or
+  `didAbandonWallpaperSwitch`) with the live display ids the switch changes, mirrors
+  included. Before the apply the hold asks each display's frontmost wallpaper window for a still
+  through the poster request (`DesktopPosterNotification`, context `switch-hold:<uuid>`, 250 ms
+  at most), wraps it in a `SwitchHoldVeil` sublayer and moves that onto the layer the renderer
+  announces with `WallpaperMachine.wallpaperLayerInstalled` (reasons `open` and `replace`; the
+  observer is synchronous on the main thread, so it only moves a layer and never calls the
+  bridge). The apply returning, which waits for the first presented frame, fades the veil out.
+  `adopt` and `contentReady` are the entry points for a host window; no host calls them yet, so
+  only a scene successor carries the veil. A 30 s ceiling and an 8 s grace for a host window
+  release a veil nothing ends, and `AppDelegate` stops the hold before the hosts shut down. See
+  [wallpaper switching](features/wallpaper-switching.md).
 - **Window audit.** `WallpaperWindowAuditor` checks that every wallpaper window is ordered in on
   the active Space, listed on screen by the window server and inside its display (the
   `DesktopWindowState` classifier the diagnostics report also uses). It looks only after an event

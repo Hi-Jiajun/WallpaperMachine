@@ -296,10 +296,20 @@ final class WallpaperPresentationPolicy {
         "MWENativeVideoDesktopWindow",
     ]
 
+    static func isWallpaperWindow(_ window: NSWindow) -> Bool {
+        wallpaperWindowClassNames.contains { name in
+            NSClassFromString(name).map { window.isKind(of: $0) } ?? false
+        }
+    }
+
     static func wallpaperWindows() -> [NSWindow] {
-        let types = wallpaperWindowClassNames.compactMap(NSClassFromString)
-        guard !types.isEmpty else { return [] }
-        return NSApp.windows.filter { window in types.contains { window.isKind(of: $0) } }
+        NSApp.windows.filter(isWallpaperWindow)
+    }
+
+    /// The wallpaper windows from the front one back, so a display that briefly has two (one
+    /// replacing the other) lists the one on top first.
+    static func orderedWallpaperWindows() -> [NSWindow] {
+        NSApp.orderedWindows.filter(isWallpaperWindow)
     }
 
     /// Wallpaper visibility grouped by display. A display counts as visible

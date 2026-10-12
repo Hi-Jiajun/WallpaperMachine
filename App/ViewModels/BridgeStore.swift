@@ -55,6 +55,15 @@ final class BridgeStore {
     let editorState = WallpaperEditorState()
     /// The user's commands, from the control panel and the menu bar, run through here.
     let commands = UserCommandQueue()
+    /// A wallpaper switch keeps the picture it replaces on screen until the successor has drawn
+    /// ([WallpaperSwitchHold]). The ids are the live CoreGraphics ids of the displays the switch
+    /// changes, mirrors included. `willSwitch` runs before the apply and may take a moment (it
+    /// asks the visible wallpaper for a still); exactly one of `didSettle` and `didAbandon`
+    /// follows, `didSettle` once the engine has applied the wallpaper and `didAbandon` when the
+    /// apply failed or was cancelled.
+    @ObservationIgnored var willSwitchWallpaper: (@MainActor ([UInt32]) async -> Void)?
+    @ObservationIgnored var didSettleWallpaperSwitch: (@MainActor ([UInt32]) -> Void)?
+    @ObservationIgnored var didAbandonWallpaperSwitch: (@MainActor ([UInt32]) -> Void)?
     /// Where the activation lines go: the app's log. A test collects them instead.
     @ObservationIgnored var activationLogWriter: (_ line: String, _ isFailure: Bool) -> Void = ActivationLog.write
     private(set) var activatingWallpaperID: String?
@@ -323,16 +332,22 @@ final class BridgeStore {
         try validateActivationTarget(displayId)
         let previouslyActive = isWallpaperActive(id: id, displayId: displayId)
         let previousAssignments = independentAssignments()
+        let held = switchHoldDisplays(for: displayId)
+        await willSwitchWallpaper?(held)
         var applyCompleted = false
+        var settled = false
         do {
             try await setDisplayConfigEnabledAsync(wallpaperId: id, displayId: displayId, enabled: true)
             try await applyValidatedWallpaperOptionsAsync(wallpaperId: id, userInitiated: userInitiated)
             applyCompleted = true
+            didSettleWallpaperSwitch?(held)
+            settled = true
             try validateActivationTarget(displayId)
             guard isWallpaperActive(id: id, displayId: displayId) else {
                 throw WallpaperActionError(message: String(localized: "The display did not report this wallpaper as active. Refresh Displays and retry."))
             }
         } catch {
+            if !settled { didAbandonWallpaperSwitch?(held) }
             // A bridge error may happen after reconciliation. Never infer rollback from a stale bundle.
             try await resyncAfterFailedApplyAsync(cause: error)
             if isWallpaperActive(id: id, displayId: displayId), applyCompleted || !previouslyActive {
@@ -458,6 +473,17 @@ final class BridgeStore {
             throw WallpaperActionError(message: String(localized: "No wallpaper is running on this display."))
         }
         try await reloadWallpaperAsync(id: owner.wallpaperId, displayId: owner.displayId)
+    }
+
+    /// The live CoreGraphics ids of the displays that change when `displayId` gets another
+    /// wallpaper: the display itself and every display mirroring it, which presents its own
+    /// scene of the same wallpaper.
+    func switchHoldDisplays(for displayId: String) -> [UInt32] {
+        var seen = Set<UInt32>()
+        return monitorInformationSnapshot.rows
+            .filter { $0.displayId == displayId || $0.mirrorTargetDisplayId == displayId }
+            .compactMap { ResolvedDisplayTitles.liveDisplayID($0.displayId, title: $0.title) }
+            .filter { seen.insert($0).inserted }
     }
 
     func isWallpaperActive(id: String, displayId: String) -> Bool {

@@ -83,6 +83,10 @@ unattached `CAMetalLayer`s and injected notification and encoding services:
 - Retention: frame URLs are immutable and pruned only after every Space updates;
   displays on the current-Space fallback or with an unreadable Space keep a
   bounded number of the newest posters.
+- Frames: the frame a ready notification carries keeps its channel order as a picture
+  and is refused when a value is missing or mistyped, its byte count does not fill its
+  size, or it is larger than the encoder reads back; a frame asked for by a wallpaper
+  switch (context `switch-hold:…`) is never encoded or written as a poster.
 
 Not covered: what Mission Control actually shows and its refresh latency, and
 macOS accepting or restoring native selections. Both are on
@@ -125,6 +129,38 @@ the apply fail; a wallpaper the display does not show is simply applied; and
 through the real panel only that button restarts, while a tile's double-click
 leaves the shown wallpaper running. Not covered: whether a scene reload flashes
 on the desktop ([manual-smoke.md](manual-smoke.md)).
+
+### Wallpaper switching
+
+`WallpaperSwitchHoldTests` drive the switch hold with an injected notification center,
+unattached `CALayer`s, a manual clock and timers fired by hand; nothing opens a window.
+[Wallpaper switching](../features/wallpaper-switching.md) owns the behavior:
+
+- The still: the request goes to the frontmost layer of a display and carries a
+  `switch-hold:` context; an answer that arrives inside the request or after it is taken;
+  an unanswered request (250 ms), an unusable frame, a display with no wallpaper window
+  and a display that is not seen leave no ticket; a second switch keeps the still it has and
+  restarts the ceiling; a switch during a fade takes a fresh still.
+- Placement: the renderer's `open` and `replace` announcements move the veil onto the new
+  layer, `reconfigure`, another display and an announcement without a display id do not;
+  a host takes over a veil only when the window it sat on is gone.
+- Release: the scene's first frame (the engine settling) fades the veil, which is removed by
+  its own timer; a host's content fades it after its settle; `cancel` and `stop` remove it,
+  also while the still is on its way; Reduce Motion skips the fade; the 30 s ceiling and the
+  8 s host grace release a veil nothing ends, and the grace never outlasts a nearer ceiling;
+  displays are held and released independently.
+
+`WallpaperActivationRecoveryTests` also pin the store's side: a switch is announced with the
+live display ids before the bridge apply and settled after it, an apply that throws abandons
+it instead (an apply that landed but was not reported active still settles, so exactly one of
+the two fires), an activation that finds its wallpaper already shown announces nothing, and
+a switch covers the display and every display mirroring it.
+
+Not covered: whether a sublayer composites over a `CAMetalLayer`'s drawables, whether real
+surfaces answer the request within 250 ms (a paused renderer included), how the still compares
+with the live frame, and the fade, Reduce Motion, multi-display and mirror behavior on a desktop
+([manual-smoke.md](manual-smoke.md#wallpaper-switching)). No web page or native-video host takes
+the veil yet.
 
 ### Playback policy
 

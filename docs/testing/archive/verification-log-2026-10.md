@@ -9,6 +9,15 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-13 — Play only on the display in use
+
+Commit `feat(playback): optionally play only on the display you are using`: opt-in Playback toggle `Only play on the display I’m using`. ActiveDisplayTracker follows the pointer through event monitors that exist only while the option is on and two displays are connected; WallpaperPresentationPolicy treats every other display as hidden after a 3 s dwell and resumes at once, never darkening every display. No bridge or Rust change. Taken in a worktree; the full gate was not run here.
+
+- `python3 scripts/test.py --only ActiveDisplayTrackerTests --only WallpaperPresentationPolicyTests --only PlaybackPolicyCompositionTests --only PlaybackPreferencesTests --only WebPanelPerformanceSettingsTests --only PowerSourceResamplerTests --only WallpaperBackupTests` plus SystemConditionMonitorTests, LowBatteryTests, WebPanelGeneralSettingsTests, ControlPanelPlaybackToolsTests, ControlPanelSnapshotDeliveryTests, WebPanelAssetsTests, AppRuleMonitorTests, OtherAudioMonitorTests — 152 passed of 152 (19 new).
+- Deliberate breaks (a wait that ignores cancellation, a pointer entry that leaves the old wait running, no never-darken-every-display guard) each failed the new tests; all were reverted.
+- `python3 -m unittest scripts.tests.test_panel_localization` — 5 passed (three new WebUI strings in ja, zh-Hans, zh-Hant).
+- Not run: the full gate; real global and local pointer events across two physical displays, whether the global monitor sees the pointer while this app is in front, the display-ID mapping with mixed scaling, how the 3 s dwell feels, and the live row layout. All need an authorized two-display desktop run.
+
 ## 2026-10-13 — Low-battery playback rule
 
 New Playback rule `When the battery is low` (Keep running, Pause or Stop at 10, 20 or 30 percent; internal battery only). It joins SystemConditionMonitor's actions, reads IOKit's power-source notification only while an action is chosen, and is hidden on Macs without a battery. No bridge or Rust change.

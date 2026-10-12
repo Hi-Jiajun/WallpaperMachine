@@ -1715,6 +1715,52 @@ final class DesktopWallpaperTests: XCTestCase {
         }
     }
 
+    func testPosterFramesFromANotificationKeepByteOrderAndRejectWhatCannotBeShown() throws {
+        let red: [UInt8] = [255, 0, 0, 255]
+        for bgra in [false, true] {
+            let frame = try XCTUnwrap(DesktopPosterFrame(userInfo: [
+                "pixels": Data(red), "width": 1, "height": 1, "bgra": bgra, "context": "any"]))
+            let image = try XCTUnwrap(frame.cgImage())
+            XCTAssertEqual(image.colorSpace?.name, CGColorSpace.sRGB)
+            let color = try XCTUnwrap(NSBitmapImageRep(cgImage: image).colorAt(x: 0, y: 0)?.usingColorSpace(.sRGB))
+            // The same four bytes: red first, or blue first.
+            XCTAssertEqual(color.redComponent, bgra ? 0 : 1, accuracy: 0.05, "bgra: \(bgra)")
+            XCTAssertEqual(color.blueComponent, bgra ? 1 : 0, accuracy: 0.05, "bgra: \(bgra)")
+        }
+
+        XCTAssertNil(DesktopPosterFrame(userInfo: nil))
+        XCTAssertNil(DesktopPosterFrame(userInfo: ["pixels": Data(red), "width": 1, "height": 1]))
+        XCTAssertNil(DesktopPosterFrame(userInfo: ["pixels": Data(red), "width": "1", "height": 1, "bgra": false]))
+
+        for (width, height, bytes) in [(0, 2, 0), (-1, 2, 0), (2, 2, 15), (2, 2, 17), (16_385, 1, 16_385 * 4),
+                                       (1, 16_385, 16_385 * 4), (Int.max, 1, 0)] {
+            let frame = DesktopPosterFrame(pixels: Data(count: bytes), width: width, height: height, bgra: false)
+            XCTAssertNil(frame.cgImage(), "\(width) by \(height) with \(bytes) bytes")
+        }
+    }
+
+    @MainActor
+    func testAHeldSwitchFrameNeverBecomesTheDesktopPoster() async throws {
+        let workspace = MemoryDesktopWorkspace()
+        workspace.pictures = [one: original("one")]
+        let center = NotificationCenter(), layer = CAMetalLayer(), encoder = CountingPosterEncoder()
+        let sync = try DesktopWallpaperSync(folder: root, workspace: workspace,
+            surfaces: { [.init(layer: layer, display: "1")] }, frameCenter: center, scope: { _ in .all },
+            encode: { await encoder.encode($0) }, settleDelays: [])
+        sync.start(); defer { sync.stop() }
+
+        // The frame a switch hold asked the renderer for answers a request of its own.
+        post(Data([9]), layer: layer, center: center, context: "switch-hold:3F2A9C")
+        for _ in 0..<20 { await Task.yield() }
+        let encodedHeld = await encoder.count
+        XCTAssertEqual(encodedHeld, 0)
+        XCTAssertTrue(workspace.writes.isEmpty)
+
+        post(Data([2]), layer: layer, center: center)
+        try await waitUntil { workspace.writes == [self.one] }
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(workspace.pictures[one]?.url)), Data([2]))
+    }
+
     func testEncoderRejectsInvalidSizesAndTruncatedPixels() {
         for (width, height, bytes) in [(0, 2, 0), (-1, 2, 0), (2, 2, 15), (2, 2, 17), (Int.max, 1, 0), (16_384, 16_384, 0)] {
             XCTAssertThrowsError(try DesktopPosterEncoder.jpeg(pixels: Data(count: bytes), width: width, height: height, bgra: false))

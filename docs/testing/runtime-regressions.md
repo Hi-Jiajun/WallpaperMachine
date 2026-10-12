@@ -641,7 +641,9 @@ engine to redo, and when.
   `NSNotificationCenter` and plain `NSObject`s stand in for the window and its layers). The Swift
   host puts content on a window's new layer from `WallpaperMachine.wallpaperLayerInstalled`, and
   matches the name, the `displayID` and `reason` keys and the `open`, `replace` and `reconfigure`
-  strings literally, so a rename on one side silently disables the other. One announcement per
+  strings literally, so a rename on one side silently disables the other (the Swift side,
+  `WallpaperSwitchHold`, is pinned by `WallpaperSwitchHoldTests`, which post the same spelling).
+  One announcement per
   install, in order, the layer as the object, delivered on the posting thread and not on the
   default center. `tests::general::platform::case_wallpaper_window_announces_layers` runs the
   real window paths (open, swap, update, reverted swap) under the same gate as the layer-swap
