@@ -242,6 +242,11 @@ reuse, or visual behavior, which is why these items are manual.
 - [ ] Turn on **Update the Mission Control picture every 5 minutes**, wait past
       five minutes with the wallpaper visible and check that the thumbnails
       moved on; with it off they keep the last settled frame.
+- [ ] With an animated wallpaper that has played for over a minute, swipe
+      quickly between several Desktops and open Mission Control: every
+      thumbnail shows the wallpaper as it looked within the last two minutes, and
+      a Desktop created in the middle of the swipes has a picture at once. After
+      two more minutes, swipe once more and check the thumbnails moved on.
 - [ ] Eject a wallpaper: all Desktops recover their previous native image and
       scaling.
 - [ ] Quit and reopen to check restoration journaling.

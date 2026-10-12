@@ -51,15 +51,31 @@ at once, without visiting them.
 - **A wallpaper starts or changes.** It is captured at once and again after
   `DesktopWallpaperSync.settleCaptureDelays` (3 s and 15 s), because intros, fades and
   settings that fade in are missed by the first frame. A wallpaper that resumes after
-  a pause, a cover or display sleep settles the same way (`presentationResumed`).
-- **A Space change or wake.** The existing poster is applied at once and a fresh frame
-  is requested, since an animated wallpaper has moved on since its poster was taken.
-  Desktops that kept refusing posters are tried again, and the Space monitor re-reads
-  the topology first.
+  a pause, a cover or display sleep settles the same way (`presentationResumed`),
+  unless its poster is still fresh (below).
+- **A Space change or wake.** The existing poster is applied at once, so a new Space
+  has one immediately. A fresh frame is requested only for a surface whose poster has
+  aged (see the next item). Desktops that kept refusing posters are tried again, and
+  the Space monitor re-reads the topology first.
+- **A poster that is still fresh is kept.** A Space change, a wake and a resume
+  (`presentationResumed`) retake a surface only when its poster is older than
+  `DesktopWallpaperSync.recaptureFloor` (120 s) or was taken before the wallpaper
+  settled, that is, before the last of the settle captures could have landed. Each
+  display is judged on its own. Mission Control shows sampled stills, and a file name
+  hashes the pixels, so an animated wallpaper turns every extra capture into one more
+  poster file for WallpaperAgent to decode, as well as a full-resolution readback, a
+  hash and an encode here. A wallpaper that starts or changes, the periodic setting
+  and a poster scoped to a Space ([spaces.md](spaces.md#poster-ownership-and-late-frames),
+  which must confirm its context) are not affected. The resume's settle captures
+  cover only the surfaces that were retaken, and nothing is scheduled when none were.
+  A frame that a paused or covered surface answers with is the one it kept, so it does
+  not make its poster fresh: a Space change or wake that asks such a surface while its
+  display is paused leaves the resume to retake it. The debug log notes each poster kept.
 - **Periodically**, every `periodicRefreshInterval` (300 s), while the setting is on.
 - Settling and periodic captures ask only displays whose wallpaper is presenting
   (`canCapture`: the presentation policy has not suspended playback globally or for
-  that display); a new wallpaper, a Space change and a wake capture every surface.
+  that display); a new wallpaper captures every surface, and a Space change and a
+  wake every surface whose poster is not kept.
 - A frame identical to the current poster costs a readback and a hash, and is neither
   encoded again nor rewritten. Bursts of refresh requests collapse so that at most one
   runs every 500 ms.

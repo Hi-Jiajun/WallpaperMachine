@@ -25,6 +25,14 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-13 — Mission Control poster kept while fresh
+
+Commit `perf(desktop): stop retaking the Mission Control picture while the current one is fresh`: DesktopWallpaperSync retakes a surface's poster on a Space change, wake or resume only when it is older than 120 s or was taken before the wallpaper settled. Taken in a worktree; the full gate was not run here.
+
+- `python3 scripts/test.py --only DesktopWallpaperTests` — 62 passed of 62 (8 new tests for the freshness floor, one existing test now builds the sync with a zero floor). Three mutations each fail the expected tests: a poster never kept (4 failures), the settle rule ignored (1), Space scope ignored plus a failed encode left counting as fresh (2).
+- The same class plus WallpaperPresentationPolicyTests, PlaybackPolicyCompositionTests, WallpaperSpaceMonitorTests and WallpaperActivationRecoveryTests — 121 passed of 121.
+- Gap: what Mission Control shows after rapid Space swipes with an animated wallpaper, and whether WallpaperAgent's container stops growing, were not observed; headless tests use synthetic pixels, an in-memory workspace and an injected clock.
+
 ## 2026-10-13 — Power source read again on wake (resample)
 
 Commit `fix(power): read the power source again when the Mac wakes`: WallpaperBridge.resample_power_source() and PowerSourceResampler (wake plus a follow-up two seconds later). Taken in a worktree on top of the power watcher change (`perf(bridge): let the power watcher sleep until something happens`); the full gate was not run here.
@@ -116,16 +124,3 @@ Playlists accept any whole number of minutes from 1 to 10,080 next to the preset
 - Headless Chromium harness over `renderSettings`: choosing Custom sends nothing and focuses the minutes field; 45 sends `interval: 45`; 0 is refused locally; 60 snaps the menu back to Every hour
 - Native gate (`python3 scripts/test.py`, incl. new WebPanelPlaylistTests/PlaylistStoreTests cases) — not run: needs macOS/Xcode
 - WKWebView appearance in the real panel — unchecked; no Release build
-
-## 2026-10-10 — Lock state and scene-assets folder no longer probed per update
-
-Cached the session lock state in WallpaperPresentationPolicy (asked at start, lock/unlock, display wake, user switch and while locked) and resolved the scene-assets folder with its readiness in WorkshopStore instead of in every page snapshot.
-
-- `python3 scripts/test.py --only WallpaperPresentationPolicyTests --only WorkshopDownloadIntentTests --only ControlPanelSnapshotDeliveryTests --only ControlPanelShellTests` — 71 passed, including 6 new tests
-- `python3 scripts/test.py` on the shared tree with the lock-screen re-sync change (artifacts/tests/Tests-20261010-134554-494250) — 1334 passed, 0 failed, 14 skipped
-- `python3 scripts/build.py --swift-only --configuration Release` at 51e1d39 — OK; relaunched by the user
-- Standalone loop: `CGSessionCopyCurrentDictionary` 52 µs median (84 µs p95), `ClientPaths.assetsURL` 124 µs, cached URL 0.3 µs
-- Live, 30 vs 18 user-approved Bar Count drags in 40 s windows: page-snapshot samples in `assetsURL` 50 of 141 → 0 of 71; policy lock read 1 → 0; coalition energy within noise
-- Driving the drags in the background activated the app per drag, so the on-key assets refresh took 15 samples; not representative of drags in the focused panel
-- Not exercised live: a real screen lock, display wake with a lock, or fast user switching (unit tests only)
-- `scripts/check_renderer.py` — not run: no renderer or bridge change

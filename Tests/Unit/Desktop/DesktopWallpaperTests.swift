@@ -72,6 +72,22 @@ private actor CountingPosterEncoder {
     }
 }
 
+private actor FailingPosterEncoder {
+    private(set) var count = 0
+    func encode(_ frame: DesktopPosterFrame) throws -> Data {
+        count += 1
+        throw CocoaError(.fileWriteUnknown)
+    }
+}
+
+/// The sync's notion of how old a poster is, moved by the test and not by waiting.
+@MainActor
+private final class ManualClock {
+    private(set) var now = ContinuousClock.now
+    func advance(_ duration: Duration) { now = now.advanced(by: duration) }
+    func rewind(_ duration: Duration) { now = now.advanced(by: .zero - duration) }
+}
+
 final class DesktopWallpaperTests: XCTestCase {
     private var root: URL!
     private let one = DesktopPictureTarget(display: "1", space: "one")
@@ -824,10 +840,11 @@ final class DesktopWallpaperTests: XCTestCase {
         workspace.pictures = [one: original("one")]
         let frames = NotificationCenter(), spaces = NotificationCenter()
         let layer = CAMetalLayer()
+        // The poster is only retaken once it has aged; this is the aged case.
         let sync = try DesktopWallpaperSync(folder: root, workspace: workspace,
                                             surfaces: { [DesktopPosterSurface(layer: layer, display: "1")] },
                                             frameCenter: frames, workspaceCenter: spaces,
-                                            encode: { $0.pixels }, settleDelays: [])
+                                            encode: { $0.pixels }, settleDelays: [], recaptureFloor: .zero)
         var requests = 0
         let observer = frames.addObserver(forName: Notification.Name("WallpaperMachine.requestDesktopPoster"),
                                           object: layer, queue: nil) { _ in requests += 1 }
@@ -849,6 +866,219 @@ final class DesktopWallpaperTests: XCTestCase {
         workspace.didWrite = nil
         XCTAssertEqual(try Data(contentsOf: XCTUnwrap(workspace.pictures[two]?.url)), Data([1]))
         XCTAssertEqual(requests, 1)
+    }
+
+    /// A rig for the freshness floor: one or two displays, a clock the test moves, and
+    /// counters for the frames the sync asks for.
+    @MainActor
+    private final class FloorRig {
+        let workspace = MemoryDesktopWorkspace()
+        let frames = NotificationCenter(), spaces = NotificationCenter()
+        let clock = ManualClock()
+        let layers: [CAMetalLayer]
+        let sync: DesktopWallpaperSync
+        private(set) var requests: [Int] = []
+        private var observers: [NSObjectProtocol] = []
+
+        var total: Int { requests.reduce(0, +) }
+
+        init(root: URL, displays: Int = 1, floor: Duration = .seconds(60), settleDelays: [Duration] = [],
+             scope: @escaping @MainActor (String) -> DesktopPosterScope = { _ in .all },
+             periodicInterval: Duration = .seconds(300),
+             encode: @escaping @Sendable (DesktopPosterFrame) async throws -> Data = { $0.pixels }) throws {
+            let layers = (0..<displays).map { _ in CAMetalLayer() }
+            self.layers = layers
+            requests = Array(repeating: 0, count: displays)
+            let clock = self.clock
+            sync = try DesktopWallpaperSync(
+                folder: root, workspace: workspace,
+                surfaces: { layers.enumerated().map { DesktopPosterSurface(layer: $1, display: String($0 + 1)) } },
+                frameCenter: frames, workspaceCenter: spaces, scope: scope, encode: encode,
+                settleDelays: settleDelays, periodicInterval: periodicInterval,
+                recaptureFloor: floor, clock: { clock.now })
+            for (index, layer) in layers.enumerated() {
+                observers.append(frames.addObserver(forName: DesktopPosterNotification.request,
+                                                    object: layer, queue: nil) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.requests[index] += 1 }
+                })
+            }
+            sync.start()
+        }
+
+        func finish() {
+            for observer in observers { frames.removeObserver(observer) }
+            sync.stop()
+        }
+
+        func spaceChanged() { spaces.post(name: NSWorkspace.activeSpaceDidChangeNotification, object: nil) }
+    }
+
+    @MainActor
+    private func postFrame(_ pixels: Data, on rig: FloorRig, display: Int = 0, context: String = "") async throws {
+        let written = rig.workspace.writes.count
+        post(pixels, layer: rig.layers[display], center: rig.frames, context: context)
+        try await waitUntil { rig.workspace.writes.count > written }
+    }
+
+    @MainActor
+    func testSpaceChangeWithinTheFloorReusesThePosterAndAfterItCapturesAgain() async throws {
+        let rig = try FloorRig(root: root, floor: .seconds(60))
+        defer { rig.finish() }
+        rig.workspace.pictures = [one: original("one")]
+        try await postFrame(Data([1]), on: rig)
+
+        // A new Space gets the poster that exists; a poster this young is not taken again.
+        rig.clock.advance(.seconds(10))
+        rig.workspace.pictures[two] = original("two")
+        let written = rig.workspace.writes.count
+        rig.spaceChanged()
+        try await waitUntil { rig.workspace.writes.count > written }
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(rig.workspace.pictures[two]?.url)), Data([1]))
+        XCTAssertEqual(rig.total, 0, "a poster ten seconds old is as good as a new one")
+
+        rig.clock.advance(.seconds(51))
+        rig.spaceChanged()
+        try await waitUntil { rig.total == 1 }
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(rig.total, 1, "once, not once per settle delay")
+    }
+
+    @MainActor
+    func testResumeWithinTheFloorOfASettledPosterTakesNothing() async throws {
+        let rig = try FloorRig(root: root, floor: .seconds(60), settleDelays: [.milliseconds(20), .milliseconds(50)])
+        defer { rig.finish() }
+        rig.workspace.pictures = [one: original("one")]
+        rig.sync.refresh()
+        try await waitUntil { rig.total == 3 }   // the request itself and both settle captures
+        // The frame that answers the last settle capture arrives after it.
+        rig.clock.advance(.seconds(1))
+        try await postFrame(Data([1]), on: rig)
+
+        rig.sync.presentationResumed()
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(rig.total, 3, "the wallpaper settled a moment ago")
+
+        rig.clock.advance(.seconds(60))
+        rig.sync.presentationResumed()
+        try await waitUntil { rig.total == 5 }
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(rig.total, 5, "an aged poster settles again, with both captures")
+    }
+
+    @MainActor
+    func testAFrameAPausedSurfaceAnswersWithDoesNotMakeThePosterFreshForTheResume() async throws {
+        let rig = try FloorRig(root: root, floor: .seconds(120), settleDelays: [.milliseconds(20), .milliseconds(50)])
+        defer { rig.finish() }
+        rig.workspace.pictures = [one: original("one"), two: original("two")]
+        var presenting = false
+        rig.sync.canCapture = { _ in presenting }
+
+        // A Space change asks every surface whose poster has aged, paused or not, and a paused
+        // one answers with the frame it kept.
+        rig.spaceChanged()
+        try await waitUntil { rig.total == 1 }
+        try await postFrame(Data([1]), on: rig)
+
+        // The display plays again within the floor: that frame was no reading of the wallpaper
+        // running, so the resume still takes the poster as the wallpaper settles.
+        presenting = true
+        rig.sync.presentationResumed()
+        try await waitUntil { rig.total == 3 }
+
+        // A frame taken while it presents does make the poster fresh.
+        try await postFrame(Data([2]), on: rig)
+        rig.sync.presentationResumed()
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(rig.total, 3, "a presenting surface's frame is fresh")
+    }
+
+    @MainActor
+    func testResumeRetakesAPosterThatWasTakenBeforeSettling() async throws {
+        let rig = try FloorRig(root: root, floor: .seconds(60), settleDelays: [.milliseconds(20), .milliseconds(50)])
+        defer { rig.finish() }
+        rig.workspace.pictures = [one: original("one")]
+        rig.sync.refresh()
+        try await waitUntil { rig.total == 3 }
+        // The wallpaper was covered before its settle captures could land: this frame is
+        // the first one, taken in the same instant the wallpaper started.
+        try await postFrame(Data([1]), on: rig)
+
+        rig.sync.presentationResumed()
+        try await waitUntil { rig.total == 5 }
+    }
+
+    @MainActor
+    func testSpaceScopedPostersAreNeverSkippedByTheFloor() async throws {
+        let rig = try FloorRig(root: root, floor: .seconds(60),
+                               scope: { _ in .desktop(id: "one", context: "visit-a") })
+        defer { rig.finish() }
+        rig.workspace.pictures = [one: original("one"), two: original("two")]
+        try await postFrame(Data([1]), on: rig, context: "visit-a")
+
+        rig.spaceChanged()
+        try await waitUntil { rig.total == 1 }
+    }
+
+    @MainActor
+    func testPeriodicCapturesIgnoreTheFloor() async throws {
+        let rig = try FloorRig(root: root, floor: .seconds(600), periodicInterval: .milliseconds(30))
+        defer { rig.finish() }
+        rig.workspace.pictures = [one: original("one")]
+        try await postFrame(Data([1]), on: rig)
+        let before = rig.total
+        rig.sync.refreshesPeriodically = true
+        try await waitUntil { rig.total >= before + 2 }
+    }
+
+    @MainActor
+    func testDisplaysAreJudgedOnTheirOwn() async throws {
+        let rig = try FloorRig(root: root, displays: 2, floor: .seconds(120))
+        defer { rig.finish() }
+        rig.workspace.pictures = [one: original("one"), external: original("external")]
+        try await postFrame(Data([1]), on: rig, display: 0)
+        rig.clock.advance(.seconds(100))
+        try await postFrame(Data([2]), on: rig, display: 1)
+
+        // Display 1 is now 130 s old, display 2 only 30 s.
+        rig.clock.advance(.seconds(30))
+        rig.spaceChanged()
+        try await waitUntil { rig.total == 1 }
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(rig.requests, [1, 0])
+    }
+
+    @MainActor
+    func testADisplayWithoutAFrameYetAndAClockThatWentBackwardsAreStale() async throws {
+        let rig = try FloorRig(root: root, displays: 2, floor: .seconds(60))
+        defer { rig.finish() }
+        rig.workspace.pictures = [one: original("one"), external: original("external")]
+        try await postFrame(Data([1]), on: rig, display: 0)
+
+        rig.spaceChanged()
+        try await waitUntil { rig.total == 1 }
+        XCTAssertEqual(rig.requests, [0, 1], "the display that never answered is asked, the other keeps its poster")
+
+        rig.clock.rewind(.seconds(5))
+        rig.spaceChanged()
+        try await waitUntil { rig.requests[0] == 1 }
+    }
+
+    @MainActor
+    func testFrameThatCouldNotBeEncodedDoesNotMakeThePosterFresh() async throws {
+        let encoder = FailingPosterEncoder()
+        let rig = try FloorRig(root: root, floor: .seconds(60), encode: { try await encoder.encode($0) })
+        defer { rig.finish() }
+        post(Data([1]), layer: rig.layers[0], center: rig.frames)
+        for _ in 0..<300 {
+            if await encoder.count > 0 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let attempts = await encoder.count
+        XCTAssertEqual(attempts, 1)
+        for _ in 0..<50 { await Task.yield() }
+
+        rig.spaceChanged()
+        try await waitUntil { rig.total == 1 }
     }
 
     @MainActor

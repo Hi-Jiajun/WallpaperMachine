@@ -9,6 +9,19 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-10 — Lock state and scene-assets folder no longer probed per update
+
+Cached the session lock state in WallpaperPresentationPolicy (asked at start, lock/unlock, display wake, user switch and while locked) and resolved the scene-assets folder with its readiness in WorkshopStore instead of in every page snapshot.
+
+- `python3 scripts/test.py --only WallpaperPresentationPolicyTests --only WorkshopDownloadIntentTests --only ControlPanelSnapshotDeliveryTests --only ControlPanelShellTests` — 71 passed, including 6 new tests
+- `python3 scripts/test.py` on the shared tree with the lock-screen re-sync change (artifacts/tests/Tests-20261010-134554-494250) — 1334 passed, 0 failed, 14 skipped
+- `python3 scripts/build.py --swift-only --configuration Release` at 51e1d39 — OK; relaunched by the user
+- Standalone loop: `CGSessionCopyCurrentDictionary` 52 µs median (84 µs p95), `ClientPaths.assetsURL` 124 µs, cached URL 0.3 µs
+- Live, 30 vs 18 user-approved Bar Count drags in 40 s windows: page-snapshot samples in `assetsURL` 50 of 141 → 0 of 71; policy lock read 1 → 0; coalition energy within noise
+- Driving the drags in the background activated the app per drag, so the on-key assets refresh took 15 samples; not representative of drags in the focused panel
+- Not exercised live: a real screen lock, display wake with a lock, or fast user switching (unit tests only)
+- `scripts/check_renderer.py` — not run: no renderer or bridge change
+
 ## 2026-10-10 — Lock-screen check skips unchanged store re-syncs
 
 Release 1.3.2 (31) at HEAD bd55717, M5 Pro, macOS 27.0.1, AC power; animated lock screen and screen saver on one display with 45 Spaces (93 journal entries). Every two-second check and every snapshot apply re-synced the native selection.

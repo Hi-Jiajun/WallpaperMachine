@@ -44,9 +44,12 @@ unattached `CAMetalLayer`s and injected notification and encoding services:
   late frames and encodes from another Space or an old layer are rejected; a
   frame identical to the poster is neither encoded nor written.
 - Capture timing: a Space change applies the existing poster at once and asks for
-  a fresh frame; settling captures after a new wallpaper and after a resume;
-  periodic captures only while enabled; later captures skip displays that are not
-  presenting.
+  a fresh frame only when the poster is older than the freshness floor or was
+  taken before the wallpaper settled (displays judged separately; Space-scoped
+  posters, a backwards clock and a frame that failed to encode never count as
+  fresh); a resume retakes only such displays; settling captures after a new
+  wallpaper; periodic captures only while enabled and regardless of the floor;
+  later captures skip displays that are not presenting.
 - Refusals: a desktop that keeps refusing posters is left alone until the next
   Space change; a poster that reads back late is confirmed without counting a
   refusal; a failed Space neither blocks the others nor loses its old poster.
