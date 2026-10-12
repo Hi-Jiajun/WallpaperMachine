@@ -208,6 +208,17 @@ final class WallpaperController {
     }
   }
 
+  /// A notice the wallpaper service forwards to its extensions. Waking is the only one that
+  /// needs work: surfaces re-evaluate whether they should be presenting. The others, such as
+  /// `SignificantTimeChangeNotification`, are logged once so a new kind is noticed.
+  func hostNotification(named name: String) {
+    if name == "com.apple.wallpaper.hostDidWake" {
+      surfaces.values.forEach { $0.applyPolicy() }
+    } else if WallpaperRuntime.firstTime("host-notification-\(name)") {
+      WallpaperRuntime.log("Host notification \(name) needs no action")
+    }
+  }
+
   func update(id value: Any?, request: Any?) throws {
     guard let id = WallpaperRuntime.identifier(value), let surface = surfaces[id], let request
     else { throw WallpaperRuntime.failure("Unknown wallpaper surface.") }

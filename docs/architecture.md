@@ -444,12 +444,12 @@ only on macOS 26 and later (`LockScreenConfiguration.isSupportedBySystem`).
 
 | File | Responsibility |
 |---|---|
-| `WallpaperExtension.swift` | `@main AppExtension`; XPC handler for `acquire`/`update`/`invalidate`/`snapshot`/`provideSettingsViewModels`/`isChoiceDownloaded`/`selectedChoicesDidChange`, and connection acceptance |
-| `WallpaperRuntime.swift` | Loads and checks the private hosting ABI, verifies the caller's code signature via its audit token, resolves `CAContext`, reads the published configuration and asset paths, logging |
-| `WallpaperController.swift` | Singleton surface registry; reacts to screen sleep/wake, `com.apple.screenIsLocked`/`Unlocked`, and the Darwin notification `app.wallpapermachine.lock-screen.changed` |
+| `WallpaperExtension.swift` | `@main AppExtension`; XPC handler for the whole system protocol (21 requests on macOS 27.0): `acquire`/`update`/`invalidate`/`snapshot`/`provideSettingsViewModels`/`isChoiceDownloaded`/`selectedChoicesDidChange`/`handleNotification` do the work, the rest reply "nothing to do"; connection acceptance |
+| `WallpaperRuntime.swift` | Loads and checks the private hosting ABI, verifies the caller's code signature via its audit token, resolves `CAContext`, compares the exported XPC protocol with the system's (`verifyXPCProtocol`), reads the published configuration and asset paths, logging |
+| `WallpaperController.swift` | Singleton surface registry; reacts to screen sleep/wake, `com.apple.screenIsLocked`/`Unlocked`, the wallpaper service's `hostDidWake` notice, and the Darwin notification `app.wallpapermachine.lock-screen.changed` |
 | `WallpaperSurface.swift` | One `WallpaperID` to one `CAContext` with a scene/video `CAMetalLayer` or live WebKit layer tree; bounded geometry, readiness and snapshots |
 | `WallpaperSettingsProvider.swift` | Encodes the private wallpaper settings view-model payload |
-| `WallpaperExtensionBridge.h` | Objective-C bridging header declaring the private `CAContext`, `NSXPCConnection.auditToken` and the XPC protocol; also includes `SceneWallpaperBindings.h` |
+| `WallpaperExtensionBridge.h` | Objective-C bridging header declaring the private `CAContext`, `NSXPCConnection.auditToken` and the XPC protocol, selector for selector as the system declares it; also includes `SceneWallpaperBindings.h` |
 
 The process boundary is a file boundary. `Shared/` compiles into both targets and holds the
 contracts they must agree on:
@@ -473,6 +473,9 @@ contracts they must agree on:
   screen saver (selected by `LockScreenScene.webEntryFile`); `LockScreenSurfaceRegistry`,
   `LockScreenFrameBacking` and `LockScreenIdleExit` manage surface lifecycle, pixel backing and
   the extension process's exit once nothing uses it, so the next launch runs the registered copy.
+- `LockScreenXPCDrift` reads the extension's and the system's XPC protocol declarations and
+  reports requests or reply types that differ; the extension logs the result once per launch
+  (see [After a macOS update](features/lock-screen.md#after-a-macos-update)).
 
 Rules of the exchange:
 

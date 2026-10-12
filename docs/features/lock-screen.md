@@ -169,6 +169,13 @@ tree; it does not resume playback the user paused. Web projects remain unsupport
   configurations are rejected rather than converted destructively.
 - Playback respects the pause and battery settings. The lock screen covering the
   desktop does not pause it.
+- The extension answers the whole private wallpaper-service protocol, 21 requests on
+  macOS 27.0. macOS drops the connection of an extension that cannot answer a request,
+  or answers it with another reply type, and the service also sends requests
+  WallpaperMachine has no use for: downloads, skipping shuffled content, context-menu
+  items, added wallpapers, migration and debugging. Those get an immediate "nothing to
+  do" reply; the service's own wake notice makes every surface re-check whether it
+  should be presenting, and its time-change notice is ignored.
 
 ## When activation fails
 
@@ -350,9 +357,30 @@ that project's referenced managed files.
 ## Verification
 
 The offscreen suites (service, selection journal, extension registration, frame
-backing, presentation authority, and the screen saver's native-context/WebKit
-surface) are inventoried under *Lock screen* in [coverage](../testing/coverage.md).
-They never mutate LaunchServices or PlugInKit and select no real wallpaper. Real idle
-transitions, password UI, multi-monitor compositor delivery, sleep/wake visuals, live
-registration repair, ending a genuinely stale extension process and macOS choosing the
-intended extension still require an authorized desktop check.
+backing, presentation authority, the protocol comparison, and the screen saver's
+native-context/WebKit surface) are inventoried under *Lock screen* in
+[coverage](../testing/coverage.md). They never mutate LaunchServices or PlugInKit and
+select no real wallpaper. Real idle transitions, password UI, multi-monitor compositor
+delivery, sleep/wake visuals, live registration repair, ending a genuinely stale
+extension process, macOS choosing the intended extension and the wallpaper service's
+wake and time-change notices completing without an error in WallpaperAgent's log still
+require an authorized desktop check.
+
+### After a macOS update
+
+The first connection each launch compares the extension's declared requests and reply
+types with the system's own `WallpaperExtensionXPCProtocol` (read on macOS 27.0; macOS 26
+has not been compared) and writes one line to `extension.log`:
+
+```sh
+grep 'XPC protocol' ~/Library/Application\ Support/WallpaperMachine/LockScreenExchange/extension.log
+```
+
+`XPC protocol matches the system (21 selectors)` means nothing changed. `XPC protocol
+drift: missing=[...] extra=[...] differing=[...]` names the requests macOS added
+(`missing`), no longer has (`extra`) or now declares with another argument or reply
+type (`differing`); a missing or differing request makes macOS drop the connection, so
+update `Extension/WallpaperExtensionBridge.h` and `WallpaperExtension.swift` before
+the lock screen is trusted on that release. A skipped check is logged as such and
+changes nothing. `Unsupported request <selector> answered inertly` appears once per
+request kind the extension has nothing to do for.
