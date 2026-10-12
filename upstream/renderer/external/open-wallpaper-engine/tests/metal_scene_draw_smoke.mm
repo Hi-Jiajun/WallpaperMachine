@@ -64,16 +64,20 @@
 #include <charconv>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <memory>
+#include <mutex>
 #include <span>
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 #include <time.h>
 
 using namespace wallpaper;
@@ -1974,10 +1978,11 @@ TEST_F(MetalSceneDraw, AFrameThatWouldRepeatThePictureTakesNoDrawableAndPresents
 
         // Each of these changes what the composition reads without touching a
         // pass, so the next frame presents once and the one after repeats.
-        const std::array<std::function<void()>, 4> changes {
+        const std::array<std::function<void()>, 5> changes {
             [&] { render.SetWallpaperHorizontalFlip(true); },
             [&] { render.SetWallpaperScalingMode(WallpaperScalingMode::FILL); },
             [&] { render.SetWallpaperScalingFactor(1.5); },
+            [&] { render.SetWallpaperFraming({ 0.0, 1.0 }); },
             [&] { render.InvalidatePresentedFrame(); },
         };
         for (std::size_t i = 0; i < changes.size(); ++i) {
@@ -2007,6 +2012,172 @@ TEST_F(MetalSceneDraw, AFrameThatWouldRepeatThePictureTakesNoDrawableAndPresents
         render.destroy();
     }
     RendererCounters::SetEnabled(false);
+}
+
+TEST_F(MetalSceneDraw, APannedWallpaperIsComposedAtTheChosenPositionInTheDrawableAndThePoster)
+{
+    // A 3:2 scene fitted into a square layer leaves bars above and below. The
+    // composition that fills the drawable is the one a poster is made from, so
+    // where the picture sits is read off the poster: the first and last rows
+    // that are not the bars' black must be the ones the layout function says,
+    // for the top, the middle and the bottom, in the frame that presents the
+    // change and again for a poster served without drawing a frame.
+    const auto project = WriteFixture(root_ / "project");
+    {
+        // The scene's own background must not be black, or it could not be told
+        // from the bars around it.
+        const auto layout_path = root_ / "project" / "layout.json";
+        std::ifstream in(layout_path);
+        std::string   text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        in.close();
+        const std::string black = "\"clearcolor\":[0.0,0.0,0.0]";
+        const auto        at    = text.find(black);
+        ASSERT_NE(at, std::string::npos);
+        text.replace(at, black.size(), "\"clearcolor\":[0.2,0.4,0.6]");
+        std::ofstream(layout_path) << text;
+    }
+    LoadedScene loaded;
+    std::string error;
+    ASSERT_TRUE(LoadScene(project, root_ / "cache", loaded, error)) << error;
+    ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal);
+
+    struct Poster {
+        std::mutex              mutex;
+        std::condition_variable changed;
+        bool                    requested { false };
+        int                     delivered { 0 };
+        bool                    bgra { false };
+        uint32_t                width { 0 };
+        uint32_t                height { 0 };
+        std::vector<uint8_t>    pixels;
+    };
+    auto poster = std::make_shared<Poster>();
+
+    constexpr uint32_t kSide = 480;
+    @autoreleasepool {
+        id<MTLDevice> device  = MTLCreateSystemDefaultDevice();
+        CAMetalLayer* layer   = [CAMetalLayer layer];
+        layer.device          = device;
+        layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+        layer.drawableSize    = CGSizeMake(kSide, kSide);
+        layer.framebufferOnly = NO;
+
+        MetalRender         render;
+        MetalRenderInitInfo info {
+            .metal_layer          = (__bridge void*)layer,
+            .width                = kSide,
+            .height               = kSide,
+            .render_width         = kSide,
+            .render_height        = kSide,
+            .display_scale_factor = 1.0,
+        };
+        info.wants_poster = [poster] {
+            std::scoped_lock lock(poster->mutex);
+            const bool wanted = poster->requested;
+            poster->requested = false;
+            return wanted;
+        };
+        info.poster_ready = [poster](std::span<const uint8_t> pixels, uint32_t width,
+                                     uint32_t height, bool bgra) {
+            std::scoped_lock lock(poster->mutex);
+            poster->pixels.assign(pixels.begin(), pixels.end());
+            poster->width  = width;
+            poster->height = height;
+            poster->bgra   = bgra;
+            ++poster->delivered;
+            poster->changed.notify_all();
+        };
+        ASSERT_TRUE(render.init(info)) << render.lastError();
+        auto graph = sceneToRenderGraph(*loaded.scene);
+        ASSERT_NE(graph, nullptr);
+        ASSERT_TRUE(render.compileRenderGraph(*loaded.scene, *graph)) << render.lastError();
+        render.UpdateCameraFillMode(*loaded.scene, FillMode::ASPECTFIT);
+        render.SetWallpaperScalingMode(WallpaperScalingMode::FIT);
+
+        const auto ask_for_poster = [&] {
+            std::scoped_lock lock(poster->mutex);
+            poster->requested = true;
+        };
+        const auto wait_for_poster = [&](int expected) {
+            std::unique_lock lock(poster->mutex);
+            return poster->changed.wait_for(lock, std::chrono::seconds(10),
+                                            [&] { return poster->delivered >= expected; });
+        };
+        // The rows and columns that differ from the bars' black.
+        struct Footprint {
+            int32_t first_x { 0 }, last_x { -1 }, first_y { 0 }, last_y { -1 };
+        };
+        const auto footprint_of = [&](const std::vector<uint8_t>& pixels) {
+            Footprint f { static_cast<int32_t>(kSide), -1, static_cast<int32_t>(kSide), -1 };
+            for (int32_t y = 0; y < static_cast<int32_t>(kSide); ++y) {
+                for (int32_t x = 0; x < static_cast<int32_t>(kSide); ++x) {
+                    const auto at = (static_cast<size_t>(y) * kSide + x) * 4;
+                    if (pixels[at] == 0 && pixels[at + 1] == 0 && pixels[at + 2] == 0) continue;
+                    f.first_x = std::min(f.first_x, x);
+                    f.last_x  = std::max(f.last_x, x);
+                    f.first_y = std::min(f.first_y, y);
+                    f.last_y  = std::max(f.last_y, y);
+                }
+            }
+            return f;
+        };
+
+        bool presented = false;
+        ASSERT_TRUE(render.drawFrame(*loaded.scene, &presented)) << render.lastError();
+        ASSERT_TRUE(presented);
+
+        int  deliveries = 0;
+        int  previous_first_y = -1;
+        for (const double pan_y : { 0.0, 0.5, 1.0 }) {
+            SCOPED_TRACE(pan_y);
+            const auto layout = ComputeWallpaperScalingLayout(
+                WallpaperScalingMode::FIT, 384, 256, kSide, kSide, 1.0, 1.0, 0.5, pan_y);
+            ASSERT_EQ(layout.viewport_px.width, static_cast<int32_t>(kSide));
+            ASSERT_EQ(layout.viewport_px.height, 320);
+
+            // The frame that follows the change presents, and the poster
+            // composed beside the drawable is the same picture.
+            render.SetWallpaperFraming({ 0.5, pan_y });
+            ask_for_poster();
+            presented = false;
+            ASSERT_TRUE(render.drawFrame(*loaded.scene, &presented)) << render.lastError();
+            EXPECT_TRUE(presented) << "a changed position did not present";
+            ASSERT_TRUE(wait_for_poster(++deliveries));
+            std::vector<uint8_t> in_frame;
+            {
+                std::scoped_lock lock(poster->mutex);
+                ASSERT_EQ(poster->width, kSide);
+                ASSERT_EQ(poster->height, kSide);
+                ASSERT_EQ(poster->pixels.size(), static_cast<size_t>(kSide) * kSide * 4);
+                in_frame = poster->pixels;
+            }
+            const auto drawn = footprint_of(in_frame);
+            EXPECT_EQ(drawn.first_y, layout.viewport_px.y);
+            EXPECT_EQ(drawn.last_y, layout.viewport_px.y + layout.viewport_px.height - 1);
+            EXPECT_EQ(drawn.first_x, 0);
+            EXPECT_EQ(drawn.last_x, static_cast<int32_t>(kSide) - 1);
+            EXPECT_GT(drawn.first_y, previous_first_y) << "the picture did not move down";
+            previous_first_y = drawn.first_y;
+
+            // An idle wallpaper's poster is composed from the retained output,
+            // with no frame drawn, and has to agree with the drawable's.
+            ask_for_poster();
+            EXPECT_EQ(render.ServicePosterRequest(*loaded.scene), PosterServiceResult::Submitted);
+            ASSERT_TRUE(wait_for_poster(++deliveries));
+            {
+                std::scoped_lock lock(poster->mutex);
+                EXPECT_EQ(poster->pixels, in_frame);
+            }
+
+            // The next frame repeats the picture and presents nothing.
+            presented = true;
+            ASSERT_TRUE(render.drawFrame(*loaded.scene, &presented)) << render.lastError();
+            EXPECT_FALSE(presented);
+        }
+        EXPECT_EQ(previous_first_y, 160) << "the bottom pan leaves all the slack above the picture";
+
+        render.destroy();
+    }
 }
 
 TEST_F(MetalSceneDraw, GeometryRebuiltEveryFrameIsUploadedAndDrawnFromItsOwnSlot)

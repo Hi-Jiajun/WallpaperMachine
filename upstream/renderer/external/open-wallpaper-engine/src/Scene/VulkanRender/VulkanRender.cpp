@@ -203,6 +203,7 @@ struct VulkanRender::Impl {
     void UpdateCameraFillMode(Scene&, wallpaper::FillMode);
     void SetWallpaperScalingMode(wallpaper::WallpaperScalingMode);
     void SetWallpaperScalingFactor(double);
+    void SetWallpaperFraming(const wallpaper::WallpaperFraming&);
     void SetWallpaperHorizontalFlip(bool);
 
     bool initRes();
@@ -256,6 +257,7 @@ struct VulkanRender::Impl {
     WallpaperScalingLayout                m_scaling_layout {};
     WallpaperScalingMode                  m_scaling_mode { WallpaperScalingMode::FIT };
     double                                m_scaling_factor { 1.0 };
+    wallpaper::WallpaperFraming           m_framing {};
     bool                                  m_horizontal_flip { false };
     double                                m_display_scale_factor { 1.0 };
     VkExtent2D                            m_requested_render_extent {};
@@ -338,6 +340,9 @@ void VulkanRender::SetWallpaperScalingMode(wallpaper::WallpaperScalingMode mode)
 }
 void VulkanRender::SetWallpaperScalingFactor(double factor) {
     pImpl->SetWallpaperScalingFactor(factor);
+}
+void VulkanRender::SetWallpaperFraming(const wallpaper::WallpaperFraming& framing) {
+    pImpl->SetWallpaperFraming(framing);
 }
 void VulkanRender::SetWallpaperHorizontalFlip(bool enabled) {
     pImpl->SetWallpaperHorizontalFlip(enabled);
@@ -1183,7 +1188,9 @@ VulkanRender::Impl::computeScalingLayout(const Scene& scene, uint32_t output_wid
                                          logical_width,
                                          logical_height,
                                          scale_factor,
-                                         m_scaling_factor);
+                                         m_scaling_factor,
+                                         m_framing.pan_x,
+                                         m_framing.pan_y);
 }
 
 void VulkanRender::Impl::updateScalingLayout(const Scene& scene, uint32_t output_width,
@@ -1226,6 +1233,13 @@ void VulkanRender::Impl::SetWallpaperScalingFactor(double factor) {
     m_scaling_factor = NormalizeScaleFactor(factor);
     m_present_gate.Invalidate();
     LOG_INFO("wallpaper scaling factor: %.3f", m_scaling_factor);
+}
+
+void VulkanRender::Impl::SetWallpaperFraming(const wallpaper::WallpaperFraming& framing) {
+    // No log line: a drag on a position control sets this many times a second,
+    // which would flood the log.
+    m_framing = NormalizeWallpaperFraming(framing);
+    m_present_gate.Invalidate();
 }
 
 void VulkanRender::Impl::SetWallpaperHorizontalFlip(bool enabled) {

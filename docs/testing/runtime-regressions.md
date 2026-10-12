@@ -102,6 +102,13 @@ device.
   wallpaper that is drawing correctly.
 - **Posters** — `metal_poster_capture_test` covers on-request poster readback,
   busy coalescing and invalidation.
+  `MetalSceneDraw.APannedWallpaperIsComposedAtTheChosenPositionInTheDrawableAndThePoster`
+  fits a 3:2 scene into a square layer and reads the poster for a position at the top,
+  the middle and the bottom: the first and last rows that are not the bars' black must
+  be the layout function's, in the frame that presents the change and in a poster served
+  from the retained output without drawing (`ServicePosterRequest`), and the two posters
+  must be byte-identical. It skips visibly without a Metal device. The poster is the
+  only place the composition can be read, the drawable being released at present.
 
 ## Video decode, color and import
 
@@ -229,7 +236,12 @@ device.
   over fit, fill, stretch, none, user scale, 2x displays, exact halving and
   uneven reduction, RGBA and BGRA sources sampled linearly or nearest, and
   requires the copy path's bytes; mirrored, smaller frames and other passes fall
-  back.
+  back. The rows with a position (fill pinned to the leading and to the trailing
+  edges, fit against the bottom, a 2x display pinned to the top, an unscaled picture
+  at 0.25/0.75) hold the same bar, and also require the picture's footprint, the first
+  and last rows and columns that are not the clear colour, to equal the layout's
+  viewport, and the pixels to differ from the centred rendering, so a position that is
+  ignored leaves the picture in the middle and fails.
 - **Posters** — the Compatibility swapchain is `COLOR_ATTACHMENT` only, so
   MoltenVK makes the layer framebuffer-only. A requested poster is composed a
   second time by the pass that composed the drawable (`FinPass::recordComposition`
@@ -287,9 +299,9 @@ device.
   (`TheSkipPresentsTheSameVideoFramesInTheSameOrder`, observed through
   `RenderInitInfo::video_frame_presented`), and with the skip on no generation is
   presented twice after the start. A held frame submits nothing until a flip, a
-  poster request, a resume, a scaling-factor (crop), render-scale, surface-resize
-  or fill-mode change, each of which presents the held generation exactly once and
-  then repeats again; a static scene submits nothing once every pass is reused,
+  position change (`SceneWallpaper::setFraming`), a poster request, a resume, a
+  scaling-factor (crop), render-scale, surface-resize or fill-mode change, each of
+  which presents the held generation exactly once and then repeats again; a static scene submits nothing once every pass is reused,
   and the poster it then exports is byte-identical to the baseline's. Counters
   are compared within one draw at the window edges, never exactly. A change the
   comparison cannot see must invalidate the gate; do not widen the skip by

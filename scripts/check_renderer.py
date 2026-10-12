@@ -34,7 +34,7 @@ REGRESSION_BINARIES = {
     "audio_tests": False, "miniaudio_failure_paths_test": False, "sprite_animation_test": False,
     "vulkan_sample_count_smoke": False, "rendergraph_smoke": False,
     "rust_shader_bridge_test": False, "stb_image_regression_test": False,
-    "surface_health_test": False,
+    "surface_health_test": False, "wallpaper_scaling_test": False,
 }
 OFFSCREEN_PROBE = "offscreen_scene_probe"
 RELOAD_PROBE = "scene_reload_cycle_probe"

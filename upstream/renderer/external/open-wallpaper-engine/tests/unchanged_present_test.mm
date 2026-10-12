@@ -539,6 +539,17 @@ TEST_F(UnchangedPresent, ARepeatedVideoFramePresentsAgainOnlyWhenSomethingChange
     EXPECT_EQ(Delta(held, flipped)[OWE_RC_RENDER_SUBMISSIONS], 1u)
         << "a flip must present exactly once and then repeat again";
 
+    // So does moving the picture inside the room the layout leaves around it,
+    // set through the scene's own entry point, which reaches the renderer by
+    // the same message every live setting takes.
+    running.wallpaper().setFraming({ 0.0, 1.0 });
+    std::this_thread::sleep_for(400ms);
+    const auto panned = running.Read();
+    EXPECT_EQ(Delta(flipped, panned)[OWE_RC_RENDER_SUBMISSIONS], 1u)
+        << "a position change must present exactly once and then repeat again";
+    EXPECT_GE(Delta(flipped, panned)[OWE_RC_PRESENTS_SKIPPED_UNCHANGED], 5u)
+        << "the held frame did not go back to repeating after the position change";
+
     // A poster can only be exported from a presented frame, so a pending
     // request is answered by drawing, once.
     running.poster().Request();
@@ -546,7 +557,7 @@ TEST_F(UnchangedPresent, ARepeatedVideoFramePresentsAgainOnlyWhenSomethingChange
                                                       "was never exported";
     std::this_thread::sleep_for(300ms);
     const auto postered = running.Read();
-    EXPECT_EQ(Delta(flipped, postered)[OWE_RC_RENDER_SUBMISSIONS], 1u);
+    EXPECT_EQ(Delta(panned, postered)[OWE_RC_RENDER_SUBMISSIONS], 1u);
     {
         std::scoped_lock lock(running.poster().mutex);
         EXPECT_EQ(running.poster().delivered, 1);
@@ -669,6 +680,9 @@ TEST_F(UnchangedPresent, OutputChangesOnAHeldVideoFramePresentOnceEach)
     // Crop and fill: the user's zoom, and the fill mode.
     expect_one_present("a scaling-factor (crop) change", [&] {
         running.wallpaper().setPropertyFloat(PROPERTY_SCALINGFACTOR, 1.5f);
+    });
+    expect_one_present("a position change", [&] {
+        running.wallpaper().setFraming({ 1.0, 0.0 });
     });
     expect_one_present("a render-scale change", [&] {
         running.wallpaper().setPropertyFloat(PROPERTY_RENDER_SCALE, 0.5f);

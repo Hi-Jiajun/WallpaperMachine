@@ -573,6 +573,24 @@ extern "C" int owe_scene_wallpaper_set_render_scale(owe_scene_wallpaper* scene, 
     return 0;
 }
 
+extern "C" int owe_scene_wallpaper_set_framing(owe_scene_wallpaper* scene, double pan_x,
+                                               double pan_y)
+{
+    // No log line on this path: a drag sets it many times a second.
+    try {
+        clear_last_error();
+        if (!valid_scene(scene)) return finish_with_error("scene must not be null");
+        if (!std::isfinite(pan_x) || !std::isfinite(pan_y)) {
+            return finish_with_error("framing must be finite");
+        }
+
+        scene->scene.setFraming(wallpaper::WallpaperFraming { pan_x, pan_y });
+        return 0;
+    } catch (...) {
+        return finish_with_error_noexcept("failed to set framing");
+    }
+}
+
 extern "C" int owe_scene_wallpaper_set_first_frame_callback(
     owe_scene_wallpaper* scene,
     owe_first_frame_callback callback,

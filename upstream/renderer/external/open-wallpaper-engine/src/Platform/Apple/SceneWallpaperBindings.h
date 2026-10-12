@@ -126,6 +126,26 @@ int owe_scene_wallpaper_set_paused(owe_scene_wallpaper* scene, bool paused);
  */
 int owe_scene_wallpaper_set_render_scale(owe_scene_wallpaper* scene, double scale);
 
+/*
+ * Sets where the presented wallpaper sits inside the slack the display leaves
+ * around it, as one fraction per axis: 0 puts the wallpaper's leading edge on
+ * the display's (left, and top), 1 its trailing edge (right, and bottom), 0.5
+ * centres it, which is also the default. The slack is the display minus the
+ * wallpaper, so one fraction places a wallpaper that leaves bars (Fit,
+ * Original size, a scale factor below 1) and one that overflows the display
+ * (Fill, a scale factor above 1) alike. An axis with no slack, such as Stretch
+ * at a scale factor of 1, is unmoved by any value.
+ *
+ * Both values must be finite; they are clamped to [0, 1]. Applied live: the
+ * project is not reparsed, nothing is rebuilt and video keeps playing, and the
+ * pointer, the Mission Control picture and the drawable all follow it. Safe
+ * before the first frame: the value is retained and applied once the surface
+ * exists, and it survives surface reconfiguration and a change of renderer.
+ *
+ * Returns 0 on success, non-zero on failure.
+ */
+int owe_scene_wallpaper_set_framing(owe_scene_wallpaper* scene, double pan_x, double pan_y);
+
 /* Direct first-frame notification forwarding from SceneWallpaper. */
 int owe_scene_wallpaper_set_first_frame_callback(owe_scene_wallpaper* scene,
                                                  owe_first_frame_callback callback,

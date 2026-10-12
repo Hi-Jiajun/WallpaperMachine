@@ -61,9 +61,21 @@ frame. Effect and video output of Native Metal has not been compared against rea
 wallpapers.
 
 Desktop posters work on both backends and need no setting: each re-draws its final
-composition — fit, zoom and flip included — into an image of its own only when a
-poster is requested, including while the scene is idle or paused. The
+composition — fit, zoom, flip and position included — into an image of its own only
+when a poster is requested, including while the scene is idle or paused. The
 Compatibility drawable is therefore only ever rendered to, never read back.
+
+Where the picture sits is one layout shared by both backends, the pointer mapping and
+the posters. The scaling mode and the scale factor decide how large the picture is;
+whatever room that leaves around it (bars for Fit, Original size or a factor below 1)
+or whatever it overflows by (Fill, or a factor above 1) is split by a position, a
+fraction per axis: 0 puts the picture's left or top edge on the display's, 1 its right
+or bottom edge, and 0.5, the default, centres it as every wallpaper was before the
+position existed. An axis with no room, such as Stretch at a factor of 1, does not
+move. The engine takes the position as a live setting
+(`owe_scene_wallpaper_set_framing`): nothing is rebuilt, a held video keeps its frame,
+the next frame is presented once, and the position survives a surface rebuild and a
+change of renderer. The app does not offer it yet.
 
 Compiled work is reused across launches where it can be. A scene's translated Metal
 shaders, their reflection and their binding plans are stored in that scene's shader
@@ -139,8 +151,8 @@ scripts, timeline, sound and events on every tick; only drawing an identical
 picture is left out. A newly decoded video frame is presented on the tick that
 selects it, so this is neither content pacing (an
 [experimental switch](performance.md#experimental-switches)) nor updating only when
-the scene changes, and no drawable is held to keep the picture. A resize, fill, scaling or
-flip change, a render-scale or scene-optimisation change, a rebuilt graph or
+the scene changes, and no drawable is held to keep the picture. A resize, fill, scaling,
+position or flip change, a render-scale or scene-optimisation change, a rebuilt graph or
 surface, a resumed wallpaper, a failed frame or a poster request makes the next
 frame present. The renderer counters report these frames as
 `presents_skipped_unchanged`, apart from dropped draws and present requests. Native

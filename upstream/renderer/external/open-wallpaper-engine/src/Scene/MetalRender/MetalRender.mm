@@ -1182,6 +1182,7 @@ struct MetalRender::Impl
     double               display_scale_factor { 1.0 };
     WallpaperScalingMode scaling_mode { WallpaperScalingMode::NONE };
     double               scaling_factor { 1.0 };
+    WallpaperFraming     framing {};
     bool                 horizontal_flip { false };
     bool                 video_paused { false };
     float                video_rate { 1.0f };
@@ -4014,7 +4015,7 @@ WallpaperScalingLayout MetalRender::Impl::scalingLayout(const Scene& scene, uint
         1u, static_cast<uint32_t>(std::lround(static_cast<double>(height) / scale_factor)));
     return ComputeWallpaperScalingLayout(scaling_mode, source_extent.width, source_extent.height,
                                          logical_width, logical_height, scale_factor,
-                                         scaling_factor);
+                                         scaling_factor, framing.pan_x, framing.pan_y);
 }
 
 // ---------------------------------------------------------------------------
@@ -4178,6 +4179,14 @@ void MetalRender::SetWallpaperScalingMode(WallpaperScalingMode mode)
 void MetalRender::SetWallpaperScalingFactor(double factor)
 {
     pImpl->scaling_factor = NormalizeScaleFactor(factor);
+    pImpl->present_gate.Invalidate();
+}
+
+void MetalRender::SetWallpaperFraming(const WallpaperFraming& framing)
+{
+    // Like the scaling factor: the frame after a pan must present, not be
+    // skipped as a repeat of one decided before it.
+    pImpl->framing = NormalizeWallpaperFraming(framing);
     pImpl->present_gate.Invalidate();
 }
 

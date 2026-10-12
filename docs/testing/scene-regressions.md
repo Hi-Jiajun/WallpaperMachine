@@ -149,6 +149,16 @@ Playback, backend, host and startup areas are in
   read positions outside the canvas), but named layers take cursor events only
   while the cursor is inside it, so letterbox bars never trigger a layer whose box
   crosses the canvas edge.
+  The picture can also be positioned inside its slack (`WallpaperFraming`, the
+  trailing `pan_x`/`pan_y` of `ComputeWallpaperScalingLayout`); the mapping derives
+  from `layout.viewport_px` alone, so the pointer follows the position with no mapping
+  of its own. `WallpaperScaling.CursorMappingFollowsThePannedPresentation` in
+  `wallpaper_scaling_test` (CPU only, run by `check_renderer.py`) requires the window's
+  left edge to map to the camera's left edge at a pan of 0 and the right edges to meet
+  at 1, with the drawn content rectangle and the clip unchanged.
+  `.DefaultPanIsBitExactWithTheCentredLayout` compares every mode against an in-test
+  copy of the old centring arithmetic, so the default can never move a wallpaper by a
+  pixel; a change to the layout function's arithmetic order has to keep it green.
 - **`engine.screenResolution`** has its own setter:
   `SceneWallpaper::publishScreenResolution` reports the display's pixels on scene
   attach and whenever the surface is replaced. `RenderInitInfo::width`/`height`

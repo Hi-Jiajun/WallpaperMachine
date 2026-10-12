@@ -145,6 +145,10 @@ public:
     void UpdateCameraFillMode(Scene& scene, FillMode fillmode);
     void SetWallpaperScalingMode(WallpaperScalingMode mode);
     void SetWallpaperScalingFactor(double factor);
+    /// Where the presented image sits in the slack around it. The composition,
+    /// the cursor mapping and a poster all take it from the one layout, so they
+    /// agree. Takes effect on the next frame; no pass or target is rebuilt.
+    void SetWallpaperFraming(const WallpaperFraming& framing);
     void SetWallpaperHorizontalFlip(bool enabled);
 
     /// Where this surface keeps the compiled pipelines it can rebuild.

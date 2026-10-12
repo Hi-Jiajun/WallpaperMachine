@@ -7,6 +7,7 @@
 #include <string_view>
 #include "Type.hpp"
 #include "Core/SurfaceHealth.hpp"
+#include "Presentation/WallpaperFraming.hpp"
 #include "Scene/include/Scene/SceneBackendSelection.hpp"
 #include "Scene/include/Scene/SceneVideoPath.hpp"
 #include "Scene/include/Scene/SceneUpdateDemand.hpp"
@@ -47,6 +48,9 @@ constexpr std::string_view PROPERTY_FPS                       = "fps";
 constexpr std::string_view PROPERTY_FILLMODE                  = "fillmode";
 constexpr std::string_view PROPERTY_SCALINGMODE               = "scalingmode";
 constexpr std::string_view PROPERTY_SCALINGFACTOR             = "scalingfactor";
+/// Object property: a `WallpaperFraming`, both axes in one message so a
+/// reader never sees one of them from before a change and one from after.
+constexpr std::string_view PROPERTY_FRAMING                   = "framing";
 /// Internal rasterization scale in (0,1]. Distinct from PROPERTY_SCALINGFACTOR,
 /// which scales the presented image on the output.
 constexpr std::string_view PROPERTY_RENDER_SCALE              = "render_scale";
@@ -161,6 +165,16 @@ public:
     void setPropertyFloat(std::string_view, float);
     void setPropertyString(std::string_view, std::string);
     void setPropertyObject(std::string_view, std::shared_ptr<void>);
+
+    /// Where the presented wallpaper sits inside the slack the display leaves
+    /// around it (see `WallpaperFraming`); the default centres it. Applied
+    /// live like the scaling factor: nothing is rebuilt, an idle scene draws
+    /// one frame to show it and a paused one shows it when playback resumes.
+    /// The render handler holds the value, so it survives hot-switching,
+    /// surface reconfiguration and a backend change. Each axis is clamped to
+    /// [0, 1] and a non-finite one becomes the centre. Safe before the first
+    /// frame: the value is kept and applied when the surface exists.
+    void setFraming(const WallpaperFraming&);
 
     ExSwapchain* exSwapchain() const;
 

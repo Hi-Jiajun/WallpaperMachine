@@ -427,6 +427,13 @@ independently, a graph failure and a frame failure latch different reasons,
 clearing the stop never clears the failure count, and the present age is unknown
 before the first present.
 
+`wallpaper_scaling_test` (CPU only, in the check) pins the presentation layout
+function: the default position reproduces an in-test copy of the old centring
+arithmetic bit for bit in every scaling mode, a position of 0 and 1 puts the picture
+against the leading and trailing edges for an overflowing and a letterboxed picture
+alike, non-finite values fall back to the centre and out-of-range ones clamp, and the
+pointer mapping follows the position.
+
 `unchanged_present_test` exercises Compatibility frames that would repeat the
 picture through a real swapchain on a `CAMetalLayer` no window owns. In
 `AStaticSceneStopsPresentingOnceEveryPassIsReused` it also reads

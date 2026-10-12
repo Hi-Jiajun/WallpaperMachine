@@ -470,6 +470,7 @@ public:
         CMD_SET_FILLMODE,
         CMD_SET_SCALINGMODE,
         CMD_SET_SCALINGFACTOR,
+        CMD_SET_FRAMING,
         CMD_SET_RENDER_SCALE,
         CMD_SET_HORIZONTAL_FLIP,
         CMD_SET_AUDIO_RESPONSE_ENABLED,
@@ -527,6 +528,7 @@ public:
                 CASE_CMD(SET_FILLMODE);
                 CASE_CMD(SET_SCALINGMODE);
                 CASE_CMD(SET_SCALINGFACTOR);
+                CASE_CMD(SET_FRAMING);
                 CASE_CMD(SET_HORIZONTAL_FLIP);
                 CASE_CMD(SET_AUDIO_RESPONSE_ENABLED);
                 CASE_CMD(SET_MEDIA_INTEGRATION_ENABLED);
@@ -792,6 +794,7 @@ public:
         m_render->SetCounters(&counters);
         m_render->SetWallpaperScalingMode(m_scalingmode);
         m_render->SetWallpaperScalingFactor(m_scalingfactor);
+        m_render->SetWallpaperFraming(m_framing);
         m_render->SetWallpaperHorizontalFlip(m_horizontal_flip);
         m_render->SetVideoPlaybackRate(m_speed);
         m_render->SetVideoPlaybackPaused(! frame_timer.Running() || m_render_blocked);
@@ -1028,6 +1031,7 @@ private:
         }
         m_render->SetWallpaperScalingMode(m_scalingmode);
         m_render->SetWallpaperScalingFactor(m_scalingfactor);
+        m_render->SetWallpaperFraming(m_framing);
         m_render->SetWallpaperHorizontalFlip(m_horizontal_flip);
         if (m_fillmode_explicit) {
             m_render->UpdateCameraFillMode(*m_scene, m_fillmode);
@@ -1309,6 +1313,15 @@ private:
             m_scalingfactor = value;
             if (renderInited()) {
                 m_render->SetWallpaperScalingFactor(m_scalingfactor);
+            }
+        }
+    }
+    MHANDLER_CMD(SET_FRAMING) {
+        std::shared_ptr<WallpaperFraming> value;
+        if (msg->findObject("value", &value) && value != nullptr) {
+            m_framing = NormalizeWallpaperFraming(*value);
+            if (renderInited()) {
+                m_render->SetWallpaperFraming(m_framing);
             }
         }
     }
@@ -1716,6 +1729,10 @@ private:
     bool                                     m_fillmode_explicit { false };
     WallpaperScalingMode                     m_scalingmode { WallpaperScalingMode::FIT };
     float                                    m_scalingfactor { 1.0f };
+    /// Where the presented image sits in the slack around it. Held here, not
+    /// in a backend, so it outlives a backend change, a surface rebuild and a
+    /// graph rebuild like the scaling mode and factor beside it.
+    WallpaperFraming                         m_framing {};
     /// Internal rasterization scale, independent of `m_scalingfactor`: that one
     /// scales the presented image on the output, this one only changes how many
     /// pixels the scene is drawn with.
@@ -2014,6 +2031,13 @@ void SceneWallpaper::setPropertyObject(std::string_view name, std::shared_ptr<vo
     }
 }
 
+void SceneWallpaper::setFraming(const WallpaperFraming& framing) {
+    // One object, so a reader of the render thread sees both axes change
+    // together; normalised here so what travels is already in range.
+    setPropertyObject(PROPERTY_FRAMING,
+                      std::make_shared<WallpaperFraming>(NormalizeWallpaperFraming(framing)));
+}
+
 int SceneWallpaper::takeLastFrameSyncFd() {
     return m_main_handler->renderHandler()->takeLastFrameSyncFd();
 }
@@ -2088,6 +2112,14 @@ MHANDLER_CMD_IMPL(MainHandler, SET_PROPERTY) {
                 auto nmsg =
                     CreateMsgWithCmd(m_render_handler, RenderHandler::CMD::CMD_SET_SCALINGFACTOR);
                 nmsg->setFloat("value", value);
+                nmsg->post();
+            }
+        } else if (property == PROPERTY_FRAMING) {
+            std::shared_ptr<WallpaperFraming> value;
+            if (msg->findObject("value", &value) && value != nullptr) {
+                auto nmsg =
+                    CreateMsgWithCmd(m_render_handler, RenderHandler::CMD::CMD_SET_FRAMING);
+                nmsg->setObject("value", value);
                 nmsg->post();
             }
         } else if (property == PROPERTY_RENDER_SCALE) {
