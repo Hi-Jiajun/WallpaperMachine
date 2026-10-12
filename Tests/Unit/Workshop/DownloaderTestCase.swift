@@ -26,12 +26,15 @@ class DownloaderTestCase: XCTestCase {
   func startDownload(
     in root: URL, username: String = "localtest", itemID: String = "123456",
     libraryName: String = "Library", rememberSession: Bool = true, item: WorkshopItem? = nil,
-    networkMonitor: (any ProcessNetworkMonitoring)? = nil
+    networkMonitor: (any ProcessNetworkMonitoring)? = nil, checkpointDirectory: URL? = nil,
+    freeSpace: (@Sendable (URL) -> Int64?)? = nil
   ) -> WorkshopDownloader {
     let downloader = WorkshopDownloader(
       sessionDirectory: root.appendingPathComponent("SteamSession"),
       runtimeProvider: ShellRuntimeProvider(),
-      networkMonitor: networkMonitor ?? FixtureNetworkMonitor())
+      networkMonitor: networkMonitor ?? FixtureNetworkMonitor(),
+      checkpointDirectory: checkpointDirectory,
+      freeSpace: freeSpace ?? WorkshopDownloader.systemFreeSpace)
     let requestedItem = item ?? WorkshopItem(
       id: itemID, title: "Session fixture", creator: "Test", summary: "", previewURL: nil,
       tags: ["Video"], size: 0, subscriptions: 0)
@@ -349,6 +352,26 @@ final class FixtureNetworkMonitor: ProcessNetworkMonitoring {
   func stop() async {
     if running { stopCount += 1 }
     running = false
+  }
+}
+
+/// A disk whose free space the test decides, and which remembers what it was asked about.
+final class FreeSpaceProbe: @unchecked Sendable {
+  private let lock = NSLock()
+  private var free: Int64?
+  private var asked: [URL] = []
+
+  init(_ free: Int64?) { self.free = free }
+
+  var available: Int64? {
+    get { lock.withLock { free } }
+    set { lock.withLock { free = newValue } }
+  }
+
+  var questions: [URL] { lock.withLock { asked } }
+
+  var measure: @Sendable (URL) -> Int64? {
+    { url in self.lock.withLock { self.asked.append(url); return self.free } }
   }
 }
 

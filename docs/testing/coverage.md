@@ -1039,6 +1039,11 @@ and `WorkshopDownloadPersistenceTests`:
   partial content never published on cancel or incomplete download, scene-asset
   installation keeping only validated assets, pause and checkpoint recovery of
   content and queue order.
+- Free space (`DownloaderLifecycleTests`, injected disk): a download that cannot
+  fit fails before SteamCMD launches with the needed and available sizes, Try again
+  checks again, partial data already staged lowers the requirement, and an unknown
+  size, an unreadable disk or a sign-in-only run never blocks. Scene assets use a
+  fixed floor. The floor's real footprint is unmeasured.
 - `DownloadTelemetryTests` — download-speed sampling, including real `nettop`
   streaming (detail in [renderer.md](renderer.md)); `DownloaderLifecycleTests`
   report progress from disk growth against the listed size and stay

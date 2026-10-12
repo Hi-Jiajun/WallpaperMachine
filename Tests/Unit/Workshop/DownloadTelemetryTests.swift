@@ -340,7 +340,7 @@ final class DownloadTelemetryTests: DownloaderTestCase {
     let downloader = WorkshopDownloader(
       sessionDirectory: root.appendingPathComponent("SteamSession"),
       runtimeProvider: ShellRuntimeProvider(),
-      networkMonitor: monitor)
+      networkMonitor: monitor, freeSpace: { _ in nil })
     downloader.installAssets(
       username: "localtest", executable: root.appendingPathComponent("runtime/steamcmd"),
       destination: root.appendingPathComponent("SceneAssets")

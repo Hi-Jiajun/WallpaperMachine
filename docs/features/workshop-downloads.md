@@ -618,6 +618,27 @@ non-destructive copies.
 A download interrupted by a crash leaves staging behind. The app reclaims only
 staging directories it can prove nothing is writing to.
 
+**Free space.** Before SteamCMD starts, the downloader checks that the disk holding
+the library can take the download, so one that cannot fit fails at once instead of
+stalling for the inactivity limit and blaming the connection. The check runs on
+every start, including a resume, an automatic restart and **Try again**. A
+Workshop item needs the part of its listed size not already staged, plus 15% for
+Steam's staging and 64 MiB of margin; whatever a paused or failed attempt kept as
+partial download data is counted from disk, so a retry only needs what is still
+missing. Free space is the figure macOS calls available for important usage,
+which includes space it can reclaim on demand. Shared scene resources have no
+listed size, so they need a fixed 3 GiB less whatever an earlier attempt already
+staged for them (counted from disk like an item's partial data, down to the 64 MiB
+margin): a lower bound meant to block only a clearly full disk, not yet tuned
+against a measured installation. When the disk is short
+the download fails with a message naming what it needs and what is available; its
+partial data is kept and **Try again** checks again. Nothing blocks a download
+whose size Steam does not list, a sign-in-only run, or a disk whose free space
+cannot be read. A preset's base wallpaper (size unknown) is not checked, and
+parallel jobs are checked one by one, not added together, so a bulk **Download the
+ones not in your library** or **Update N wallpapers** can report a shortfall on
+some jobs and not on others.
+
 ### Workshop presets
 
 A Workshop preset (category **Preset**, "Required items" on its page) is not a

@@ -76,6 +76,8 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     @ObservationIgnored private let passTimeout: TimeInterval
     /// The clock both limits are measured on.
     @ObservationIgnored private let now: () -> Date
+    /// Free bytes on the volume that holds a folder, as the system would hand them to this app.
+    @ObservationIgnored private let freeSpace: @Sendable (URL) -> Int64?
     @ObservationIgnored private var failure: String?
     @ObservationIgnored private var receivesNetwork = false
     @ObservationIgnored private var networkStarted = false
@@ -91,12 +93,14 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
          runtimeProvider: any SteamCMDRuntimeProviding = SteamCMDRuntimeService(),
          networkMonitor: (any ProcessNetworkMonitoring)? = nil, checkpointDirectory: URL? = nil,
          inactivityTimeout: TimeInterval = 300, passTimeout: TimeInterval = 1800,
-         now: @escaping () -> Date = Date.init) {
+         now: @escaping () -> Date = Date.init,
+         freeSpace: @escaping @Sendable (URL) -> Int64? = WorkshopDownloader.systemFreeSpace) {
         self.sessionDirectory = sessionDirectory
         self.checkpointDirectory = checkpointDirectory
         self.inactivityTimeout = inactivityTimeout
         self.passTimeout = passTimeout
         self.now = now
+        self.freeSpace = freeSpace
         self.runtimeProvider = runtimeProvider
         self.networkMonitor = networkMonitor ?? ProcessNetworkMonitor()
         savedAccount = Self.readSavedAccount(at: sessionDirectory)
@@ -243,6 +247,8 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
                     }.value
                 }
                 AppLog.info("SteamCMD \(label): runtime prepared; saved sign-in restored: \(restoredSessionRevision != nil)")
+                try Task.checkCancellation()
+                try await ensureFreeSpace(under: root, staging: staging, label: label)
                 try Task.checkCancellation()
                 var passItemID = itemID
                 while true {
@@ -394,6 +400,65 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
                 }.value
             }
         }
+    }
+
+    /// Stops a download that cannot fit before SteamCMD starts, instead of letting it stall for
+    /// the inactivity limit and blame the connection. It runs on every start (first, resume,
+    /// Try again) after any checkpoint is restored, so a retry only needs the space still
+    /// missing. A preset's base is fetched in a second pass of unknown size, which is not
+    /// checked; concurrent jobs are checked one by one, not summed.
+    private func ensureFreeSpace(under root: URL, staging: URL, label: String) async throws {
+        let installingAssets = isInstallingAssets
+        let expected = expectedBytes
+        guard !isSigningInOnly,
+              Self.requiredFreeBytes(expected: expected, alreadyStaged: 0, installingAssets: installingAssets) != nil
+        else { return }
+        // Where this kind of run keeps what it has fetched: an item under the Workshop tree, the
+        // shared assets in the app's own install directory.
+        let content = staging.appendingPathComponent(installingAssets ? "wallpaper-engine" : "steamapps/workshop", isDirectory: true)
+        let measure = freeSpace
+        let (staged, available) = await Task.detached(priority: .utility) { () -> (Int64, Int64?) in
+            (Self.bytesOnDisk(under: content), measure(root))
+        }.value
+        guard let needed = Self.requiredFreeBytes(expected: expected, alreadyStaged: staged, installingAssets: installingAssets),
+              let available, available < needed else { return }
+        AppLog.warn("SteamCMD \(label): not enough free space (need \(needed), have \(available))")
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        let neededText = formatter.string(fromByteCount: needed)
+        let availableText = formatter.string(fromByteCount: available)
+        throw WorkshopFailure(message: String(localized: "Not enough free disk space: this download needs about \(neededText) and only \(availableText) is available on the disk that holds your library. Free up space, then try again."))
+    }
+
+    /// Free bytes the system would give this app on the volume holding `url`, counting space it
+    /// can reclaim on demand (purgeable caches, local snapshots); nil when it cannot be read.
+    nonisolated static func availableCapacity(at url: URL) -> Int64? {
+        try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+            .volumeAvailableCapacityForImportantUsage
+    }
+
+    /// What a download reads by default; tests pass their own disk instead.
+    nonisolated static let systemFreeSpace: @Sendable (URL) -> Int64? = { availableCapacity(at: $0) }
+
+    /// Room kept beyond the content itself for Steam's manifests and the private runtime.
+    nonisolated static let freeSpaceMargin: Int64 = 64 * 1024 * 1024
+    /// What a Workshop item needs on top of its listed size while Steam stages and assembles it.
+    nonisolated static let freeSpaceHeadroom = 1.15
+    /// Wallpaper Engine's shared assets have no size to read, so a fixed floor stands in. It is
+    /// a lower bound, meant to block only when the disk is clearly short; tune it after one
+    /// measured real installation. What an earlier attempt already staged counts against it.
+    nonisolated static let sceneAssetsFreeBytes: Int64 = 3 * 1024 * 1024 * 1024
+
+    /// The free space a download needs before it starts, or nil when nothing can be said and the
+    /// download is never blocked: a sign-in-only run, or an item whose listing gives no size.
+    /// Bytes an earlier attempt already staged are on the disk and are not needed again, for the
+    /// shared assets as much as for an item.
+    nonisolated static func requiredFreeBytes(expected: Int64?, alreadyStaged: Int64, installingAssets: Bool) -> Int64? {
+        if installingAssets { return max(freeSpaceMargin, sceneAssetsFreeBytes - max(0, alreadyStaged)) }
+        guard let expected, expected > 0 else { return nil }
+        // A listed size beyond a pebibyte is a bad listing, not a disk that needs it.
+        let remaining = max(0, min(expected, 1 << 50) - max(0, alreadyStaged))
+        return Int64((Double(remaining) * freeSpaceHeadroom).rounded(.up)) + freeSpaceMargin
     }
 
     func submitSecret(_ value: String) {
