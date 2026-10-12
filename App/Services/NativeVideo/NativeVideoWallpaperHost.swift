@@ -22,6 +22,9 @@ final class NativeVideoWallpaperHost {
     private let makeSurface: @MainActor (URL, NSRect, RuntimeSurfaceKey, Bool) -> NativeVideoSurface
     private let counters: RuntimeCounters
     private let frameCenter: NotificationCenter
+    /// Where the system announces that the Mac or its displays woke and that
+    /// the session came back. Injected so a wake can be posted by a test.
+    private let workspaceCenter: NotificationCenter
     /// Waits for a duration. Injected so the limits below can be fired by hand
     /// instead of waited out.
     private let sleep: @Sendable (Duration) async throws -> Void
@@ -85,6 +88,16 @@ final class NativeVideoWallpaperHost {
     private var reconcileRequested = false
     private var stopped = false
     private var posterObserver: NSObjectProtocol?
+    /// How long after a wake the playing surfaces are asked to check their
+    /// pipelines. The system may need a moment after the displays come on to
+    /// give the video decoder back, and a check made at once could find it still
+    /// gone and start repairs that its return would have made unnecessary. Not
+    /// tuned on a real wake yet (see manual-smoke.md).
+    static let wakeSettle = Duration.seconds(1)
+    private var wakeObservers: [NSObjectProtocol] = []
+    /// Moves on every wake, so a settle that a newer wake superseded can tell.
+    private var wakeGeneration: UInt64 = 0
+    private var wakeTask: Task<Void, Never>?
 
     var onError: (@MainActor (String) -> Void)?
     var onSurfacesChanged: (@MainActor () -> Void)?
@@ -100,6 +113,7 @@ final class NativeVideoWallpaperHost {
             @MainActor (URL, NSRect, RuntimeSurfaceKey, Bool) -> NativeVideoSurface
         )? = nil,
         frameCenter: NotificationCenter = .default,
+        workspaceCenter: NotificationCenter = NSWorkspace.shared.notificationCenter,
         counters: RuntimeCounters? = nil,
         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
         storage: (@MainActor (URL) async -> NativeVideoStoragePolicy.Location)? = nil
@@ -119,6 +133,7 @@ final class NativeVideoWallpaperHost {
             return window
         }
         self.frameCenter = frameCenter
+        self.workspaceCenter = workspaceCenter
         self.counters = counters ?? .shared
         self.sleep = sleep
         self.storage = storage ?? { url in await NativeVideoStoragePolicy.location(of: url) }
@@ -163,7 +178,51 @@ final class NativeVideoWallpaperHost {
         ) { [weak self] notification in
             MainActor.assumeIsolated { self?.answerPosterRequest(notification) }
         }
+        for (name, reason) in [
+            (NSWorkspace.screensDidWakeNotification, "the displays woke"),
+            (NSWorkspace.didWakeNotification, "the Mac woke"),
+            (NSWorkspace.sessionDidBecomeActiveNotification, "the session became active"),
+        ] {
+            wakeObservers.append(workspaceCenter.addObserver(
+                forName: name, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.systemWoke(reason: reason) }
+            })
+        }
         stopped = false
+    }
+
+    // MARK: Wake
+
+    /// The Mac or its displays woke, or the user's session came back.
+    ///
+    /// Playback that was running before may no longer be: the system may take
+    /// the video decoder away while the displays sleep, and neither a plain
+    /// `play()` nor the presentation policy's resume says whether pictures come
+    /// out again. After a short settle every playing surface is asked to check
+    /// itself; a healthy one pays a brief look and shows no change. The wake
+    /// notifications arrive in a burst (the displays, then the Mac, then the
+    /// session), so a newer one replaces the settle in flight and the surfaces
+    /// are asked once.
+    ///
+    /// Nothing is started while no surface is open, which is every wake on the
+    /// default Compatibility backend: the observers are cheap, a timer for no
+    /// consumer is not. A surface that opens during the settle has just been
+    /// built and has no pipeline to have lost yet.
+    private func systemWoke(reason: String) {
+        guard !stopped, !surfaces.isEmpty else { return }
+        wakeGeneration &+= 1
+        let generation = wakeGeneration
+        wakeTask?.cancel()
+        let sleep = self.sleep
+        wakeTask = Task { @MainActor [weak self] in
+            do { try await sleep(Self.wakeSettle) } catch { return }
+            guard let self, !self.stopped, generation == self.wakeGeneration else { return }
+            self.wakeTask = nil
+            for surface in self.surfaces.values where surface.isPlaying {
+                surface.verifyPlayback(reason: reason)
+            }
+        }
     }
 
     /// Re-reads the committed native wallpapers and diffs them against open
@@ -370,10 +429,10 @@ final class NativeVideoWallpaperHost {
         // actually played. The generation is checked on the way back in, so a
         // failure from a surface that has since been replaced cannot condemn
         // its successor.
-        surface.onPreparationFailure = { [weak self, weak surface] _, detail in
+        surface.onPreparationFailure = { [weak self, weak surface] _, detail, settled in
             guard let surface else { return }
             self?.handlePreparationFailure(
-                displayID: displayID, surface: surface, detail: detail)
+                displayID: displayID, surface: surface, detail: detail, settled: settled)
         }
         surface.onAudioDropped = { [weak self, weak surface] detail in
             guard let self, let surface, self.surfaces[displayID] === surface else { return }
@@ -499,31 +558,60 @@ final class NativeVideoWallpaperHost {
 
     // MARK: Health
 
-    /// Logs and counts what a health check found. Observation only: a stalled
-    /// pipeline is not repaired and the wallpaper is not handed back, because
-    /// nothing yet shows that a stall after a pause is real on the machines that
-    /// run this. The counter is what answers that.
+    /// Logs and counts what a health check found at one look.
+    ///
+    /// The surface repairs its own pipeline (a kick, one rebuild, then a
+    /// preparation failure that `handlePreparationFailure` turns into the
+    /// hand-off), so this only reports. A stall is counted once per check, at
+    /// the first look: the looks that follow a repair are the same stall seen
+    /// again, and the kick and rebuild counters say how far it went.
     private func record(
         health event: NativeVideoHealthEvent, displayID: UInt32, surface: NativeVideoSurface
     ) {
         let wallpaperID = descriptors[displayID]?.wallpaperId ?? "?"
         let load = logLoads[displayID]
+        let subject = "native video wallpaper \(wallpaperID)"
+        let next: String
+        switch event.next {
+        case .done: next = ""
+        case .recheck: next = "; looking again"
+        case .kick: next = "; kicking it with a seek and play"
+        case .rebuild: next = "; rebuilding its pipeline"
+        case .giveUp: next = "; giving up on it"
+        }
+        let after: String
+        switch event.stage {
+        case .initial: after = event.trigger
+        case .afterKick: after = "a kick (\(event.trigger))"
+        case .afterRebuild: after = "a rebuild (\(event.trigger))"
+        }
         switch event.verdict {
         case .advancing:
-            AppLog.debug(
-                "native video wallpaper \(wallpaperID): playback advancing after \(event.trigger)",
-                load: load)
+            let line = "\(subject): playback advancing after \(after)"
+            // A repair that worked is worth a line of its own; a healthy
+            // pipeline is not.
+            if event.stage == .initial {
+                AppLog.debug(line, load: load)
+            } else {
+                AppLog.info(line, load: load)
+            }
         case let .waiting(detail):
-            AppLog.debug(
-                "native video wallpaper \(wallpaperID): playback not judged after "
-                    + "\(event.trigger): \(detail)", load: load)
+            let line = "\(subject): playback not judged after \(after): \(detail)\(next)"
+            if event.next == .recheck || event.next == .done {
+                AppLog.debug(line, load: load)
+            } else {
+                // The player went on waiting long enough to be treated as stuck.
+                AppLog.warn(line, load: load)
+            }
         case let .stalled(detail):
-            counters.record(
-                .nativeVideoPlaybackStalled,
-                for: RuntimeSurfaceKey(kind: .desktopNativeVideo, displayID: displayID))
+            if event.stage == .initial {
+                counters.record(
+                    .nativeVideoPlaybackStalled,
+                    for: RuntimeSurfaceKey(kind: .desktopNativeVideo, displayID: displayID))
+            }
             AppLog.warn(
-                "native video wallpaper \(wallpaperID): playback did not advance after "
-                    + "\(event.trigger): \(detail) (\(surface.stateSummary))", load: load)
+                "\(subject): playback did not advance after \(after): \(detail) "
+                    + "(\(surface.stateSummary))\(next)", load: load)
         }
     }
 
@@ -548,7 +636,11 @@ final class NativeVideoWallpaperHost {
     /// `settled` says whether the failure is a verdict on the file. A decoder
     /// that could not open the track is, and is remembered so the next offer of
     /// the same key goes straight back to the scene engine. A clip that merely
-    /// never showed a frame in time is not, and a later offer opens it afresh.
+    /// never showed a frame in time, or whose pipeline stalled and was not
+    /// revived by the repairs (the system can take the decoder back while the
+    /// Mac sleeps), is not: this host does not remember it, so if the bridge
+    /// offers the key again the clip is opened afresh. The bridge holds the
+    /// hand-off for the session either way (see `handOff`).
     private func handlePreparationFailure(
         displayID: UInt32, surface: NativeVideoSurface, detail: String, settled: Bool = true
     ) {
@@ -811,6 +903,10 @@ final class NativeVideoWallpaperHost {
             frameCenter.removeObserver(posterObserver)
             self.posterObserver = nil
         }
+        for observer in wakeObservers { workspaceCenter.removeObserver(observer) }
+        wakeObservers.removeAll()
+        wakeTask?.cancel()
+        wakeTask = nil
         for (displayID, surface) in surfaces {
             close(displayID: displayID, surface: surface)
         }

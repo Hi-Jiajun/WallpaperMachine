@@ -9,6 +9,16 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-11 — macOS 27 per-Space poster writes: absolute paths and late acknowledgement
+
+- Diagnosis (read-only, M5 Pro, macOS 27.0.1): DesktopPictureSetDisplayForSpace forwards to WallpaperServices, whose result HIServices discards; every poster write logged 'Failed to set legacy configuration: … no such file' because the sandboxed WallpaperAgent resolves the root-relative path inside its container.
+- Live, with the user's permission, on one inactive Space: an absolute home-path poster was accepted with no WallpaperServices error, changed only that Space's two store nodes, and read back after ~0.3 s (not immediately); the original was restored and the probe image deleted.
+- The WallpaperServices BOOL is returned before the agent applies the write (failures are logged later off-thread), so it is not used as acknowledgement.
+- Store evidence: writes to a display's visible Space are copied into SystemDefault and Displays/<uuid>; the on-disk Index.plist can lag the agent's memory until a scheduled store write.
+- Unit: python3 scripts/test.py --only DesktopWallpaperTests (51 passed), including late-acknowledgement, never-acknowledged pause, absolute-path configuration and the poster-pruning race the new test exposed.
+- Gate: python3 scripts/test.py — 1339 passed, 0 failed, 14 skipped.
+- Not checked: a full app session on macOS 27 with the rebuilt app, Mission Control thumbnails, or macOS 15/26 (root-relative path path unchanged there).
+
 ## 2026-10-11 — Aligned layers turn about their anchor
 
 SceneRuntimeContext rotated a non-centre layer about its centre and slid its anchor offset along the scene's axes. Every gate below ran in a detached worktree at HEAD plus this change only, because another session's uncommitted audio edits in the shared tree stop audio_tests from compiling (SmoothAudioResponseBinsForTesting undeclared).

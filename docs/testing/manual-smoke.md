@@ -309,6 +309,32 @@ earlier wallpaper (select it again in System Settings once).
 macOS refuses screenshots while locked, so the final lock-screen appearance and
 smoothness cannot be captured and have to be judged by eye.
 
+## Native video backend (experimental, opt-in)
+
+Set **Video playback** to **Native video preferred** and apply a plain video that
+**In use now** lists as `native`. Whether the system really takes a playing clip's decoder
+away during sleep or a lock, and whether a kick or a rebuild brings it back, is not
+something any headless test can show; these rows are how it is learned. Read the
+diagnostics log after each one, and record a diagnostic session's counters
+(`nativeVideoPlaybackStalled`, `nativeVideoPlaybackKick`, `nativeVideoPlaybackRebuild`).
+
+- [ ] Sleep the displays only, wait a few minutes and wake them: the picture is moving
+      within a few seconds. The log shows `playback advancing after the displays woke`, or
+      the stalled line followed by the kick and rebuild lines.
+- [ ] Sleep the Mac, wake it: the same.
+- [ ] Lock the screen, wait, unlock (and switch to another user and back): the picture is
+      moving after the unlock.
+- [ ] Cover the desktop with a full-screen app for several minutes, or turn on Low Power
+      Mode, then uncover it: the picture is moving, with the check logged after the
+      resume.
+- [ ] Pause the wallpaper, sleep and wake: it stays paused, and no check, kick or rebuild
+      is logged for it.
+- [ ] With two displays, sleep and wake: both pictures move, and each display's check is
+      logged under its own wallpaper.
+- [ ] Whenever a stall is logged, note whether the kick was enough, whether a rebuild was
+      needed and whether the clip ended on Compatibility (the reason is in **In use now**).
+      A stall that ends there is the case to report.
+
 ## Audio responsiveness
 
 - [ ] Use an authored audio-reactive scene, leave Audio response enabled, and

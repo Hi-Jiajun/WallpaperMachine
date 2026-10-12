@@ -367,9 +367,9 @@ final class NativeVideoPlayerMediaTests: XCTestCase {
         try bytes.prefix(bytes.count / 3).write(to: broken)
 
         let player = NativeVideoPlayer(surface: surface, counters: counters, paused: false)
-        var reported: (generation: UInt64, detail: String)?
-        player.onPreparationFailure = { generation, detail in
-            reported = (generation, detail)
+        var reported: (generation: UInt64, detail: String, settled: Bool)?
+        player.onPreparationFailure = { generation, detail, settled in
+            reported = (generation, detail, settled)
         }
         let view = NSView(frame: NSRect(x: 0, y: 0, width: 64, height: 36))
         view.wantsLayer = true
@@ -381,6 +381,7 @@ final class NativeVideoPlayerMediaTests: XCTestCase {
 
         XCTAssertTrue(failed, "a truncated asset must reach the failure callback")
         XCTAssertEqual(reported?.generation, surface.generation)
+        XCTAssertEqual(reported?.settled, true, "a clip that cannot be decoded is a fact about the file")
         print("[media] playback failure -> \(reported?.detail ?? "none")")
     }
 
@@ -403,7 +404,7 @@ final class NativeVideoPlayerMediaTests: XCTestCase {
         try? await Task.sleep(for: .milliseconds(500))
 
         var reported: String?
-        player.onPreparationFailure = { _, detail in reported = detail }
+        player.onPreparationFailure = { _, detail, _ in reported = detail }
         let delivered = await wait(upTo: .seconds(10)) { reported != nil }
 
         XCTAssertTrue(delivered, "a failure seen before the callback existed must be held")
@@ -422,7 +423,7 @@ final class NativeVideoPlayerMediaTests: XCTestCase {
         let player = NativeVideoPlayer(surface: surface, counters: counters, paused: false)
         var failure: String?
         var dropped: String?
-        player.onPreparationFailure = { _, detail in failure = detail }
+        player.onPreparationFailure = { _, detail, _ in failure = detail }
         player.onAudioDropped = { dropped = $0 }
         player.setAudioOutputDeviceForTest("org.wallpapermachine.tests.missing-output")
         let view = NSView(frame: NSRect(x: 0, y: 0, width: 64, height: 36))
@@ -608,7 +609,7 @@ final class NativeVideoPlayerMediaTests: XCTestCase {
 
         let player = NativeVideoPlayer(surface: surface, counters: counters, paused: false)
         var failures: [String] = []
-        player.onPreparationFailure = { _, detail in failures.append(detail) }
+        player.onPreparationFailure = { _, detail, _ in failures.append(detail) }
         player.setAudioOutputDeviceForTest("org.wallpapermachine.tests.missing-output")
         let view = NSView(frame: NSRect(x: 0, y: 0, width: 64, height: 36))
         view.wantsLayer = true
@@ -652,7 +653,7 @@ final class NativeVideoPlayerMediaTests: XCTestCase {
         let url = try Hev1Fixture.write(name: "hev1", into: directory)
         let player = makePlayer(url: url)
         var failures: [String] = []
-        player.onPreparationFailure = { _, detail in failures.append(detail) }
+        player.onPreparationFailure = { _, detail, _ in failures.append(detail) }
         let itemReady = await wait { player.itemStatusForTest == .readyToPlay }
         guard itemReady, failures.isEmpty else {
             throw XCTSkip("this OS rejects an hev1 item outright (\(failures)); nothing to restart")
@@ -759,7 +760,7 @@ final class NativeVideoPlayerMediaTests: XCTestCase {
         try bytes.prefix(bytes.count / 3).write(to: broken)
         let player = NativeVideoPlayer(surface: surface, counters: counters, paused: false)
         var reported = false
-        player.onPreparationFailure = { _, _ in reported = true }
+        player.onPreparationFailure = { _, _, _ in reported = true }
         let view = NSView(frame: NSRect(x: 0, y: 0, width: 64, height: 36))
         view.wantsLayer = true
         player.attach(to: view)
@@ -887,7 +888,7 @@ final class NativeVideoPlayerMediaTests: XCTestCase {
         let url = try Hev1Fixture.write(name: "health-stall", into: directory)
         let player = makePlayer(url: url)
         var failures: [String] = []
-        player.onPreparationFailure = { _, detail in failures.append(detail) }
+        player.onPreparationFailure = { _, detail, _ in failures.append(detail) }
         let ready = await wait { player.itemStatusForTest == .readyToPlay }
         guard ready, failures.isEmpty else {
             throw XCTSkip("this OS rejects an hev1 item outright (\(failures))")
@@ -981,5 +982,192 @@ final class NativeVideoPlayerMediaTests: XCTestCase {
         XCTAssertNil(player.liveSample())
         XCTAssertFalse(player.livenessOutputIsAttachedForTest, "stopping releases the output")
         XCTAssertFalse(player.isEligibleForCheck)
+    }
+
+    // MARK: Repair
+
+    /// Short windows keep a real-time run to a couple of seconds. They are the
+    /// policy's numbers, not waits in the test.
+    private let quickChecks = NativeVideoHealthSupervisor.Policy(
+        minimumPause: .seconds(5), settle: .milliseconds(50), window: .milliseconds(400),
+        step: .milliseconds(50), rebuildWindow: .milliseconds(600))
+
+    /// A player on an `hev1` clip that is told it showed a picture once: the
+    /// pipeline a decoder reclaimed after a sleep leaves behind, which reports
+    /// that it plays and produces nothing. Skips where this OS does not
+    /// produce that.
+    private func makeDeadPipeline(
+        name: String, sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    ) async throws -> NativeVideoPlayer {
+        let url = try Hev1Fixture.write(name: name, into: directory)
+        let player = makeCheckedPlayer(url: url, health: quickChecks, now: { .now }, sleep: sleep)
+        let ready = await wait { player.itemStatusForTest == .readyToPlay }
+        try XCTSkipUnless(ready, "this OS does not get an hev1 item as far as ready")
+        let shown = await wait(upTo: .seconds(2)) { player.layerIsReadyForDisplayForTest }
+        try XCTSkipIf(shown, "this OS decodes hev1, so the clip is no longer frame-less")
+        player.markPictureShownForTest()
+        XCTAssertTrue(player.isEligibleForCheck)
+        return player
+    }
+
+    private func count(_ counter: RuntimeCounter) -> UInt64 {
+        counters.snapshot().value(counter, for: surface)
+    }
+
+    func testAFrameLessPipelineIsKickedRebuiltThenReported() async throws {
+        let player = try await makeDeadPipeline(name: "ladder-dead")
+        var failures: [String] = []
+        var settled: [Bool] = []
+        var events: [NativeVideoHealthEvent] = []
+        player.onPreparationFailure = { _, detail, isSettled in
+            failures.append(detail)
+            settled.append(isSettled)
+        }
+        player.onHealthEvent = { events.append($0) }
+
+        player.verifyPlayback(reason: "the displays woke")
+        let reported = await wait(upTo: .seconds(30)) { !failures.isEmpty }
+
+        XCTAssertTrue(reported, "the ladder never ended: \(events.map(\.stage))")
+        XCTAssertEqual(failures.count, 1, "the host hears of it once")
+        XCTAssertEqual(settled, [false], "a stall the repairs could not clear is no verdict on the file")
+        XCTAssertTrue(failures.first?.contains("the displays woke") == true, "the report names the trigger: \(failures)")
+        XCTAssertEqual(events.map(\.stage), [.initial, .afterKick, .afterRebuild])
+        XCTAssertTrue(events.allSatisfy { if case .stalled = $0.verdict { return true } else { return false } })
+        XCTAssertEqual(count(.nativeVideoPlaybackKick), 1)
+        XCTAssertEqual(count(.nativeVideoPlaybackRebuild), 1)
+        let items = itemCounts()
+        XCTAssertEqual(items.created, 2, "the rebuild made one new item")
+        XCTAssertEqual(items.created, items.released + 1, "and released the one it replaced")
+        XCTAssertFalse(player.livenessOutputIsAttachedForTest, "the check leaves nothing attached")
+        print("[media] hev1 ladder: \(failures.first ?? "")")
+    }
+
+    func testAFrameLessPipelineWithNoRebuildLeftIsReportedAfterTheKick() async throws {
+        // The allowance is shared with the first-frame restart: two rebuilds in
+        // ten minutes for the surface, whoever asked for them.
+        let player = try await makeDeadPipeline(name: "ladder-budget")
+        var failures: [String] = []
+        var settled: [Bool] = []
+        var events: [NativeVideoHealthEvent] = []
+        player.onPreparationFailure = { _, detail, isSettled in
+            failures.append(detail)
+            settled.append(isSettled)
+        }
+        player.onHealthEvent = { events.append($0) }
+        for round in 1...2 {
+            XCTAssertTrue(player.restartPlayback(reason: "spend \(round)"))
+            let rebuilt = await wait { itemCounts().created == UInt64(round + 1) }
+            XCTAssertTrue(rebuilt, "restart \(round) never built its item")
+        }
+        XCTAssertFalse(player.canRebuildPlayback())
+
+        player.verifyPlayback(reason: "the session became active")
+        let reported = await wait(upTo: .seconds(30)) { !failures.isEmpty }
+
+        XCTAssertTrue(reported, "the ladder never ended")
+        XCTAssertEqual(events.map(\.stage), [.initial, .afterKick])
+        XCTAssertEqual(settled, [false])
+        XCTAssertEqual(count(.nativeVideoPlaybackKick), 1)
+        XCTAssertEqual(count(.nativeVideoPlaybackRebuild), 0, "a rebuild the budget refuses is not made")
+        XCTAssertEqual(itemCounts().created, 3, "and nothing was rebuilt behind its back")
+    }
+
+    func testARestartFromElsewhereEndsTheCheckInFlight() async throws {
+        // The host's first-frame restart and the health check both rebuild. When
+        // the host's lands first, the check is about an item that is going away
+        // and must not go on to kick or rebuild the new one.
+        let sleeper = ManualSleeper()
+        let player = try await makeDeadPipeline(name: "ladder-restart", sleep: sleeper.closure)
+        var failures: [String] = []
+        var events: [NativeVideoHealthEvent] = []
+        player.onPreparationFailure = { _, detail, _ in failures.append(detail) }
+        player.onHealthEvent = { events.append($0) }
+
+        player.verifyPlayback(reason: "the displays woke")
+        await sleeper.waitUntilPending()  // the settle
+        for _ in 0..<quickChecks.sampleLimit {
+            sleeper.fireNext()
+            await sleeper.waitUntilPending()
+        }
+        XCTAssertEqual(count(.nativeVideoPlaybackKick), 1, "the check found the stall and kicked")
+        let cancelled = sleeper.cancelledCount
+
+        XCTAssertTrue(player.restartPlayback(reason: "the first-frame wait ran out"))
+        XCTAssertEqual(sleeper.cancelledCount, cancelled + 1, "the check's timer is cancelled at once")
+        let rebuilt = await wait { itemCounts().created == 2 }
+        XCTAssertTrue(rebuilt)
+        for _ in 0..<100 { await Task.yield() }
+
+        XCTAssertEqual(events.count, 1, "the check says nothing more")
+        XCTAssertEqual(count(.nativeVideoPlaybackRebuild), 0, "and the check rebuilt nothing")
+        XCTAssertTrue(failures.isEmpty)
+        XCTAssertEqual(sleeper.pendingCount, 0)
+        XCTAssertFalse(player.livenessOutputIsAttachedForTest)
+    }
+
+    func testAHealthyPlayerIsNeitherKickedNorRebuiltByAWake() async throws {
+        let url = try await makeClip(name: "ladder-healthy")
+        let player = makeCheckedPlayer(url: url, health: quickChecks, now: { .now })
+        var events: [NativeVideoHealthEvent] = []
+        player.onHealthEvent = { events.append($0) }
+        let shown = await wait { player.isEligibleForCheck }
+        XCTAssertTrue(shown, "the clip never showed a frame")
+
+        player.verifyPlayback(reason: "the displays woke")
+        let reported = await wait(upTo: .seconds(10)) { !events.isEmpty }
+
+        XCTAssertTrue(reported, "no check followed the wake")
+        XCTAssertEqual(
+            events, [NativeVideoHealthEvent(trigger: "the displays woke", verdict: .advancing)])
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertEqual(count(.nativeVideoPlaybackKick), 0)
+        XCTAssertEqual(count(.nativeVideoPlaybackRebuild), 0)
+        let items = itemCounts()
+        XCTAssertEqual(items.created, 1, "the item was never replaced")
+        XCTAssertEqual(items.released, 0)
+        XCTAssertTrue(player.isPlaying)
+        XCTAssertFalse(player.livenessOutputIsAttachedForTest)
+    }
+
+    func testAWakeDoesNotCheckAClipThatIsPausedOrHidden() async throws {
+        let url = try await makeClip(name: "ladder-paused")
+        let sleeper = ManualSleeper()
+        let player = makeCheckedPlayer(url: url, health: quickChecks, now: { .now }, sleep: sleeper.closure)
+        let shown = await wait { player.isEligibleForCheck }
+        XCTAssertTrue(shown, "the clip never showed a frame")
+
+        player.setUserPaused(true)
+        player.verifyPlayback(reason: "the displays woke")
+        player.setUserPaused(false)
+        player.setPresentationSuspended(true)
+        player.verifyPlayback(reason: "the Mac woke")
+        for _ in 0..<50 { await Task.yield() }
+
+        XCTAssertTrue(sleeper.requested.isEmpty, "nothing that is not playing is looked at")
+        XCTAssertFalse(player.isPlaying)
+    }
+
+    func testAKickKeepsAHealthyClipPlayingAndNeverStartsAPausedOne() async throws {
+        let url = try await makeClip(name: "kick-healthy")
+        let player = makePlayer(url: url)
+        let shown = await wait { player.layerIsReadyForDisplayForTest }
+        XCTAssertTrue(shown, "the clip never showed a frame")
+
+        player.kickPlayback()
+        XCTAssertEqual(count(.nativeVideoPlaybackKick), 1)
+        let anchor = player.playbackTimeForTest.seconds
+        let moved = await wait {
+            // A loop wraps the position back, which is also movement.
+            abs(player.playbackTimeForTest.seconds - anchor) > 0.2
+        }
+        XCTAssertTrue(moved, "the clip stopped after the kick")
+        XCTAssertTrue(player.isPlaying)
+        XCTAssertEqual(itemCounts().created, 1, "a kick does not replace the item")
+
+        player.setUserPaused(true)
+        player.kickPlayback()
+        XCTAssertEqual(count(.nativeVideoPlaybackKick), 1, "a pause the user chose is not kicked out of")
+        XCTAssertFalse(player.isPlaying)
     }
 }

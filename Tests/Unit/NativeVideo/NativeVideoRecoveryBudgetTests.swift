@@ -105,6 +105,31 @@ final class NativeVideoRecoveryBudgetTests: XCTestCase {
         XCTAssertTrue(budget.permit(at: at(95)))
     }
 
+    func testAskingWhetherARebuildIsOpenSpendsNothingAndAgreesWithPermit() {
+        var budget = NativeVideoRecoveryBudget()
+        for _ in 0..<5 { XCTAssertTrue(budget.wouldPermit(at: at(0))) }
+        XCTAssertEqual(budget.spent, 0, "asking is not rebuilding")
+
+        XCTAssertTrue(budget.permit(at: at(1)))
+        XCTAssertTrue(budget.permit(at: at(2)))
+        XCTAssertFalse(budget.wouldPermit(at: at(3)))
+        XCTAssertFalse(budget.permit(at: at(3)), "the same answer when it is asked for in earnest")
+        XCTAssertEqual(budget.spent, 2)
+        XCTAssertTrue(budget.wouldPermit(at: at(601)), "the first has left the window")
+        XCTAssertEqual(budget.spent, 2, "and finding that out forgets nothing yet")
+    }
+
+    func testAskingSeesAStableRunsForgivenessWithoutApplyingIt() {
+        var budget = NativeVideoRecoveryBudget()
+        XCTAssertTrue(budget.permit(at: at(0)))
+        XCTAssertTrue(budget.permit(at: at(5)))
+        budget.healthy(at: at(10))
+
+        XCTAssertTrue(budget.wouldPermit(at: at(70)))
+        XCTAssertEqual(budget.spent, 2)
+        XCTAssertFalse(budget.wouldPermit(at: at(69)), "a run of 59 seconds forgives nothing")
+    }
+
     func testResetRestoresTheFullAllowance() {
         var budget = NativeVideoRecoveryBudget()
         XCTAssertTrue(budget.permit(at: at(0)))

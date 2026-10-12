@@ -58,6 +58,14 @@ struct NativeVideoRecoveryBudget: Equatable {
         return true
     }
 
+    /// Whether `permit(at:)` would say yes at `moment`, without charging
+    /// anything. For a caller that has a cheaper repair to try first and wants
+    /// to know whether the expensive one is still open to it.
+    func wouldPermit(at moment: ContinuousClock.Instant) -> Bool {
+        var trial = self
+        return trial.permit(at: moment)
+    }
+
     /// Records that the pipeline delivered a frame at `moment`. The first call
     /// after a rebuild starts the stable run; later ones leave its start alone,
     /// so a long healthy stretch is measured from when it began.

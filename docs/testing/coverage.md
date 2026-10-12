@@ -615,7 +615,7 @@ need an authorized runtime check
   with every replaced item released; a healthy clip restarts and plays again, its
   stable run earning the allowance back through the injected clock; and a restart
   never starts a paused clip and is refused after a stop or a reported failure.
-- The liveness check after a long pause. `NativeVideoLivenessTests` — the pure rule: a
+- The liveness check and its repair after a long pause or a wake. `NativeVideoLivenessTests` — the pure rule: a
   new picture plus a clock that moved by about a frame is advancing, in any order across
   samples; a clock that runs with no picture (what an `hev1` pipeline looks like) is
   stalled, and so are pictures with a frozen clock and neither; less than a frame of
@@ -628,18 +628,45 @@ need an authorized runtime check
   bounds the samples (20 for the default policy); waiting and sample-less windows are
   reported as such; a surface that cannot be judged is not even waited for, and one that
   stops being judgeable during the settle or mid-run is dropped without a report; a cancel
-  releases what sampling attached at once; a newer trigger replaces the one in flight and
-  starts over from its own settle. The host suite checks that a stalled report is counted
-  as `nativeVideoPlaybackStalled` and leaves the surface open, playing, unrejected and
-  unrestarted, that healthy and waiting reports are not counted, and that a report from a
-  replaced surface is ignored. `NativeVideoPlayerMediaTests` (opt-in) add the real player:
-  a healthy clip resumed after a long pause is reported advancing and not rebuilt, with
-  nothing left attached; only a pause of at least 5 seconds (user or hidden display) starts
-  a check and pausing again cancels it; an `hev1` clip (skipped when an OS decodes it)
-  is never checked because it never showed a picture, and sampled by hand its clock moves
-  while no picture is produced, which is the stall a time-only check would miss; sampling
-  follows the loop to its next copy; a paused clip stops reporting pictures; and a stopped
-  player has nothing to sample.
+  releases what sampling attached at once; a newer trigger replaces a check that is only
+  looking and starts over from its own settle. `NativeVideoHealthLadderTests` — the order of
+  repairs as a pure rule: a kick first, a rebuild only if the kick did not help, then the
+  give-up with what was seen and tried; a rebuild the budget refuses is given up at once
+  after the kick; a player that only waits is looked at twice more before it counts as
+  stuck, and that patience is not renewed by a repair. The supervisor suite then runs the
+  ladder against a scripted target: a dead pipeline gets exactly one kick, one rebuild and
+  one report, in that order, with a settle before each look and the longer window after the
+  rebuild; a kick or a rebuild that brings pictures back ends the check and tells the
+  target; a refused or unstartable rebuild is reported instead of tried; a pause or cancel
+  mid-ladder stops every further repair; and a trigger that arrives once repairing has
+  begun is absorbed rather than kicking twice, while one that arrives after the ladder ended
+  starts its own. `NativeVideoRecoveryBudgetTests` also pin that asking whether a rebuild
+  is open charges nothing and agrees with the real request. The host suite checks that a
+  stalled report is counted as `nativeVideoPlaybackStalled` once per check, at its first
+  look, and that the host does nothing about a report itself, that healthy and waiting
+  reports are not counted, and that a report from a replaced surface is ignored. A hand-off
+  after the ladder gave up (an unsettled failure) is not remembered by the host as a
+  verdict, so the same key opens natively when it is offered again, while a settled
+  decoder failure still is (the bridge's hold on the hand-off is outside this suite). A wake
+  (displays, Mac or session, each of the three) asks only the surfaces that are playing to
+  verify, after a settle and not before; a burst of notifications is one request; a
+  surface that stopped playing during the settle is not asked; a host with no surface open
+  starts no settle; and a shut-down host ignores wakes and cancels the settle in flight. `NativeVideoPlayerMediaTests` (opt-in) add the
+  real player: a healthy clip resumed after a long pause, or woken, is reported advancing,
+  never kicked or rebuilt, with its item untouched and nothing left attached; only a
+  pause of at least 5 seconds (user or hidden display) starts a resume check and pausing
+  again cancels it; a paused or hidden clip is not checked by a wake; an `hev1` clip
+  (skipped when an OS decodes it) is never checked because it never showed a picture, and
+  sampled by hand its clock moves while no picture is produced, which is the stall a
+  time-only check would miss. Marked as having shown a picture once, the same clip is the
+  dead pipeline a reclaimed decoder leaves: it is kicked, rebuilt and reported exactly
+  once and as unsettled, the counters show one kick and one rebuild, every replaced item
+  is released and the check survives its own rebuild; with the allowance spent by earlier
+  restarts it is kicked and reported without a rebuild; and a rebuild requested elsewhere
+  ends the check
+  at once, so it reports nothing more and rebuilds nothing. A kick leaves a healthy clip
+  playing and does not start a paused one. Sampling follows the loop to its next copy; a
+  paused clip stops reporting pictures; and a stopped player has nothing to sample.
 - A pass overtaken while it waited, in the host suite with a metadata read held open by
   a gate while the next snapshot arrives: a wallpaper that was replaced, dropped from
   the native list or given another admission key by then is never built (the host
@@ -696,10 +723,14 @@ sleeping external disk, an unreachable share, an evicted cloud file) with the re
 the hand-off and the reason they produce in **In use now**: the limits and rules are
 covered, and the frame-less clip by the opt-in `hev1` test, but no test blocks a real
 `AVAsset` load or starts a clip from a volume that is slow to answer. Also not covered:
-whether a real long suspension (a covered desktop for hours, display sleep, Low Power Mode)
-ever costs a clip its decoder on this Mac. The check is covered, and so is the dead
-pipeline it must recognise, but nothing here reclaims a decoder, so the premise it exists
-to measure is only answered by the `nativeVideoPlaybackStalled` counter on a real machine.
+whether a real long suspension, sleep, lock or covered desktop (hours, display sleep, Low
+Power Mode) ever costs a clip its decoder on this Mac, and whether a kick or a rebuild
+brings one back. The check and the ladder are covered, and so is the dead pipeline they
+must recognise (`hev1`, which a kick and a rebuild cannot repair, so it always ends in the
+hand-off), but nothing here reclaims a decoder and no test shows a repair that works on
+a stuck pipeline. Those premises are answered by the `nativeVideoPlaybackStalled`,
+`nativeVideoPlaybackKick` and `nativeVideoPlaybackRebuild` counters on a real machine, and
+by the sleep, lock and unlock rows in [manual-smoke](manual-smoke.md#native-video-backend-experimental-opt-in).
 
 ## Panel
 

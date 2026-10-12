@@ -108,13 +108,14 @@ final class NativeVideoPlayer {
     /// Reported when the clip keeps playing without its audio, with the
     /// failure that caused it, so the host can log it against its load.
     var onAudioDropped: (@MainActor (String) -> Void)?
-    /// What a health check concluded. Reported, never acted on here.
+    /// What each look of a health check concluded, and what the check does
+    /// next. Reported for the host's log; the repair itself is the player's.
     var onHealthEvent: (@MainActor (NativeVideoHealthEvent) -> Void)?
     /// A failure seen before anyone was listening. The host installs its
     /// callback after constructing the surface, and a synchronous failure at
     /// load would otherwise be dropped on the floor — which is the one case
     /// where the display ends up black with no hand-off.
-    private var pendingFailure: String?
+    private var pendingFailure: (detail: String, settled: Bool)?
     var isReadyForDisplay: Bool { !stopped && layer.isReadyForDisplay }
     var onReadyForDisplay: (@MainActor () -> Void)? {
         didSet { if isReadyForDisplay { onReadyForDisplay?() } }
@@ -122,12 +123,13 @@ final class NativeVideoPlayer {
 
     /// Reported when the platform player cannot prepare or play the asset,
     /// with this surface's generation so a late failure cannot be attributed
-    /// to whatever replaced it.
-    var onPreparationFailure: (@MainActor (UInt64, String) -> Void)? {
+    /// to whatever replaced it. The last argument is whether the failure is a
+    /// verdict on the file; see `NativeVideoSurface.onPreparationFailure`.
+    var onPreparationFailure: (@MainActor (UInt64, String, Bool) -> Void)? {
         didSet {
             guard let pendingFailure, onPreparationFailure != nil else { return }
             self.pendingFailure = nil
-            onPreparationFailure?(surface.generation, pendingFailure)
+            onPreparationFailure?(surface.generation, pendingFailure.detail, pendingFailure.settled)
         }
     }
 
@@ -262,7 +264,7 @@ final class NativeVideoPlayer {
 
     /// Takes the looper and its queued copies down, leaving the player and
     /// its layer in place for whatever is loaded next.
-    private func releaseItem() {
+    private func releaseItem(cancellingCheck: Bool = true) {
         guard let looper else { return }
         // Removing the queue makes the item fail on its way out; that is this
         // teardown, not a fault worth reacting to.
@@ -270,8 +272,9 @@ final class NativeVideoPlayer {
         currentItemObservation = nil
         sizeObservation = nil
         observedItem = nil
-        // A check in flight describes the item that is going away.
-        supervisor.cancel()
+        // A check in flight describes the item that is going away, unless it is
+        // the check that is replacing it.
+        if cancellingCheck { supervisor.cancel() }
         detachLivenessOutput()
         detachPosterOutput()
         // The looper holds the queue; disabling it first stops it re-filling
@@ -428,8 +431,17 @@ final class NativeVideoPlayer {
     /// to the item, so they carry over untouched. A clip already playing
     /// without its audio is rebuilt without it.
     func restartPlayback(reason: String) -> Bool {
+        startRebuild(reason: reason, keepingCheck: false)
+    }
+
+    /// `keepingCheck` is for the health check's own rebuild: it goes on to look
+    /// at the new item, so the item going away must not end it. Any other
+    /// rebuild ends a check at once, since what the check would conclude is
+    /// about an item that is about to be replaced.
+    private func startRebuild(reason: String, keepingCheck: Bool) -> Bool {
         guard !stopped, !failureReported, let mediaURL, rebuild == nil else { return false }
         guard recovery.permit(at: now()) else { return false }
+        if !keepingCheck { supervisor.cancel() }
         AppLog.debug(
             "native video: restarting playback (\(reason)); rebuild \(recovery.spent) of "
                 + "\(recovery.policy.maximum); \(stateSummary)")
@@ -447,10 +459,19 @@ final class NativeVideoPlayer {
                 self.reportPreparationFailure("the clip could not be reopened for a restart")
                 return
             }
-            self.releaseItem()
+            self.releaseItem(cancellingCheck: !keepingCheck)
             self.start(item)
         }
         return true
+    }
+
+    /// Asks for a health check of the pipeline, for a reason the host knows
+    /// and the player does not (the Mac or its displays woke, the session came
+    /// back). A surface that is paused, hidden or has never shown a picture is
+    /// not checked, and a check already repairing absorbs the request.
+    func verifyPlayback(reason: String) {
+        guard !stopped else { return }
+        supervisor.schedule(trigger: reason)
     }
 
     /// Where the pipeline stands, in one line, for the log. Read when a clip
@@ -500,17 +521,19 @@ final class NativeVideoPlayer {
 
     /// Reported once. Both observations can fire for one underlying fault, and
     /// a second report would be a second hand-off for a wallpaper the host has
-    /// already given away.
-    private func reportPreparationFailure(_ detail: String) {
+    /// already given away. `settled` is true for a failure that is a fact about
+    /// the file (it could not be opened or decoded) and false for one that is
+    /// not (the pipeline stopped delivering and the repairs did not revive it).
+    private func reportPreparationFailure(_ detail: String, settled: Bool = true) {
         guard !stopped, !failureReported else { return }
         failureReported = true
         guard onPreparationFailure != nil else {
             // Nobody is listening yet. Held rather than dropped; installing
             // the callback delivers it.
-            pendingFailure = detail
+            pendingFailure = (detail, settled)
             return
         }
-        onPreparationFailure?(surface.generation, detail)
+        onPreparationFailure?(surface.generation, detail, settled)
     }
 
     /// The user's scaling choice for this display. Applied to the layer
@@ -746,8 +769,11 @@ final class NativeVideoPlayer {
 // MARK: Health checks
 
 extension NativeVideoPlayer: NativeVideoHealthTarget {
+    /// A rebuild in flight does not make the surface ineligible: the check's
+    /// own rebuild is followed by a look at the new item, and `liveSample`
+    /// has nothing to show until it exists.
     var isEligibleForCheck: Bool {
-        !stopped && !userPaused && !presentationSuspended && hasShownFrame && rebuild == nil
+        !stopped && !userPaused && !presentationSuspended && hasShownFrame
     }
 
     /// One look at the pipeline: where the clock is, and whether the playing
@@ -758,7 +784,7 @@ extension NativeVideoPlayer: NativeVideoHealthTarget {
     /// reports each frame once and has to be read to consume it; leaving one
     /// unread would answer yes for ever after the first.
     func liveSample() -> NativeVideoLivenessEvaluator.Sample? {
-        guard !stopped, let item = player.currentItem else { return nil }
+        guard !stopped, rebuild == nil, let item = player.currentItem else { return nil }
         let output = attachLivenessOutput(to: item)
         let time = item.currentTime()
         var produced = false
@@ -777,6 +803,50 @@ extension NativeVideoPlayer: NativeVideoHealthTarget {
     func reportHealth(_ event: NativeVideoHealthEvent) {
         guard !stopped else { return }
         onHealthEvent?(event)
+    }
+
+    func canRebuildPlayback() -> Bool {
+        !stopped && !failureReported && mediaURL != nil && rebuild == nil
+            && recovery.wouldPermit(at: now())
+    }
+
+    /// The cheap repair. A zero-tolerance seek to where the clip already is
+    /// makes the player re-request the picture at that time, which a stuck
+    /// output needs and a healthy one does not notice; `play()` then covers a
+    /// player the system left paused. Never starts a clip the user paused or a
+    /// display that is hidden.
+    func kickPlayback() {
+        guard !stopped, !userPaused, !presentationSuspended, rebuild == nil,
+            player.currentItem != nil
+        else { return }
+        counters.record(.nativeVideoPlaybackKick, for: surface)
+        let time = player.currentTime()
+        if time.isNumeric {
+            player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+        }
+        player.play()
+    }
+
+    func rebuildPlayback(reason: String) -> Bool {
+        guard startRebuild(reason: reason, keepingCheck: true) else { return false }
+        counters.record(.nativeVideoPlaybackRebuild, for: surface)
+        return true
+    }
+
+    func playbackProvedHealthy() {
+        guard !stopped else { return }
+        recovery.healthy(at: now())
+    }
+
+    /// The repairs ran out. Reported as unsettled: a pipeline that stalled after
+    /// a wake or a resume says nothing about whether the file can play, so the
+    /// host does not remember the hand-off as a verdict and tries the clip
+    /// afresh if the bridge offers it again.
+    func giveUpOnPlayback(trigger: String, detail: String) {
+        reportPreparationFailure(
+            "playback stalled after \(trigger): \(detail); recovery budget "
+                + "\(recovery.spent) of \(recovery.policy.maximum) rebuilds spent",
+            settled: false)
     }
 
     /// Re-attached whenever the loop replaces the playing item: an output left
@@ -800,4 +870,8 @@ extension NativeVideoPlayer: NativeVideoHealthTarget {
     }
 
     var livenessOutputIsAttachedForTest: Bool { livenessOutput != nil }
+    /// Stands in for a picture shown earlier, so a pipeline that is dead from
+    /// the start can be put through the checks that only apply to one that
+    /// died after it worked.
+    func markPictureShownForTest() { hasShownFrame = true }
 }

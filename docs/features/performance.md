@@ -533,26 +533,65 @@ counts every deadline that passed without a frame as `nativeVideoFirstFrameTimeo
 a single count with no refusal means the rebuild brought the picture, and on the
 internal drive any count means the pipeline stalled.
 
-A clip that has shown a picture is checked once more after a long pause. The system can
-reclaim the decoder while nothing is playing (a covered desktop for hours, display sleep,
-Low Power Mode), and a clip resumed after that can report that it is playing, with its
-clock running, while no picture comes out. When a clip is resumed after at least 5 seconds
-paused (by the user's Pause or because its display was hidden), native playback waits half
-a second and then, for up to 2 seconds, looks every tenth of a second at the playing item.
-It needs both signs of life in that time: a new picture handed over by a video output
-attached to the item for the check, and a clock that moved by about a frame. The clock
-alone is not enough, because a pipeline that decodes nothing keeps its clock running. A
-clip whose player said throughout that it was waiting for data is not judged, so a slow disk
-is not mistaken for a dead decoder. A clip that never showed a picture is left to the
-first-frame wait above, and pausing again, hiding the display or switching the clip
-cancels a check in flight. A second resume replaces a check that has not finished, so one
-long suspension is judged once. This is observation only for now: a stalled result is
-written to the diagnostics log with the pipeline's state (`playback did not advance after
-resumed after 2 h`) and counted as `nativeVideoPlaybackStalled`, and the wallpaper stays on
-native video, neither rebuilt nor handed to Compatibility. A clip that shows fewer than one
-picture in two seconds can be reported as stalled while it plays. The cost of the check's
-video output on a 4K clip has not been measured; it exists only while the check samples,
-normally a fraction of a second after the settle, and reads the clip's own pixel format.
+A clip that has shown a picture is checked, and repaired if need be, after anything that
+can cost it its decoder. The system may reclaim the decoder while nothing is playing (a
+covered desktop for hours, display sleep, Low Power Mode, a locked session), and a clip
+that carries on afterwards can report that it is playing, with its clock running, while no
+picture comes out. A check starts when a clip is resumed after at least 5 seconds paused
+(by the user's Pause or because its display was hidden), and when the displays wake, the
+Mac wakes or the session becomes active again (an unlock, or a switch back to this user).
+A wake waits one second first, so the system can hand the decoder back, and the
+notifications that arrive in a burst make one check, taken after the last of them. Only
+clips that are playing are asked: a clip the user paused stays paused, and a hidden
+display is not looked at. With no native clip open, which is every Mac on the default
+Compatibility backend, a wake starts no wait at all.
+
+A check waits half a second and then, for up to 2 seconds, looks every tenth of a second
+at the playing item. It needs both signs of life in that time: a new picture handed over by
+a video output attached to the item for the check, and a clock that moved by about a frame.
+The clock alone is not enough, because a pipeline that decodes nothing keeps its clock
+running. A healthy clip is proven within a couple of samples, so its cost is one short-lived
+video output and no visible change. When no picture comes out, the check works up a ladder
+of repairs, looking again after each:
+
+1. The clip is kicked: a seek to where it already is, with no tolerance, and `play()`. It
+   restarts an output that is stuck, costs nothing visible when it works, and never starts
+   a clip the user paused. The look after it settles for half a second and lasts 2 seconds.
+2. If pictures are still missing, the clip's item and looper are rebuilt from the file. The
+   layer stays blank until the new item shows its first picture, which is why this comes
+   second. It spends the surface's recovery allowance, the same one the first-frame wait
+   uses (two rebuilds per ten minutes, given back after a minute of uninterrupted
+   pictures), and its look lasts 5 seconds, since the new item has to load first.
+3. If pictures are still missing, or no allowance is left for a rebuild, the wallpaper goes
+   to Compatibility like any other player failure, and **In use now** says that playback
+   stalled after the trigger (`the displays woke`), what was seen, what was tried and how
+   much of the allowance was spent. The bridge keeps the refusal for the session, so the
+   clip stays on Compatibility until its file or its target frame rate changes or **Video
+   playback** is switched to Compatibility and back. The native host does not remember the
+   hand-off as a verdict on the file, unlike a decoder failure: a decoder the system took
+   back during a long sleep says nothing about the clip, so when the bridge does offer the
+   same wallpaper again it opens natively once more.
+
+A clip whose player said throughout that it was waiting for data is looked at again, twice
+at most, before it is treated as stuck, so a disk that is still spinning up is not nudged;
+one that keeps waiting for six seconds is kicked like a stalled one. A clip that never
+showed a picture is left to the first-frame wait above. Pausing again, hiding the display
+or switching the clip ends a check in flight, and a rebuild started by the first-frame wait
+ends it too. A trigger that arrives while a check is still only looking replaces it; one
+that arrives once the check has started repairing is absorbed, so nothing is kicked or
+rebuilt twice for one suspension.
+
+A diagnostic recording counts the first look that finds no picture as
+`nativeVideoPlaybackStalled`, and the repairs as `nativeVideoPlaybackKick` and
+`nativeVideoPlaybackRebuild`: a kick for every stall means the cheap repair is enough, and
+a rebuild for most of them means it is not. Each look and each repair is also a line in the
+diagnostics log under the wallpaper's load (`playback did not advance after the displays
+woke: the clock advances but no frame is produced`). A clip that shows fewer than one
+picture in two seconds can be reported as stalled, and kicked, while it plays. Whether a
+kick or a rebuild really brings back a decoder the system reclaimed has not been seen on a
+real Mac, and neither has the cost of the check's video output on a 4K clip; the output
+exists only while the check samples, normally a fraction of a second after the settle, and
+reads the clip's own pixel format.
 
 Switching wallpapers quickly does not put the ones in between on the desktop. Reading
 a clip's metadata can take a moment, and the next switch may be committed meanwhile.

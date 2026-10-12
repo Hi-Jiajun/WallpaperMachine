@@ -90,11 +90,11 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         /// Delivered synchronously the moment a callback is installed, which
         /// is what the real player does when it was already holding a failure.
         var failureOnInstall: String?
-        var onPreparationFailure: (@MainActor (UInt64, String) -> Void)? {
+        var onPreparationFailure: (@MainActor (UInt64, String, Bool) -> Void)? {
             didSet {
                 guard let failureOnInstall, onPreparationFailure != nil else { return }
                 self.failureOnInstall = nil
-                onPreparationFailure?(generation, failureOnInstall)
+                onPreparationFailure?(generation, failureOnInstall, true)
             }
         }
         var onAudioDropped: (@MainActor (String) -> Void)?
@@ -109,9 +109,10 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
             self.generation = generation
         }
 
-        /// Stands in for `AVPlayerItem.status` becoming `.failed`.
-        func failPreparation(_ detail: String, generation: UInt64? = nil) {
-            onPreparationFailure?(generation ?? self.generation, detail)
+        /// Stands in for `AVPlayerItem.status` becoming `.failed`, or, with
+        /// `settled: false`, for the health ladder giving up on a stalled pipeline.
+        func failPreparation(_ detail: String, generation: UInt64? = nil, settled: Bool = true) {
+            onPreparationFailure?(generation ?? self.generation, detail, settled)
         }
 
         /// Every volume the surface was given, in order: the first is the one
@@ -136,6 +137,9 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
             restartReasons.append(reason)
             return restartResult
         }
+        /// Every health check the host asked this surface for, with its reason.
+        private(set) var verifyReasons: [String] = []
+        func verifyPlayback(reason: String) { verifyReasons.append(reason) }
         func setUserPaused(_ paused: Bool) { userPaused = paused }
         func setPresentationSuspended(_ suspended: Bool) { self.suspended = suspended }
         var isPlaying: Bool { !isStopped && !userPaused && !suspended }
@@ -180,6 +184,9 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         refusalSequence: [NativeVideoRefusal?] = [],
         recorder: Recorder,
         frameCenter: NotificationCenter = NotificationCenter(),
+        /// Where wake notifications are posted. Never the system's, so a real
+        /// wake during a test run reaches no host.
+        workspaceCenter: NotificationCenter = NotificationCenter(),
         /// Where the stub says each file lives. Defaults to the internal
         /// drive so a test never asks the real file system about a path.
         storage: @escaping @MainActor (URL) -> NativeVideoStoragePolicy.Location = { _ in
@@ -232,6 +239,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
                 return surface
             },
             frameCenter: frameCenter,
+            workspaceCenter: workspaceCenter,
             counters: counters,
             sleep: limits,
             storage: { url in
@@ -1365,6 +1373,30 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         XCTAssertEqual(recorder.admissionProbes.count, 1, "the file itself was not re-read")
     }
 
+    func testAStalledPipelineTheRepairsGaveUpOnIsNotRememberedAsAVerdict() async throws {
+        // The health ladder gives up on a pipeline that stopped delivering, for
+        // instance after a long sleep took the decoder away. That is a fact about
+        // the moment, not the file: the wallpaper goes to the scene engine now and
+        // is offered to this backend again once the bridge offers the key again.
+        let recorder = Recorder()
+        let host = makeHost(wallpapers: [], recorder: recorder)
+        defer { host.shutdown() }
+        await host.apply([wallpaper(admissionKey: 5)])
+        let passes = PassCounter()
+        host.onSurfacesChanged = { passes.record() }
+        surfacesMade[7]?.failPreparation("playback stalled after the Mac woke", settled: false)
+        await passes.wait(for: 1)
+        XCTAssertEqual(recorder.rejected.count, 1)
+        XCTAssertTrue(host.isEmpty)
+
+        await host.apply([wallpaper(admissionKey: 5)])
+
+        XCTAssertEqual(host.activeDisplayIDs, [7], "the same key plays natively again")
+        XCTAssertEqual(recorder.presented, 2)
+        XCTAssertEqual(recorder.rejected.count, 1, "and is not handed over a second time")
+        XCTAssertEqual(recorder.admissionProbes.count, 1, "the file itself was not re-read")
+    }
+
     func testADecoderFailureIsStillRememberedAsAVerdict() async throws {
         // The contrast: a decoder that could not open the track is a statement
         // about the file, so the same key goes straight back to the scene engine.
@@ -1474,9 +1506,10 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         return surface
     }
 
-    func testAStalledReportIsCountedButNothingIsDoneAboutIt() async throws {
-        // Observation first: the premise that a long pause costs the decoder
-        // has to show up in the counter before anything repairs it.
+    func testAStalledReportIsCountedAndTheHostItselfDoesNothingAboutIt() async throws {
+        // The surface repairs its own pipeline and reports its own failure.
+        // The host only records what it is told, so a report can never rebuild
+        // or hand over a wallpaper behind the surface's back.
         let recorder = Recorder()
         let host = makeHost(wallpapers: [], recorder: recorder)
         defer { host.shutdown() }
@@ -1499,6 +1532,30 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         XCTAssertTrue(surface.restartReasons.isEmpty, "nor rebuilt")
         XCTAssertEqual(host.isPlaying(displayID: 7), true)
         XCTAssertEqual(states, statesBefore, "the wallpaper's startup state is untouched")
+    }
+
+    func testOnlyTheFirstLookOfACheckCountsAsAStall() async throws {
+        // One stall is a kick, a rebuild and a give-up, each followed by a look
+        // that finds the same thing. The counter answers how often a long
+        // pause costs the decoder, so it counts the stall, not the looks.
+        let recorder = Recorder()
+        let host = makeHost(wallpapers: [], recorder: recorder)
+        defer { host.shutdown() }
+        counters.startSession(duration: .seconds(60))
+        let surface = try await openAShowingSurface(host)
+        let detail = "the clock advances but no frame is produced"
+
+        surface.onHealthEvent?(NativeVideoHealthEvent(
+            trigger: "the displays woke", verdict: .stalled(detail), stage: .initial, next: .kick))
+        surface.onHealthEvent?(NativeVideoHealthEvent(
+            trigger: "the displays woke", verdict: .stalled(detail), stage: .afterKick, next: .rebuild))
+        surface.onHealthEvent?(NativeVideoHealthEvent(
+            trigger: "the displays woke", verdict: .stalled(detail), stage: .afterRebuild,
+            next: .giveUp(detail)))
+
+        XCTAssertEqual(counters.snapshot().value(.nativeVideoPlaybackStalled, for: displaySevenKey), 1)
+        XCTAssertEqual(host.activeDisplayIDs, [7], "the hand-off is the surface's own report, not this one")
+        XCTAssertTrue(recorder.rejected.isEmpty)
     }
 
     func testAHealthyOrUnjudgedReportIsNotCountedAsAStall() async throws {
@@ -1534,6 +1591,165 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
 
         current.onHealthEvent?(stalled)
         XCTAssertEqual(counters.snapshot().value(.nativeVideoPlaybackStalled, for: displaySevenKey), 1)
+    }
+
+    // MARK: Wake
+
+    private let wakeNotifications = [
+        NSWorkspace.screensDidWakeNotification,
+        NSWorkspace.didWakeNotification,
+        NSWorkspace.sessionDidBecomeActiveNotification,
+    ]
+
+    /// Opens a clip on each of `displays` and gives every surface the picture a
+    /// health check needs to have seen, which also ends its first-frame wait.
+    /// What is left pending on the sleeper afterwards is whatever the test
+    /// starts next.
+    private func openShowingSurfaces(
+        _ host: NativeVideoWallpaperHost, displays: [UInt32], paused: Set<UInt32> = []
+    ) async throws -> [UInt32: FakeSurface] {
+        let frame = NSRect(x: 0, y: 0, width: 80, height: 60)
+        screenFrames = displays.map { ($0, frame) }
+        await host.apply(displays.map {
+            wallpaper(
+                displayID: $0, id: "wake-\($0)", paused: paused.contains($0),
+                admissionKey: UInt64($0))
+        })
+        var opened: [UInt32: FakeSurface] = [:]
+        for display in displays {
+            let surface = try XCTUnwrap(surfacesMade[display])
+            surface.isReadyForDisplay = true
+            surface.onReadyForDisplay?()
+            opened[display] = surface
+        }
+        await settle(until: { self.sleeper.pendingCount == 0 })
+        return opened
+    }
+
+    func testAWakeAsksOnlyThePlayingSurfacesToCheckTheirPipelines() async throws {
+        let workspace = NotificationCenter()
+        let host = makeHost(
+            wallpapers: [], recorder: Recorder(), workspaceCenter: workspace, manualLimits: true)
+        host.start()
+        defer { host.shutdown() }
+        let surfaces = try await openShowingSurfaces(host, displays: [7, 8, 9], paused: [8])
+        host.setPresentationSuspended(true, forDisplay: 9)
+        XCTAssertEqual(host.isPlaying(displayID: 7), true)
+        XCTAssertEqual(host.isPlaying(displayID: 8), false, "the user paused this one")
+        XCTAssertEqual(host.isPlaying(displayID: 9), false, "and this one is hidden")
+
+        workspace.post(name: NSWorkspace.screensDidWakeNotification, object: nil)
+        await sleeper.waitUntilPending()
+        XCTAssertTrue(
+            surfaces.values.allSatisfy { $0.verifyReasons.isEmpty },
+            "the system gets a moment to hand the decoder back first")
+        sleeper.fireNext()
+        await settle(until: { !(surfaces[7]?.verifyReasons.isEmpty ?? true) })
+
+        XCTAssertEqual(surfaces[7]?.verifyReasons.count, 1)
+        XCTAssertEqual(surfaces[8]?.verifyReasons.count, 0, "a pause the user chose is not undone by a wake")
+        XCTAssertEqual(surfaces[9]?.verifyReasons.count, 0, "nor is a hidden display looked at")
+    }
+
+    func testEveryWayTheSystemComesBackAsksForACheck() async throws {
+        for name in wakeNotifications {
+            let workspace = NotificationCenter()
+            let host = makeHost(
+                wallpapers: [], recorder: Recorder(), workspaceCenter: workspace,
+                manualLimits: true)
+            host.start()
+            let surfaces = try await openShowingSurfaces(host, displays: [7])
+
+            workspace.post(name: name, object: nil)
+            await sleeper.waitUntilPending()
+            sleeper.fireNext()
+            await settle(until: { !(surfaces[7]?.verifyReasons.isEmpty ?? true) })
+
+            XCTAssertEqual(surfaces[7]?.verifyReasons.count, 1, "\(name.rawValue)")
+            host.shutdown()
+        }
+    }
+
+    func testASecondWakeSupersedesTheFirst() async throws {
+        // The system announces a wake in a burst: the displays, the Mac, then
+        // the session. One check for the burst, taken after the last of them.
+        let workspace = NotificationCenter()
+        let host = makeHost(
+            wallpapers: [], recorder: Recorder(), workspaceCenter: workspace, manualLimits: true)
+        host.start()
+        defer { host.shutdown() }
+        let surfaces = try await openShowingSurfaces(host, displays: [7])
+
+        let cancelledBefore = sleeper.cancelledCount
+        for name in wakeNotifications { workspace.post(name: name, object: nil) }
+        await sleeper.waitUntilPending()
+        XCTAssertEqual(sleeper.pendingCount, 1, "one settle is running, not three")
+        XCTAssertEqual(sleeper.cancelledCount - cancelledBefore, 2, "the earlier ones were cancelled")
+        sleeper.fireNext()
+        await settle(until: { !(surfaces[7]?.verifyReasons.isEmpty ?? true) })
+        for _ in 0..<50 { await Task.yield() }
+
+        XCTAssertEqual(surfaces[7]?.verifyReasons.count, 1)
+    }
+
+    func testASurfaceThatStoppedPlayingDuringTheSettleIsNotAsked() async throws {
+        let workspace = NotificationCenter()
+        let host = makeHost(
+            wallpapers: [], recorder: Recorder(), workspaceCenter: workspace, manualLimits: true)
+        host.start()
+        defer { host.shutdown() }
+        let surfaces = try await openShowingSurfaces(host, displays: [7, 8])
+
+        workspace.post(name: NSWorkspace.didWakeNotification, object: nil)
+        await sleeper.waitUntilPending()
+        host.setPresentationSuspended(true, forDisplay: 7)  // the display went back to sleep
+        sleeper.fireNext()
+        await settle(until: { !(surfaces[8]?.verifyReasons.isEmpty ?? true) })
+
+        XCTAssertEqual(surfaces[8]?.verifyReasons.count, 1)
+        XCTAssertEqual(surfaces[7]?.verifyReasons.count, 0, "who is playing is decided when the settle ends")
+    }
+
+    func testAWakeWithNoSurfaceOpenStartsNoTimer() async throws {
+        // The default backend never opens a surface; a wake must cost it nothing.
+        let workspace = NotificationCenter()
+        let host = makeHost(
+            wallpapers: [], recorder: Recorder(), workspaceCenter: workspace, manualLimits: true)
+        host.start()
+        defer { host.shutdown() }
+
+        for name in wakeNotifications { workspace.post(name: name, object: nil) }
+        for _ in 0..<50 { await Task.yield() }
+
+        XCTAssertTrue(sleeper.requested.isEmpty, "no settle runs for a host with nothing to check")
+
+        // Once a surface plays, the same wake does start its settle.
+        let surfaces = try await openShowingSurfaces(host, displays: [7])
+        workspace.post(name: NSWorkspace.didWakeNotification, object: nil)
+        await sleeper.waitUntilPending()
+        sleeper.fireNext()
+        await settle(until: { !(surfaces[7]?.verifyReasons.isEmpty ?? true) })
+        XCTAssertEqual(surfaces[7]?.verifyReasons.count, 1)
+    }
+
+    func testAClosedHostIgnoresWakes() async throws {
+        let workspace = NotificationCenter()
+        let host = makeHost(
+            wallpapers: [], recorder: Recorder(), workspaceCenter: workspace, manualLimits: true)
+        host.start()
+        let surfaces = try await openShowingSurfaces(host, displays: [7])
+        let cancelledBefore = sleeper.cancelledCount
+        workspace.post(name: NSWorkspace.screensDidWakeNotification, object: nil)
+        await sleeper.waitUntilPending()
+
+        host.shutdown()
+        XCTAssertEqual(sleeper.cancelledCount - cancelledBefore, 1, "the settle in flight is cancelled")
+        let timers = sleeper.requested.count
+        workspace.post(name: NSWorkspace.screensDidWakeNotification, object: nil)
+        for _ in 0..<50 { await Task.yield() }
+
+        XCTAssertEqual(sleeper.requested.count, timers, "and no wake starts another")
+        XCTAssertTrue(surfaces[7]?.verifyReasons.isEmpty == true)
     }
 
     func testAKeyRefusedThenSupersededThenOfferedAgainIsReportedAgain() async {

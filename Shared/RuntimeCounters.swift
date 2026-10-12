@@ -81,12 +81,21 @@ enum RuntimeCounter: String, CaseIterable, Sendable {
     /// the normal path for an upright clip is visible instead of being
     /// inferred from CPU use.
     case nativeVideoPosterFallback
-    /// A clip that had shown a picture was checked after a long pause and its
-    /// pipeline delivered none, although the player reported it was playing.
-    /// Observation only: nothing acts on it yet. A steady zero over many
-    /// long suspensions means the decoder survives them; a count says it does
-    /// not, and how often.
+    /// A clip that had shown a picture was checked after a long pause or a
+    /// wake and its pipeline delivered none, although the player reported it
+    /// was playing. Counted once per check, at the first look, before anything
+    /// is repaired. A steady zero over many long suspensions means the decoder
+    /// survives them; a count says it does not, and how often.
     case nativeVideoPlaybackStalled
+    /// The first repair of a stalled pipeline: a zero-tolerance seek to where
+    /// it is, then play. Compare with `nativeVideoPlaybackStalled`: a kick for
+    /// every stall means the cheap repair is enough.
+    case nativeVideoPlaybackKick
+    /// The second repair, after the kick did not bring pictures: the player's
+    /// item and looper were rebuilt from the file. Spends the surface's
+    /// recovery allowance, like a first-frame restart does, but is counted
+    /// apart from it.
+    case nativeVideoPlaybackRebuild
 }
 
 /// Time-limited, aggregated runtime counters. Off by default: recording happens
