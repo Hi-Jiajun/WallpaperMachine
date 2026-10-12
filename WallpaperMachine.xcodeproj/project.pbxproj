@@ -79,6 +79,7 @@
 		26D379E659639596D6C4FED0 /* DirectoryWatcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE4D876B0194DBDF0824EDF7 /* DirectoryWatcherTests.swift */; };
 		2782215FD4C80F7A34033ABB /* WallpaperMachineUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB8D61A1E95FAC6CE7E1A262 /* WallpaperMachineUITests.swift */; };
 		296D171829F322F7E899B9C3 /* WorkshopStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70F99B245FF1D2D710BF22EB /* WorkshopStoreTests.swift */; };
+		2AA7BD5E6624D26D01DFCDFD /* NativeVideoPosterOrientationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3DFD092A26BC641D7EE33F0 /* NativeVideoPosterOrientationTests.swift */; };
 		2AD4B0317BC7A99CFBEDCF78 /* NativeVideoPlayerMediaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85CF926E535B5A0D390F8F3D /* NativeVideoPlayerMediaTests.swift */; };
 		2BBEEB18CDA5302152321AD4 /* RuntimeDiagnosticsSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4477EF46F5A657D0CD755EA7 /* RuntimeDiagnosticsSession.swift */; };
 		2BC63D5AEDAA4106D76193A7 /* LockScreenExtensionProcessesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5512489A9E0DA9B91D250833 /* LockScreenExtensionProcessesTests.swift */; };
@@ -827,6 +828,7 @@
 		A1D7CE75AE94C453481C2E26 /* shuffle.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = shuffle.m; sourceTree = "<group>"; };
 		A2DC6784059A09026D9D72A7 /* WallpaperAutomationScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperAutomationScheduler.swift; sourceTree = "<group>"; };
 		A38523CF5D61D51EEF466B7F /* WorkshopTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkshopTests.swift; sourceTree = "<group>"; };
+		A3DFD092A26BC641D7EE33F0 /* NativeVideoPosterOrientationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVideoPosterOrientationTests.swift; sourceTree = "<group>"; };
 		A5014D3F63ED47CED8D97217 /* helpers.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = helpers.h; sourceTree = "<group>"; };
 		A5B4D19D68B14C50A1E1F810 /* StillImagePageUpgradeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StillImagePageUpgradeTests.swift; sourceTree = "<group>"; };
 		A6C4FD886E22C6BDD66A3CC4 /* AppAutomation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAutomation.swift; sourceTree = "<group>"; };
@@ -1177,6 +1179,7 @@
 				81E8900808C3FBFCA975A433 /* NativeVideoAdmissionTests.swift */,
 				3AA6B2B21F8AAEE83C660623 /* NativeVideoPlaybackFailureTests.swift */,
 				85CF926E535B5A0D390F8F3D /* NativeVideoPlayerMediaTests.swift */,
+				A3DFD092A26BC641D7EE33F0 /* NativeVideoPosterOrientationTests.swift */,
 				0F6F119A4374E1141B0C63D2 /* NativeVideoWallpaperHostTests.swift */,
 				EC75867843E7AD620D17B481 /* SyntheticVideoFixture.swift */,
 				B034A3927E65C890496F757E /* SyntheticVideoFixtureTests.swift */,
@@ -2334,6 +2337,7 @@
 				890C8397296FA4EFB17CEBD2 /* NativeVideoAdmissionTests.swift in Sources */,
 				5BC904B626BEB96BFDBD870E /* NativeVideoPlaybackFailureTests.swift in Sources */,
 				2AD4B0317BC7A99CFBEDCF78 /* NativeVideoPlayerMediaTests.swift in Sources */,
+				2AA7BD5E6624D26D01DFCDFD /* NativeVideoPosterOrientationTests.swift in Sources */,
 				CA2A11017E93881CFB4D119E /* NativeVideoWallpaperHostTests.swift in Sources */,
 				AAC9BD764B39DFEB037B5F36 /* NextWallpaperTests.swift in Sources */,
 				FCAEA57769AB2C255EA1E71E /* OtherAudioMonitorTests.swift in Sources */,

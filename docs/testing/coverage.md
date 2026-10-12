@@ -573,12 +573,23 @@ need an authorized runtime check
   posters from replaced surfaces not published. `NativeVideoPlaybackFailureTests` — the
   reported failure keeps the codes under the localized message and a clip with
   sound is rebuilt with its picture alone.
+- `NativeVideoPosterOrientationTests` — which clips cannot take a poster from
+  the playing item: the display matrix of real generated clips (rotated by 0, 90,
+  180 and 270 degrees, one mirrored, and a movie with no picture) is read back,
+  and every one but the upright clip selects the one-shot image generator.
+  Metadata only; no player is created.
 - `SyntheticVideoFixtureTests` cover the generated-clip writer's input-ready
-  waiting. `NativeVideoPlayerMediaTests` drive the real player and are opt-in
+  waiting; the writer can store a clip rotated by a display matrix.
+  `NativeVideoPlayerMediaTests` drive the real player and are opt-in
   (`WALLPAPER_MACHINE_MEDIA_TESTS=1`, see
-  [README.md](README.md#opt-in-layers)).
+  [README.md](README.md#opt-in-layers)). Among them, the poster of a
+  portrait-rotated clip has the picture's orientation and size and matches an
+  upright reference frame, a paused rotated clip still answers without resuming,
+  and an upright clip keeps reading the playing frame (`nativeVideoPosterFallback`
+  stays 0).
 
-Not covered: first frames presented on a real display.
+Not covered: first frames presented on a real display, and the Mission Control
+or other-Space poster of a rotated clip as macOS shows it.
 
 ## Panel
 

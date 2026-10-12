@@ -27,6 +27,13 @@ enum SyntheticVideoFixture {
         /// Adds an audio track of silence covering the whole clip, for the
         /// cases that are about a clip with sound.
         var withAudio = false
+        /// Clockwise quarter-turn multiples written as the track's display
+        /// matrix, the way a phone records a portrait clip: the stored frames
+        /// stay `width` x `height` and only the matrix says how to show them.
+        var rotationDegrees = 0
+        /// Writes the display matrix flipped left to right, the way a mirrored
+        /// front-camera recording can carry it.
+        var mirrored = false
 
         /// Constant frame rate expressed exactly: `numerator / denominator`
         /// fps. 24 is 24/1, NTSC 30 is 30000/1001.
@@ -110,6 +117,12 @@ enum SyntheticVideoFixture {
         ]
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
         input.expectsMediaDataInRealTime = false
+        var matrix = CGAffineTransform.identity
+        if request.rotationDegrees != 0 {
+            matrix = CGAffineTransform(rotationAngle: CGFloat(request.rotationDegrees) * .pi / 180)
+        }
+        if request.mirrored { matrix = matrix.scaledBy(x: -1, y: 1) }
+        if !matrix.isIdentity { input.transform = matrix }
         // Without this the writer picks its own media timescale — 600 in
         // practice — and 1001/24000 s per frame cannot be represented in it,
         // so an NTSC fixture silently becomes a whole-number one. Pinning the

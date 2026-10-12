@@ -60,10 +60,14 @@ enum RuntimeCounter: String, CaseIterable, Sendable {
     /// The native backend refused a wallpaper and handed it to the scene
     /// engine.
     case nativeVideoRefused
-    /// A poster request could not be answered from the item that is playing
-    /// and fell back to a one-shot image generator, which is a second decode.
-    /// Counted so a fallback that became the normal path is visible instead
-    /// of being inferred from CPU use.
+    /// A poster request was answered by a one-shot image generator instead of
+    /// the item that is playing, which is a second decode of a few frames.
+    /// Either the playing item produced no frame in time, or the clip is
+    /// rotated or mirrored and the generator is the only path that returns it
+    /// upright: for such a clip every poster counts here by design, so a
+    /// steady count on one is not a fault. Counted so a fallback that became
+    /// the normal path for an upright clip is visible instead of being
+    /// inferred from CPU use.
     case nativeVideoPosterFallback
 }
 

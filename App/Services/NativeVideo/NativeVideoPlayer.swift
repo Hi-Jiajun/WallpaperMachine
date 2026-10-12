@@ -57,6 +57,14 @@ final class NativeVideoPlayer {
     /// video-only item is about the picture and goes to the host.
     private var audioDropped = false
     private var rebuild: Task<Void, Never>?
+    /// The clip's display matrix, read once at load. `nil` until the read
+    /// finishes; a clip whose matrix cannot be read is treated as upright.
+    ///
+    /// The picture the layer shows has this matrix applied, but the frames a
+    /// video output hands back do not, so it decides which poster path can be
+    /// trusted for an upright result.
+    private var displayTransform: CGAffineTransform?
+    private var orientationTask: Task<Void, Never>?
     /// Reported when the clip keeps playing without its audio, with the
     /// failure that caused it, so the host can log it against its load.
     var onAudioDropped: (@MainActor (String) -> Void)?
@@ -106,7 +114,50 @@ final class NativeVideoPlayer {
 
     func load(url: URL) {
         mediaURL = url
-        start(AVPlayerItem(url: url))
+        let item = AVPlayerItem(url: url)
+        readDisplayTransform(of: item.asset)
+        start(item)
+    }
+
+    /// Reads the display matrix from the asset the player itself is loading,
+    /// so the file is not opened a second time for it.
+    private func readDisplayTransform(of asset: AVAsset) {
+        orientationTask?.cancel()
+        orientationTask = Task { @MainActor [weak self] in
+            let transform: CGAffineTransform
+            do {
+                transform = try await Self.loadDisplayTransform(of: asset)
+            } catch {
+                AppLog.debug(
+                    "native video: could not read the clip's orientation "
+                        + "(\(Self.describe(error))); treating it as upright")
+                transform = .identity
+            }
+            guard let self, !self.stopped, !Task.isCancelled else { return }
+            self.displayTransform = transform
+        }
+    }
+
+    /// The display matrix of the clip's first video track, or the identity for
+    /// a clip with no video track.
+    nonisolated static func loadDisplayTransform(of asset: AVAsset) async throws
+        -> CGAffineTransform
+    {
+        guard let video = try await asset.loadTracks(withMediaType: .video).first else {
+            return .identity
+        }
+        return try await video.load(.preferredTransform)
+    }
+
+    /// Whether a frame read back from a video output differs in orientation
+    /// from the picture the layer shows.
+    ///
+    /// Any rotation or flip does: `AVPlayerItem.presentationSize` and the layer
+    /// follow the matrix, while the output's buffers stay in the file's own
+    /// orientation. Such a clip is read with `AVAssetImageGenerator`, which
+    /// applies the matrix itself.
+    nonisolated static func needsUprightGenerator(_ transform: CGAffineTransform) -> Bool {
+        !transform.isIdentity
     }
 
     private func start(_ item: AVPlayerItem) {
@@ -351,6 +402,15 @@ final class NativeVideoPlayer {
 
     private func producePoster() async -> CGImage? {
         defer { detachPosterOutput() }
+        // A header read that normally finished long ago; awaited so the first
+        // request can never pick the path before the orientation is known.
+        await orientationTask?.value
+        if Self.needsUprightGenerator(displayTransform ?? .identity) {
+            // The playing item's frames would come back un-rotated. Skip the
+            // video output altogether rather than read frames to discard them.
+            guard !stopped, let item = player.currentItem else { return lastPoster }
+            return await generatorPoster(for: item) ?? lastPoster
+        }
         for step in 0..<Self.posterWaitSteps {
             guard !stopped, let item = player.currentItem else { return lastPoster }
             // Re-resolved every step: crossing a loop boundary replaces
@@ -371,24 +431,34 @@ final class NativeVideoPlayer {
             }
         }
         guard !stopped else { return nil }
-        // One-shot fallback, created and released inside this request. It is
-        // a second decode of a few frames, which is why it is counted: a
-        // permanently retained generator would be a second decoder for the
-        // whole session.
-        if let item = player.currentItem, let mediaURL {
-            let generator = AVAssetImageGenerator(asset: AVURLAsset(url: mediaURL))
-            generator.appliesPreferredTrackTransform = true
-            generator.requestedTimeToleranceBefore = .positiveInfinity
-            generator.requestedTimeToleranceAfter = .positiveInfinity
-            counters.record(.nativeVideoPosterFallback, for: surface)
-            if let image = try? await generator.image(at: item.currentTime()).image {
-                lastPoster = image
-                return image
-            }
+        if let item = player.currentItem, let image = await generatorPoster(for: item) {
+            return image
         }
         // Still nothing: the last frame this player produced is a truthful
         // answer, and nil is a truthful "none yet". Neither resumes playback.
         return lastPoster
+    }
+
+    /// One upright frame from a one-shot image generator, created and
+    /// released inside this request.
+    ///
+    /// It is a second decode of a few frames, which is why it is counted: a
+    /// permanently retained generator would be a second decoder for the whole
+    /// session. A rotated or mirrored clip takes this path for every poster,
+    /// an upright one only when the playing item produced no frame in time.
+    /// Playback is never resumed to make the picture.
+    private func generatorPoster(for item: AVPlayerItem) async -> CGImage? {
+        guard let mediaURL else { return nil }
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: mediaURL))
+        generator.appliesPreferredTrackTransform = true
+        generator.requestedTimeToleranceBefore = .positiveInfinity
+        generator.requestedTimeToleranceAfter = .positiveInfinity
+        counters.record(.nativeVideoPosterFallback, for: surface)
+        guard let image = try? await generator.image(at: item.currentTime()).image,
+            !stopped
+        else { return nil }
+        lastPoster = image
+        return image
     }
 
     private func attachPosterOutput(to item: AVPlayerItem) -> AVPlayerItemVideoOutput {
@@ -431,6 +501,8 @@ final class NativeVideoPlayer {
         posterRequest = nil
         rebuild?.cancel()
         rebuild = nil
+        orientationTask?.cancel()
+        orientationTask = nil
         detachPosterOutput()
         lastPoster = nil
         pendingFailure = nil

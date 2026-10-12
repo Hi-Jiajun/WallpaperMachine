@@ -76,6 +76,49 @@ final class NativeVideoPlayerMediaTests: XCTestCase {
         return player
     }
 
+    private func makeRotatedClip(name: String, degrees: Int) async throws -> URL {
+        var request = SyntheticVideoFixture.Request.constantRate(
+            name: name, numerator: 30, denominator: 1, frames: 30)
+        request.rotationDegrees = degrees
+        return try await SyntheticVideoFixture.write(request, into: directory)
+    }
+
+    /// A frame the way the platform shows the clip: the generator applies the
+    /// track's display matrix, as the layer does.
+    private func uprightReferenceFrame(of url: URL) async throws -> CGImage {
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        generator.appliesPreferredTrackTransform = true
+        generator.requestedTimeToleranceBefore = .positiveInfinity
+        generator.requestedTimeToleranceAfter = .positiveInfinity
+        return try await generator.image(at: .zero).image
+    }
+
+    /// The four corners of `image`, a few pixels in from the edge so codec
+    /// edge handling does not matter, as 8-bit sRGB: top-left, top-right,
+    /// bottom-left, bottom-right. Only red and green are meaningful for the
+    /// fixture, whose blue changes per frame.
+    private static func corners(of image: CGImage) -> [(red: Int, green: Int, blue: Int)] {
+        let width = image.width, height = image.height
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let drawn = bytes.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(
+                data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                bytesPerRow: width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard drawn else { return [] }
+        let inset = 3
+        return [(inset, inset), (width - 1 - inset, inset),
+            (inset, height - 1 - inset), (width - 1 - inset, height - 1 - inset)
+        ].map { x, y in
+            let offset = (y * width + x) * 4
+            return (Int(bytes[offset]), Int(bytes[offset + 1]), Int(bytes[offset + 2]))
+        }
+    }
+
     /// Waits for `condition`, polling, up to `timeout`. Returns whether it
     /// became true, so a caller reports a timeout rather than asserting on a
     /// value it never waited for.
@@ -201,6 +244,89 @@ final class NativeVideoPlayerMediaTests: XCTestCase {
         let image = await player.posterImage()
 
         XCTAssertNotNil(image, "a paused player still has the last frame it produced")
+        XCTAssertFalse(
+            player.isPlaying,
+            "a screenshot request must never restart playback the user stopped")
+    }
+
+    func testAPosterOfAnUprightClipStillUsesTheVideoOutput() async throws {
+        // The generator is a second decode. A clip whose picture and frames
+        // agree must keep reading the frame that is already playing.
+        let url = try await makeClip(name: "poster-upright")
+        let player = makePlayer(url: url)
+        let itemReady = await wait { player.itemStatusForTest == .readyToPlay }
+        XCTAssertTrue(itemReady, "the item never became readyToPlay")
+        _ = await wait(upTo: .seconds(3)) { player.layerIsReadyForDisplayForTest }
+        let first = player.playbackTimeForTest
+        let advanced = await wait { CMTimeCompare(player.playbackTimeForTest, first) > 0 }
+        XCTAssertTrue(advanced, "playback time never advanced")
+
+        let image = await player.posterImage()
+
+        XCTAssertEqual(image?.width, 64)
+        XCTAssertEqual(image?.height, 36)
+        XCTAssertEqual(
+            counters.snapshot().value(.nativeVideoPosterFallback, for: surface), 0,
+            "an upright clip must not pay for a second decode")
+    }
+
+    func testAPosterOfARotatedClipIsUpright() async throws {
+        // The item's presentation size and the layer follow the display
+        // matrix; the frames a video output returns do not. The poster has to
+        // match the picture, not the stored frames.
+        let url = try await makeRotatedClip(name: "poster-rotated", degrees: 90)
+        let player = makePlayer(url: url)
+        let itemReady = await wait { player.itemStatusForTest == .readyToPlay }
+        XCTAssertTrue(itemReady, "the item never became readyToPlay")
+        let sized = await wait {
+            (player.currentItemForTest?.presentationSize ?? .zero) != .zero
+        }
+        XCTAssertTrue(sized, "the item never reported a presentation size")
+        let presentation = try XCTUnwrap(player.currentItemForTest).presentationSize
+        XCTAssertEqual(presentation, CGSize(width: 36, height: 64), "the fixture is not rotated")
+        _ = await wait(upTo: .seconds(3)) { player.layerIsReadyForDisplayForTest }
+
+        let poster = await player.posterImage()
+        let image = try XCTUnwrap(poster)
+
+        XCTAssertEqual(CGSize(width: image.width, height: image.height), presentation)
+        XCTAssertFalse(player.posterOutputIsAttachedForTest)
+        XCTAssertEqual(
+            counters.snapshot().value(.nativeVideoPosterFallback, for: surface), 1,
+            "a rotated clip's poster is the one-shot generator's, and it is counted")
+        let reference = try await uprightReferenceFrame(of: url)
+        XCTAssertEqual(image.width, reference.width)
+        XCTAssertEqual(image.height, reference.height)
+        let got = Self.corners(of: image), want = Self.corners(of: reference)
+        XCTAssertEqual(got.count, 4)
+        XCTAssertEqual(want.count, 4)
+        for (index, (a, b)) in zip(got, want).enumerated() {
+            XCTAssertLessThan(abs(a.red - b.red), 24, "corner \(index) red \(a) vs \(b)")
+            XCTAssertLessThan(abs(a.green - b.green), 24, "corner \(index) green \(a) vs \(b)")
+        }
+        // Independent of the reference: the fixture's green grows with the
+        // stored row, and a clockwise quarter turn carries the stored top row
+        // to the right-hand edge. Left corners are therefore much greener
+        // than right ones, and a counter-clockwise or unturned picture is not.
+        if got.count == 4 {
+            XCTAssertGreaterThan(got[0].green, got[1].green + 60, "top row: \(got)")
+            XCTAssertGreaterThan(got[2].green, got[3].green + 60, "bottom row: \(got)")
+        }
+    }
+
+    func testAPausedRotatedClipAnswersAnUprightPosterWithoutResuming() async throws {
+        let url = try await makeRotatedClip(name: "poster-rotated-paused", degrees: 90)
+        let player = makePlayer(url: url)
+        let itemReady = await wait { player.itemStatusForTest == .readyToPlay }
+        XCTAssertTrue(itemReady, "the item never became readyToPlay")
+        player.setUserPaused(true)
+        XCTAssertFalse(player.isPlaying)
+
+        let poster = await player.posterImage()
+        let image = try XCTUnwrap(poster)
+
+        XCTAssertEqual(image.width, 36)
+        XCTAssertEqual(image.height, 64)
         XCTAssertFalse(
             player.isPlaying,
             "a screenshot request must never restart playback the user stopped")
