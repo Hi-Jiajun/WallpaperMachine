@@ -49,10 +49,13 @@ them.
 Results open on Most popular this year and can be sorted by Highest rated
 (Steam's all-time `toprated`), Most popular today / Trending this week / Most
 popular this month / Most popular this year (Steam's `trend` sort with a `days`
-window of 1, 7, 30 or 365), Most subscribed, Newest or Relevance. Steam's public
-browse page has no "most voted" sort and silently treats unknown `browsesort`
-values as trending, so none is offered. Wallpaper Engine's "mobile compatible"
-box has no Steam tag behind it, so it is not offered either.
+window of 1, 7, 30 or 365), Most subscribed, Newest (Steam's `mostrecent`, by when an
+item was first published), Recently updated (Steam's `lastupdated`, by when it last
+changed, so an old wallpaper with a fresh update comes first) or Relevance. Recently
+updated reads the search text and every tag filter like the others and ignores the
+trending window. Steam's public browse page has no "most voted" sort and silently
+treats unknown `browsesort` values as trending, so none is offered. Wallpaper Engine's
+"mobile compatible" box has no Steam tag behind it, so it is not offered either.
 
 ### Opening an item from a link or id
 

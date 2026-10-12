@@ -50,7 +50,7 @@ const installed = { text: '', sort: 'title', descending: false, tags: [], exclud
 // What Discover lists. An author's wallpapers and a collection's items are opened from a tile
 // rather than chosen here, and come back to the list they were opened from.
 const workshopSources = [['browse', 'Wallpapers', 'image'], ['collections', 'Collections', 'layers'], ['subscriptions', 'Your subscriptions', 'bookmark']];
-const workshopSorts = [['toprated', 'Highest rated'], ['trend-today', 'Most popular today'], ['trend', 'Trending this week'], ['trend-month', 'Most popular this month'], ['trend-year', 'Most popular this year'], ['totaluniquesubscribers', 'Most subscribed'], ['mostrecent', 'Newest'], ['textsearch', 'Relevance']];
+const workshopSorts = [['toprated', 'Highest rated'], ['trend-today', 'Most popular today'], ['trend', 'Trending this week'], ['trend-month', 'Most popular this month'], ['trend-year', 'Most popular this year'], ['totaluniquesubscribers', 'Most subscribed'], ['mostrecent', 'Newest'], ['lastupdated', 'Recently updated'], ['textsearch', 'Relevance']];
 // Installed sort keys with the direction each one starts in: names read A→Z, while favorites,
 // size and date are asked for to see the biggest / newest / starred first.
 const installedSorts = [['title', 'Name', false], ['type', 'Type', false], ['favorites', 'Favorites', true], ['size', 'File size', true], ['added', 'Date added', true]];

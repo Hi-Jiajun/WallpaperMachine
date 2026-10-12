@@ -252,6 +252,7 @@ export default {
   'Most popular this year': '今年最热门',
   'Most subscribed': '订阅最多',
   'Newest': '最新',
+  'Recently updated': '最近更新',
   'Relevance': '相关性',
   'Name': '名称',
   'Favorites': '收藏',

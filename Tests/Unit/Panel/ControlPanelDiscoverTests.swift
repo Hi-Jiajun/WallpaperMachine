@@ -262,6 +262,87 @@ final class ControlPanelDiscoverTests: ControlPanelTestCase {
     await workshop.steamCMDSetup.shutdown()
   }
 
+  /// The sort menu is the web page's own table of keys, and the native side refuses a key it
+  /// does not know, so each option must be one `WorkshopSort` reads and none may be left out.
+  /// Choosing one asks for a search sorted by that key.
+  func testDiscoverSortMenuOffersEveryWorkshopSortAndSearchesByTheChosenOne() async throws {
+    let fixture = makeStore()
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "web-sort-menu-\(UUID().uuidString)")
+    let defaults = try TemporaryDefaults.make(for: self).defaults
+    defer { try? FileManager.default.removeItem(at: root) }
+    let workshop = WorkshopStore(
+      downloader: WorkshopDownloadManager(sessionDirectory: root), supportDirectory: root,
+      defaults: defaults)
+    let controller = WebPanelController(
+      store: fixture.store, navigation: ControlPanelNavigation(), workshop: workshop,
+      defaults: defaults, appLanguage: .english())
+    let web = controller.makeWebView()
+    defer { controller.stop() }
+    web.setFrameSize(NSSize(width: 960, height: 640))
+    let deadline = Date().addingTimeInterval(15)
+    while !controller.isReady && Date() < deadline {
+      try await Task.sleep(for: .milliseconds(100))
+    }
+    XCTAssertTrue(controller.isReady)
+    guard controller.isReady else { return }
+    _ = try await web.callAsyncJavaScript("""
+      document.querySelector('#welcome [data-action="go"][data-step="5"]').click();
+      document.querySelector('#welcome [data-action="finish"]').click();
+      """, arguments: [:], in: nil, contentWorld: .page)
+    // Messages are recorded and answered with nothing, so no search reaches Steam.
+    let result =
+      try await web.callAsyncJavaScript(
+        """
+        const snapshot = await window.webkit.messageHandlers.native.postMessage({action:'ready'});
+        const sent = [];
+        // WebKit hands the page a wrapper that is dropped, with the override on it, once nothing
+        // in the page refers to it and the page collects garbage; the next message would then
+        // reach the real handler. Holding the wrapper keeps the override for the whole run.
+        window.heldBridge = window.webkit.messageHandlers.native;
+        window.webkit.messageHandlers.native.postMessage = message => { sent.push(message); return Promise.resolve(null); };
+        const show = () => window.wallpaperUI.receive(Object.assign({}, snapshot, {
+          page: 'discover',
+          workshop: Object.assign({}, snapshot.workshop, {
+            page: 1, totalPages: 1000, totalCount: 2891159, pageSize: 30,
+            loaded: true, loading: false, items: [], error: null, lookup: false,
+            source: { key: 'browse', id: null, name: null, searchable: true, canGoBack: false }
+          })
+        }));
+        // Native pushes can replace the snapshot between turns, and one that arrives while the
+        // page is not on Discover turns a sort choice into an Installed sort that searches
+        // nothing. So each choice shows Discover again just before it and reads what it caused
+        // in the same turn: the handler posts its message at once. The page redraws after a
+        // choice, so the menu is looked up again for each one.
+        const turn = () => new Promise(resolve => setTimeout(resolve, 0));
+        const menu = () => document.getElementById('browser-sort');
+        show();
+        const keys = [...menu().options].map(option => option.value);
+        const labels = [...menu().options].map(option => option.textContent.trim());
+        const choices = {};
+        for (const key of keys) {
+          await turn(); show();
+          sent.length = 0;
+          menu().value = key;
+          menu().dispatchEvent(new Event('change', { bubbles: true }));
+          choices[key] = sent.filter(message => message.action === 'workshopSearch').map(message => message.sort);
+        }
+        return { keys, labels, choices };
+        """, arguments: [:], in: nil, contentWorld: .page) as? [String: Any]
+    let keys = result?["keys"] as? [String] ?? []
+    XCTAssertEqual(Set(keys), Set(WorkshopSort.allCases.map(\.rawValue)), "every sort has a menu entry and no entry is unknown to Swift")
+    XCTAssertEqual(keys.count, Set(keys).count, "no sort is offered twice")
+    let labels = result?["labels"] as? [String] ?? []
+    XCTAssertEqual(labels.count, Set(labels).count, "entries are told apart by their labels")
+    XCTAssertFalse(labels.contains(where: \.isEmpty))
+    let choices = result?["choices"] as? [String: [String]] ?? [:]
+    for key in keys {
+      XCTAssertEqual(choices[key], [key], "choosing \(key) searches sorted by it")
+    }
+    XCTAssertNil(controller.actionError)
+    await workshop.steamCMDSetup.shutdown()
+  }
+
   /// Discover's lists are tabs, so subscriptions can be found without opening a menu, even at
   /// the 760px window minimum; signed in, downloading what the library lacks leads the list.
   func testDiscoverListsAreTabsAndSubscriptionsLeadWithTheirDownload() async throws {

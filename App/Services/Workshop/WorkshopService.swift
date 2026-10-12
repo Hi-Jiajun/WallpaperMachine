@@ -42,10 +42,12 @@ enum WorkshopKind: String, CaseIterable, Identifiable, Sendable {
 /// Sort orders Steam's public browse page actually honours. The raw value is the stable key
 /// shared with the web panel; `browseSort` and `days` are what the request sends. Steam has no
 /// public "most voted" sort: unknown `browsesort` values silently fall back to trending.
+/// `updated` is Steam's `lastupdated`: items by the time they last changed, newest first, with
+/// search text and tags applied like any other sort.
 enum WorkshopSort: String, CaseIterable, Identifiable, Sendable {
     case topRated = "toprated"
     case trendingToday = "trend-today", trending = "trend", trendingMonth = "trend-month", trendingYear = "trend-year"
-    case popular = "totaluniquesubscribers", newest = "mostrecent", relevance = "textsearch"
+    case popular = "totaluniquesubscribers", newest = "mostrecent", updated = "lastupdated", relevance = "textsearch"
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -56,6 +58,7 @@ enum WorkshopSort: String, CaseIterable, Identifiable, Sendable {
         case .trendingYear: String(localized: "Most popular this year")
         case .popular: String(localized: "Most subscribed")
         case .newest: String(localized: "Newest")
+        case .updated: String(localized: "Recently updated")
         case .relevance: String(localized: "Relevance")
         }
     }

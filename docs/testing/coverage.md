@@ -803,7 +803,8 @@ follows the developer's in-app language choice.
   and clamps to Steam's page limit, the grid keeps square tiles in at least three
   columns, download rings and telemetry, the search field's handling of a pasted
   link (looked up at once) against a bare id (only on Return) and words (after
-  their pause), and previews that play without canvas
+  their pause), the sort menu (one entry for each `WorkshopSort`, each searching by
+  its own key), and previews that play without canvas
   readback and release offscreen images. This does not reproduce a GPU-process
   hang or prove on-screen smoothness.
 - `ControlPanelSyncTests` (hidden-panel pushes, option fetches, display titles),
@@ -995,7 +996,8 @@ following (`WebWallpaperRenderScaleTests`, plus the render-scale cases of
   submitted; a failed page or submission retries its own query; superseded and
   racing requests cannot publish over a newer search; pages are Steam's own pages
   served from cache, capped at Steam's page limit, with the next page prefetched;
-  the sidebar defaults match Wallpaper Engine's.
+  the sidebar defaults match Wallpaper Engine's; Recently updated reaches Steam as
+  `lastupdated` with the search text and tags.
 - `WorkshopLinkTests` — which pasted text names a Workshop item: bare ids from six
   digits, item page and `steam://` links in their accepted spellings, and the
   look-alikes that must stay searches (other hosts, user info or ports, bad ids,

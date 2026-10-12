@@ -252,6 +252,7 @@ export default {
   'Most popular this year': '今年の人気順',
   'Most subscribed': 'サブスクライブ数順',
   'Newest': '新着順',
+  'Recently updated': '最近更新された順',
   'Relevance': '関連度順',
   'Name': '名前',
   'Favorites': 'お気に入り',

@@ -49,6 +49,28 @@ final class WorkshopStoreTests: XCTestCase {
     XCTAssertEqual(store.items.first?.kind, .video)
   }
 
+  /// Recently updated is Steam's `lastupdated` order. It must reach Steam as that key together
+  /// with the search text and tags, and the page it answers with is shown.
+  func testRecentlyUpdatedSortAsksSteamForLastUpdatedWithTheSearchAndTags() async throws {
+    let fixture = try Fixture()
+    defer { fixture.remove() }
+    let store = fixture.store
+    store.searchText = "forest"
+    store.kind = .scene
+    store.sort = .updated
+    store.tags = ["Nature"]
+    let values = URLComponents(url: store.browseURL, resolvingAgainstBaseURL: false)?.queryItems ?? []
+    XCTAssertEqual(values.first { $0.name == "browsesort" }?.value, "lastupdated")
+    XCTAssertEqual(values.first { $0.name == "searchtext" }?.value, "forest")
+    XCTAssertEqual(values.filter { $0.name == "requiredtags[]" }.compactMap(\.value), ["Scene", "Nature"])
+    store.search()
+    try await fixture.reply(
+      text: "forest", kind: .scene, sort: .updated, page: 1,
+      body: pageHTML(id: "301", title: "Updated today", page: 1, pages: 2, count: 31), tags: ["Nature"])
+    try await finished(store)
+    assertPage(store, id: "301", page: 1, pages: 2, count: 31)
+  }
+
   func testDefaultsMatchWallpaperEngineSidebarAndExclusionsReachSteam() async throws {
     let fixture = try Fixture()
     defer { fixture.remove() }

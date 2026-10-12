@@ -69,6 +69,7 @@ final class WorkshopTests: XCTestCase {
         XCTAssertEqual(query(.trendingYear).days, "365")
         XCTAssertEqual(query(.popular).sort, "totaluniquesubscribers")
         XCTAssertEqual(query(.newest).sort, "mostrecent")
+        XCTAssertEqual(query(.updated).sort, "lastupdated")
         XCTAssertEqual(query(.relevance).sort, "textsearch")
         // The panel round-trips raw values, so every case must survive the trip.
         for sort in WorkshopSort.allCases { XCTAssertEqual(WorkshopSort(rawValue: sort.rawValue), sort) }

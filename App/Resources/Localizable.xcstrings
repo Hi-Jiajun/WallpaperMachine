@@ -672,6 +672,9 @@
     "Newest" : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Newest"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "新着順"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "最新发布"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "最新"}}}
     },
+    "Recently updated" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Recently updated"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "最近更新された順"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "最近更新"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "最近更新"}}}
+    },
     "Relevance" : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Relevance"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "関連度順"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "相关性"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "相關性"}}}
     },
