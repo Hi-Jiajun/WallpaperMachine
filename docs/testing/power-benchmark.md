@@ -342,7 +342,7 @@ it and is never claimed to be one with no pre-buffering.
 | T1 | Single display, static or low-frequency scene | Idle ticks and dirty propagation |
 | T2 | 1080p/4K/ultrawide video at 24/30/60 FPS | Decode, conversion, frame rate, pool budget |
 | T3 | Simple, multi-layer post-processed, particle and video-texture scenes | CPU versus GPU versus bandwidth |
-| T4 | Web wallpaper with and without a cooperating pause listener | Whether host-side suspension is real |
+| T4 | Web wallpaper with and without a cooperating pause listener, covered and paused (Play/Pause, battery Pause) | Whether host-side suspension is real; a paused page is detached after a 3 s first-frame grace, so measure after it (not yet run) |
 | T5 | Two displays, one visible one occluded, then both occluded | Per-surface policy and shared consumers |
 | T6 | Lock screen, unlock, display sleep, system preview | Joint app/extension presentation ownership |
 | T7 | Rapid wallpaper switching, hot-plug, window and resolution changes | Reclaim, recovery, leaks |

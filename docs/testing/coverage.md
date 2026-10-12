@@ -448,8 +448,11 @@ authorized runtime check ([lock-screen](../features/lock-screen.md#verification)
 - `NativeVideoWallpaperHostTests` — startup waits for surface readiness, refused
   wallpapers are handed back to the scene engine with their reason, re-evaluation
   when the target rate changes, one surface per display, mirrors judged by their
-  group's strictest target, hidden-display and user-pause handling, and posters
-  from replaced surfaces not published. `NativeVideoPlaybackFailureTests` — the
+  group's strictest target, hidden-display and user-pause handling, a clip stopped
+  by a reading taken while the desktop (or one display) was covered playing again
+  once `WallpaperHosts.reconcile` has the host read the bridge again (that
+  `AppDelegate` makes the call after each delivery is not run by any test), and
+  posters from replaced surfaces not published. `NativeVideoPlaybackFailureTests` — the
   reported failure keeps the codes under the localized message and a clip with
   sound is rebuilt with its picture alone.
 - `SyntheticVideoFixtureTests` cover the generated-clip writer's input-ready
@@ -639,7 +642,9 @@ audio, media, random-file and directory listeners), audio delivery, output and
 single-owner rules (`WebWallpaperAudioMediaTests`, `WebWallpaperAudioOutputTests`,
 `WebWallpaperAudioOwnershipTests`), host lifecycle, crash budget and reload
 recovery (`WebWallpaperHostLifecycleTests`, `WebWallpaperRecoveryTests`),
-suspension (`WebWallpaperSuspensionTests`), pointer routing
+suspension by presentation and by pause, with the first-frame grace (counted only
+while the view is in the window), edits drawn on a paused page, and a measured stop of
+frames, timers and CSS (`WebWallpaperSuspensionTests`), pointer routing
 (`WebWallpaperMouseRoutingTests`) and the screen-saver surface
 (`ScreenSaverWebSurfaceTests`). Detail and limits:
 [web wallpapers](../features/web-wallpapers.md#verification).

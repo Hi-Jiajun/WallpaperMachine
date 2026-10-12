@@ -127,6 +127,13 @@ final class NativeVideoWallpaperHost {
 
     /// Re-reads the committed native wallpapers and diffs them against open
     /// windows. Overlapping calls coalesce into one trailing pass.
+    ///
+    /// A descriptor's `paused` is the bridge's composed flag: Play/Pause, the
+    /// battery Pause, and presentation, global and per display. A presentation
+    /// change returns no snapshot, so whoever delivers one calls this once the
+    /// bridge has committed it (`WallpaperHosts.reconcile`). Without that, a
+    /// pass that ran while the desktop was covered leaves the clip user-paused
+    /// by a reading that is out of date the moment the desktop is uncovered.
     func reconcile() {
         guard !stopped else { return }
         guard !reconcileInFlight else {

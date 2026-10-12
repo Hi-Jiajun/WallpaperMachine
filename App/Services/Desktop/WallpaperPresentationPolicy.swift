@@ -522,3 +522,24 @@ final class WallpaperPresentationPolicy {
         counters.record(suspended ? .presentationSuspended : .presentationResumed, for: surface)
     }
 }
+
+/// The hosts that draw the bridge's committed wallpapers in windows of their own.
+///
+/// Presentation, global and per display, is folded into the `paused` of every
+/// descriptor these hosts are given, but committing it returns no snapshot. A
+/// host that read its descriptors while a change held (a snapshot applied under
+/// a covered desktop, the status menu opening, the charger being plugged in)
+/// keeps that paused reading after the change ends, and nothing else tells it.
+/// Whoever delivers a presentation change to the bridge calls `reconcile()`
+/// afterwards, once the bridge has committed it or failed to, so every host
+/// reads again.
+@MainActor
+struct WallpaperHosts {
+    var web: WebWallpaperHost?
+    var native: NativeVideoWallpaperHost?
+
+    func reconcile() {
+        web?.reconcile()
+        native?.reconcile()
+    }
+}

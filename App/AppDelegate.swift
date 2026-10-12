@@ -33,6 +33,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var sceneMediaSink: SceneMediaSink?
     private var webWallpaperHost: WebWallpaperHost?
     private var nativeVideoHost: NativeVideoWallpaperHost?
+    private var wallpaperHosts: WallpaperHosts {
+        WallpaperHosts(web: webWallpaperHost, native: nativeVideoHost)
+    }
     private var presentationPolicy: WallpaperPresentationPolicy?
     private var windowAuditor: WallpaperWindowAuditor?
     private var wakeRevalidator: SystemWakeRevalidator?
@@ -313,6 +316,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                     let resuming = presentation == .running && self.appliedGlobalPresentation != .running
                     self.wallpaperEnergy?.invalidate()
                     Task {
+                        // Whether the bridge took it or not: it folds presentation
+                        // into each web and native video wallpaper's `paused`, and
+                        // the call returns no snapshot to carry that. A page or a
+                        // clip held still by a `paused` read while covered would
+                        // otherwise stay stopped after the desktop is uncovered.
+                        defer { self.wallpaperHosts.reconcile() }
                         do {
                             if leavingUnloaded {
                                 try await store.setPresentationUnloadedAsync(false)
@@ -375,6 +384,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                     self.nativeVideoHost?.setPresentationSuspended(suspended, forDisplay: displayID)
                     self.wallpaperEnergy?.invalidate()
                     Task {
+                        // As on the global path: the display's own suspension is part
+                        // of that display's `paused`, and nothing else reads it again.
+                        defer { self.wallpaperHosts.reconcile() }
                         do {
                             try await store.setDisplayPresentationSuspendedAsync(
                                 displayID: displayID, suspended: suspended)

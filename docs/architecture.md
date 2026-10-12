@@ -254,7 +254,11 @@ setter through optional private CoreGraphics and HIServices symbols, falling bac
   `OtherAudioMonitor` feed those conditions, and wallpaper audio is suppressed separately
   (`setAudioSuppressed`) for a mute rule or other-app audio set to mute. Occlusion is per display
   (`setDisplayPresentationSuspended`): one covered screen stops only its own decoding,
-  simulation and rendering, and a visible screen never resumes a covered one. With
+  simulation and rendering, and a visible screen never resumes a covered one. Neither call returns a
+  snapshot, yet both fold into every web and native video descriptor's `paused`, so `AppDelegate`
+  has the web and native video hosts read the bridge again (`WallpaperHosts.reconcile`) once the
+  bridge has committed the change or failed to; a clip would otherwise stay stopped by a reading
+  taken while the desktop was covered. With
   `PlaybackPreferences.desktopCoveredAction` at its default, pause, a display whose working
   area other windows cover counts as hidden too: `WallpaperCoverageProbes` keeps one alpha-0,
   mouse-transparent window per display just above the wallpaper level, over `visibleFrame`

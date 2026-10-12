@@ -83,6 +83,17 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         var maximumBackoff: Duration = .seconds(30)
     }
 
+    /// How long a user-paused page keeps running after its document finishes
+    /// loading before the host detaches it. `didFinish` fires before the first
+    /// meaningful paint, the renderer defers a battery pause until the host
+    /// reports startup, and a wallpaper can be applied while paused. Detaching
+    /// at once would snapshot a blank view and may stop WebKit finishing the
+    /// load, so the page gets this long to draw one frame first. The default
+    /// matches the first settle capture of `DesktopWallpaperSync`.
+    struct Timing {
+        var firstFrameGrace: Duration = .seconds(3)
+    }
+
     /// Everything the host has committed to this wallpaper. A reloaded document
     /// starts with none of it, so the whole snapshot is replayed on each new
     /// document generation rather than only the values that changed since.
@@ -91,6 +102,9 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         var fps: UInt32?
         var volume: Float = 1
         var muted = false
+        /// The bridge's composed pause, not only the Play/Pause button: user
+        /// pause, battery Pause, and the renderer's own presentation and
+        /// per-display suspension all arrive through `BridgeWebWallpaper.paused`.
         var userPaused = false
         var presentationSuspended = false
 
@@ -119,18 +133,39 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
     private let surface: RuntimeSurfaceKey
     private let counters: RuntimeCounters
     private let recovery: RecoveryPolicy
+    private let timing: Timing
     private let now: @MainActor () -> ContinuousClock.Instant
     private let wait: @Sendable (Duration) async throws -> Void
     private var restartHistory: [ContinuousClock.Instant] = []
     private var restartTask: Task<Void, Never>?
+    /// Whether the current document has had its first-frame grace since it
+    /// finished loading. Only a user pause waits for it; presentation
+    /// suspension is immediate, as a surface that is already hidden never
+    /// attaches. The grace counts only time the view is in the window: a page
+    /// that finished loading while covered has drawn nothing yet.
+    private var firstFrameSettled = false
+    private var firstFrameTask: Task<Void, Never>?
     /// When the current document finished loading, so a crash can tell a page
     /// that ran stably from one that died shortly after every load.
     private var lastLoadFinished: ContinuousClock.Instant?
     private weak var container: NSView?
     private var placeholder: NSImageView?
     private(set) var hostSuspended = false
+    /// The last frame captured when the view left the window tree; nil while the
+    /// view is attached or when the snapshot failed. The desktop poster sync is
+    /// answered from it, because a detached view cannot be snapshotted reliably.
+    private(set) var suspensionPoster: NSImage?
     /// Invalidates an in-flight suspension poster when the decision changes.
     private var suspensionGeneration: UInt64 = 0
+    /// Raised after host suspension turns on or off. The grace expiry has no
+    /// host call behind it, so the host learns about it from here.
+    var onHostSuspensionChanged: (@MainActor () -> Void)?
+    /// A property change reached the paused page and `suspensionPoster` now holds
+    /// the frame it drew, so the Space posters can be read again.
+    var onSuspensionPosterRefreshed: (@MainActor () -> Void)?
+    /// Set while a change shown to a paused page waits for the frame it will be
+    /// detached with.
+    private var posterOwed = false
     var onFailure: (@MainActor (String) -> Void)?
     var onLoaded: (@MainActor () -> Void)?
     var onLoading: (@MainActor () -> Void)?
@@ -246,6 +281,7 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         persistentData: Bool = true,
         rendersAtDisplayRefresh: Bool = false,
         recovery: RecoveryPolicy = RecoveryPolicy(),
+        timing: Timing = Timing(),
         now: (@MainActor () -> ContinuousClock.Instant)? = nil,
         wait: (@Sendable (Duration) async throws -> Void)? = nil
     ) {
@@ -257,6 +293,7 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         self.rendersAtDisplayRefresh = rendersAtDisplayRefresh
         self.counters = counters ?? .shared
         self.recovery = recovery
+        self.timing = timing
         self.now = now ?? { ContinuousClock.now }
         self.wait = wait ?? { try await Task.sleep(for: $0) }
         let configuration = WKWebViewConfiguration()
@@ -317,7 +354,11 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         isLoaded = false
         documentGeneration += 1
         lastLoadFinished = nil
+        resetFirstFrameWindow()
         forgetDocumentState()
+        // A user-paused page that was detached has to be back in the window to
+        // load, and is suspended again after its next first frame.
+        reconcileHostSuspension()
         onLoading?()
         deliverAudioOutput()
         webView.loadFileURL(entryURL, allowingReadAccessTo: projectURL)
@@ -326,6 +367,7 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
     func stop() {
         restartTask?.cancel()
         restartTask = nil
+        resetFirstFrameWindow()
         lastLoadFinished = nil
         // Invalidate any host call still in flight for the document being torn
         // down, so it cannot reach the blank page that replaces it.
@@ -356,8 +398,24 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
     /// `propertiesJSON` is the bridge's `{ id: { value, type, … } }` payload,
     /// with any staged `file` value already substituted by the host.
     func applyUserProperties(json propertiesJSON: String) {
+        let changed = committed.propertiesJSON != propertiesJSON
         committed.propertiesJSON = propertiesJSON
         deliverUserProperties()
+        if changed { showChangeWhilePaused() }
+    }
+
+    /// A change to a page that only its pause holds still would wait in the
+    /// suspended web process until the user plays, and the desktop would keep
+    /// the frame from before the edit. The page is given the first-frame grace
+    /// again, so the change draws, and is detached again with the frame it drew.
+    /// A page that is also covered waits for the cover to end, since it draws
+    /// nothing meanwhile. Only a change to what the page shows counts: the frame
+    /// limit and the render scale change how it draws, and apply when it plays.
+    private func showChangeWhilePaused() {
+        guard isLoaded, committed.userPaused, firstFrameSettled else { return }
+        posterOwed = true
+        resetFirstFrameWindow()
+        reconcileHostSuspension()
     }
 
     func applyGeneralProperties(fps: UInt32) {
@@ -376,7 +434,9 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
 
     func setPaused(_ paused: Bool) {
         committed.userPaused = paused
+        if !paused { posterOwed = false }
         deliverPaused()
+        reconcileHostSuspension()
         refreshDemand()
     }
 
@@ -410,7 +470,52 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
     func setPresentationSuspended(_ suspended: Bool) {
         committed.presentationSuspended = suspended
         deliverPaused()
-        applyHostSuspension(suspended)
+        reconcileHostSuspension()
+    }
+
+    /// The host suspends a page while no pixel can reach a display, and while it
+    /// is paused once it has drawn its first frame. Both go through
+    /// `applyHostSuspension`, so a page that ignores `setPaused` stops
+    /// regardless; the two reasons compose, and clearing one leaves the other
+    /// in force.
+    private func reconcileHostSuspension() {
+        applyHostSuspension(committed.presentationSuspended || (committed.userPaused && firstFrameSettled))
+        runFirstFrameWindow()
+    }
+
+    private func resetFirstFrameWindow() {
+        firstFrameTask?.cancel()
+        firstFrameTask = nil
+        firstFrameSettled = false
+    }
+
+    /// Runs the first-frame grace of the loaded document while its view is in
+    /// the window, and holds it while the view is out: a covered page draws
+    /// nothing, so time spent covered would let a paused page detach with a
+    /// blank frame the moment it is uncovered. Whatever changes where the view
+    /// is ends up here through `reconcileHostSuspension`, so the grace starts
+    /// when the page is first in view and starts over after each interruption.
+    /// A zero grace settles at once instead of scheduling a task.
+    private func runFirstFrameWindow() {
+        if hostSuspended {
+            firstFrameTask?.cancel()
+            firstFrameTask = nil
+            return
+        }
+        guard isLoaded, !firstFrameSettled, firstFrameTask == nil else { return }
+        let grace = timing.firstFrameGrace
+        guard grace > .zero else {
+            firstFrameSettled = true
+            reconcileHostSuspension()
+            return
+        }
+        firstFrameTask = Task { @MainActor [weak self, wait] in
+            try? await wait(grace)
+            guard let self, !Task.isCancelled else { return }
+            self.firstFrameTask = nil
+            self.firstFrameSettled = true
+            self.reconcileHostSuspension()
+        }
     }
 
     /// Suspension the page cannot opt out of.
@@ -443,6 +548,19 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         // is back where WebKit will run it.
         refreshDemand()
         if !suspended { flushDeferredDeliveries() }
+        AppLog.debug("""
+            web wallpaper \(projectURL.lastPathComponent): host suspension \
+            \(suspended ? "on (\(suspensionReason))" : "off")
+            """, load: logLoad)
+        onHostSuspensionChanged?()
+    }
+
+    private var suspensionReason: String {
+        switch (committed.userPaused && firstFrameSettled, committed.presentationSuspended) {
+        case (true, true): "both"
+        case (true, false): "user pause"
+        default: "presentation"
+        }
     }
 
     /// Keeps the last frame on screen while the web view is out of the window.
@@ -472,11 +590,17 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         placeholder.wantsLayer = true
         container.addSubview(placeholder)
         self.placeholder = placeholder
+        suspensionPoster = poster
         webView.removeFromSuperview()
         counters.record(.webDetached, for: surface)
+        if posterOwed {
+            posterOwed = false
+            onSuspensionPosterRefreshed?()
+        }
     }
 
     private func reattachWebView() {
+        suspensionPoster = nil
         guard let container else { return }
         if webView.superview !== container {
             webView.frame = container.bounds
@@ -733,6 +857,10 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         isLoaded = true
         lastLoadFinished = now()
         replayCommittedState()
+        // A document that finishes again starts another grace; it runs once the
+        // view is in the window, and a zero grace suspends the page right here.
+        resetFirstFrameWindow()
+        reconcileHostSuspension()
         // A document that already registered its listeners during load only
         // becomes deliverable now.
         refreshDemand()
@@ -756,7 +884,11 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         // The crashed document's listeners died with it. Restarting inherits
         // nothing, so a page that crashes repeatedly cannot accumulate
         // subscriptions the host would keep feeding.
+        resetFirstFrameWindow()
         forgetDocumentState()
+        // The restart loads into the window tree, and a user-paused page is
+        // suspended again after its next first frame.
+        reconcileHostSuspension()
         let moment = now()
         // A load that finishes proves nothing on its own: a page that crashes
         // shortly after every load would otherwise clear its budget forever.

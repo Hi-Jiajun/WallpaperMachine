@@ -201,7 +201,8 @@ final class WebWallpaperRecoveryTests: XCTestCase {
   }
 
   func testUserPauseSurvivesAReloadAndPresentationResume() async throws {
-    let page = WebWallpaperPage(projectURL: project, entryFile: "index.html")
+    let page = WebWallpaperPage(
+      projectURL: project, entryFile: "index.html", timing: .init(firstFrameGrace: .zero))
     page.setPaused(true)
     page.setPresentationSuspended(true)
     page.load()
@@ -216,6 +217,9 @@ final class WebWallpaperRecoveryTests: XCTestCase {
     XCTAssertEqual(
       (state["paused"] as? [Bool])?.last, true,
       "clearing presentation suspension must not undo the user's pause")
+    XCTAssertTrue(
+      page.hostSuspended,
+      "and the host keeps the paused page suspended once the presentation resumes")
   }
 
   func testLoadInvalidatesHostCallsIssuedForTheOldDocument() async throws {

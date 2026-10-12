@@ -33,6 +33,7 @@ final class WebWallpaperHost {
     private var windows: [UInt32: any WebWallpaperSurface] = [:]
     private let makeSurface: @MainActor (NSRect, WebWallpaperPage) -> any WebWallpaperSurface
     private let pointerMonitorOverride: (any WebWallpaperPointerMonitoring)?
+    private let pageTiming: WebWallpaperPage.Timing
     private lazy var mouse: any WebWallpaperPointerMonitoring = pointerMonitorOverride ?? WebWallpaperMouseForwarder { [weak self] in
         self?.windows.values.compactMap { $0 as? WebWallpaperWindow } ?? []
     }
@@ -124,6 +125,7 @@ final class WebWallpaperHost {
         assetStore: (@MainActor (URL, String) -> any WebWallpaperAssetSource)? = nil,
         imagePlacement: StillImagePlacementStore? = nil,
         pointerMonitor: (any WebWallpaperPointerMonitoring)? = nil,
+        pageTiming: WebWallpaperPage.Timing = .init(),
         audioClock: @escaping @MainActor () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         contentRevision: @escaping @MainActor () -> UInt64 = { 0 },
         makeSurface: @escaping @MainActor (NSRect, WebWallpaperPage) -> any WebWallpaperSurface = {
@@ -133,6 +135,7 @@ final class WebWallpaperHost {
         self.fetch = fetch
         self.makeSurface = makeSurface
         self.pointerMonitorOverride = pointerMonitor
+        self.pageTiming = pageTiming
         self.audioClock = audioClock
         self.contentRevision = contentRevision
         self.screens = screens ?? { Self.systemScreens() }
@@ -294,6 +297,11 @@ final class WebWallpaperHost {
 
     /// Re-reads the committed web wallpapers and diffs them against open windows.
     /// Overlapping calls coalesce into one trailing pass.
+    ///
+    /// A descriptor's `paused` is the bridge's composed flag (Play/Pause, battery
+    /// Pause, presentation and per-display suspension), and the page is held still
+    /// by what was last read. Presentation and power-source changes return no
+    /// snapshot, so whoever applies them calls this once the bridge has committed.
     func reconcile() {
         guard !stopped else { return }
         guard !reconcileInFlight else {
@@ -404,7 +412,8 @@ final class WebWallpaperHost {
                     kind: .desktopWeb, displayID: displayID, generation: surfaceGeneration)
                 let page = WebWallpaperPage(
                     projectURL: projectURL, entryFile: wallpaper.entryFile,
-                    surface: surface, counters: counters, rendersAtDisplayRefresh: rendersAtDisplayRefresh)
+                    surface: surface, counters: counters, rendersAtDisplayRefresh: rendersAtDisplayRefresh,
+                    timing: pageTiming)
                 let load = AppLog.beginLoad("web", project: wallpaper.projectPath, detail: """
                     wallpaper \(wallpaper.wallpaperId) “\(wallpaper.title)” entry \(wallpaper.entryFile), \
                     \(DiagnosticEnvironment.display(displayID)), fps \(wallpaper.fps)\
@@ -432,6 +441,21 @@ final class WebWallpaperHost {
                     self.scheduleSurfaceChange()
                     self.refreshAudioOutputs()
                     self.refreshPointerMonitor()
+                }
+                // The first-frame grace expires without any host call, so the
+                // pointer monitor and the audio owners would otherwise never
+                // learn that a paused page has just been detached.
+                page.onHostSuspensionChanged = { [weak self, weak page] in
+                    guard let self, let page, self.windows[displayID]?.page === page else { return }
+                    self.refreshPointerMonitor()
+                    self.refreshAudioOutputs()
+                }
+                // An edit shown to a paused page has been drawn and the page is
+                // detached again, so its Space posters are read from the new frame.
+                page.onSuspensionPosterRefreshed = { [weak self, weak page] in
+                    guard let self, let page, !self.stopped,
+                          self.windows[displayID]?.page === page else { return }
+                    self.onSurfacesChanged?()
                 }
                 page.onAudioDemandChanged = { [weak self, weak page] subscribed in
                     guard let self, let page else { return }
@@ -1026,6 +1050,18 @@ final class WebWallpaperHost {
         let webView = window.page.webView
         let center = frameCenter
         let context = notification.userInfo?["context"] as? String
+        // A suspended page has left the window tree and WebKit does not promise
+        // a snapshot of a detached view, so its own detach poster is the frame.
+        // Published a turn later, like a live snapshot, because the requester
+        // is still inside its own refresh when it asks.
+        if let poster = window.page.suspensionPoster {
+            Task { @MainActor in
+                guard let frame = Self.rgbaPixels(of: poster) else { return }
+                DesktopPosterFrame(pixels: frame.pixels, width: frame.width, height: frame.height, bgra: false)
+                    .publish(for: layer, to: center, context: context)
+            }
+            return
+        }
         webView.takeSnapshot(with: nil) { image, error in
             MainActor.assumeIsolated {
                 guard let image else {

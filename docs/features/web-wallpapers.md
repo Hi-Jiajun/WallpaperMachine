@@ -60,7 +60,7 @@ bodies stay native: nothing is copied, retried or run per frame.
 |---|---|
 | `wallpaperPropertyListener.applyUserProperties({ id: { value } })` | After load and after every Apply; colors are `"r g b"` floats in 0–1 as in `project.json` |
 | `wallpaperPropertyListener.applyGeneralProperties({ fps })` | After load and when the display's target FPS changes |
-| `wallpaperPropertyListener.setPaused(bool)` | Play/Pause, presentation suspension |
+| `wallpaperPropertyListener.setPaused(bool)` | Play/Pause, battery Pause, presentation suspension; the page's cooperative half, the host suspends it as well ([Suspension](#runtime-shape)) |
 | `wallpaperPropertyListener.userDirectoryFilesAddedOrChanged(property, files)` / `userDirectoryFilesRemoved(property, files)` | A watched `fetchall` folder gained or lost files |
 
 Combo values reach the page with the selected option's authored JSON type: a
@@ -83,9 +83,9 @@ and `playback.PLAYING` / `.PAUSED` / `.STOPPED`, with values 0, 1 and 2.
 Registering a listener replaces the previous one, and each listener fires only when
 its own part of the state changed. A page that registers after load is given the
 current state. Audio, media and directory delivery all stop while a page is
-suspended and resume when it comes back: media state is re-derived on resume, and
-directory additions and removals are held across the suspension and replayed in
-order.
+suspended (covered, or paused once it has drawn) and resume when it comes back:
+media state is re-derived on resume, and directory additions and removals are held
+across the suspension and replayed in order.
 
 The wallpaper web view has exactly one `WKScriptMessageHandler`, named
 `mweWallpaper`, carrying listener registration and random-file requests; it is
@@ -115,9 +115,46 @@ separate web view with its own handler (see [architecture](../architecture.md#co
   A snapshot taken before detaching stays on screen as a placeholder inside the
   window's container view, so the Space poster sync keeps identifying the surface
   by the same content layer, and a suspended page receives no pointer events. The
-  document is never reloaded to suspend it, so its JavaScript state survives. How
-  much WebKit then throttles the page is its own decision and has not been
-  measured here.
+  document is never reloaded to suspend it, so its JavaScript state survives.
+  Two reasons suspend a page and they compose, so clearing one leaves the other in
+  force. The presentation policy (no pixel can reach the display) suspends at once.
+  A paused wallpaper suspends once its first frame has had time to draw:
+  `BridgeWebWallpaper.paused` is the bridge's composed flag (Play/Pause, battery
+  Pause, and the bridge's own presentation and per-display suspension), and
+  `WebWallpaperPage.Timing.firstFrameGrace` (3 s, the first settle capture of the
+  poster sync) starts when the document has finished loading and its view is in the
+  window; time spent covered does not count, and it starts over each time the view
+  is put back. The grace exists because
+  `didFinish` fires before the first meaningful paint, the bridge defers a battery
+  pause until the host reports startup, and a wallpaper can be applied while
+  paused; detaching at once would snapshot a blank view and WebKit may not finish
+  loading a detached one. A reload or a crash restart puts a paused page back in
+  the window tree for its load and suspends it again after its next first frame. The
+  grace expiring has no host call behind it, so the page reports it
+  (`onHostSuspensionChanged`) and the host drops the global pointer monitor and
+  re-elects audio owners; each transition is logged at debug level
+  (`host suspension on|off`) so resume latency can be read from the log. Because
+  `paused` includes the presentation, a presentation resume also waits for the
+  descriptors to be read again, and a presentation change returns no snapshot to
+  carry them: `AppDelegate` reconciles the web and native video hosts once the bridge has
+  committed the change (or failed to), and the pause that came from the covered
+  desktop ends with it. Values applied while a page is suspended reach it when it
+  resumes, not before, with one exception: a changed property payload (the
+  inspector's Apply, an image's fit or placement) reaching a page that only its
+  pause holds still puts the page back in the window for another first-frame
+  grace, so the edit draws, and detaches it again with the frame it drew; the
+  host then reads the Space posters again (`onSuspensionPosterRefreshed`). A page
+  that is also covered waits for the cover to end. The frame limit and the render
+  scale do not wake a paused page: they change how it draws, not what it shows,
+  and apply when it plays.
+  The frame taken at detach is kept (`suspensionPoster`) and answers the desktop
+  poster sync's requests, because WebKit does not promise a snapshot of a detached
+  view ([desktop picture](desktop-picture.md#when-a-poster-is-taken)). With its view
+  detached, a page that implements no pause listener runs no animation frames, no
+  timer callbacks and no CSS animation iterations
+  (`WebWallpaperSuspensionTests.testUserPauseStopsFramesTimersAndCSSOfAPageWithoutAListener`
+  counts them by wall-clock time inside the detached interval). The energy effect
+  on a real desktop is the power benchmark's T4 and has not been measured.
 - **Occlusion** is left to `WallpaperPresentationPolicy`. A guarded per-view WebKit
   selector (`_setWindowOcclusionDetectionEnabled:`) disables WebKit's independent
   window-occlusion check; otherwise even a brief Space or Show Desktop transition
@@ -260,13 +297,18 @@ never substitutes Pause for an unavailable mute.
   a heavy WebGL scene on a slower GPU, slows its pointer with its frames.
 - Nonzero WebAudio gain is not controlled by the native media-volume interface;
   whole-page Mute still applies where WebKit exposes it.
+- A paused wallpaper's WebAudio is muted (`WebWallpaperAudioOwnership` gives a paused
+  page no audible output) but not suspended: the host has no `AudioContext`
+  handling, and what WebKit's own throttling does to a detached page's audio graph
+  is unmeasured.
 
 ## Verification
 
 The page host is tested against a real offscreen `WKWebView` with no desktop window
 (`Tests/Unit/WebWallpaper/`: module loading, late-listener replay, local request
-metadata, pause composition, suspension, navigation lockdown, forwarded pointer
-events, mouse routing policy) and the bridge contract in
+metadata, pause composition, suspension by presentation and by pause with its
+first-frame grace and edits shown while paused, navigation lockdown, forwarded
+pointer events, mouse routing policy) and the bridge contract in
 `upstream/renderer/crates/bridge/src/tests/` (`apply_options.rs`,
 `web_audio_media.rs`); file and directory properties are covered under
 [user files](user-files.md#verification), and the domain inventory is in

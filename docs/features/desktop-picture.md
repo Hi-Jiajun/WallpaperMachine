@@ -40,8 +40,12 @@ its final pixels: a Metal readback for scene and Compatibility-backend video, a
 `WKWebView` snapshot for a web wallpaper, and the player surface's image for a
 native-backend video. The request and the answer carry the same context string (empty
 outside Space selection mode), so a reply can be matched to the request that asked for
-it. The first ready frame goes to every native desktop of the display at once, without
-visiting them.
+it. A web wallpaper the host has suspended (covered, or paused after its first frame)
+answers from the frame it kept when its view left the window tree, since WebKit does
+not promise a snapshot of a detached view (an edit made while it is paused draws in
+the window first, and the frame is kept again); a page not yet detached is
+snapshotted live. The first ready frame goes to every native desktop of the display
+at once, without visiting them.
 
 - **A wallpaper starts or changes.** It is captured at once and again after
   `DesktopWallpaperSync.settleCaptureDelays` (3 s and 15 s), because intros, fades and

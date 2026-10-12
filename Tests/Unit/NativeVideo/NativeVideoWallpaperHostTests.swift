@@ -674,6 +674,57 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         host.shutdown()
     }
 
+    func testAClipStoppedByACoveredDesktopPlaysAgainWhenTheHostsReadTheBridgeAgain() async {
+        // The bridge folds a covered desktop into the descriptor's `paused`, and
+        // committing the change returns no snapshot. A pass that runs while it
+        // holds (the status menu opening, the charger being plugged in) leaves
+        // the clip user-paused by that reading, and uncovering the desktop only
+        // lifts the host's own suspension: the reading stays until the hosts
+        // are told to read again.
+        let recorder = Recorder()
+        let host = makeHost(wallpapers: [wallpaper(paused: false)], recorder: recorder)
+        defer { host.shutdown() }
+        await host.apply([wallpaper()])
+        host.setPresentationSuspended(true)
+        await host.apply([wallpaper(paused: true)])
+        host.setPresentationSuspended(false)
+        XCTAssertEqual(
+            host.isPlaying(displayID: 7), false, "the covered reading is still what the clip holds")
+
+        await reconcile(WallpaperHosts(web: nil, native: host), host)
+
+        XCTAssertEqual(host.isPlaying(displayID: 7), true)
+    }
+
+    func testAClipOnADisplayThatWasHiddenPlaysAgainWhenTheHostsReadTheBridgeAgain() async {
+        // The same for one display: its own suspension is part of that display's
+        // `paused`, and showing it again returns no snapshot either. The other
+        // display's reading is its own.
+        let recorder = Recorder()
+        let host = makeHost(
+            wallpapers: [wallpaper(displayID: 7), wallpaper(displayID: 9, id: "301")],
+            recorder: recorder)
+        defer { host.shutdown() }
+        await host.apply([wallpaper(displayID: 7), wallpaper(displayID: 9, id: "301")])
+        host.setPresentationSuspended(true, forDisplay: 9)
+        await host.apply([wallpaper(displayID: 7), wallpaper(displayID: 9, id: "301", paused: true)])
+        host.setPresentationSuspended(false, forDisplay: 9)
+        XCTAssertEqual(host.isPlaying(displayID: 9), false)
+
+        await reconcile(WallpaperHosts(web: nil, native: host), host)
+
+        XCTAssertEqual(host.isPlaying(displayID: 9), true)
+        XCTAssertEqual(host.isPlaying(displayID: 7), true, "and the display that never stopped plays on")
+    }
+
+    /// Reads the bridge again through `hosts` and waits for that pass to finish.
+    private func reconcile(_ hosts: WallpaperHosts, _ host: NativeVideoWallpaperHost) async {
+        let finished = expectation(description: "the host read the bridge again")
+        host.onSurfacesChanged = { finished.fulfill() }
+        hosts.reconcile()
+        await fulfillment(of: [finished], timeout: 10)
+    }
+
     func testAWallpaperThatLeavesTheNativeBackendStopsPlayingImmediately() async {
         // The bridge stops returning it — because the user switched wallpaper,
         // turned the backend off, or the routing changed. Leaving the player
