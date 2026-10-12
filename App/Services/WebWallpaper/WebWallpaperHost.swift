@@ -521,7 +521,7 @@ final class WebWallpaperHost {
                     ? staged.json
                     : try imagePlacement.effectivePropertiesJSON(
                         staged.json, wallpaperID: wallpaper.wallpaperId, displayID: wallpaper.displayKey)
-                page.applyUserProperties(json: json)
+                page.applyUserProperties(json: json, restaged: staged.restagedFiles)
             } catch {
                 AppLog.error("image wallpaper properties could not be applied: \(error.localizedDescription)")
                 onError?(error.localizedDescription)
@@ -821,12 +821,20 @@ final class WebWallpaperHost {
     /// can tell "no directory set" from "one is set", and neither mode loads it
     /// directly — `ondemand` asks for a random file and `fetchall` is told the
     /// contents through the listener.
-    func stageAssets(for wallpaper: BridgeWebWallpaper) async -> (json: String, restaged: Bool) {
+    ///
+    /// `restagedFiles` names the `file` properties staged again on this call. Their
+    /// staged path is built from the property id and the file's name, so a selection
+    /// whose bytes changed under the same name reads exactly as it did before, and
+    /// the page is told to take it in again.
+    func stageAssets(
+        for wallpaper: BridgeWebWallpaper
+    ) async -> (json: String, restaged: Bool, restagedFiles: Set<String>) {
         let properties = Self.pathProperties(in: wallpaper.propertiesJson)
-        guard !properties.isEmpty else { return (wallpaper.propertiesJson, false) }
+        guard !properties.isEmpty else { return (wallpaper.propertiesJson, false, []) }
         let project = Self.projectKey(wallpaper.projectPath)
         assetOwners[project] = wallpaper.wallpaperId
         var restaged = false
+        var restagedFiles = Set<String>()
         for property in properties {
             // Registered before staging: the import itself announces the files
             // it found, and routing that announcement needs the mode already
@@ -844,13 +852,16 @@ final class WebWallpaperHost {
                     property, project: project, wallpaperId: wallpaper.wallpaperId,
                     title: wallpaper.title)
                 restaged = true
+                if property.kind == .file { restagedFiles.insert(property.id) }
             }
         }
         let staged = properties.filter { $0.kind == .file }.reduce(into: [String: String]()) {
             $0[$1.id] = stagedAssets[project]?[$1.id]?.pageValue ?? ""
         }
-        guard !staged.isEmpty else { return (wallpaper.propertiesJson, restaged) }
-        return (Self.substituting(staged, in: wallpaper.propertiesJson) ?? wallpaper.propertiesJson, restaged)
+        guard !staged.isEmpty else { return (wallpaper.propertiesJson, restaged, restagedFiles) }
+        return (
+            Self.substituting(staged, in: wallpaper.propertiesJson) ?? wallpaper.propertiesJson,
+            restaged, restagedFiles)
     }
 
     /// The `file` and `directory` properties the bridge's payload declares.

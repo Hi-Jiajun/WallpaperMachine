@@ -429,6 +429,24 @@ final class WebWallpaperSuspensionTests: XCTestCase {
     XCTAssertFalse(page.isInWindowTree)
   }
 
+  /// The staged path of a reselected file does not change, so the payload is the
+  /// same text; the new bytes are what the page has to be shown.
+  func testARestagedFileWakesAPausedPageThoughItsPayloadIsUnchanged() async throws {
+    let payload = #"{"cover":{"type":"file","value":"p/cover.png"}}"#
+    let first = Gate()
+    let second = Gate()
+    let (page, container) = try await pausedAndDetachedPage(first: first, second: second, properties: payload)
+    defer { withExtendedLifetime(container) {} }  // the page holds its container weakly
+
+    page.applyUserProperties(json: payload, restaged: ["cover"])
+    XCTAssertFalse(page.hostSuspended, "the new content is drawn in the window, not queued behind a suspended page")
+    XCTAssertTrue(page.isInWindowTree)
+
+    await second.open()
+    try await poll { page.hostSuspended }
+    XCTAssertTrue(page.hostSuspended, "and the page is suspended again with the frame it drew")
+  }
+
   /// A covered page draws nothing, so the change is shown once the cover ends.
   func testAChangeToAPausedAndCoveredPageIsShownWhenTheCoverEnds() async throws {
     let first = Gate()

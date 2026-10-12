@@ -58,8 +58,8 @@ bodies stay native: nothing is copied, retried or run per frame.
 
 | Call into the page | When |
 |---|---|
-| `wallpaperPropertyListener.applyUserProperties({ id: { value } })` | After load and after every Apply; colors are `"r g b"` floats in 0–1 as in `project.json` |
-| `wallpaperPropertyListener.applyGeneralProperties({ fps })` | After load and when the display's target FPS changes |
+| `wallpaperPropertyListener.applyUserProperties({ id: { value } })` | Once after load with every property, then after an Apply with only the properties whose values changed; colors are `"r g b"` floats in 0–1 as in `project.json` |
+| `wallpaperPropertyListener.applyGeneralProperties({ fps })` | Once after load, then when the display's target FPS changes |
 | `wallpaperPropertyListener.setPaused(bool)` | Play/Pause, battery Pause, presentation suspension; the page's cooperative half, the host suspends it as well ([Suspension](#runtime-shape)) |
 | `wallpaperPropertyListener.userDirectoryFilesAddedOrChanged(property, files)` / `userDirectoryFilesRemoved(property, files)` | A watched `fetchall` folder gained or lost files |
 
@@ -71,8 +71,28 @@ statements in the page keep working. Property `order`/`index` values are orderin
 hints, not identity: fractional values are preserved and properties that share one
 all stay, in declaration order.
 
-Values are replayed to a listener that registers after the first push, so pages
-that install the listener from a deferred module still start.
+Values are replayed in full to a listener that registers after the first push, so
+pages that install the listener from a deferred module still start.
+
+`applyUserProperties` and `applyGeneralProperties` follow Wallpaper Engine's
+contract: the first delivery a listener takes in carries every property, and every
+later one only the properties whose values differ, in any key order; nothing is
+called when nothing differs. The host resends the whole committed set on each
+apply (the screen saver on every reconcile, pause toggles included) and the shared
+host script works out the difference per listener, so a page that tests each key
+sees the same calls on the desktop, in the preview and on the lock screen. A
+listener assigned late or again, a reloaded document and a content-process restart
+start from the whole set; a handler that is missing or throws has not taken a
+delivery in, so the next call is measured against what it last accepted. A `file`
+property the host stages again counts as changed once even though its value reads the
+same: the staged path is built from the property and the file's name, so a file
+reselected after it was edited, or another folder's file of the same name, arrives
+under the path the page already has, and the desktop host passes the restaged property ids
+along with the payload (`restagedFiles` of `WebWallpaperHost.stageAssets`). A paused
+page draws that change like any edit, and a handler that threw on it is sent it
+again. A page
+that rebuilt itself from the payload on every edit has to keep its earlier values,
+as it must under Wallpaper Engine. `setPaused` is not deduplicated.
 
 The page may call `wallpaperRegisterAudioListener`, the five
 `wallpaperRegisterMedia*Listener` functions (status, properties, thumbnail,
@@ -307,11 +327,13 @@ never substitutes Pause for an unavailable mute.
 The page host is tested against a real offscreen `WKWebView` with no desktop window
 (`Tests/Unit/WebWallpaper/`: module loading, late-listener replay, local request
 metadata, pause composition, suspension by presentation and by pause with its
-first-frame grace and edits shown while paused, navigation lockdown, forwarded
-pointer events, mouse routing policy) and the bridge contract in
+first-frame grace and edits shown while paused, navigation lockdown, forwarded pointer events, mouse routing
+policy, changed-only property delivery) and the bridge contract in
 `upstream/renderer/crates/bridge/src/tests/` (`apply_options.rs`,
 `web_audio_media.rs`); file and directory properties are covered under
 [user files](user-files.md#verification), and the domain inventory is in
 [coverage](../testing/coverage.md). Show Desktop and Space transition smoothness,
 real hover and window-server routing on a desktop, audible output and mirror audio
-handoff need an authorized manual run.
+handoff need an authorized manual run, as does a pass over real Workshop pages from
+the [local corpus](../testing/wallpaper-corpus.md) for any that assumed a full
+property object on every edit.

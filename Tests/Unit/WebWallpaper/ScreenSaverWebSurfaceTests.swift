@@ -20,7 +20,7 @@ final class ScreenSaverWebSurfaceTests: XCTestCase {
       <!doctype html><html><head><style>
       html,body { margin:0; width:100%; height:100%; background:rgb(0,255,0); }
       </style></head><body><canvas width="32" height="32"></canvas><script>
-      window.state = {ticks:0, frames:0, gap:0, general:null, user:null, directories:{}, capture:[]};
+      window.state = {ticks:0, frames:0, gap:0, general:null, user:null, userKeys:[], directories:{}, capture:[]};
       let previous = performance.now();
       setInterval(() => {
         const now = performance.now(); state.gap = Math.max(state.gap, now-previous);
@@ -37,6 +37,7 @@ final class ScreenSaverWebSurfaceTests: XCTestCase {
         applyGeneralProperties(value) { state.general = value; },
         applyUserProperties(value) {
           state.user = value;
+          state.userKeys.push(Object.keys(value).sort());
           if (value.cover) fetch('file:///' + value.cover.value).then(r => r.text()).then(t => state.file = t);
         },
         setPaused(value) { state.paused = value; },
@@ -148,6 +149,35 @@ final class ScreenSaverWebSurfaceTests: XCTestCase {
     received = try await state(surface)
     XCTAssertEqual(((received["user"] as? [String: Any])?["color"] as? [String: Any])?["value"] as? String, "0 1 0")
     XCTAssertEqual((received["directories"] as? [String: Any])?["gallery"] as? [String], [])
+  }
+
+  /// Every reconcile (a pause toggle, an FPS change) resends the whole committed set to the page;
+  /// the host script hands the listener only what it has not already taken in.
+  func testOnlyChangedPropertiesReachThePageAfterTheFirstDelivery() async throws {
+    let both = #"{"color":{"type":"color","value":"1 0 0"},"size":{"type":"slider","value":3}}"#
+    let surface = try make(properties: both)
+    try await start(surface)
+    var received = try await state(surface)
+    XCTAssertEqual(received["userKeys"] as? [[String]], [["color", "size"]])
+
+    try surface.update(propertiesJSON: both, fps: 12, paused: false)
+    try await poll { (try await self.state(surface)["general"] as? [String: Any])?["fps"] as? Int == 12 }
+    surface.setPaused(true)
+    try await poll { surface.isPaused }
+    surface.setPaused(false)
+    try await poll { !surface.isPaused }
+    try await poll { try await self.state(surface)["paused"] as? Bool == false }
+    received = try await state(surface)
+    XCTAssertEqual(
+      received["userKeys"] as? [[String]], [["color", "size"]],
+      "an FPS change and a pause toggle resend the same properties, which the page already has")
+
+    try surface.update(
+      propertiesJSON: #"{"color":{"type":"color","value":"0 1 0"},"size":{"type":"slider","value":3}}"#,
+      fps: 12, paused: false)
+    try await poll { (try await self.state(surface)["userKeys"] as? [[String]])?.count == 2 }
+    received = try await state(surface)
+    XCTAssertEqual(received["userKeys"] as? [[String]], [["color", "size"], ["color"]])
   }
 
   func testPauseSuspendsUncooperativeTimersAndResumeRestoresAnimation() async throws {

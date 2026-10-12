@@ -396,11 +396,14 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
     }
 
     /// `propertiesJSON` is the bridge's `{ id: { value, type, … } }` payload,
-    /// with any staged `file` value already substituted by the host.
-    func applyUserProperties(json propertiesJSON: String) {
-        let changed = committed.propertiesJSON != propertiesJSON
+    /// with any staged `file` value already substituted by the host. `restaged`
+    /// names the `file` properties whose bytes the host replaced under the same
+    /// staged path: their value reads as before, so the page is told to take them
+    /// in again, once, and a paused page draws the new content like any edit.
+    func applyUserProperties(json propertiesJSON: String, restaged: Set<String> = []) {
+        let changed = committed.propertiesJSON != propertiesJSON || !restaged.isEmpty
         committed.propertiesJSON = propertiesJSON
-        deliverUserProperties()
+        deliverUserProperties(restaged: restaged)
         if changed { showChangeWhilePaused() }
     }
 
@@ -615,9 +618,13 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
     /// inactive scheduling policy keys off exactly this.
     var isInWindowTree: Bool { container != nil && webView.superview === container }
 
-    private func deliverUserProperties() {
+    /// `restaged` is not committed: a document that loads later is given the whole
+    /// set, which already carries the new staged bytes.
+    private func deliverUserProperties(restaged: Set<String> = []) {
         guard isLoaded, let json = committed.propertiesJSON else { return }
-        run("window.__mweWallpaperHost.applyUserProperties(JSON.parse(json))", arguments: ["json": json])
+        run(
+            "window.__mweWallpaperHost.applyUserProperties(JSON.parse(json), restaged)",
+            arguments: ["json": json, "restaged": restaged.sorted()])
     }
 
     private func deliverGeneralProperties() {
