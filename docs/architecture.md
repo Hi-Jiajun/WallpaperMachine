@@ -470,7 +470,9 @@ Rules of the exchange:
 - `Extension/WallpaperExtension.entitlements` enables the App Sandbox with network-client
   access, a read-only exception for `/opt/homebrew/` (which lets the sandboxed process load the
   Homebrew-provided renderer dylibs) and a read-write home-relative exception for the exchange
-  directory only (`LockScreenConfiguration.exchangeRelativePath` must match it).
+  directory only (`LockScreenConfiguration.exchangeRelativePath` must match it). Packaging reads the
+  signed extension back against that file, so a dropped entitlement fails packaging instead of
+  showing as a lock screen that never starts ([bundle contract](build.md#bundle-contract)).
 - Web wallpapers in the extension get a project-specific WebKit file grant, never the common
   revisions directory. Network-client access allows wallpaper resources, but capture, audio and
   author dialogs are disabled. The page's un-ordered scheduling window does not present on the
