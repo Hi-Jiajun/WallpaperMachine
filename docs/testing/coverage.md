@@ -388,6 +388,25 @@ on [manual-smoke.md](manual-smoke.md).
 - `WallpaperCompatibilityTests` — target, content and configuration generations
   and truthful unknown states. They do not establish complete scene or on-screen
   compatibility.
+- `LetterboxDetectorTests` — the black-bar decision over synthetic luma frames:
+  letterbox, pillarbox and windowbox edges within a row, hairline edges ignored,
+  noisy black and a logo or subtitle inside a bar, fades and dark scenes skipped,
+  disagreeing, lopsided and implausible bars. `LetterboxZoomTests` — the Fill scale
+  factor for a given display worked from the engine's layout (16:9, 16:10, 4:3 and
+  ultrawide), rounding up and the limits. `VideoLetterboxProbeTests` — the probe
+  over injected frames (repeats counted once, orientation kept, large frames
+  measured at the same fractions), plus unreadable, audio-only, timed-out,
+  cancelled and replaced files; nothing in it decodes video.
+  `VideoLetterboxProbeMediaTests` — opt-in (`WALLPAPER_MACHINE_MEDIA_TESTS=1`, see
+  [README](README.md#opt-in-layers)): small generated H.264 clips with bars painted
+  at known rows are decoded through `AVAssetImageGenerator` (a few frames, no
+  player, window or audio) for letterboxed, pillarboxed, top-only, full-bleed and
+  all-black pictures; skipped in the routine gate, so the bar edges measured on real
+  decoder output are not covered unless it is run.
+  `VideoLetterboxStoreTests` — results per library revision, one probe at a time,
+  cancellation writing nothing, the 16-entry bound. They do not show how the factor
+  looks on a real display, nor real wallpapers with burnt-in subtitles, fades or
+  anamorphic pixels.
 - `LibraryMetricsTests`, `ClientPreferencesTests` — folder size and date measured
   off the snapshot path, manifest approval and tags, and an explicit defaults
   suite staying independent of the application's own preferences.
@@ -825,16 +844,20 @@ follows the developer's in-app language choice.
   the helper; those are on [manual-smoke.md](manual-smoke.md).
 - Feature pages that live here and are described under their domain:
   `ControlPanelAutomationTests`, `ControlPanelBackupFlowTests`,
-  `ControlPanelDisplayLayoutTests`, `ControlPanelPixivTests`,
+  `ControlPanelDisplayLayoutTests`, `ControlPanelLetterboxTests` (the Black bars
+  card drawn in the real page for an installed video only), `ControlPanelPixivTests`,
   `ControlPanelPlaybackToolsTests`, `ControlPanelPreviewTests`,
   `ControlPanelSpaceWallpaperTests`.
 - Controller-level suites without a web view: `WebPanelAssetsTests` (thumbnail
   routes serve only announced previews; the listed core modules and non-English
   locale catalogs are served, unknown names and traversal refused),
   `WebPanelAssetPropertiesTests`, `WebPanelCompatibilityTests`,
-  `WebPanelDeliveryStatusTests`, `WebPanelEnergyUsageTests` (sampling only while
-  Settings is visible), `WebPanelExternalLinkTests` (every fixed link in
-  `WebUI/*.js` passes the allowlist), `WebPanelGeneralSettingsTests` (the Login
+  `WebPanelLetterboxTests` (the Black bars snapshot never starts a probe, only an
+  installed video on an enabled independent display can be checked, the suggested
+  factor follows the target display without a second probe, results read as idle
+  after a library refresh), `WebPanelDeliveryStatusTests`,
+  `WebPanelEnergyUsageTests` (sampling only while Settings is visible),
+  `WebPanelExternalLinkTests` (every fixed link in `WebUI/*.js` passes the allowlist), `WebPanelGeneralSettingsTests` (the Login
   Items note and button, and that returning to the panel re-reads the status only
   while approval is pending),
   `WebPanelHiddenPropertyTests` (a property a visibility rule hides is not given

@@ -36,7 +36,7 @@ App/                               WallpaperMachine application target sources o
                                    memory-pressure log and per-wallpaper energy ratings
     GitHub/                        GitHub release client, update models, update store, installer, what's-new records
     Library/                       ClientPaths (owns the app-support layout), import/deletion, still-image wallpapers,
-                                   collections, presets, history, compatibility checks, backup and restore
+                                   collections, presets, history, compatibility checks, the video black-bar check, backup and restore
     Lifecycle/                     why the app is quitting (QuitReason, the power-off notice), how long each quit stage takes
                                    (QuitTimings), the deadline each stage gets (QuitSupervisor, QuitMode, the exit fuse)
                                    and SIGTERM/SIGHUP as a quit (TerminationSignalRelay);

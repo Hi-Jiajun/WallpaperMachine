@@ -105,6 +105,7 @@ extension WebPanelController {
     trackPixivDependencies()
     trackBackupDependencies()
     trackCompatibilityDependencies()
+    trackLetterboxDependencies()
     _ = updater.state
     _ = downloader.savedAccount
     _ = downloader.rememberSessionWhileRunning
@@ -685,6 +686,7 @@ extension WebPanelController {
       "backup": backupSnapshot(),
       "imagePlacement": imagePlacementSnapshot(),
       "wallpaperCompatibility": compatibilitySnapshot()["wallpaperCompatibility"] ?? null,
+      "videoLetterbox": letterboxSnapshot() as Any? ?? null,
       "options": options ?? null,
       "settings": settingsSnapshot.merging(playbackChoicesSnapshot) { _, new in new },
       "workshop": workshopSnapshot, "workshopUpdates": updatesSnapshot,

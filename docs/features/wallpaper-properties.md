@@ -1,8 +1,8 @@
 # Wallpaper properties
 
 What the inspector offers for one installed wallpaper beyond applying it: the live
-preview window, the authored properties with their presets, image placement and the
-compatibility check. Selecting and applying a wallpaper, and the inspector's overall
+preview window, the authored properties with their presets, image placement, the
+compatibility check and the black-bar check. Selecting and applying a wallpaper, and the inspector's overall
 layout, are in [control panel](control-panel.md#selection-versus-apply).
 
 ## Live preview
@@ -239,5 +239,44 @@ frame-rate constraints. Checks are explicit and version/configuration-bound.
 Unknown scene shader/graph or Web runtime behavior remains **unknown**; readable
 files and video metadata are not proof of a displayed frame. The same card shows
 the actual running backend and fallback reason when the runtime reports them.
-When a check is unavailable and the wallpaper is a Workshop item, the card also
-offers [Reinstall from Workshop…](workshop-downloads.md#reinstall-from-workshop).
+When the installed project or its entry file is unavailable and the wallpaper is
+a Workshop item, the card also offers [Reinstall from Workshop…](workshop-downloads.md#reinstall-from-workshop).
+
+### Black bars
+
+An installed video's **Black bars** card looks for bars baked into the picture
+itself, such as a 2.39:1 film inside a 16:9 file or a 4:3 clip inside 16:9.
+**Look for black bars** is an explicit click: it decodes five frames at 10, 30, 50,
+70 and 90% of the clip (frames that land on the same moment count once), measures
+the bars in each and reports what most of them agree on. The check is read-only:
+nothing is applied, rewritten or saved. Results are held in memory for the last
+16 wallpapers checked and read as not checked again after a library refresh or a
+restart; selecting another wallpaper cancels a check that is still running.
+
+- **No black bars found**, or **Black bars found** with their size as a share of the
+  picture on each side. Bars on both ends of one axis, or all four sides, are
+  reported only when they are about the same size.
+- With the target display in **Fill**, the card names the scale factor that crops
+  the bars off that display. The factor depends on the display's proportions under
+  the engine's Fill layout (a 21:9 display already crops the top and bottom of a
+  16:9 video, so the card may say Fill already does it), is rounded up to two
+  decimals and carries half a percent of overscan. In any other scaling mode the
+  bars are reported and no factor is named. Setting the factor is the display's
+  **Scale factor** field; the card changes nothing.
+- **Uneven** bars (one side only, or lopsided) get no factor, because a centred
+  zoom would also cut picture. Bars that add up to more than 45% of an axis are
+  treated as unreliable and nothing is suggested.
+- The card says it cannot tell when the sampled frames are too dark, disagree about
+  where the bars are, or are too few after repeats are dropped. It says it cannot
+  check when AVFoundation cannot read the file (WebM, Matroska and AVI are not
+  readable there), the file has no video track, reading takes longer than 20
+  seconds, or the file changed while it was being read.
+
+Sampled evidence is not proof: a scene that keeps a black border through all five
+samples looks like bars, burnt-in subtitles shorten a bar in the frames that carry
+them, and the thresholds are this app's own, exercised on generated H.264 clips
+and not on a corpus of real wallpapers. Anamorphic (non-square pixel) clips can be
+a percent or two off, which the overscan covers. Mirror displays hold their own
+scale factor and are not covered. Both video backends apply the scale factor with
+the same Fill layout, so the named factor crops the same bars on either
+([Video backend](performance.md#video-backend)).

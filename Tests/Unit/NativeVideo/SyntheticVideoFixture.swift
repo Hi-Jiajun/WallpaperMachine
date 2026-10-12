@@ -34,6 +34,9 @@ enum SyntheticVideoFixture {
         /// Writes the display matrix flipped left to right, the way a mirrored
         /// front-camera recording can carry it.
         var mirrored = false
+        /// Paints each frame (the pixel buffer and the frame's index) in place of the default
+        /// distinguishable-per-frame fill, for tests that need a particular picture.
+        var painter: ((CVPixelBuffer, Int) -> Void)?
 
         /// Constant frame rate expressed exactly: `numerator / denominator`
         /// fps. 24 is 24/1, NTSC 30 is 30000/1001.
@@ -171,7 +174,7 @@ enum SyntheticVideoFixture {
             guard CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer) == kCVReturnSuccess,
                 let pixelBuffer = buffer
             else { throw FixtureError.pixelBufferFailed }
-            fill(pixelBuffer, step: index)
+            if let painter = request.painter { painter(pixelBuffer, index) } else { fill(pixelBuffer, step: index) }
             let time = CMTime(value: elapsed, timescale: request.timescale)
             guard adaptor.append(pixelBuffer, withPresentationTime: time) else {
                 throw FixtureError.writerFailed(

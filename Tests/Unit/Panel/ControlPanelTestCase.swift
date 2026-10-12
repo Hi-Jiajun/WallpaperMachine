@@ -302,7 +302,8 @@ final class PanelFixture {
   let library: URL
 
   init(store: BridgeStore, bridge: LayoutSnapshotBridge, displayTitles: DisplayTitleResolver,
-    pixivTransport: (any PixivTransport)? = nil, spaces: WallpaperSpaceMonitor? = nil) throws {
+    pixivTransport: (any PixivTransport)? = nil, spaces: WallpaperSpaceMonitor? = nil,
+    letterbox: VideoLetterboxStore? = nil) throws {
     self.store = store
     self.bridge = bridge
     library = root.appendingPathComponent("Library", isDirectory: true)
@@ -388,7 +389,8 @@ final class PanelFixture {
           directory: root.appendingPathComponent("pixiv-thumbnails"), fetcher: PreviewFetcher { _ in image })),
       appLanguage: .english(), playback: PlaybackPreferences(defaults: defaults), playlists: playlists,
       hotKeys: HotKeyPreferences(defaults: defaults), collections: collections, presets: presets,
-      backup: backup, imagePlacement: imagePlacement, compatibility: compatibility, automations: automations, spaces: self.spaces)
+      backup: backup, imagePlacement: imagePlacement, compatibility: compatibility, letterbox: letterbox,
+      automations: automations, spaces: self.spaces)
     controller.signInToPixiv = { nil }
     web = controller.makeWebView()
     web.setFrameSize(NSSize(width: 960, height: 640))

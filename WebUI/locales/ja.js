@@ -1286,6 +1286,28 @@ export default {
   'Choose an enabled, independent target display to check this wallpaper': 'この壁紙をチェックするには、有効な独立した対象ディスプレイを選んでください',
   'Reading the wallpaper’s files…': '壁紙のファイルを読み込み中…',
 
+  // Black bars card (inspector)
+  'Black bars': '黒帯',
+  'Some videos have black bars baked into the picture. Looking samples a few frames of the file; nothing is changed.': 'ビデオによっては、映像そのものに黒帯が焼き込まれていることがあります。確認ではファイルから数フレームを調べるだけで、何も変更されません。',
+  'Look for black bars': '黒帯を確認',
+  'Look again': 'もう一度確認',
+  'Looking for black bars…': '黒帯を確認中…',
+  'No black bars found.': '黒帯は見つかりませんでした。',
+  'Black bars found at the top and bottom, about {percent}% of the picture on each side.': '上下に黒帯が見つかりました。それぞれ映像の約{percent}%を占めています。',
+  'Black bars found at the left and right, about {percent}% of the picture on each side.': '左右に黒帯が見つかりました。それぞれ映像の約{percent}%を占めています。',
+  'Black bars found on all four sides, up to {percent}% of the picture.': '四辺すべてに黒帯が見つかりました。最大で映像の{percent}%を占めています。',
+  'With Fill on this display, a scale factor of ×{factor} hides them.': 'このディスプレイで「画面いっぱいに表示」を選び、スケール倍率を×{factor}にすると隠せます。',
+  'Fill on this display already crops them out.': 'このディスプレイでは、「画面いっぱいに表示」ですでに黒帯が切り取られます。',
+  'This display uses {mode} scaling. Black bars can be hidden with Fill and a scale factor.': 'このディスプレイのスケーリングモードは「{mode}」です。黒帯は「画面いっぱいに表示」とスケール倍率で隠せます。',
+  'The bars are uneven, so a scale factor could not hide them without cutting into the picture.': '黒帯の幅が揃っていないため、スケール倍率で隠そうとすると映像の一部も切れてしまいます。',
+  'The bars look too large to be reliable, so nothing is suggested.': '黒帯が大きすぎて信頼できないため、提案はありません。',
+  'The sampled frames are too dark to tell.': '調べたフレームが暗すぎて判断できません。',
+  'The sampled frames do not agree on where the bars are.': '調べたフレーム間で黒帯の位置が一致しません。',
+  'Too few different frames could be sampled to tell.': '判断するのに十分な数の異なるフレームを取得できませんでした。',
+  'This video cannot be read here, so it cannot be checked.': 'このビデオはここでは読み込めないため、確認できません。',
+  'Reading the video took too long.': 'ビデオの読み込みに時間がかかりすぎました。',
+  'The video changed while it was being checked. Look again.': '確認中にビデオが変更されました。もう一度確認してください。',
+
   // Saved playlists and collection sources (Settings: displays)
   'Collection “{name}”': 'コレクション「{name}」',
   'A collection that no longer exists': '存在しないコレクション',

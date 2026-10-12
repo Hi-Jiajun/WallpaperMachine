@@ -9,8 +9,8 @@ runtime structure (scheme handler, snapshot, action bridge, crash recovery) is i
 [architecture](../architecture.md#control-panel-wkwebview-and-the-javascript-bridge).
 
 Documented separately: the [first-run guide and support prompt](first-run.md),
-[live preview, properties, presets, image placement and the compatibility
-check](wallpaper-properties.md), [local backup and restore](backup-restore.md), and
+[live preview, properties, presets, image placement, the compatibility check and
+the black-bar check](wallpaper-properties.md), [local backup and restore](backup-restore.md), and
 [app updates and What's New](updates.md).
 
 ## Language

@@ -139,7 +139,7 @@ class PanelLocalizationTests(unittest.TestCase):
         # check covers direct t('...') calls, not arbitrary JavaScript parsing.
         keys = set()
         for name in ("panel.js", "settings.js", "welcome.js", "pixiv.js", "support-prompt.js",
-                     "collections.js", "presets.js", "placement.js", "compatibility.js", "plans.js", "backup.js", "playlist-order.js", "automation.js", "display-layouts.js"):
+                     "collections.js", "presets.js", "placement.js", "compatibility.js", "letterbox.js", "plans.js", "backup.js", "playlist-order.js", "automation.js", "display-layouts.js"):
             source = (ROOT / "WebUI" / name).read_text()
             keys.update(ast.literal_eval(key) for key in re.findall(
                 rf"\bt\(\s*({LITERAL})", source))

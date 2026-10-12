@@ -72,6 +72,7 @@ final class WebPanelController: NSObject, WKNavigationDelegate {
   let backup: WallpaperBackupStore
   let imagePlacement: StillImagePlacementStore
   let compatibility: WallpaperCompatibilityStore
+  let letterbox: VideoLetterboxStore
   var imagePlacementRequestSequence: UInt64 = 0
   var imagePlacementRequests: [String: UInt64] = [:]
   /// Tests pass a closure so choosing an app does not open a panel. Nil uses the sheet.
@@ -183,6 +184,7 @@ final class WebPanelController: NSObject, WKNavigationDelegate {
     backup: WallpaperBackupStore? = nil,
     imagePlacement: StillImagePlacementStore? = nil,
     compatibility: WallpaperCompatibilityStore? = nil,
+    letterbox: VideoLetterboxStore? = nil,
     chooseApplication: (@MainActor () async -> URL?)? = nil,
     automations: WallpaperAutomationStore? = nil,
     displayLayouts: WallpaperDisplayLayoutStore? = nil,
@@ -212,6 +214,7 @@ final class WebPanelController: NSObject, WKNavigationDelegate {
     self.backup = backup ?? WallpaperBackupStore(defaults: defaults)
     self.imagePlacement = imagePlacement ?? .shared
     self.compatibility = compatibility ?? WallpaperCompatibilityStore()
+    self.letterbox = letterbox ?? Self.letterboxStore(for: store)
     self.chooseApplication = chooseApplication
     filtersCollapsed = Self.filtersCollapsedKeys.mapValues { defaults.bool(forKey: $0) }
     welcomeSeen = defaults.bool(forKey: Self.welcomeSeenKey)
@@ -233,6 +236,7 @@ final class WebPanelController: NSObject, WKNavigationDelegate {
     }
     self.backup.onChange = { [weak self] in self?.scheduleUpdate() }
     self.compatibility.onChange = { [weak self] in self?.scheduleUpdate() }
+    self.letterbox.onChange = { [weak self] in self?.scheduleUpdate() }
   }
 
   func makeWebView() -> WKWebView {
@@ -381,6 +385,7 @@ final class WebPanelController: NSObject, WKNavigationDelegate {
     loginItemRefresh = nil
     updatePending = false
     cancelDisplayOptions()
+    letterbox.cancelAll()
     subscriptions.removeAll()
     webView?.configuration.userContentController.removeScriptMessageHandler(
       forName: "native", contentWorld: .page)
@@ -759,7 +764,7 @@ final class WebPanelAssets: NSObject, WKURLSchemeHandler {
   private static let files: Set<String> = [
     "index.html", "panel.js", "panel.css", "settings.js", "settings.css", "welcome.js",
     "welcome.css", "theme.js", "icons.js", "i18n.js", "property-label.js", "pixiv.js", "support-prompt.js",
-    "collections.js", "presets.js", "placement.js", "compatibility.js", "plans.js", "backup.js", "playlist-order.js", "automation.js", "display-layouts.js",
+    "collections.js", "presets.js", "placement.js", "compatibility.js", "letterbox.js", "plans.js", "backup.js", "playlist-order.js", "automation.js", "display-layouts.js",
     "app-icons/minimal.png", "app-icons/day.png", "app-icons/night.png",
   ]
   /// One catalog module per shipped language, served as `mwe-ui://app/locales/<tag>.js`.

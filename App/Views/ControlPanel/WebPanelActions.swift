@@ -14,6 +14,7 @@ extension WebPanelController {
     if try performWallpaperAutomation(action, request: request) { return }
     if try await performBackup(action, request: request) { return }
     if try await performCompatibility(action, request: request) { return }
+    if try await performLetterbox(action, request: request) { return }
     if try await performImagePlacement(action, request: request) { return }
     switch action {
     case "ready":

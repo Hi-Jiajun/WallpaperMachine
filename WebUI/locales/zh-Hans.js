@@ -1286,6 +1286,28 @@ export default {
   'Choose an enabled, independent target display to check this wallpaper': '请选择一台已启用的独立目标显示器来检查此壁纸',
   'Reading the wallpaper’s files…': '正在读取壁纸文件…',
 
+  // Black bars card (inspector)
+  'Black bars': '黑边',
+  'Some videos have black bars baked into the picture. Looking samples a few frames of the file; nothing is changed.': '有些视频的画面本身就带有黑边。检查只会从文件中抽取几帧，不会更改任何内容。',
+  'Look for black bars': '检查黑边',
+  'Look again': '重新检查',
+  'Looking for black bars…': '正在检查黑边…',
+  'No black bars found.': '未发现黑边。',
+  'Black bars found at the top and bottom, about {percent}% of the picture on each side.': '在上方和下方发现黑边，各约占画面的 {percent}%。',
+  'Black bars found at the left and right, about {percent}% of the picture on each side.': '在左侧和右侧发现黑边，各约占画面的 {percent}%。',
+  'Black bars found on all four sides, up to {percent}% of the picture.': '四边都发现黑边，最宽占画面的 {percent}%。',
+  'With Fill on this display, a scale factor of ×{factor} hides them.': '在此显示器上选择“填充”并将缩放系数设为 ×{factor}，即可隐藏黑边。',
+  'Fill on this display already crops them out.': '在此显示器上，“填充”已经会裁掉黑边。',
+  'This display uses {mode} scaling. Black bars can be hidden with Fill and a scale factor.': '此显示器的缩放模式为“{mode}”。黑边可通过“填充”和缩放系数来隐藏。',
+  'The bars are uneven, so a scale factor could not hide them without cutting into the picture.': '黑边宽度不均匀，用缩放系数隐藏会连同部分画面一起裁掉。',
+  'The bars look too large to be reliable, so nothing is suggested.': '黑边大得不太可信，因此不提供建议。',
+  'The sampled frames are too dark to tell.': '抽取的帧太暗，无法判断。',
+  'The sampled frames do not agree on where the bars are.': '抽取的各帧对黑边位置的判断不一致。',
+  'Too few different frames could be sampled to tell.': '能抽取到的不同帧太少，无法判断。',
+  'This video cannot be read here, so it cannot be checked.': '无法在此读取该视频，因此无法检查。',
+  'Reading the video took too long.': '读取视频耗时过长。',
+  'The video changed while it was being checked. Look again.': '检查期间视频发生了变化，请重新检查。',
+
   // Saved playlists and collection sources (Settings: displays)
   'Collection “{name}”': '合集“{name}”',
   'A collection that no longer exists': '已不存在的合集',

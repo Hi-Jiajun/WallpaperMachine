@@ -9,6 +9,7 @@ import { createCollections } from './collections.js';
 import { createPresets } from './presets.js';
 import { createPlacement } from './placement.js';
 import { createCompatibility } from './compatibility.js';
+import { createLetterbox } from './letterbox.js';
 
 const $ = (id) => document.getElementById(id);
 const escapeHTML = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
@@ -228,7 +229,7 @@ function receive(snapshot) {
   if (selectionAnchor && !selection.has(selectionAnchor)) selectionAnchor = null;
   // Page-side choices that name something in the snapshot (a collection on show, a picked
   // preset, a placement being dragged) follow what the snapshot still has.
-  collections.sync(snapshot); presets.sync(snapshot); placement.sync(snapshot); compatibilityCard.sync(snapshot);
+  collections.sync(snapshot); presets.sync(snapshot); placement.sync(snapshot); compatibilityCard.sync(snapshot); letterbox.sync(snapshot);
   window.appTheme.apply(snapshot.theme);
   // Every string is translated where it is drawn, so a language change only needs the
   // static markup refreshed before the render below redraws the rest.
@@ -776,7 +777,7 @@ function renderInspector(discover) {
     ${download || request ? button(t('Show in downloads'), 'openDownloads', {}, { className: 'link' }) : ''}
     ${compatibility ? `<p class="inspector-compatibility muted"><small>${escapeHTML(compatibility)}</small></p>` : ''}${artworkLink}${reportLink}
     ${item.kind === 'Scene' && !state.settings.sceneAssetsReady ? `<div class="notice warning">${escapeHTML(t('Shared scene resources are required before playback.'))} ${button(t('Get shared resources'), 'requestAssets', {}, { className: 'link' })}</div>` : ''}${showInLibrary}
-    </div>${discover ? (item.summary ? `<section class="inspector-section"><p>${escapeHTML(item.summary)}</p></section>` : '') : `${isInstalled ? compatibilityCard.section(item, target) : ''}${isInstalled && packagedStill(item.id) ? placement.section(item) : ''}${options ? renderOptions(options, isInstalled ? collections.inspectorSection(item) : '') : `<section class="inspector-section"><p class="muted">${escapeHTML(t('Loading wallpaper options…'))}</p></section>${isInstalled ? collections.inspectorSection(item) : ''}`}`}
+    </div>${discover ? (item.summary ? `<section class="inspector-section"><p>${escapeHTML(item.summary)}</p></section>` : '') : `${isInstalled ? compatibilityCard.section(item, target) : ''}${isInstalled && item.kind === 'Video' ? letterbox.section(item, target) : ''}${isInstalled && packagedStill(item.id) ? placement.section(item) : ''}${options ? renderOptions(options, isInstalled ? collections.inspectorSection(item) : '') : `<section class="inspector-section"><p class="muted">${escapeHTML(t('Loading wallpaper options…'))}</p></section>${isInstalled ? collections.inspectorSection(item) : ''}`}`}
     </div>${options ? renderInspectorSave(options) : ''}</div>`);
   for (const image of $('inspector').querySelectorAll('img[data-label-height]')) image.style.height = `${Number(image.dataset.labelHeight)}px`;
   placement.layout();
@@ -1791,12 +1792,13 @@ const pixiv = createPixivPage({
   $, send, run, escapeHTML, icon, button, morph, keyAttr, checked, disabled, selectOptions, safeImage, safeLink, preview, tags, bytes, tileRing, filterButton, filterGroup, filterHeading,
   activate: (id) => handleAction('activate', { id }),
 });
-// Installed's collections, the inspector's presets, picture placement and compatibility card
-// draw with the panel's helpers into the same page; each keeps only its own page state.
+// Installed's collections, the inspector's presets, picture placement, compatibility card and
+// black-bar card draw with the panel's helpers into the same page; each keeps only its own page state.
 const collections = createCollections({ send, render, announce, escapeHTML, icon, button, keyAttr, checked, disabled, busy, filterGroup, selection, filtersCollapsed });
 const presets = createPresets({ send, render, escapeHTML, icon, button, keyAttr, disabled, busy });
 const placement = createPlacement({ send, render, escapeHTML, icon, button, keyAttr, disabled, busy, safeImage });
 const compatibilityCard = createCompatibility({ escapeHTML, icon, button, keyAttr, busy, canReinstall });
+const letterbox = createLetterbox({ escapeHTML, icon, button, keyAttr, busy });
 placement.bind($('inspector'));
 const supportPrompt = createSupportPrompt({
   container: $('support-dialog'), send, escapeHTML, icon, morph,

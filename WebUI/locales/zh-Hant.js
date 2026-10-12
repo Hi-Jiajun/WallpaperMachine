@@ -1286,6 +1286,28 @@ export default {
   'Choose an enabled, independent target display to check this wallpaper': '請選擇已啟用的獨立目標顯示器來檢查此桌布',
   'Reading the wallpaper’s files…': '正在讀取桌布檔案…',
 
+  // Black bars card (inspector)
+  'Black bars': '黑邊',
+  'Some videos have black bars baked into the picture. Looking samples a few frames of the file; nothing is changed.': '有些影片的畫面本身就帶有黑邊。檢查只會從檔案中擷取幾個影格，不會變更任何內容。',
+  'Look for black bars': '檢查黑邊',
+  'Look again': '再次檢查',
+  'Looking for black bars…': '正在檢查黑邊…',
+  'No black bars found.': '未發現黑邊。',
+  'Black bars found at the top and bottom, about {percent}% of the picture on each side.': '在上方與下方發現黑邊，各約佔畫面的 {percent}%。',
+  'Black bars found at the left and right, about {percent}% of the picture on each side.': '在左側與右側發現黑邊，各約佔畫面的 {percent}%。',
+  'Black bars found on all four sides, up to {percent}% of the picture.': '四邊都發現黑邊，最寬佔畫面的 {percent}%。',
+  'With Fill on this display, a scale factor of ×{factor} hides them.': '在此顯示器上選擇「填滿」並將縮放係數設為 ×{factor}，即可隱藏黑邊。',
+  'Fill on this display already crops them out.': '在此顯示器上，「填滿」已經會裁掉黑邊。',
+  'This display uses {mode} scaling. Black bars can be hidden with Fill and a scale factor.': '此顯示器的縮放模式為「{mode}」。黑邊可透過「填滿」和縮放係數來隱藏。',
+  'The bars are uneven, so a scale factor could not hide them without cutting into the picture.': '黑邊寬度不均勻，用縮放係數隱藏會連同部分畫面一起裁掉。',
+  'The bars look too large to be reliable, so nothing is suggested.': '黑邊大到不太可信，因此不提供建議。',
+  'The sampled frames are too dark to tell.': '擷取的影格太暗，無法判斷。',
+  'The sampled frames do not agree on where the bars are.': '擷取的各影格對黑邊位置的判斷不一致。',
+  'Too few different frames could be sampled to tell.': '能擷取到的不同影格太少，無法判斷。',
+  'This video cannot be read here, so it cannot be checked.': '無法在此讀取這部影片，因此無法檢查。',
+  'Reading the video took too long.': '讀取影片耗時過長。',
+  'The video changed while it was being checked. Look again.': '檢查期間影片發生了變化，請再次檢查。',
+
   // Saved playlists and collection sources (Settings: displays)
   'Collection “{name}”': '收藏集「{name}」',
   'A collection that no longer exists': '已不存在的收藏集',
