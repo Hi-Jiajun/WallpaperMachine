@@ -132,10 +132,15 @@ per-Space assignments; see
   and are written when it attaches; overflow is reported, not silent; loads start
   only once the log is open; concurrent lines all arrive.
 - `DiagnosticsRedactorTests` — home paths in all forms, user and account names
-  as whole tokens only, SteamCMD sign-in names, credential values.
+  as whole tokens only, SteamCMD sign-in names, credential values, the beta
+  identifier of macOS reports.
 - `DiagnosticsBundleTests` — newest sessions first (including `-N` suffix order),
   the byte budget with tail truncation, crash-report prefix, age and count
-  filters, a missing extension log noted, and the zip's actual entries.
+  filters, a missing extension log noted, the load journal, resource, spin and
+  hang reports from both report folders (prefix, extension, age, `Retired/`,
+  count, the host name dropped from stored names, an oversized file's tail, an
+  unreadable system folder noted without failing the export), and the zip's
+  actual entries.
 - `RuntimeCountersTests`, `RuntimeDiagnosticsReportTests` and
   `RuntimeDiagnosticsWindowTests` — counters record only inside an open,
   self-expiring session, per surface, with a bounded table; the report keeps
