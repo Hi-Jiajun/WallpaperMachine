@@ -34,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var webWallpaperHost: WebWallpaperHost?
     private var nativeVideoHost: NativeVideoWallpaperHost?
     private var presentationPolicy: WallpaperPresentationPolicy?
+    private var windowAuditor: WallpaperWindowAuditor?
     private var appRuleMonitor: AppRuleMonitor?
     private var otherAudioMonitor: OtherAudioMonitor?
     private var systemConditionMonitor: SystemConditionMonitor?
@@ -208,6 +209,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             webHost.onSurfacesChanged = { [weak self, weak lockScreen] in
                 guard let self, !self.shutdownInProgress else { return }
                 self.presentationPolicy?.evaluate()
+                self.windowAuditor?.windowsMayHaveChanged()
                 guard lockScreen?.ownsDesktopProvider != true else { return }
                 do { try self.startDesktopWallpaperSync() } catch {
                     AppLog.error("Desktop poster sync could not be restarted: \(error.localizedDescription)")
@@ -227,6 +229,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             nativeVideo.onSurfacesChanged = { [weak self] in
                 guard let self, !self.shutdownInProgress else { return }
                 self.presentationPolicy?.evaluate()
+                self.windowAuditor?.windowsMayHaveChanged()
             }
             nativeVideo.start()
             store.onSnapshotApplied = { [weak self, weak lockScreen] in
@@ -240,6 +243,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 self.sceneMediaSink?.reconcile()
                 self.nativeVideoHost?.reconcile()
                 self.presentationPolicy?.evaluate()
+                self.windowAuditor?.windowsMayHaveChanged()
                 // Play, pause and a changed library or display set are when a waiting playlist
                 // change can happen.
                 self.automaticWallpapers?.scheduler.evaluate()
@@ -314,7 +318,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                                 try await store.setPresentationUnloadedAsync(true)
                             }
                             self.appliedGlobalPresentation = presentation
-                            if resuming { self.desktopWallpaperSync?.presentationResumed() }
+                            if resuming {
+                                self.desktopWallpaperSync?.presentationResumed()
+                                self.windowAuditor?.presentationResumed()
+                            }
                             // A playlist change that fell due while presentation was suspended
                             // happens now that it runs again.
                             self.automaticWallpapers?.scheduler.evaluate()
@@ -387,6 +394,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             policy.start()
             desktopSpaces = .shared
             desktopSpaces?.start()
+            // After the Space monitor, whose topology the auditor reads to tell a
+            // full-screen Space from a wallpaper window that is missing.
+            let auditor = WallpaperWindowAuditor(
+                canExpectVisible: { [weak self] in self?.presentationPolicy?.globalPresentation == .running },
+                isDesktopSpace: { WallpaperWindowAuditor.spaceIsDesktop(displayID: $0, in: .shared) })
+            windowAuditor = auditor
+            auditor.start()
             startPlaylistScheduler(store: store)
             startAutomaticWallpapers(store: store)
             // The Shortcuts app lists these; commands wait for the handler set after bootstrap.
@@ -668,6 +682,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         wallpaperEnergy = nil
         presentationPolicy?.stop()
         presentationPolicy = nil
+        windowAuditor?.stop()
+        windowAuditor = nil
         desktopWallpaperSync?.stop()
         previewWindow?.session.close()
         previewWindow?.close()
@@ -836,6 +852,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 wallpaperEnergy = nil
                 presentationPolicy?.stop()
                 presentationPolicy = nil
+                windowAuditor?.stop()
+                windowAuditor = nil
                 desktopWallpaperSync = nil
                 sceneMediaSink?.shutdown()
                 sceneMediaSink = nil

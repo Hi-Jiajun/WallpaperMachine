@@ -192,7 +192,7 @@ Services are grouped by domain under `App/Services/`; each domain has a matching
 |---|---|---|
 | `Appearance/` | `AppThemePreferences`, `AppThemeStore` | Mode/accent/tone preferences shared by AppKit and the page |
 | `Automation/` | `AutomationCommand`, `AppAutomation`, `HotKeyPreferences`, `GlobalHotKeys`, `WallpaperFocusFilter`, `WallpaperAutomationStore/Planner/Scheduler/Controller`, `WallpaperSolarTimes`, App Intents in `WallpaperIntents.swift` and `WallpaperConfigurationIntents.swift` | Explicit commands through `AppDelegate.performAutomation`; per-display weekday/solar/appearance rules and temporary Focus choices through the shared command queue; see [features/automation.md](features/automation.md) |
-| `Desktop/` | `DesktopSpaceWallpaperAPI`, `DesktopWallpaperLedger`, `DesktopWallpaperSync`, `WallpaperSpaceMonitor`, `WallpaperPresentationPolicy`, `WallpaperCoverageProbes`, `PlaybackPreferences`, `AppRuleMonitor`, `OtherAudioMonitor`, `SystemConditionMonitor`, `DisplayConfiguration`, `WallpaperDisplayTransfer` | Per-Space desktop picture control, original-wallpaper journal, still-poster sync, playback rules, per-display renderer suspension, display refresh and multi-display copy/swap |
+| `Desktop/` | `DesktopSpaceWallpaperAPI`, `DesktopWallpaperLedger`, `DesktopWallpaperSync`, `WallpaperSpaceMonitor`, `WallpaperPresentationPolicy`, `WallpaperCoverageProbes`, `WallpaperWindowAuditor`, `DesktopWindowObservation`, `PlaybackPreferences`, `AppRuleMonitor`, `OtherAudioMonitor`, `SystemConditionMonitor`, `DisplayConfiguration`, `WallpaperDisplayTransfer` | Per-Space desktop picture control, original-wallpaper journal, still-poster sync, playback rules, per-display renderer suspension, display refresh and multi-display copy/swap |
 | `Diagnostics/` | `RuntimeDiagnosticsSession`, `DiagnosticsBundle`, `SessionLedger`, `EnergyUsageMonitor`, `WallpaperEnergyRecorder` | Runtime counters, the diagnostics report, how the previous session ended, energy readout and per-wallpaper ratings; see [features/diagnostics.md](features/diagnostics.md) |
 | `GitHub/` | `GitHubReleaseClient`, `AppUpdateStore`, `AppUpdateInstaller`, `WhatsNewStore` | GitHub Releases update check, download, in-place install; which what's-new announcements were shown |
 | `Library/` | `ClientPaths`, `WallpaperImportService`, `LibraryImportStore`, `WallpaperDeletionService`, `StillImageWallpaper`, `WallpaperBackupService`, `WallpaperCollectionStore`, `WallpaperPresetStore`, `WallpaperHistoryStore` | App-support layout, non-destructive import (run for the app, not the panel page, so Finder and Dock drops import too), still pictures packaged as `web` wallpapers, guarded deletion, collections, presets, history, backup and restore |
@@ -281,6 +281,20 @@ setter through optional private CoreGraphics and HIServices symbols, falling bac
   settles: one that already runs a scene keeps its previous descriptor, so the scene is not
   closed and reloaded, and a new one gets no window yet. If the primary display reports no
   pixels, the whole refresh waits.
+- **Window audit.** `WallpaperWindowAuditor` checks that every wallpaper window is ordered in on
+  the active Space, listed on screen by the window server and inside its display (the
+  `DesktopWindowState` classifier the diagnostics report also uses). It looks only after an event
+  that can move windows: a Space change, `didWake`, `screensDidWake`, a screen change that moved
+  `DisplayConfiguration`, the presentation policy resuming (a wake usually lands on a locked
+  session, where the wake itself expects nothing on screen), and a wallpaper window number it has
+  not seen, which `AppDelegate` reports from the snapshot, web and native-video callbacks. It
+  looks at +1 s and +3 s (+1, +2 and +5 s for a new window) and stops at the first look where
+  nothing is wrong. A later trigger replaces an earlier schedule, and nothing polls. It stays
+  silent while `globalPresentation` is not `.running` (display sleep, session lock, an app rule),
+  and for the two Space faults on a display whose current Space is a full-screen app's, where
+  desktop windows are legitimately off screen. A fault is logged with its diagnostics line;
+  repairing it is off unless a hidden preference is set
+  ([desktop window audit](features/diagnostics.md#desktop-window-audit)).
 
 ### Renderer bridge (generated uniffi)
 

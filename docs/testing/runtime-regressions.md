@@ -455,8 +455,9 @@ engine to redo, and when.
 - **A screen change that moves nothing does no work** — `DisplayRefreshCoalescerTests`
   (`testScreenChangesThatLeaveTheDisplaysAsTheyWereDoNotRefresh`,
   `testAnUnchangedBurstDuringARefreshEndsWithIt`,
-  `testTwoReadingsOfTheSameDisplaysAreEqual`), `WallpaperSpaceMonitorTests.testOnlyAScreenChangeThatMovesADisplayRereadsTheSpaces`
-  and `WallpaperPresentationPolicyTests.testOnlyAScreenChangeThatMovesAWorkingAreaIsEvaluated`.
+  `testTwoReadingsOfTheSameDisplaysAreEqual`), `WallpaperSpaceMonitorTests.testOnlyAScreenChangeThatMovesADisplayRereadsTheSpaces`,
+  `WallpaperPresentationPolicyTests.testOnlyAScreenChangeThatMovesAWorkingAreaIsEvaluated`
+  and `WallpaperWindowAuditorTests.testScreenChangesThatLeaveTheDisplaysAsTheyWereDoNotCheck`.
   An XDR display posts a screen change for every frame of an EDR headroom ramp;
   each one would run a bridge refresh, republish every snapshot, re-sync the lock
   screen, push the whole control panel and ask the window server for the

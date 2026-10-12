@@ -103,8 +103,19 @@ and a newer command in the same slot replaces a waiting one.
   more; screen changes that leave the displays as they were refresh nothing; a
   failed refresh is retried. `DisplayTitleResolverTests` — localized display
   names replace the renderer's label.
+- `WallpaperWindowAuditorTests` — against injected window observations and
+  recorded delays, asserting the reports the auditor makes (fault, window, look,
+  repairs done) and pinning the wording of the log lines in one test: a healthy
+  desktop writes nothing and looks once; a window off
+  its Space is reported at the first look and again at the last, repaired only with
+  the hidden preference and never beyond the two-step ladder or its budget; a
+  burst of triggers keeps one schedule; nothing happens while presentation is
+  paused or for a Space fault in a full-screen Space; repeated reports are
+  throttled; only a new window number or a moved display starts a check.
 
-Not covered: the real Focus Settings pane and a real Low Power Mode.
+Not covered: the real Focus Settings pane and a real Low Power Mode; real
+wallpaper windows on another Space and the effect of either repair step (needs a
+desktop run).
 
 ### Spaces
 

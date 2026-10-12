@@ -331,6 +331,58 @@ the wallpaper windows legitimately read `notOnActiveSpace`. Whether any of these
 faults explains a missing wallpaper on a given Mac is not established here; the
 lines exist to show which one a report has.
 
+### Desktop window audit
+
+The export reads the windows once. The running app also looks at them after an
+event that can move a window, and writes a warning to the application log when
+one is not showing. It never polls.
+
+| Trigger | Looks at |
+|---|---|
+| A Space change, the Mac waking, the displays waking, the wallpaper resuming after the policy paused it (an unlock, for one), or a display added, removed or moved (screen changes that leave every display as it was are ignored) | +1 s and +3 s |
+| A wallpaper window the app had not seen (a wallpaper opened, or the window was rebuilt) | +1 s, +2 s and +5 s |
+
+A new trigger replaces a schedule that is still waiting. Each look uses the
+state table above and ends the audit at the first look where every window is
+`ok`. Nothing is written for a healthy audit.
+
+The audit says nothing, and repairs nothing, when no window is expected to show:
+
+- the presentation policy has paused or unloaded the wallpaper (display sleep,
+  session lock, an app rule, or other-app audio set to pause);
+- for `notOnActiveSpace` and `offScreenInWindowServer`, the window's display is
+  in a full-screen app's Space, which the Space monitor reports as having no
+  current desktop. Where the Space topology cannot be read, the fault is
+  recorded.
+
+A fault the Space does not explain (`outsideItsDisplay`, `transparent`,
+`notOrderedIn`, `absentFromWindowServer`) is recorded in every Space.
+
+```
+desktop window audit: display 1 MWEWallpaperDesktopWindow #1234 is notOnActiveSpace at +1s after activeSpaceDidChange; desktop window MWEWallpaperDesktopWindow #1234 display 1: …; state notOnActiveSpace
+desktop window audit: display 1 MWEWallpaperDesktopWindow #1234 is still notOnActiveSpace at +3s after activeSpaceDidChange, after 0 repairs
+```
+
+The first line carries the same window line as the report. The second is written
+at the last look when the fault persists. A report of the same fault on the same
+window is not repeated within 60 s.
+
+**Repair is off by default.** Setting the hidden preference
+`WallpaperMachine.reassertDesktopWindows` to true
+(`defaults write app.wallpapermachine WallpaperMachine.reassertDesktopWindows -bool YES`;
+it is read at each look, so no relaunch is needed) lets each trigger apply at most two
+steps to a faulty window, one per look and only while it is still faulty:
+
+1. order the window front;
+2. set its level and collection behavior to what the app opens it with, then order it front.
+
+Each step is logged (`repair 1 (order front) applied to …`), and so is the
+recovery (`every wallpaper window is showing again at +3s after … , after 1 repair`).
+The windows are the app's own, so nothing here needs the Accessibility permission.
+The default is off because moving windows can make the window server recompose and
+the fault has not been seen on macOS 27.x. Whether to turn it on waits for a log from a
+Mac that shows the fault.
+
 ## Verification
 
 - Rust:
@@ -341,8 +393,11 @@ lines exist to show which one a report has.
 - Swift: `AppLogRouterTests`, `DiagnosticsRedactorTests`, `DiagnosticsBundleTests`,
   `SessionLedgerTests`, `CrashReportIndexTests`, `UncaughtExceptionLogTests`,
   `QuitReasonTests`, `QuitTimingsTests`, `AppUpdateTests` for when an install counts as
-  pending, and `DesktopWindowDiagnosticsTests` (state precedence, line format, window server
-  description parsing and the window ID array read, against injected observations).
+  pending, `DesktopWindowDiagnosticsTests` (state precedence, line format, window server
+  description parsing and the window ID array read, against injected observations),
+  and `WallpaperWindowAuditorTests` (when the audit looks and stops, what it logs and how
+  often, the repair ladder and its budget, and when it stays silent, with injected
+  observations and delays).
 - Not established by tests:
   - that a real scene's renderer lines carry its number on the desktop;
   - the unreadable-folder note on a Mac whose account is not in `_analyticsusers`
@@ -361,4 +416,8 @@ lines exist to show which one a report has.
   - Finder reveal;
   - the wallpaper window lines for open wallpaper windows (the window server read is checked
     against whatever window the session lists on screen, and skipped when there is none; the
-    AppKit read against an `NSWindow` that is never shown).
+    AppKit read against an `NSWindow` that is never shown);
+  - whether macOS ever leaves a wallpaper window on another Space on a given release, whether
+    a window of these kinds reports `isOnActiveSpace` in a full-screen Space, and whether
+    either repair step brings an off-Space window back: the audit's decisions are tested, the
+    live windows and the repair need a desktop run.
