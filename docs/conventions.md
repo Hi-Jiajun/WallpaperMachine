@@ -213,6 +213,10 @@ The rules that bind every change:
   - a new user-facing string and every shipped catalog;
   - `README.md` and `README.zh-CN.md`;
   - a vendored `upstream/` update and `upstream/provenance.json`.
+- History stays linear: catch up with `origin/main` by rebasing unpushed commits
+  (`git pull --rebase`), not with a `Merge remote-tracking branch` commit. CI commits
+  to `main` on its own (version bumps, the Supporter list), so a local `main`
+  falls behind often. Commits that are already pushed are never rewritten.
 - Never commit `artifacts/`, `build/`, screenshots, traces, wallpaper payloads,
   Steam session data, credentials, or absolute personal paths.
 

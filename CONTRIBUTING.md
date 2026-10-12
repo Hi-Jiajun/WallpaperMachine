@@ -108,7 +108,8 @@ The rules contributors trip over; [AGENTS.md](AGENTS.md) and
   Leave it out unless a maintainer asked for that release.
 - CI commits to `main` on its own (version bumps and the Supporter list), so a
   long-lived branch falls behind quickly; update it from `origin/main` before you
-  ask for review.
+  ask for review, rebasing commits you have not pushed yet rather than merging
+  `origin/main` into them.
 - The [PR template](.github/pull_request_template.md) carries the checklist, and
   the definition of done is in [docs/conventions.md](docs/conventions.md#definition-of-done).
 

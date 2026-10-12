@@ -104,8 +104,10 @@ use `rg -u` only when those are the target.
   others' edits unstaged; messages follow
   [conventions](docs/conventions.md#commits-and-pull-requests) (`feat`/`fix`/`perf`
   subjects and bodies feed the user-facing release notes). Pull request titles use the
-  same format, because a squash merge can make the title the commit subject. Never
-  push, amend, rebase, force or rewrite history unless asked.
+  same format, because a squash merge can make the title the commit subject. To catch
+  up with `origin/main`, rebase unpushed commits onto it (`git pull --rebase`) instead
+  of creating a merge commit; never rewrite commits that are already pushed. Never
+  push, amend or force unless asked.
 - Personal opt-ins: a developer's local rules (`CLAUDE.local.md`, an agent tool dir)
   may enable exactly two things: committing without asking, and ending app-code tasks
   with a Release build. They never relax any other rule here; on conflict, follow
