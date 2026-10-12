@@ -599,8 +599,8 @@ extension WebPanelController {
     case "appRuleRemove":
       guard let id = UUID(uuidString: try request.string("id")) else { throw WebPanelRequest.invalid }
       playback.removeRule(id: id)
-    case "lockScreenRetry": store.lockScreenWallpaper?.refresh(retryingLockScreen: true)
-    case "screenSaverRetry": store.lockScreenWallpaper?.refresh()
+    case "lockScreenRetry": store.lockScreenWallpaper?.retry(lockScreen: true)
+    case "screenSaverRetry": store.lockScreenWallpaper?.retry(lockScreen: false)
     case "openLoginItemsSettings": openLoginItemsSettings()
     case "openFocusSettings":
       // Focus filters are added to a Focus there; the app cannot add its own.

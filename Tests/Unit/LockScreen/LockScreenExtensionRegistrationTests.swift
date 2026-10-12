@@ -259,9 +259,10 @@ final class LockScreenExtensionRegistrationTests: XCTestCase {
     }
     let output = Registry.output(paths).replacingOccurrences(of: "     app.", with: "=    app.")
       .replacingOccurrences(of: "(1.2.5)", with: "(99.2.5)")
-    XCTAssertEqual(Set(try LockScreenExtensionRegistration.parseRegistrations(output)), Set(paths))
-    XCTAssertEqual(try LockScreenExtensionRegistration.parseRegistrations("  (no matches)\n"), [])
-    XCTAssertEqual(try LockScreenExtensionRegistration.parseRegistrations(Registry.output([paths[0]])), [paths[0]])
+    XCTAssertEqual(Set(try LockScreenExtensionRegistration.parseRecords(output).map(\.url)), Set(paths))
+    XCTAssertEqual(try LockScreenExtensionRegistration.parseRecords("  (no matches)\n"), [])
+    XCTAssertEqual(
+      try LockScreenExtensionRegistration.parseRecords(Registry.output([paths[0]])).map(\.url), [paths[0]])
   }
 
   func testEmptyTruncatedAndForeignDiscoveryOutputIsRejected() throws {
@@ -269,7 +270,137 @@ final class LockScreenExtensionRegistrationTests: XCTestCase {
     for invalid in ["", "pkd unavailable", output.replacingOccurrences(of: " (1 plug-in)\n", with: ""),
       output.replacingOccurrences(of: "(1 plug-in)", with: "(2 plug-ins)"),
       output.replacingOccurrences(of: LockScreenConfiguration.extensionIdentifier, with: "unrelated.extension")] {
-      XCTAssertThrowsError(try LockScreenExtensionRegistration.parseRegistrations(invalid))
+      XCTAssertThrowsError(try LockScreenExtensionRegistration.parseRecords(invalid))
+    }
+  }
+
+  func testElectionMarksAreParsedAndOnlyIgnoredBlocksActivation() async throws {
+    let app = try makeApp("Current")
+    let ext = app.appendingPathComponent(LockScreenExtensionRegistration.extensionPath)
+    let other = try makeApp("Other")
+    let otherExt = other.appendingPathComponent(LockScreenExtensionRegistration.extensionPath)
+
+    // Every mark pluginkit(8) can print, with spaces and Unicode in the path.
+    let spaced = URL(fileURLWithPath: "/a b/调试 (new).app/" + LockScreenExtensionRegistration.extensionPath)
+    let marks: [(Character, LockScreenExtensionRegistration.Mark)] = [
+      (" ", .blank), ("+", .elected), ("-", .ignored), ("=", .superseded), ("!", .debugger), ("?", .unknown),
+    ]
+    for (character, mark) in marks {
+      let records = try LockScreenExtensionRegistration.parseRecords(
+        Registry.output([spaced], marks: [spaced.path: character]))
+      XCTAssertEqual(records, [.init(url: spaced, mark: mark)], "mark \(character)")
+    }
+    // `-A` lists every version at one path. A superseded older one does not hide the current
+    // one's election, and versions that disagree are not treated as ignored.
+    func versions(_ older: Character, _ newer: Character) throws -> [LockScreenExtensionRegistration.Mark] {
+      let line = { (mark: Character, version: String) in
+        "\(mark)    \(LockScreenConfiguration.extensionIdentifier)(\(version))\t855441FD-9FFC-4FAA-A50F-5F5B50701AFD\t2026-10-05 06:06:07 +0000\t\(spaced.path)\n"
+      }
+      return try LockScreenExtensionRegistration.parseRecords(
+        line(older, "1.2.4") + line(newer, "1.2.5") + " (2 plug-ins)\n").map(\.mark)
+    }
+    XCTAssertEqual(try versions("-", "-"), [.ignored])
+    XCTAssertEqual(try versions("=", "-"), [.ignored])
+    XCTAssertEqual(try versions("=", "="), [.superseded])
+    XCTAssertEqual(try versions("-", " "), [.unknown])
+
+    // Only an ignore on this app's copy stops activation; the normal blank state and every
+    // other mark let it through.
+    for (character, mark) in marks {
+      let registry = Registry(paths: [ext], marks: [ext: character])
+      do {
+        try await registration(app, registry: registry).prepare()
+        XCTAssertNotEqual(mark, .ignored, "an ignored renderer must stop activation")
+      } catch let failure as LockScreenWallpaperFailure {
+        XCTAssertEqual(mark, .ignored, "mark \(character) must not stop activation")
+        XCTAssertEqual(failure.reason, .extensionTurnedOff)
+        XCTAssertFalse(failure.message.isEmpty)
+      }
+      let state = await registry.state()
+      XCTAssertTrue(state.commands.allSatisfy { $0.arguments.first == "-m" }, "reading never changes an election")
+    }
+
+    // The same through a reconciliation that registers this copy and removes another one,
+    // and through a renderer that was never registered here.
+    let converging = Registry(paths: [otherExt], marks: [otherExt: "-", ext: "-"])
+    do {
+      try await registration(app, registry: converging).prepare()
+      XCTFail("An ignored renderer must stop activation after reconciling")
+    } catch let failure as LockScreenWallpaperFailure {
+      XCTAssertEqual(failure.reason, .extensionTurnedOff)
+    }
+    var state = await converging.state()
+    XCTAssertEqual(state.paths, [ext], "Registration still converges before the election is judged")
+    XCTAssertFalse(state.commands.contains { $0.arguments.first == "-e" })
+
+    // Another copy being ignored is not this app's problem.
+    let neighbour = Registry(paths: [ext, otherExt], marks: [otherExt: "-"])
+    try await registration(app, registry: neighbour).prepare()
+    state = await neighbour.state()
+    XCTAssertEqual(state.paths, [ext])
+  }
+
+  func testAnIgnoredRendererEndsNoProcesses() async throws {
+    let app = try makeApp("Current")
+    let ext = app.appendingPathComponent(LockScreenExtensionRegistration.extensionPath)
+    let table = FakeExtensionProcessTable([FakeExtensionProcessTable.process(1, bundle: "/gone/Other.appex")])
+    let registry = Registry(paths: [ext], marks: [ext: "-"])
+    do {
+      try await registration(app, registry: registry, processes: table.processes).prepare()
+      XCTFail("An ignored renderer must stop activation")
+    } catch let failure as LockScreenWallpaperFailure {
+      XCTAssertEqual(failure.reason, .extensionTurnedOff)
+    }
+    XCTAssertTrue(table.signals.isEmpty, "Nothing is ended for a renderer macOS will not run")
+    XCTAssertEqual(table.lists, 0)
+  }
+
+  func testEnableExtensionRunsOneElectionCommandAndVerifiesIt() async throws {
+    let app = try makeApp("Current")
+    let ext = app.appendingPathComponent(LockScreenExtensionRegistration.extensionPath)
+    let registry = Registry(paths: [ext], marks: [ext: "-"])
+    let service = registration(app, registry: registry)
+    try await service.enableExtension()
+    var state = await registry.state()
+    XCTAssertEqual(
+      state.commands.filter { $0.arguments.first == "-e" }.map(\.arguments),
+      [["-e", "use", "-i", LockScreenConfiguration.extensionIdentifier]])
+    XCTAssertEqual(state.commands.last?.arguments.first, "-m", "The result is read back from the registry")
+    try await service.prepare()
+
+    // A renderer macOS keeps ignoring is reported, not claimed as repaired.
+    let stubborn = Registry(paths: [ext], marks: [ext: "-"], electionSticks: true)
+    do {
+      try await registration(app, registry: stubborn).enableExtension()
+      XCTFail("A renderer that stays ignored must fail")
+    } catch let failure as LockScreenWallpaperFailure {
+      XCTAssertEqual(failure.reason, .extensionTurnedOff)
+    }
+    state = await stubborn.state()
+    XCTAssertEqual(state.commands.filter { $0.arguments.first == "-e" }.count, 1)
+
+    // A refused command fails the same way instead of the generic registration error.
+    let refused = Registry(paths: [ext], marks: [ext: "-"], failureFlag: "-e")
+    do {
+      try await registration(app, registry: refused).enableExtension()
+      XCTFail("A refused election command must fail")
+    } catch let failure as LockScreenWallpaperFailure {
+      XCTAssertEqual(failure.reason, .extensionTurnedOff)
+    }
+  }
+
+  func testEnableExtensionLeavesAnElectionAloneUnlessThisCopyIsIgnored() async throws {
+    let app = try makeApp("Current")
+    let other = try makeApp("Other")
+    let ext = app.appendingPathComponent(LockScreenExtensionRegistration.extensionPath)
+    let otherExt = other.appendingPathComponent(LockScreenExtensionRegistration.extensionPath)
+    for registry in [
+      Registry(paths: [ext]), Registry(paths: [ext], marks: [ext: "+"]),
+      Registry(paths: [ext, otherExt], marks: [otherExt: "-"]), Registry(paths: []),
+    ] {
+      try await registration(app, registry: registry).enableExtension()
+      let state = await registry.state()
+      XCTAssertTrue(state.commands.allSatisfy { $0.arguments.first == "-m" }, "no election was asked to change")
     }
   }
 
@@ -283,19 +414,26 @@ final class LockScreenExtensionRegistrationTests: XCTestCase {
   private actor Registry {
     struct Command { var tool: String; var arguments: [String] }
     private var paths: [URL]
+    private var marks: [String: Character]
     private var commands: [Command] = []
     private let ignoreRemoval: Bool
     private let failureFlag: String?
     private let cancel: Bool
     private let removeWithParent: Bool
+    private let electionSticks: Bool
 
-    init(paths: [URL], ignoreRemoval: Bool = false, failureFlag: String? = nil,
-      cancel: Bool = false, removeWithParent: Bool = false) {
+    /// `marks` are the election marks pluginkit prints in column 0 (blank when absent);
+    /// `electionSticks` makes `-e use` change nothing, like a refused election.
+    init(paths: [URL], marks: [URL: Character] = [:], ignoreRemoval: Bool = false,
+      failureFlag: String? = nil, cancel: Bool = false, removeWithParent: Bool = false,
+      electionSticks: Bool = false) {
       self.paths = paths
+      self.marks = Dictionary(uniqueKeysWithValues: marks.map { ($0.key.path, $0.value) })
       self.ignoreRemoval = ignoreRemoval
       self.failureFlag = failureFlag
       self.cancel = cancel
       self.removeWithParent = removeWithParent
+      self.electionSticks = electionSticks
     }
 
     func state() -> (paths: [URL], commands: [Command]) { (paths, commands) }
@@ -307,12 +445,15 @@ final class LockScreenExtensionRegistrationTests: XCTestCase {
         throw NSError(domain: "registration-command", code: 1)
       }
       switch (tool.lastPathComponent, arguments[0]) {
-      case ("pluginkit", "-m"): return Self.output(paths)
+      case ("pluginkit", "-m"): return Self.output(paths, marks: marks)
       case ("pluginkit", "-a"):
         let url = URL(fileURLWithPath: arguments[1])
         if !paths.contains(url) { paths.append(url) }
       case ("pluginkit", "-r"):
         if !ignoreRemoval { paths.removeAll { $0.path == arguments[1] } }
+      case ("pluginkit", "-e"):
+        XCTAssertEqual(arguments, ["-e", "use", "-i", LockScreenConfiguration.extensionIdentifier])
+        if !electionSticks { for path in paths { marks[path.path] = "+" } }
       case ("lsregister", "-u"):
         if removeWithParent { paths.removeAll { $0.path.hasPrefix(arguments[1] + "/") } }
       case ("lsregister", "-f"): break
@@ -321,10 +462,11 @@ final class LockScreenExtensionRegistrationTests: XCTestCase {
       return ""
     }
 
-    nonisolated static func output(_ paths: [URL]) -> String {
+    /// `marks` are keyed by path.
+    nonisolated static func output(_ paths: [URL], marks: [String: Character] = [:]) -> String {
       if paths.isEmpty { return "  (no matches)\n" }
       return paths.map {
-        "     \(LockScreenConfiguration.extensionIdentifier)(1.2.5)\t855441FD-9FFC-4FAA-A50F-5F5B50701AFD\t2026-10-05 06:06:07 +0000\t\($0.path)\n"
+        "\(marks[$0.path] ?? " ")    \(LockScreenConfiguration.extensionIdentifier)(1.2.5)\t855441FD-9FFC-4FAA-A50F-5F5B50701AFD\t2026-10-05 06:06:07 +0000\t\($0.path)\n"
       }.joined() + " (\(paths.count) plug-in\(paths.count == 1 ? "" : "s"))\n"
     }
   }

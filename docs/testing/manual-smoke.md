@@ -296,6 +296,13 @@ earlier wallpaper (select it again in System Settings once).
       presentation` line per event and the `Playback ... paused=` lines follow the real
       display state, including after a wake that logs no `display wake`
       ([lock-screen](../features/lock-screen.md#after-sleep-wake-lock-and-unlock)).
+- [ ] Only with explicit authorization, since it changes a system election: run
+      `pluginkit -e ignore -i app.wallpapermachine.wallpaper-extension`, then enable
+      Animate lock screen. It stops at once, without waiting for a frame, and says macOS
+      has the renderer switched off; Retry runs `pluginkit -e use`, activates, and
+      `pluginkit -m -i app.wallpapermachine.wallpaper-extension` now starts with `+`.
+      Clear the election afterwards with `pluginkit -e default -i
+      app.wallpapermachine.wallpaper-extension`.
 - [ ] Do not run this alongside a competing global wallpaper manager; a conflict
       is reported and ownership-aware restoration runs instead.
 

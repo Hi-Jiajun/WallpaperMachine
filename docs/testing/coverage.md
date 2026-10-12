@@ -491,12 +491,21 @@ or depend on a second physical monitor.
   independently; shared-extension and Idle-only publication failures roll back;
   stale failure reports are ignored while a current renderer failure restores the
   selection; one bounded automatic retry repairs a wrong extension copy; shutdown
-  restores native choices before waiting for Desktop restoration.
+  restores native choices before waiting for Desktop restoration; a switched-off
+  renderer stops activation at once and only the user's Retry (lock-screen or
+  screen-saver) switches it back on, once per click, never from the monitor after a
+  relaunch, after another failure, after a click that had nothing to activate or
+  from switching a mode off and on again.
 - `LockScreenExtensionRegistrationTests` use synthetic app bundles and an
   injected registry: current-copy selection, duplicate and removed-copy cleanup,
   symlink aliases, invalid inventory rejection, cancellation, command failures;
   stale extension processes are ended only after the registry confirmed the
-  intended copy and never after a failed, conflicting or cancelled registration.
+  intended copy and never after a failed, conflicting or cancelled registration;
+  every election mark is parsed (including superseded and disagreeing versions at one
+  path) and only an ignore on this app's copy stops activation, with the specific
+  failure and nothing ended; the repair runs exactly one `pluginkit -e use`, reads the
+  registry back, reports an election that does not change or a refused command, and
+  leaves an election alone that is not this copy's ignore.
   `LockScreenExtensionDiagnosticsTests`, `LockScreenSurfaceRegistryTests`,
   `LockScreenIdleExitTests` and `LockScreenFrameBackingTests` (snapshot pixels
   composited under a Metal layer without a drawable) cover the extension side.
@@ -533,8 +542,9 @@ or depend on a second physical monitor.
 Not covered: real lock-screen visual timing, private XPC snapshot transport, the
 wallpaper service's wake and time-change notices completing, the real display power
 and session state after sleep, wake, lock and unlock, live
-registration repair, ending a genuinely stale extension process and macOS choosing
-the intended extension copy; these need an authorized runtime check
+registration repair, ending a genuinely stale extension process, a really ignored
+renderer being switched back on and macOS choosing the intended extension copy; these
+need an authorized runtime check
 ([lock-screen](../features/lock-screen.md#verification)).
 
 ## NativeVideo

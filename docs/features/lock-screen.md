@@ -200,7 +200,9 @@ error. Reports for an earlier revision are ignored, and a successful configurati
 report is not frame readiness. For older extensions that cannot send this report, a
 timed-out activation checks the current user's running extension paths and identifies
 a different app copy when one is found; otherwise the generic "macOS did not load the
-lock-screen renderer" message means no matching frame acknowledgement arrived.
+lock-screen renderer" message means no matching frame acknowledgement arrived. A
+renderer the user switched off in macOS is told apart earlier still, while registering,
+and stops activation at once ([App copies and registration](#app-copies-and-registration)).
 
 The extension keeps a bounded log at
 `~/Library/Application Support/WallpaperMachine/LockScreenExchange/extension.log`
@@ -230,12 +232,30 @@ registration's path is never unregistered, and failed discovery never authorizes
 cleanup.
 
 Registration commands run off the UI thread with cancellation and a ten-second
-deadline each. They do not change extension enable/disable elections, reset the
-system registry, install apps or restart app copies. Snapshot refreshes share an
+deadline each. Registration never changes extension elections, resets the system
+registry, installs apps or restarts app copies. Snapshot refreshes share an
 in-progress attempt (neither restarting it nor resetting the automatic recovery
 limit), and changing a native-mode switch or shutting down cancels pending
 preparation before it can publish. Registration alone does not establish playback:
 activation still waits for the matching first-frame acknowledgement.
+
+The same registry listing carries the user's election for the renderer as the first
+character of each line (`pluginkit(8)`): blank when the user never chose, which is the
+normal state, `+` to use it, `-` to ignore it, `=` superseded, `!` for debugging.
+Only `-` on this app's copy is acted on. If it reads `-`, activation stops before
+anything is published, without the 35-second wait, and the row says macOS has the
+renderer switched off and Retry turns it back on. Retry, from either the lock-screen
+or the screen-saver row, then runs `pluginkit -e use -i
+app.wallpapermachine.wallpaper-extension` once and reads the registry again; if macOS
+still reports the renderer ignored the row says so and points to System Settings, and
+every further Retry tries once more. That command is the only place the app changes an
+election and it runs only for that click: the monitor, snapshot refreshes, a relaunch,
+switching a mode off or on (the offer is also dropped once both are off), a different
+earlier failure and a click that finds nothing to activate never run it.
+The other marks are logged and do not stop activation. The repair is skipped when this
+copy's election is not `-` (for example after the user switched it on in System
+Settings). It leaves the election at `+`; `pluginkit -e default -i
+app.wallpapermachine.wallpaper-extension` clears it again.
 
 Once the registry confirms this app's extension (never after a failure or a
 cancellation), activation ends leftover renderer processes. macOS can hand requests to
@@ -373,9 +393,10 @@ native-context/WebKit surface) are inventoried under *Lock screen* in
 [coverage](../testing/coverage.md). They never mutate LaunchServices or PlugInKit and
 select no real wallpaper. Real idle transitions, password UI, multi-monitor compositor
 delivery, sleep/wake visuals, live registration repair, ending a genuinely stale
-extension process, macOS choosing the intended extension and the wallpaper service's
-wake and time-change notices completing without an error in WallpaperAgent's log still
-require an authorized desktop check.
+extension process, macOS choosing the intended extension, switching a really ignored
+renderer back on from Retry and the wallpaper service's wake and time-change notices
+completing without an error in WallpaperAgent's log still require an authorized desktop
+check.
 
 ### After sleep, wake, lock and unlock
 

@@ -1683,6 +1683,225 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     try await service.shutdown()
   }
 
+  private func switchedOff(_ message: String = "the renderer is switched off") -> LockScreenWallpaperFailure {
+    LockScreenWallpaperFailure(message: message, reason: .extensionTurnedOff)
+  }
+
+  @MainActor
+  private func electionService(
+    prepare: @escaping () async throws -> Void, enable: @escaping () async throws -> Void,
+    scenes: @escaping () async throws -> [BridgeLockScreenScene]
+  ) -> LockScreenWallpaperService {
+    LockScreenWallpaperService(prepareExtension: prepare, enableExtension: enable,
+      notifyConfigurationChanged: {}, scenes: scenes,
+      selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {}),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
+      displayUUID: { _ in "one" })
+  }
+
+  @MainActor
+  func testRetryRepairsAnIgnoredExtensionButNothingElseDoes() async throws {
+    // A saved request, as after a relaunch: the first activation is the monitor's.
+    defaults.set(true, forKey: preference)
+    var record = scene()
+    record.displayId = 1
+    var off = true
+    var events: [String] = []
+    let service = electionService(prepare: {
+      events.append("prepare")
+      if off { throw self.switchedOff() }
+    }, enable: {
+      events.append("enable")
+      off = false
+    }, scenes: { [record] })
+    try service.start()
+    let monitor = try XCTUnwrap(timers.first)
+    monitor.fire()
+    await waitFor("activation stopped by the switched-off renderer") { !service.isBusy }
+    XCTAssertEqual(service.errorMessage, "the renderer is switched off")
+    XCTAssertFalse(service.isEnabled)
+    XCTAssertFalse(service.canRefreshAutomatically)
+    XCTAssertFalse(monitor.isValid, "No steady refresh runs while the error stands")
+    XCTAssertEqual(events, ["prepare"], "Activation alone never changes an election")
+    XCTAssertFalse(FileManager.default.fileExists(
+      atPath: exchange.appendingPathComponent(LockScreenConfiguration.fileName).path),
+      "Nothing is published for a renderer macOS will not run")
+    XCTAssertEqual(try selectedProvider("Desktop"), "display-one-desktop")
+
+    let responder = readinessResponder()
+    defer { responder.cancel() }
+    service.retry(lockScreen: true)
+    await waitFor("Retry") { !service.isBusy }
+    XCTAssertEqual(events, ["prepare", "enable", "prepare"], "The election is repaired first, once")
+    XCTAssertTrue(service.isEnabled)
+    XCTAssertNil(service.errorMessage)
+
+    service.refresh()
+    await waitFor("steady refresh") { !service.isBusy }
+    service.retry(lockScreen: true)
+    await waitFor("another Retry") { !service.isBusy }
+    XCTAssertEqual(events.filter { $0 == "enable" }.count, 1, "Only a stopped activation is repaired")
+    try await service.shutdown()
+  }
+
+  @MainActor
+  func testScreenSaverRetryRepairsOncePerClickAndKeepsReportingAStubbornElection() async throws {
+    var record = scene()
+    record.displayId = 1
+    var enables = 0
+    var stubborn = true
+    let service = electionService(prepare: {
+      if enables == 0 { throw self.switchedOff() }
+    }, enable: {
+      enables += 1
+      if stubborn { throw self.switchedOff("the renderer stayed switched off") }
+    }, scenes: { [record] })
+    try service.start()
+    service.setScreenSaverEnabled(true)
+    await waitFor("activation stopped") { !service.isBusy }
+    XCTAssertEqual(service.screenSaverError, "the renderer is switched off")
+    XCTAssertEqual(enables, 0)
+
+    service.retry(lockScreen: false)
+    await waitFor("first Retry") { !service.isBusy }
+    XCTAssertEqual(enables, 1)
+    XCTAssertEqual(service.screenSaverError, "the renderer stayed switched off")
+    XCTAssertFalse(service.screenSaverEnabled)
+    XCTAssertEqual(try selectedProvider("Idle"), "display-one-idle", "A failed repair leaves the selection restored")
+    service.retry(lockScreen: false)
+    await waitFor("second Retry") { !service.isBusy }
+    XCTAssertEqual(enables, 2, "Every click tries again; nothing retries on its own")
+
+    stubborn = false
+    service.retry(lockScreen: false)
+    await waitFor("Retry after the user switched it on") { !service.isBusy }
+    XCTAssertEqual(enables, 3)
+    XCTAssertTrue(service.screenSaverEnabled)
+    XCTAssertNil(service.screenSaverError)
+    try await service.shutdown()
+  }
+
+  @MainActor
+  func testOtherFailuresAreNeverRepairedByRetry() async throws {
+    var record = scene()
+    record.displayId = 1
+    var failures = [switchedOff(), LockScreenWallpaperFailure(message: "registration unavailable")]
+    var enables = 0
+    let service = electionService(prepare: {
+      if !failures.isEmpty { throw failures.removeFirst() }
+      throw LockScreenWallpaperFailure(message: "still unavailable")
+    }, enable: { enables += 1 }, scenes: { [record] })
+    service.setEnabled(true)
+    await waitFor("switched-off failure") { !service.isBusy }
+    XCTAssertEqual(service.errorMessage, "the renderer is switched off")
+    service.retry(lockScreen: true)
+    await waitFor("Retry that repairs, then fails differently") { !service.isBusy }
+    XCTAssertEqual(enables, 1)
+    XCTAssertEqual(service.errorMessage, "registration unavailable")
+    for _ in 0..<2 {
+      service.retry(lockScreen: true)
+      await waitFor("Retry after another failure") { !service.isBusy }
+    }
+    XCTAssertEqual(enables, 1, "Retry repairs only the failure it was offered for")
+    XCTAssertEqual(service.errorMessage, "still unavailable")
+    try await service.shutdown()
+  }
+
+  @MainActor
+  func testSwitchingModesOffAndOnNeverRepairsAnElectionOnlyRetryMay() async throws {
+    var record = scene()
+    record.displayId = 1
+    var events: [String] = []
+    let service = electionService(prepare: {
+      events.append("prepare")
+      throw self.switchedOff()
+    }, enable: { events.append("enable") }, scenes: { [record] })
+    service.setEnabled(true)
+    await waitFor("switched-off failure") { !service.isBusy }
+    XCTAssertEqual(service.errorMessage, "the renderer is switched off")
+
+    // The user answers the message with the switch instead of Retry: the offer is withdrawn
+    // with the request, and the next request is a new one, not a Retry.
+    service.setEnabled(false)
+    await waitFor("switched off") { !service.isBusy }
+    XCTAssertNil(service.errorMessage)
+    service.setEnabled(true)
+    await waitFor("switched on again") { !service.isBusy }
+    XCTAssertEqual(events, ["prepare", "prepare"], "A switch never changes the election")
+    XCTAssertEqual(service.errorMessage, "the renderer is switched off", "The failure is reported afresh")
+
+    service.retry(lockScreen: true)
+    await waitFor("Retry") { !service.isBusy }
+    XCTAssertEqual(events, ["prepare", "prepare", "enable", "prepare"])
+
+    // Same for the screen saver, and for the quick off-on that cancels the withdrawal's update.
+    service.setScreenSaverEnabled(true)
+    await waitFor("screen saver failure") { !service.isBusy }
+    service.setEnabled(false)
+    service.setScreenSaverEnabled(false)
+    service.setScreenSaverEnabled(true)
+    await waitFor("screen saver switched on again") { !service.isBusy }
+    XCTAssertEqual(events.filter { $0 == "enable" }.count, 1)
+    try await service.shutdown()
+  }
+
+  @MainActor
+  func testSwitchingOneModeOffNeverRepairsTheElectionTheOtherModeShows() async throws {
+    var record = scene()
+    record.displayId = 1
+    var events: [String] = []
+    let service = electionService(prepare: {
+      events.append("prepare")
+      throw self.switchedOff()
+    }, enable: { events.append("enable") }, scenes: { [record] })
+    service.setScreenSaverEnabled(true)
+    service.setEnabled(true)
+    await waitFor("both modes stopped") { !service.isBusy }
+    XCTAssertEqual(service.screenSaverError, "the renderer is switched off")
+
+    service.setEnabled(false)
+    await waitFor("lock screen switched off") { !service.isBusy }
+    XCTAssertFalse(events.contains("enable"), "Only a Retry may change the election")
+    XCTAssertEqual(service.screenSaverError, "the renderer is switched off")
+
+    service.retry(lockScreen: false)
+    await waitFor("screen-saver Retry") { !service.isBusy }
+    XCTAssertEqual(events.filter { $0 == "enable" }.count, 1, "The offer survives for the row that still shows it")
+    try await service.shutdown()
+  }
+
+  @MainActor
+  func testAClickWithNothingToActivateDoesNotSaveTheRepairForTheMonitor() async throws {
+    var record = scene()
+    record.displayId = 1
+    var records = [record]
+    var events: [String] = []
+    let service = electionService(prepare: {
+      events.append("prepare")
+      throw self.switchedOff()
+    }, enable: { events.append("enable") }, scenes: { records })
+    service.setEnabled(true)
+    await waitFor("activation stopped") { !service.isBusy }
+    XCTAssertEqual(events, ["prepare"])
+
+    // Retry while no wallpaper is applied needs no renderer, so it repairs nothing.
+    records = []
+    service.retry(lockScreen: true)
+    await waitFor("Retry without a wallpaper") { !service.isBusy }
+    XCTAssertEqual(events, ["prepare"])
+    XCTAssertNil(service.errorMessage)
+
+    // The wallpaper applied later reaches the monitor, which only reports the failure again.
+    records = [record]
+    let monitor = try XCTUnwrap(timers.last)
+    XCTAssertTrue(monitor.isValid)
+    monitor.fire()
+    await waitFor("monitor activation") { !service.isBusy }
+    XCTAssertEqual(events, ["prepare", "prepare"], "The earlier click does not authorize this activation")
+    XCTAssertEqual(service.errorMessage, "the renderer is switched off")
+    try await service.shutdown()
+  }
+
   @MainActor
   func testConfigurationFailureRestoresSelectionWithoutWaitingForFrameTimeout() async throws {
     let bundle = root.appendingPathComponent("extension.appex")
