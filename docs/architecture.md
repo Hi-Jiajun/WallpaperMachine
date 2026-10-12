@@ -85,6 +85,12 @@ automation schedulers, the web and native-video wallpaper hosts, system media).
   reach the same path through `TerminationSignalRelay`, started at the end of launching: its
   C handler only writes to a pipe, a second signal or a deadline ends the app by the
   signal's default action ([signals](features/crash-recovery.md#signals)).
+- **Broken pipes.** The first statement of `WallpaperEngineApp.main`, ahead of the import
+  picker's helper mode, is `ProcessSignals.ignoreBrokenPipes()`. A write to a pipe or socket
+  whose reader is gone then fails with `EPIPE`, which the throwing writes already handle,
+  instead of raising SIGPIPE and ending the process unlogged. The handler is a caught no-op,
+  not `SIG_IGN`, so children started with `posix_spawn` get the default action back
+  ([broken pipes](features/crash-recovery.md#broken-pipes)).
 - **Hosted tests.** Under a hosted test run (`NSClassFromString("XCTestCase") != nil`) the
   delegate short-circuits: no services are created against the user's real app-support folder.
 

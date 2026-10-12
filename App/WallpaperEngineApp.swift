@@ -6,6 +6,8 @@ import AppKit
 struct WallpaperEngineApp {
     @MainActor
     static func main() {
+        // First, so the import picker's helper process is covered too.
+        ProcessSignals.ignoreBrokenPipes()
         if WallpaperImportPickerHelper.runIfRequested() { return }
         if NSClassFromString("XCTestCase") == nil {
             recordSessionStart()

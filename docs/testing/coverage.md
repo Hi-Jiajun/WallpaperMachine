@@ -293,6 +293,13 @@ on [manual-smoke.md](manual-smoke.md).
   non-blocking. `QuitReasonTests` pin the ledger text of a signal's quit, `QuitSupervisorTests`
   the longest a quit can take (the signal deadline) and `SessionLedgerTests` that a run cut
   short before it began quitting reads as a quit that did not finish, not a crash.
+- `ProcessSignalsTests` — SIGPIPE is set back to its default before each call and the guard is
+  checked before any write, so a guard that failed to install costs one test and not the
+  test host: a write to a pipe whose reader is closed fails with `EPIPE` and the process
+  survives, a `FileHandle` write throws it as a POSIX `EPIPE` error, a second call keeps the
+  same handler, an ignored SIGPIPE or a handler already in place is left alone, and a child
+  started with `posix_spawn` sees the default disposition (the shared `ChildSignalProbe` is
+  first shown to see an inherited ignore, as in the relay's test).
 - Not covered: a real quit, logout or restart; `applicationShouldTerminate` itself needs
   the running app (hosted tests short-circuit it), so the alert, the panel coming back, the
   "Quitting…" menu line, the exit fuse's `_exit`, whether macOS shows its cancelled-logout

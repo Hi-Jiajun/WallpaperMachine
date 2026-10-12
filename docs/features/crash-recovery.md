@@ -181,7 +181,35 @@ ledger keeps `terminated by SIGTERM` (see [diagnostics](diagnostics.md#why-the-a
 - **When it starts.** At the end of `applicationDidFinishLaunching`, and never under
   XCTest. Before that the default action applies, so a stop while the app is still
   launching ends it as before and the next launch calls it `ended unexpectedly`.
-- SIGKILL cannot be caught. SIGINT, SIGQUIT and the crash signals are left alone.
+- SIGKILL cannot be caught. SIGINT, SIGQUIT and the crash signals are left alone; SIGPIPE
+  has [its own handling](#broken-pipes).
+
+## Broken pipes
+
+A write to a pipe or socket whose reader has gone raises SIGPIPE, and with the default
+action that ends the process at once: no quit, no log line, the poster still on the desktop.
+Rust switches the default off for the executables it builds, but this app is a Swift
+executable that only links the renderer, so nothing did. The one place the app writes to a
+child's pipe, the import picker's handshake with its helper process, already used a throwing
+write and handled the error. It never got to: a helper that died first took the whole app
+with it.
+
+`ProcessSignals.ignoreBrokenPipes()` (`App/Services/Lifecycle/`) is the first statement of
+`WallpaperEngineApp.main`, before the picker's helper mode, so the helper process is covered
+too. From then on the write fails with `EPIPE`, the existing handling stops the helper and
+the import action fails with that error while the app carries on. The same holds for code
+the app does not own, such as AVFoundation and the renderer's libraries, which see a failed
+write and not a dead process.
+
+- **Caught, not ignored.** The handler is a no-op C function. `SIG_IGN` would be inherited
+  across `exec` by everything started with `posix_spawn` (SteamCMD), which would then
+  ignore a broken pipe where it should end; a caught handler goes back to the default there.
+- **Only the default is replaced.** A SIGPIPE that was already ignored or handled when the
+  app started cannot end it, so the launcher's choice stands. Calling it twice is the same
+  as calling it once. It runs under XCTest as well, which keeps the test host alive when a
+  test writes to a closed pipe.
+- It does not log. A broken pipe is reported where the write failed, in that code's own
+  error.
 
 ## Limits
 
@@ -287,6 +315,13 @@ Device-free, against the fake engine and a temporary support root:
   quit request reaches the main run loop while it is spun in the default, event-tracking and
   modal-panel modes.
   `SessionLedgerTests` pin the cut-short records and `QuitReasonTests` the ledger text.
+- `ProcessSignalsTests` (SIGPIPE set back to the default before each call, and the guard
+  checked before any write so a failed install cannot end the test host): a write to a
+  pipe whose reader is closed returns -1 with `EPIPE` and the process survives, a
+  `FileHandle` write throws it as a POSIX `EPIPE` error, a second call keeps the same
+  handler, an ignored SIGPIPE or a handler already in place is left alone, and a child
+  started with `posix_spawn` sees `DEFAULT` (the probe is checked to see an inherited ignore
+  as `IGNORE`).
 
 Not verifiable headlessly: a real engine crash while a scene loads, and how the banner and
 the menu line look in the real panel and status menu. The fake engine cannot take the
@@ -296,4 +331,5 @@ menu line, then press **Try again** and confirm the wallpaper loads; that needs 
 explicitly authorized run. The same goes for signals: `kill -TERM <pid>` on a running copy
 should restore the desktop picture before it exits, `quit: reason=signal` should appear in
 the log, and a second `kill -TERM` during a wedged quit should end it at once; the unit
-tests never send a real SIGTERM.
+tests never send a real SIGTERM. Likewise the unit tests close the reader of a pipe they
+made themselves; they never kill a real import picker helper while the app writes to it.

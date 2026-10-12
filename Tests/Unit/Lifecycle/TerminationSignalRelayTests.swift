@@ -212,12 +212,12 @@ final class TerminationSignalRelayTests: XCTestCase {
         // The probe first: perl does report an ignore it inherited.
         preserveDisposition(of: SIGUSR2)
         signal(SIGUSR2, SIG_IGN)
-        XCTAssertEqual(try perlDispositions(of: ["USR2"]), "IGNORE", "the probe can tell an ignore from a default")
+        XCTAssertEqual(try ChildSignalProbe.perlDispositions(of: ["USR2"]), "IGNORE", "the probe can tell an ignore from a default")
         signal(SIGUSR2, SIG_DFL)
 
         guard try startedRelay(signals: [SIGUSR1, SIGUSR2], calls: calls) != nil else { return }
 
-        XCTAssertEqual(try perlDispositions(of: ["USR1", "USR2"]), "DEFAULT,DEFAULT",
+        XCTAssertEqual(try ChildSignalProbe.perlDispositions(of: ["USR1", "USR2"]), "DEFAULT,DEFAULT",
                        "a caught handler resets across exec; an ignored signal would be inherited")
     }
 
@@ -269,49 +269,5 @@ final class TerminationSignalRelayTests: XCTestCase {
         XCTAssertEqual(TerminationSignalRelay.name(of: SIGTERM), "SIGTERM")
         XCTAssertEqual(TerminationSignalRelay.name(of: SIGHUP), "SIGHUP")
         XCTAssertEqual(TerminationSignalRelay.name(of: 99), "signal 99")
-    }
-
-    // MARK: Helpers
-
-    /// What perl reports for each signal in a child started with `posix_spawn`, as SteamCMD and
-    /// the Workshop downloader are: `IGNORE`, or `DEFAULT` when it is neither ignored nor
-    /// handled. Comma-separated, in order. Foundation's `Process` is no probe, because it resets
-    /// every signal to its default in the child whatever the parent did.
-    private func perlDispositions(of names: [String]) throws -> String {
-        var ends: [Int32] = [-1, -1]
-        XCTAssertEqual(pipe(&ends), 0)
-        var actions: posix_spawn_file_actions_t?
-        posix_spawn_file_actions_init(&actions)
-        defer { posix_spawn_file_actions_destroy(&actions) }
-        posix_spawn_file_actions_adddup2(&actions, ends[1], STDOUT_FILENO)
-        posix_spawn_file_actions_addclose(&actions, ends[0])
-        posix_spawn_file_actions_addclose(&actions, ends[1])
-
-        let script = #"print join(",", map { $SIG{$_} // "DEFAULT" } @ARGV)"#
-        let arguments = ["perl", "-e", script] + names
-        var argv: [UnsafeMutablePointer<CChar>?] = arguments.map { strdup($0) }
-        argv.append(nil)
-        defer { for argument in argv { free(argument) } }
-        var environment: [UnsafeMutablePointer<CChar>?] = [strdup("PATH=/usr/bin:/bin"), nil]
-        defer { for entry in environment { free(entry) } }
-
-        var child: pid_t = 0
-        let status = posix_spawn(&child, "/usr/bin/perl", &actions, nil, &argv, &environment)
-        close(ends[1])
-        defer { close(ends[0]) }
-        guard status == 0 else {
-            throw NSError(domain: NSPOSIXErrorDomain, code: Int(status))
-        }
-        var output = Data()
-        var buffer = [UInt8](repeating: 0, count: 256)
-        while true {
-            let count = read(ends[0], &buffer, buffer.count)
-            if count <= 0 { break }
-            output.append(contentsOf: buffer[..<count])
-        }
-        var waitStatus: Int32 = 0
-        waitpid(child, &waitStatus, 0)
-        XCTAssertEqual(waitStatus, 0, "perl exited cleanly")
-        return String(decoding: output, as: UTF8.self)
     }
 }

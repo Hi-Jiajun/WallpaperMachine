@@ -39,7 +39,8 @@ App/                               WallpaperMachine application target sources o
                                    collections, presets, history, compatibility checks, backup and restore
     Lifecycle/                     why the app is quitting (QuitReason, the power-off notice), how long each quit stage takes
                                    (QuitTimings), the deadline each stage gets (QuitSupervisor, QuitMode, the exit fuse)
-                                   and SIGTERM/SIGHUP as a quit (TerminationSignalRelay)
+                                   and SIGTERM/SIGHUP as a quit (TerminationSignalRelay);
+                                   ProcessSignals makes a broken pipe a write error
     Localization/                  AppLanguage.swift: shipped-language registry and the language preference store
     LockScreen/                    lock-screen selection overrides, extension registration and configuration publishing
     NativeVideo/                   AVFoundation video backend: admission, player and host window
