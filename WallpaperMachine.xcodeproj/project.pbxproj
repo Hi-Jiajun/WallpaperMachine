@@ -29,7 +29,6 @@
 		0B102301E4157C85811DEE63 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = A9F33402C96561019CAF61FC /* Localizable.xcstrings */; };
 		0B2AC66F7CF0DFC19EE8C391 /* globals.h in Headers */ = {isa = PBXBuildFile; fileRef = 0BD52246CCE5D246BBD632B1 /* globals.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		0BA1B2EFC57A973786BEFBFD /* FallbackSystemMediaProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 551253F86B1FA54273A2D696 /* FallbackSystemMediaProviderTests.swift */; };
-		0BE2E38556C2DC38D26934A5 /* UserAssetPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06E312D138C4AEF43D1616B0 /* UserAssetPicker.swift */; };
 		0C45266585B20F8F3609D20D /* PixivResumableTransfer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A88CFA68A1C229F608EB7375 /* PixivResumableTransfer.swift */; };
 		0D5DCB56A303F4042ACF4250 /* WebPanelLibraryOrganization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E165527D09FF9116FFFA21F /* WebPanelLibraryOrganization.swift */; };
 		0D9DB2D5ED14B0541EA9B25F /* LockScreenFrameBacking.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71B9BC7910CE95E183ABE68A /* LockScreenFrameBacking.swift */; };
@@ -454,7 +453,6 @@
 		05805AC2C38AF2B41A590844 /* WebPanelActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPanelActions.swift; sourceTree = "<group>"; };
 		0599FFBCA71E4DB36338EED0 /* DesktopMediaSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesktopMediaSession.swift; sourceTree = "<group>"; };
 		06C762182CE14CCFAE5FEDA1 /* WallpaperMachineExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.extensionkit-extension"; includeInIndex = 0; path = WallpaperMachineExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		06E312D138C4AEF43D1616B0 /* UserAssetPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserAssetPicker.swift; sourceTree = "<group>"; };
 		078014A1ECC04882D93A38E1 /* DownloaderLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloaderLifecycleTests.swift; sourceTree = "<group>"; };
 		07A8672C9A03D8353209ACD5 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		07B6C8CF715E0CDB75ABE2B1 /* WallpaperDisplayTransferIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperDisplayTransferIntegrationTests.swift; sourceTree = "<group>"; };
@@ -1260,7 +1258,6 @@
 			children = (
 				E4D8C201C9212B1052997E9B /* DirectoryWatcher.swift */,
 				A0AE5BFFCA601EC284BB3373 /* ManagedUserAssetStore.swift */,
-				06E312D138C4AEF43D1616B0 /* UserAssetPicker.swift */,
 				6322189809CB2145322C5754 /* UserAssetSelectionAuthorization.swift */,
 				43827C038FB1884BD8F8672F /* UserAssetStorage.swift */,
 				52016C9D2ECFD5656A899424 /* UserAssetStore.swift */,
@@ -2222,7 +2219,6 @@
 				ADF13BBC11643FF21D90820F /* SystemConditionMonitor.swift in Sources */,
 				C3F496BA80F232E3B31F3D9D /* SystemMediaEventCodec.swift in Sources */,
 				1BA320F483791FC8821783B5 /* SystemMediaProvider.swift in Sources */,
-				0BE2E38556C2DC38D26934A5 /* UserAssetPicker.swift in Sources */,
 				D8587203D650BC216D1D844F /* UserAssetSelectionAuthorization.swift in Sources */,
 				42A303AEDD07369C02730A62 /* UserAssetStorage.swift in Sources */,
 				F81474D91E66F769D86FED74 /* UserAssetStore.swift in Sources */,

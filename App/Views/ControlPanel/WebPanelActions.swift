@@ -964,6 +964,8 @@ extension WebPanelController {
     guard current.properties.contains(where: {
       $0.id == propertyID && $0.enabled && $0.kind == descriptor.kind
     }) else { throw WebPanelRequest.invalid }
+    // Only the extension is sandboxed, so this plain path stays readable across
+    // relaunches; do not add security-scoped bookmarks.
     try await UserAssetSelectionAuthorization.perform(
       managed: ManagedUserAssetStore(), wallpaperID: id, selections: [propertyID: url.path]
     ) {
