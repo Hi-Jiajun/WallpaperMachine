@@ -295,6 +295,9 @@ extension WebPanelController {
             : String(localized: "This display has no rotating playlist to move along."))
       }
       return
+    case "playlistResume":
+      playlists.resumeHandler?(try playlistDisplay(request))
+      return
     default: break
     }
     actionError = nil
@@ -616,7 +619,7 @@ extension WebPanelController {
       NSWorkspace.shared.open(Self.focusSettingsURL)
     case "displaySetting": try await displaySetting(request)
     case "eject":
-      try await store.ejectWallpaperFromDisplayAsync(
+      try await store.removeWallpaperFromDisplayAsync(
         displayId: try request.string("displayID"), wallpaperId: try wallpaperID(request))
     case "refreshDisplays": try await store.refreshDisplaysAsync()
     case "locateAssets":

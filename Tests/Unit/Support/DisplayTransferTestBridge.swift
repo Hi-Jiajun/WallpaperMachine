@@ -26,6 +26,8 @@ final class DisplayTransferTestBridge: LayoutSnapshotBridge {
     private(set) var applications: [(String, String)] = []
     /// Every `(display, wallpaper)` the store asked to take off a display, in order.
     private(set) var ejections: [(String, String)] = []
+    /// What an eject throws instead of taking the wallpaper off the display.
+    var ejectFailure: Error?
 
     func installProjects(in library: URL) throws {
         for id in ["a", "b", "c"] {
@@ -102,6 +104,7 @@ final class DisplayTransferTestBridge: LayoutSnapshotBridge {
         return mutation
     }
     override func ejectWallpaperFromDisplay(displayId: String, wallpaperId: String) async throws -> BridgeDisplayMutationBundle {
+        if let ejectFailure { throw ejectFailure }
         events.append("eject \(displayId) \(wallpaperId)")
         ejections.append((displayId, wallpaperId))
         if assignments[displayId] == wallpaperId { assignments[displayId] = nil }

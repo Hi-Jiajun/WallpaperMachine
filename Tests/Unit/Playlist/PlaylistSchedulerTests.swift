@@ -709,4 +709,217 @@ final class PlaylistSchedulerTests: XCTestCase {
         XCTAssertEqual(store.nextChange["primary"], boundary, "day and night keeps its own boundary")
         XCTAssertEqual(applied, ["b"], "the manual choice itself changes nothing")
     }
+
+    // MARK: A display the user cleared
+
+    /// The playlist does not undo a removal: a display the user emptied stays empty when the
+    /// timer falls due, and nothing is armed for it.
+    func testAClearedDisplayIsNotRefilledWhenTheTimerFallsDue() async {
+        store.update("primary") { $0.mode = .rotate; $0.interval = 30 }
+        let scheduler = makeScheduler()
+        scheduler.start()
+        defer { scheduler.stop() }
+        await settle()
+        XCTAssertNotNil(store.nextChange["primary"])
+
+        shown["primary"] = nil
+        store.setHold(.removedWallpaper, on: "primary")
+        clock.addTimeInterval(3 * 60 * 60)
+        scheduler.evaluate()
+        await settle()
+        XCTAssertTrue(applied.isEmpty, "a removed wallpaper is not put back by the rotation")
+        XCTAssertNil(store.nextChange["primary"], "a waiting display has no deadline to keep")
+        XCTAssertEqual(store.holds["primary"], .removedWallpaper)
+
+        clock.addTimeInterval(24 * 60 * 60)
+        scheduler.evaluate()
+        await settle()
+        XCTAssertTrue(applied.isEmpty, "it keeps waiting, however long")
+    }
+
+    /// Whoever puts a wallpaper on the display again ends the wait, and the rotation then counts
+    /// a whole interval from there instead of a deadline it kept while the display was empty.
+    func testTheHoldEndsWhenAnyWallpaperIsOnTheDisplayAgain() async {
+        store.update("primary") { $0.mode = .rotate; $0.interval = 30 }
+        let scheduler = makeScheduler()
+        scheduler.start()
+        defer { scheduler.stop() }
+        await settle()
+        shown["primary"] = nil
+        store.setHold(.removedWallpaper, on: "primary")
+        clock.addTimeInterval(2 * 60 * 60)
+        scheduler.evaluate()
+        await settle()
+
+        shown["primary"] = "b"
+        scheduler.evaluate()
+        await settle()
+        XCTAssertTrue(store.holds.isEmpty)
+        XCTAssertTrue(applied.isEmpty, "the wallpaper put there is not replaced on the spot")
+        XCTAssertEqual(store.nextChange["primary"], clock.addingTimeInterval(30 * 60))
+
+        clock.addTimeInterval(30 * 60)
+        scheduler.evaluate()
+        await settle()
+        XCTAssertEqual(applied, ["c"], "the rotation carries on from the wallpaper that is there")
+    }
+
+    func testChangeNowFillsAClearedDisplayAndLiftsTheHold() async {
+        store.update("primary") { $0.mode = .rotate; $0.source = .list; $0.wallpaperIDs = ["b", "c"]; $0.interval = 60 }
+        let scheduler = makeScheduler()
+        scheduler.start()
+        defer { scheduler.stop() }
+        shown["primary"] = nil
+        store.setHold(.removedWallpaper, on: "primary")
+        await settle()
+
+        XCTAssertTrue(scheduler.canSkip("primary"))
+        XCTAssertTrue(scheduler.skip("primary"))
+        await settle()
+        XCTAssertEqual(applied, ["b"])
+        XCTAssertTrue(store.holds.isEmpty)
+        XCTAssertEqual(store.nextChange["primary"], clock.addingTimeInterval(60 * 60))
+    }
+
+    func testResumeFillsAClearedRotationNowAndDoesNothingOtherwise() async {
+        store.update("primary") { $0.mode = .rotate; $0.interval = 60 }
+        let scheduler = makeScheduler()
+        scheduler.start()
+        defer { scheduler.stop() }
+        await settle()
+        scheduler.resume("primary")
+        await settle()
+        XCTAssertTrue(applied.isEmpty, "a display that is not waiting has nothing to resume")
+
+        shown["primary"] = nil
+        store.setHold(.removedWallpaper, on: "primary")
+        await settle()
+        scheduler.resume("primary")
+        await settle()
+        XCTAssertEqual(applied, ["a"], "the first wallpaper of the rotation fills the empty display")
+        XCTAssertTrue(store.holds.isEmpty)
+        XCTAssertEqual(store.nextChange["primary"], clock.addingTimeInterval(60 * 60))
+    }
+
+    func testResumePutsTheCurrentDayOrNightWallpaperBack() async {
+        store.update("primary") { $0.mode = .dayNight; $0.dayWallpaperID = "b"; $0.nightWallpaperID = "c" }
+        let scheduler = makeScheduler()
+        scheduler.start()
+        defer { scheduler.stop() }
+        await settle()
+        XCTAssertEqual(applied, ["b"])
+
+        shown["primary"] = nil
+        store.setHold(.removedWallpaper, on: "primary")
+        clock = calendar.date(from: DateComponents(year: 2027, month: 1, day: 15, hour: 20))!
+        scheduler.evaluate()
+        await settle()
+        XCTAssertEqual(applied, ["b"], "the night boundary does not refill a display the user emptied")
+        XCTAssertNil(store.nextChange["primary"])
+
+        scheduler.resume("primary")
+        await settle()
+        XCTAssertEqual(applied, ["b", "c"], "resuming applies the wallpaper for this half of the day")
+        XCTAssertTrue(store.holds.isEmpty)
+        XCTAssertEqual(store.nextChange["primary"], calendar.date(from: DateComponents(year: 2027, month: 1, day: 16, hour: 7)))
+    }
+
+    /// A wallpaper the user puts on a held day and night display stays until the next boundary,
+    /// even though a boundary passed while the display was empty.
+    func testAWallpaperChosenOnAHeldDayNightDisplayStaysUntilTheNextBoundary() async {
+        store.update("primary") { $0.mode = .dayNight; $0.dayWallpaperID = "b"; $0.nightWallpaperID = "c" }
+        let scheduler = makeScheduler()
+        scheduler.start()
+        defer { scheduler.stop() }
+        await settle()
+        shown["primary"] = nil
+        store.setHold(.removedWallpaper, on: "primary")
+        clock = calendar.date(from: DateComponents(year: 2027, month: 1, day: 15, hour: 20))!
+        scheduler.evaluate()
+        await settle()
+        XCTAssertEqual(applied, ["b"])
+
+        shown["primary"] = "a"
+        scheduler.evaluate()
+        await settle()
+        XCTAssertEqual(applied, ["b"], "the choice is not replaced by the night wallpaper")
+        XCTAssertTrue(store.holds.isEmpty)
+
+        clock = calendar.date(from: DateComponents(year: 2027, month: 1, day: 16, hour: 8))!
+        scheduler.evaluate()
+        await settle()
+        XCTAssertEqual(applied, ["b", "b"], "the next boundary applies the day wallpaper as usual")
+    }
+
+    func testTurningThePlaylistOffEndsTheWait() async {
+        store.update("primary") { $0.mode = .rotate }
+        let scheduler = makeScheduler()
+        scheduler.start()
+        defer { scheduler.stop() }
+        store.setHold(.removedWallpaper, on: "primary")
+        store.update("primary") { $0.mode = .off }
+        await settle()
+        XCTAssertTrue(store.holds.isEmpty)
+        store.update("primary") { $0.mode = .rotate }
+        shown["primary"] = nil
+        await settle()
+        clock.addTimeInterval(PlaylistScheduler.seconds(30))
+        scheduler.evaluate()
+        await settle()
+        XCTAssertEqual(applied, ["a"], "a playlist turned back on runs like any other")
+    }
+
+    /// The user can empty the display while the timer's change waits its turn in the command
+    /// queue; the change then leaves the display empty instead of undoing the removal.
+    func testAChangeWaitingBehindARemovalLeavesTheDisplayEmpty() async {
+        store.update("primary") { $0.mode = .rotate; $0.interval = 30 }
+        var waited = false
+        let scheduler = makeScheduler(activate: { display, choose in
+            waited = true
+            self.shown[display] = nil
+            self.store.setHold(.removedWallpaper, on: display)
+            guard let id = choose() else { return nil }
+            self.shown[display] = id
+            self.applied.append(id)
+            return id
+        })
+        scheduler.start()
+        defer { scheduler.stop() }
+        await settle()
+        clock.addTimeInterval(30 * 60)
+        scheduler.evaluate()
+        await settle()
+        XCTAssertTrue(waited)
+        XCTAssertTrue(applied.isEmpty)
+        XCTAssertNil(shown["primary"])
+        XCTAssertNil(store.nextChange["primary"], "the finished change does not date a display that waits")
+        XCTAssertEqual(store.holds["primary"], .removedWallpaper)
+    }
+
+    /// Change now asked for while the timer's own change is still in the queue is a request to
+    /// fill the display: it ends the wait and is made.
+    func testChangeNowBehindATimerChangeEndsTheWait() async {
+        store.update("primary") { $0.mode = .rotate; $0.source = .list; $0.wallpaperIDs = ["a", "b", "c"]; $0.interval = 30 }
+        var release: CheckedContinuation<Void, Never>?
+        let scheduler = makeScheduler(activate: { display, choose in
+            await withCheckedContinuation { release = $0 }
+            guard let id = choose() else { return nil }
+            self.shown[display] = id
+            self.applied.append(id)
+            return id
+        })
+        scheduler.start()
+        defer { scheduler.stop() }
+        clock.addTimeInterval(30 * 60)
+        scheduler.evaluate()
+        await settle()
+        XCTAssertNotNil(release, "the timer's change is waiting its turn")
+        shown["primary"] = nil
+        store.setHold(.removedWallpaper, on: "primary")
+        XCTAssertTrue(scheduler.skip("primary"))
+        XCTAssertTrue(store.holds.isEmpty)
+        release?.resume()
+        await settle()
+        XCTAssertEqual(applied, ["a"])
+    }
 }

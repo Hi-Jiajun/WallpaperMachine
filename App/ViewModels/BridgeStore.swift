@@ -33,6 +33,10 @@ final class BridgeStore {
     @ObservationIgnored var onSnapshotApplied: (() -> Void)?
     @ObservationIgnored var onWallpaperApplied: (@MainActor (_ wallpaperID: String, _ displayID: String) -> Void)?
     @ObservationIgnored var onUserWallpaperChoice: (@MainActor (_ wallpaperID: String, _ displayID: String) -> Void)?
+    /// The user took a wallpaper off a display, and the display is empty now. Not called for the
+    /// ejects the app makes on its own (deleting a wallpaper, reloading or reapplying one, a
+    /// display layout's recovery, a Focus restore), which the user did not ask for.
+    @ObservationIgnored var onUserWallpaperRemoved: (@MainActor (_ wallpaperID: String, _ displayID: String) -> Void)?
     @ObservationIgnored var openPreview: (@MainActor (WallpaperPreviewSession.Selection) -> Void)?
     private(set) var hostWallpaperStates: [String: HostWallpaperState] = [:]
     @ObservationIgnored private var hostStartupTask: Task<Void, Never>?
@@ -1036,6 +1040,22 @@ final class BridgeStore {
         await waitForIdleActivation()
         let bundle = try await bridge.ejectWallpaperFromDisplay(displayId: displayId, wallpaperId: wallpaperId)
         apply(bundle)
+    }
+
+    /// The user's **Eject** and **Remove from display**: takes the wallpaper off the display and
+    /// tells `onUserWallpaperRemoved`, so a playlist does not fill the display again. A removal
+    /// that left something on the display (it showed another wallpaper by then) is not reported.
+    func removeWallpaperFromDisplayAsync(displayId: String, wallpaperId: String) async throws {
+        try await ejectWallpaperFromDisplayAsync(displayId: displayId, wallpaperId: wallpaperId)
+        if shownWallpaperID(on: displayId) == nil { onUserWallpaperRemoved?(wallpaperId, displayId) }
+    }
+
+    /// The wallpaper `displayId` shows of its own, nil when it is empty or mirrors another display
+    /// (a mirror holds no assignment of its own).
+    func shownWallpaperID(on displayId: String) -> String? {
+        monitorInformationSnapshot.rows.first {
+            $0.displayId == displayId && $0.mirrorTargetDisplayId == nil && !$0.wallpaperId.isEmpty
+        }?.wallpaperId
     }
 
     func shutdownAsync() async throws {

@@ -185,6 +185,56 @@ final class PlaylistStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.plan(id: plan.id)?.playlist.wallpaperIDs, [])
     }
 
+    /// A display the user emptied stays empty across a relaunch, and anything that turns the
+    /// playlist off or chooses another one is the end of the wait.
+    func testAHoldOutlivesTheAppAndEndsWithTheMode() throws {
+        let store = PlaylistStore(defaults: defaults)
+        store.update("primary") { $0.mode = .rotate; $0.source = .list; $0.wallpaperIDs = ["a", "b"] }
+        store.schedule("primary", at: Date(timeIntervalSince1970: 1_800_000_000))
+        store.setHold(.removedWallpaper, on: "primary")
+        XCTAssertEqual(store.holds, ["primary": .removedWallpaper])
+        XCTAssertNil(store.nextChange["primary"], "a waiting display has no deadline")
+
+        let reloaded = PlaylistStore(defaults: defaults)
+        XCTAssertEqual(reloaded.holds, ["primary": .removedWallpaper])
+        XCTAssertNil(reloaded.nextChange["primary"])
+
+        reloaded.update("primary") { $0.interval = 60 }
+        XCTAssertEqual(reloaded.holds["primary"], .removedWallpaper, "another rhythm is not a request to fill the display")
+        reloaded.update("primary") { $0.mode = .off }
+        XCTAssertTrue(reloaded.holds.isEmpty, "an Off playlist has nothing to wait for")
+        XCTAssertTrue(PlaylistStore(defaults: defaults).holds.isEmpty)
+
+        reloaded.update("primary") { $0.mode = .rotate }
+        let plan = try reloaded.savePlan(from: "primary", name: "Rotation")
+        reloaded.setHold(.removedWallpaper, on: "primary")
+        try reloaded.applyPlan(plan.id, to: "primary")
+        XCTAssertTrue(reloaded.holds.isEmpty, "choosing a playlist is asking for it to run")
+
+        reloaded.setHold(.removedWallpaper, on: "primary")
+        reloaded.restore(DisplayPlaylist(), on: "primary")
+        XCTAssertTrue(reloaded.holds.isEmpty, "a restored playlist runs again")
+    }
+
+    func testAHoldIsPostedOnceAndAnUnknownStoredOneIsIgnored() {
+        let store = PlaylistStore(defaults: defaults)
+        let posts = PostCount()
+        let token = NotificationCenter.default.addObserver(
+            forName: PlaylistStore.didChangeNotification, object: store, queue: nil
+        ) { _ in posts.value += 1 }
+        defer { NotificationCenter.default.removeObserver(token) }
+        store.setHold(.removedWallpaper, on: "primary")
+        store.setHold(.removedWallpaper, on: "primary")
+        XCTAssertEqual(posts.value, 1, "holding a held display again is not a change")
+        store.setHold(nil, on: "primary")
+        store.setHold(nil, on: "primary")
+        XCTAssertEqual(posts.value, 2)
+
+        defaults.set(["primary": "someFutureReason", "second": "removedWallpaper"], forKey: "WallpaperMachine.playlistHolds")
+        XCTAssertEqual(PlaylistStore(defaults: defaults).holds, ["second": .removedWallpaper],
+                       "a hold from a newer version leaves the display free instead of stuck")
+    }
+
     func testInvalidPlanNamesLeaveSavedPlanAndDisplayUnchanged() throws {
         let store = PlaylistStore(defaults: defaults)
         let plan = try store.savePlan(from: "primary", name: "Valid")

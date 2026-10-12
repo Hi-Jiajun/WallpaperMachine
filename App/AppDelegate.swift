@@ -601,11 +601,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             },
             library: { store.librarySnapshot.wallpapers.filter(\.supported).map(\.id) },
             favorites: { Self.favoriteWallpaperIDs() },
-            current: { display in
-                store.monitorInformationSnapshot.rows.first {
-                    $0.displayId == display && $0.mirrorTargetDisplayId == nil && !$0.wallpaperId.isEmpty
-                }?.wallpaperId
-            },
+            current: { store.shownWallpaperID(on: $0) },
             isRunning: { [weak self] display in
                 guard store.appSnapshot.playbackState == .playing,
                     self?.automaticWallpapers?.scheduler.inFlight.contains(display) != true,
@@ -632,6 +628,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             WallpaperAutomationStore.shared.manualChoice?(display)
             return true
         }
+        playlists.resumeHandler = { [weak scheduler] display in scheduler?.resume(display) }
         scheduler.start()
     }
 
@@ -653,6 +650,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             controller?.scheduler.noteManualChoice(display)
             self?.playlistScheduler?.noteManualChoice(display)
             self?.schedulePosterRefresh()
+        }
+        // A display the user emptied stays empty: its playlist waits until a wallpaper is put on
+        // it again or they resume it. A rule that is current is marked as handled, so it does
+        // not fill the display the moment it was cleared.
+        store.onUserWallpaperRemoved = { [weak controller] _, display in
+            if PlaylistStore.shared.playlist(for: display).mode != .off {
+                PlaylistStore.shared.setHold(.removedWallpaper, on: display)
+                AppLog.info("playlist: display \(display) waits, since its wallpaper was removed")
+            }
+            controller?.scheduler.noteManualChoice(display)
         }
         controller.scheduler.start()
     }

@@ -13,9 +13,7 @@ final class WallpaperAutomationController {
         scheduler = WallpaperAutomationScheduler(store: rules, focus: focus,
             displays: displays, targetDisplay: targetDisplay, canRun: canRun,
             capture: { display in
-                .init(playlist: playlists.playlist(for: display), wallpaperID: bridge.monitorInformationSnapshot.rows.first {
-                    $0.displayId == display && $0.mirrorTargetDisplayId == nil && !$0.wallpaperId.isEmpty
-                }?.wallpaperId)
+                .init(playlist: playlists.playlist(for: display), wallpaperID: bridge.shownWallpaperID(on: display))
             }, queue: { display, operation in
                 try await bridge.commands.run(slot: BridgeStore.activationSlot(displayId: display), origin: .automation, operation)
             }, apply: { target, display in

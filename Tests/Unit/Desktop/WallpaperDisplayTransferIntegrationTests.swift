@@ -92,6 +92,38 @@ final class WallpaperDisplayTransferIntegrationTests: XCTestCase {
         XCTAssertEqual(bridge.assignments["secondary"], "a")
     }
 
+    /// Only the user's own removal tells a playlist to leave the display empty. The ejects the
+    /// app makes while it deletes, reloads or reapplies a wallpaper are not a removal.
+    func testOnlyAUserRemovalReportsARemoval() async throws {
+        var removed: [String] = []
+        store.onUserWallpaperRemoved = { id, display in removed.append("\(display)=\(id)") }
+
+        try await store.reloadWallpaperAsync(id: "a")
+        XCTAssertEqual(bridge.ejections.map { "\($0.0)=\($0.1)" }, ["primary=a"], "a reload ejects and applies again")
+        let deleted = try await store.deleteWallpapersAsync(ids: ["b"], recycle: { _ in })
+        XCTAssertEqual(deleted.deleted, ["b"])
+        XCTAssertNil(bridge.assignments["secondary"], "deleting a wallpaper took it off the display showing it")
+        XCTAssertEqual(removed, [], "neither is something the user asked to be left empty")
+
+        bridge.ejectFailure = CocoaError(.fileWriteUnknown)
+        do {
+            try await store.removeWallpaperFromDisplayAsync(displayId: "primary", wallpaperId: "a")
+            XCTFail("the removal succeeded")
+        } catch {}
+        bridge.ejectFailure = nil
+        XCTAssertEqual(bridge.assignments["primary"], "a")
+        XCTAssertEqual(removed, [], "a removal that failed removed nothing")
+
+        try await store.removeWallpaperFromDisplayAsync(displayId: "primary", wallpaperId: "c")
+        XCTAssertEqual(bridge.assignments["primary"], "a")
+        XCTAssertEqual(removed, [], "the display still shows its wallpaper, so nothing was removed from it")
+
+        try await store.removeWallpaperFromDisplayAsync(displayId: "primary", wallpaperId: "a")
+        XCTAssertNil(bridge.assignments["primary"])
+        XCTAssertEqual(removed, ["primary=a"])
+        XCTAssertNil(store.shownWallpaperID(on: "primary"))
+    }
+
     func testLaterIndividualChoiceWaitsForTheLayoutThenWins() async throws {
         var release: CheckedContinuation<Void, Never>?
         bridge.beforeApply = {

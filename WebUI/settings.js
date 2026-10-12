@@ -590,10 +590,13 @@ function draw(view) {
       + row(key('playlist-night-start-row'), t('Night starts at'), clockInput('nightStart', t('Night starts at'), playlist.nightStart))
       + (nextChange ? row(key('playlist-switch-row'), t('Next switch'), `<span class="settings-status" role="status">${e(t('Around {time}.', { time: nextChange }))}</span>`, '', 'settings-readout') : '');
     const playlistMode = playlistModes.find(([mode]) => mode === playlist.mode) || playlistModes[0];
+    // The user removed this display's wallpaper, so the playlist leaves it empty until it is resumed.
+    const held = playlist.held === true && playlist.mode !== 'off';
     const playlistRows = mirror ? '' : disclosure(key('playlist'), playlist.mode === 'off' ? t('Playlist') : t('Playlist: {mode}', { mode: t(playlistMode[1]) }),
       row(key('playlist-mode-row'), t('Changes on its own'), select(key('playlist-mode'), name(t('Changes on its own')), draft(key('playlist-mode'), playlist.mode), localizedOptions(playlistModes), playlistData('mode'), off), t('Only while wallpapers play. A change that falls due while they are paused, the screen is locked or the displays sleep happens once they play again.'))
+      + (held ? row(key('playlist-held-row'), t('Playlist paused'), button(t('Resume playlist'), 'playlistResume', { displayID: id }, off), t('This display’s wallpaper was removed, so its playlist waits until you choose a wallpaper or resume it.')) : '')
       + (playlist.mode === 'rotate' ? rotateRows : playlist.mode === 'dayNight' ? dayNightRows : '')
-      + planRows(ctx, display, playlist, off), 'settings-disclosure-rows');
+      + planRows(ctx, display, playlist, off), 'settings-disclosure-rows', held ? t('Playlist paused') : '');
     return `<section class="settings-display settings-group" data-key="display-${e(id)}" aria-labelledby="settings-group-display-${e(id)}"><h3 id="settings-group-display-${e(id)}">${e(display.title)}${primary ? `<span class="settings-note">${e(t('Primary display'))}</span>` : ''}</h3>`
       + row(key('enabled-row'), t('Enable wallpaper'), toggle(key('enabled'), name(t('Enable wallpaper')), draft(key('enabled'), display.enabled), data('enabled'), busy || primary))
       + row(key('mode-row'), t('Display mode'), select(key('mode'), name(t('Display mode')), draft(key('mode'), display.mode), localizedOptions([['standalone', 'Independent'], ['mirror', 'Mirror another display']]), data('mode'), off || primary))

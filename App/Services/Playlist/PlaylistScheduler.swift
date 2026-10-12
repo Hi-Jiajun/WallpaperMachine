@@ -145,6 +145,27 @@ final class PlaylistScheduler {
         for display in displays() {
             let playlist = store.playlist(for: display)
             let running = isRunning(display)
+            if store.holds[display] != nil {
+                // A wallpaper on the display again, from anyone, ends the wait: the user, a
+                // rule, a Space or a Focus put it there, and each is a choice. The playlist then
+                // counts a whole interval from now (or, for day and night, leaves what is on
+                // screen until its next boundary), never a deadline it kept while the display
+                // was empty.
+                guard playlist.mode == .off || current(display) != nil else {
+                    // Nothing is due while the display waits, so no deadline or timer exists.
+                    store.schedule(display, at: nil)
+                    settledPeriods[display] = nil
+                    continue
+                }
+                // Settle the period before lifting: lifting posts the store's notification.
+                if playlist.mode == .dayNight {
+                    let until = PlaylistPlanner.phase(
+                        at: date, dayStart: playlist.dayStart, nightStart: playlist.nightStart, calendar: calendar).until
+                    settledPeriods[display] = (until, store.revisions[display] ?? 0)
+                }
+                store.setHold(nil, on: display)
+                AppLog.info("playlist: display \(display) has a wallpaper again, so its playlist carries on")
+            }
             switch playlist.mode {
             case .off:
                 store.schedule(display, at: nil)
@@ -188,18 +209,35 @@ final class PlaylistScheduler {
     /// starts a fresh interval. Someone asked for it, so it happens while the display is paused
     /// or covered too, and a change already under way counts as the answer. Returns false when
     /// the display does not rotate, so the caller can fall back to the library order, or when
-    /// its playlist has no other wallpaper to change to.
+    /// its playlist has no other wallpaper to change to. It also ends the wait of a display the
+    /// user emptied.
     @discardableResult
     func skip(_ display: String) -> Bool {
         let playlist = store.playlist(for: display)
         guard playlist.mode == .rotate, displays().contains(display) else { return false }
         if inFlight.contains(display) {
+            store.setHold(nil, on: display)
             requestedWhileInFlight.insert(display)
             return true
         }
         guard canSkip(display) else { return false }
+        // Asking for a change is asking a display the user emptied to be filled.
+        store.setHold(nil, on: display)
         rotate(display, playlist: playlist, requested: true)
         return true
+    }
+
+    /// The user wants a playlist that waited because they removed the wallpaper to run again.
+    /// A rotation fills the display now and starts a fresh interval; day and night puts the
+    /// wallpaper for the current half of the day back as soon as the display can play. Does
+    /// nothing for a display that is not waiting.
+    func resume(_ display: String) {
+        guard store.holds[display] != nil else { return }
+        settledPeriods[display] = nil
+        store.setHold(nil, on: display)
+        AppLog.info("playlist: display \(display) resumed after its wallpaper was removed")
+        if store.playlist(for: display).mode == .rotate, skip(display) { return }
+        evaluate()
     }
 
     /// A change the timer brings waits while the display cannot play; a `requested` one does not.
@@ -216,7 +254,8 @@ final class PlaylistScheduler {
                 let remade = unanswered && skip(display)
                 if remade {
                     // That change schedules the next interval once it is made.
-                } else if (attempted || isRunning(display)), (store.revisions[display] ?? 0) == revision {
+                } else if (attempted || isRunning(display)), (store.revisions[display] ?? 0) == revision,
+                          store.holds[display] == nil {
                     store.schedule(display, at: now().addingTimeInterval(Self.seconds(playlist.interval)))
                 } else {
                     evaluate()
@@ -231,7 +270,9 @@ final class PlaylistScheduler {
                     let applied = try await activate(display) { [self] in
                         guard !observers.isEmpty, (store.revisions[display] ?? 0) == revision,
                             displays().contains(display),
-                            requested || requestedWhileInFlight.contains(display) || isRunning(display)
+                            requested || requestedWhileInFlight.contains(display) || isRunning(display),
+                            // The user may have emptied the display while this change waited.
+                            store.holds[display] == nil
                         else { return nil }
                         // Resolve membership when the command runs, not when its timer fired.
                         let latest = store.playlist(for: display)
@@ -289,6 +330,7 @@ final class PlaylistScheduler {
                 let applied = try await activate(display) { [self] in
                     guard (store.revisions[display] ?? 0) == revision,
                         displays().contains(display), isRunning(display), library().contains(target),
+                        store.holds[display] == nil,
                         PlaylistPlanner.phase(at: now(), dayStart: playlist.dayStart,
                             nightStart: playlist.nightStart, calendar: calendar).until == period
                     else { return nil }

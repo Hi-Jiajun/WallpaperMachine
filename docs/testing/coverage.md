@@ -926,9 +926,11 @@ across displays and detached on manual edit, cleanup when wallpapers or
 collections go), `PlaylistSchedulerTests` (fake clock, library and activation;
 no renderer: failure cooldowns, paused catch-up, a newer manual command
 outranking a failed automatic switch, a rotation yielding to a waiting Apply, a manual choice holding a
-due rotation), `WebPanelPlaylistTests` and offscreen
+due rotation, a display the user emptied staying empty until a wallpaper, Change now or Resume),
+`WebPanelPlaylistTests` and offscreen
 `ControlPanelPlaybackToolsTests` (drag and button sorting, keyboard focus,
-stale-drag rejection, escaped history titles, clearing only the target display).
+stale-drag rejection, escaped history titles, clearing only the target display, the
+Resume row in two languages).
 What each covers: [playlists](../features/playlists.md#verification).
 
 ## Preview

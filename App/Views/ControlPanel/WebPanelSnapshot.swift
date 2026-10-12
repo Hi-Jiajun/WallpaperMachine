@@ -617,6 +617,8 @@ extension WebPanelController {
       let next = playlists.nextChange[display].map { $0.timeIntervalSince1970 * 1000 } as Any? ?? null
       var value = Self.organizationPlaylistSnapshot(playlist)
       value["nextChange"] = next
+      // The playlist waits because the user removed this display's wallpaper.
+      value["held"] = playlists.holds[display] != nil
       value["skipped"] = (playlists.skipped[display] ?? [:]).sorted { $0.key < $1.key }.map { id, failure in
         ["id": id, "message": failure.message,
          "retryAfter": failure.retryAfter.timeIntervalSince1970 * 1000] as [String: Any]

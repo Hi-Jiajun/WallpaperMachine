@@ -10,6 +10,7 @@ final class PlaylistStore {
     private static let playlistsKey = "WallpaperMachine.playlists"
     private static let nextChangeKey = "WallpaperMachine.playlistNextChange"
     static let plansKey = "WallpaperMachine.playlistPlans"
+    private static let holdsKey = "WallpaperMachine.playlistHolds"
 
     private let defaults: UserDefaults
     private(set) var playlists: [String: DisplayPlaylist]
@@ -17,6 +18,14 @@ final class PlaylistStore {
     /// When each display changes next. Kept across launches, so a relaunch neither restarts a
     /// long interval nor skips a change that fell due while the app was closed.
     private(set) var nextChange: [String: Date]
+    /// Why a display's playlist is waiting instead of changing its wallpaper. The only reason is
+    /// that the user removed the wallpaper: a display they emptied stays empty until a wallpaper
+    /// is put on it again, or they resume the playlist. Kept across launches, so a relaunch does
+    /// not fill a display that was cleared, and left out of backups like the other run state.
+    enum Hold: String, Codable {
+        case removedWallpaper
+    }
+    private(set) var holds: [String: Hold]
     /// What each display has shown this shuffle round, so every wallpaper comes round before one
     /// repeats. Only for this run of the app.
     private(set) var recent: [String: [String]] = [:]
@@ -30,6 +39,9 @@ final class PlaylistStore {
     /// Changes a rotating display to its next wallpaper now, answering false when it does not
     /// rotate. The app delegate points it at the scheduler; the panel's Change now calls it.
     var skipHandler: (@MainActor (String) -> Bool)?
+    /// Lifts a display's hold and fills it from its playlist now. The app delegate points it at
+    /// the scheduler; the panel's Resume playlist calls it.
+    var resumeHandler: (@MainActor (String) -> Void)?
 
     init(defaults: UserDefaults = ClientPreferences.defaults) {
         self.defaults = defaults
@@ -39,6 +51,8 @@ final class PlaylistStore {
             .flatMap { try? JSONDecoder().decode([PlaylistPlan].self, from: $0) } ?? []
         let stored = defaults.dictionary(forKey: Self.nextChangeKey) as? [String: Double] ?? [:]
         nextChange = stored.mapValues { Date(timeIntervalSince1970: $0) }
+        let heldDisplays = defaults.dictionary(forKey: Self.holdsKey) as? [String: String] ?? [:]
+        holds = heldDisplays.compactMapValues(Hold.init(rawValue:))
     }
 
     func playlist(for display: String) -> DisplayPlaylist {
@@ -55,6 +69,8 @@ final class PlaylistStore {
         after.planID = nil
         revisions[display, default: 0] &+= 1
         playlists[display] = after
+        // Turning the playlist off leaves nothing to wait for.
+        if after.mode == .off { holds[display] = nil }
         if after.mode != before.mode || after.interval != before.interval
             || after.dayStart != before.dayStart || after.nightStart != before.nightStart
         {
@@ -150,6 +166,17 @@ final class PlaylistStore {
         persist()
     }
 
+    /// Makes a display's playlist wait (`hold`) or lets it carry on (nil). Setting what it
+    /// already has is not a change, so the scheduler can lift a hold on every evaluation.
+    func setHold(_ hold: Hold?, on display: String) {
+        guard holds[display] != hold else { return }
+        holds[display] = hold
+        // Nothing falls due while a display waits, and whatever deadline it had would be stale
+        // when the wait ends: the scheduler dates a fresh interval then.
+        if hold != nil { nextChange[display] = nil }
+        persist()
+    }
+
     /// Remembers a pick for shuffle; see `PlaylistPlanner.remember(_:in:candidates:)`.
     func recordPick(_ id: String, on display: String, candidates: [String]) {
         recent[display] = PlaylistPlanner.remember(id, in: recent[display] ?? [], candidates: candidates)
@@ -206,6 +233,8 @@ final class PlaylistStore {
         revisions[display, default: 0] &+= 1
         playlists[display] = playlist
         recent[display] = nil
+        // Choosing a playlist is asking for it to run.
+        holds[display] = nil
         nextChange[display] = playlist.mode == .rotate ? .distantPast : nil
         persist()
     }
@@ -216,6 +245,7 @@ final class PlaylistStore {
         revisions[display, default: 0] &+= 1
         playlists[display] = playlist
         recent[display] = nil
+        holds[display] = nil
         nextChange[display] = playlist.mode == .rotate ? now.addingTimeInterval(TimeInterval(playlist.interval * 60)) : nil
         persist()
     }
@@ -251,6 +281,7 @@ final class PlaylistStore {
             defaults.set(data, forKey: Self.plansKey)
         }
         defaults.set(nextChange.mapValues(\.timeIntervalSince1970), forKey: Self.nextChangeKey)
+        defaults.set(holds.mapValues(\.rawValue), forKey: Self.holdsKey)
         NotificationCenter.default.post(name: Self.didChangeNotification, object: self)
     }
 }

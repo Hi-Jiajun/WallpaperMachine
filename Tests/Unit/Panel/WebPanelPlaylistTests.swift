@@ -118,6 +118,36 @@ final class WebPanelPlaylistTests: XCTestCase {
     XCTAssertEqual(asked, ["primary"])
   }
 
+  /// A removal that holds the playlist shows in the snapshot as a paused playlist, and the
+  /// panel's Resume reaches the scheduler for the display it names.
+  func testResumeReachesTheSchedulerAndTheSnapshotReportsTheHold() async throws {
+    playlists.update("primary") { $0.mode = .rotate }
+    func held() throws -> Bool? {
+      let snapshot = try XCTUnwrap(controller.snapshot()["playlists"] as? [String: [String: Any]])
+      return snapshot["primary"]?["held"] as? Bool
+    }
+    XCTAssertEqual(try held(), false)
+    playlists.setHold(.removedWallpaper, on: "primary")
+    XCTAssertEqual(try held(), true)
+
+    var asked: [String] = []
+    playlists.resumeHandler = { asked.append($0) }
+    try await controller.perform("playlistResume", body: ["displayID": "primary"])
+    XCTAssertEqual(asked, ["primary"])
+    try await controller.perform("playlistResume", body: [:])
+    XCTAssertEqual(asked, ["primary", "primary"], "the target display is the default")
+    for body: [String: Any] in [["displayID": "mirrored"], ["displayID": "gone"]] {
+      do {
+        try await controller.perform("playlistResume", body: body)
+        XCTFail("resumed \(body)")
+      } catch {}
+    }
+    XCTAssertEqual(asked.count, 2)
+
+    playlists.setHold(nil, on: "primary")
+    XCTAssertEqual(try held(), false)
+  }
+
   func testReorderingUsesExactMembershipAndAnEligibleDisplay() async throws {
     playlists.update("primary") { $0.source = .list; $0.wallpaperIDs = ["a", "b"] }
     try await controller.perform("playlistReorder", body: ["ids": ["b", "a"], "expectedIDs": ["a", "b"]])

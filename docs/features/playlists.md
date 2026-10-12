@@ -125,14 +125,44 @@ app. Day/night still attempts its exact chosen wallpaper once per period; it nev
 substitutes an unrelated one. These rules handle errors returned by Apply, not a
 later visual defect in a wallpaper that was accepted successfully.
 
+### A display you cleared
+
+Taking the wallpaper off a display (**Eject** in Settings → Displays, or **Remove from
+display** in a wallpaper's details) is a choice too: the playlist does not undo it by
+filling the display again at the next change. `BridgeStore.removeWallpaperFromDisplayAsync`
+reports the removal, and the app delegate puts the display's playlist on hold
+(`PlaylistStore.holds`, the `removedWallpaper` reason) when the playlist is Rotate or
+Day and night. A display on hold has no deadline and no timer, and its playlist row
+reads **Playlist paused** with a **Resume playlist** button.
+
+The wait ends when:
+
+- any wallpaper is on the display again, whoever put it there (an Apply, a link, a
+  rule, a Space, a Focus); a rotation then counts a whole interval from that moment,
+  and Day and night leaves what is on screen until its next boundary;
+- **Change now** or **Next Wallpaper** asks a rotating display for a change;
+- **Resume playlist** is chosen: a rotation fills the display now and starts a fresh
+  interval, and Day and night applies the wallpaper for the current half of the day as
+  soon as the display can play;
+- the playlist is turned **Off**, a saved playlist is applied to the display, or a Focus
+  ends and restores its playlist.
+
+Only the user's own removal holds a playlist. The ejects the app makes itself (deleting
+a wallpaper, reloading or reapplying one after an update, recovering a display layout,
+restoring after a Focus) never do, and a change already waiting in the command queue
+when the display is emptied finds the hold and leaves the display empty. The hold is
+kept across launches, so a relaunch does not fill a display that was cleared. It is
+run state like the shuffle round: it is not part of a backup.
+
 ## Storage
 
 `PlaylistStore` keeps every display's playlist in the `WallpaperMachine.playlists`
 default (JSON; missing fields decode with defaults, and an interval outside 1–10,080
 minutes falls back to 30) and each display's next change in
 `WallpaperMachine.playlistNextChange`, so a relaunch neither restarts a long interval
-nor skips a change that fell due while the app was closed. Shuffle's round is kept for
-the running app only.
+nor skips a change that fell due while the app was closed. A display whose playlist is
+waiting after the user removed its wallpaper is kept in `WallpaperMachine.playlistHolds`,
+so a relaunch leaves it empty. Shuffle's round is kept for the running app only.
 
 ## Code
 
@@ -142,7 +172,7 @@ the running app only.
 | Candidates, next pick, day and night | `App/Services/Playlist/PlaylistPlanner.swift` |
 | Persistence and dates | `App/Services/Playlist/PlaylistStore.swift` |
 | Timer and switching | `App/Services/Playlist/PlaylistScheduler.swift`, wired in `AppDelegate.startPlaylistScheduler` |
-| Panel actions | `playlistSetting`, `playlistAdd`, `playlistRemove`, `playlistReorder`, `playlistClearFailures`, `playlistSkip` in `WebPanelActions.swift` |
+| Panel actions | `playlistSetting`, `playlistAdd`, `playlistRemove`, `playlistReorder`, `playlistClearFailures`, `playlistSkip`, `playlistResume` in `WebPanelActions.swift` |
 | Panel | Settings → Displays in `WebUI/settings.js`, with drag/button ordering in `WebUI/playlist-order.js`; the list button and selection action in `WebUI/panel.js` |
 | Collections and saved-plan actions | `WallpaperCollectionStore.swift`, `WebPanelLibraryOrganization.swift`, `WebUI/collections.js`, `WebUI/plans.js` |
 
@@ -158,8 +188,12 @@ a manual choice left alone, Change now, nothing playable, bounded failure skippi
 cooldown expiry, cancellation, manual-command precedence and a rotation giving
 way to a waiting Apply, rescheduled one interval later, a manual choice holding a
 due rotation for min(interval, 5 minutes) without ever shortening a later deadline
-or touching Off and Day and night) and
-`WebPanelPlaylistTests` (the actions' validation).
-`ControlPanelPlaybackToolsTests` drives reorder buttons and drag/drop in an
-offscreen panel, including an edit made while a drag is in progress. Real
+or touching Off and Day and night, a display the user emptied staying empty at a due
+change or a day and night boundary until a wallpaper, Change now or Resume ends the
+wait, and a change waiting in the queue leaving it empty) and
+`WebPanelPlaylistTests` (the actions' validation and the paused state in the snapshot).
+`WallpaperDisplayTransferIntegrationTests` checks that only the user's removal reports
+one, not a delete or a reload. `ControlPanelPlaybackToolsTests` drives reorder buttons
+and drag/drop in an offscreen panel, including an edit made while a drag is in
+progress, and the Resume row in English and Chinese. Real
 switching on a desktop is not covered by these tests.

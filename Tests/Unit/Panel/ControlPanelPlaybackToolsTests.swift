@@ -11,6 +11,21 @@ final class ControlPanelPlaybackToolsTests: ControlPanelTestCase {
     }
   }
 
+  /// What a JavaScript expression that evaluates to an array of strings reads now; none may be empty.
+  private func texts(_ panel: PanelFixture, _ expression: String,
+                     file: StaticString = #filePath, line: UInt = #line) async throws -> [String] {
+    let read = try await panel.js("return \(expression)")
+    let values = try XCTUnwrap(read as? [String], file: file, line: line)
+    XCTAssertFalse(values.isEmpty, file: file, line: line)
+    for value in values { XCTAssertFalse(value.isEmpty, file: file, line: line) }
+    return values
+  }
+
+  /// The strings as a JavaScript array literal.
+  private func arrayLiteral(_ values: [String]) throws -> String {
+    String(decoding: try JSONEncoder().encode(values), as: UTF8.self)
+  }
+
   func testButtonsAndDragReorderTheNativePlaylistAndRefuseAStaleDrag() async throws {
     try await withPanel { panel in
       installLibrary(panel)
@@ -64,6 +79,59 @@ final class ControlPanelPlaybackToolsTests: ControlPanelTestCase {
         """)
       try await panel.waitJS("Boolean(document.querySelector('#settings-content [role=\"alert\"]'))")
       XCTAssertEqual(panel.playlists.playlist(for: "primary").wallpaperIDs, ["a", "c", "b", "d"])
+    }
+  }
+
+  /// A playlist that waits because the user emptied the display says so, offers Resume only
+  /// while it waits, and does so in the page's language.
+  func testTheResumeRowShowsOnlyWhileAPlaylistWaitsAndAsksToResumeIt() async throws {
+    try await withPanel { panel in
+      installLibrary(panel)
+      panel.playlists.update("primary") { $0.mode = .rotate }
+      try await panel.finishWelcome()
+      panel.navigation.selection = .settings
+      panel.show()
+      try await panel.waitJS("powerProbe.received.at(-1)?.page === 'settings'")
+      _ = try await panel.js("document.querySelector('[data-section=\"displays\"]').click()")
+      _ = try await panel.js("document.querySelector('[data-key=\"display-primary-playlist\"] > summary').click()")
+      try await panel.waitJS("document.querySelector('[data-key=\"display-primary-playlist-mode-row\"]').getClientRects().length > 0")
+      let row = "document.querySelector('[data-key=\"display-primary-playlist-held-row\"]')"
+      let note = "document.querySelector('[data-key=\"display-primary-playlist\"] .settings-disclosure-title .settings-note')"
+      try await panel.expectJS("return \(row) === null", equals: true)
+      try await panel.expectJS("return \(note) === null", equals: true)
+
+      var resumed: [String] = []
+      panel.playlists.resumeHandler = { resumed.append($0) }
+      panel.playlists.setHold(.removedWallpaper, on: "primary")
+      try await panel.waitJS("\(row) !== null")
+      let rowTexts = """
+        [\(row).querySelector('.settings-label').firstChild.textContent, \(row).querySelector('button').textContent,
+         \(note).textContent, \(row).querySelector('.settings-note').textContent]
+        """
+      try await panel.expectJS("return \(row).querySelector('button').disabled", equals: false)
+      let english = try await texts(panel, rowTexts)
+
+      // The same page in Chinese: every string of the row is translated, not left in English.
+      _ = try await panel.js("""
+        const bridge = window.webkit.messageHandlers.native;
+        await window.wallpaperUI.receive(await bridge.postMessage({action:'languageSetting', value:'zh-Hans'}));
+        """)
+      let chinese = try await texts(panel, rowTexts)
+      XCTAssertEqual(chinese.count, english.count)
+      for (index, text) in chinese.enumerated() { XCTAssertNotEqual(text, english[index]) }
+      _ = try await panel.js("""
+        const bridge = window.webkit.messageHandlers.native;
+        await window.wallpaperUI.receive(await bridge.postMessage({action:'languageSetting', value:'system'}));
+        """)
+      let englishLiteral = try arrayLiteral(english)
+      try await panel.waitJS("JSON.stringify(\(rowTexts)) === JSON.stringify(\(englishLiteral))")
+
+      _ = try await panel.js("\(row).querySelector('button').click()")
+      try await panel.waitUntil { resumed == ["primary"] }
+
+      // Anything that ends the wait takes the row away again.
+      panel.playlists.setHold(nil, on: "primary")
+      try await panel.waitJS("\(row) === null && \(note) === null")
     }
   }
 
