@@ -583,14 +583,38 @@ need an authorized runtime check
   `nativeVideoProbeTimeout`; each retry is bounded too; the same file has at most one
   read outstanding and is answered at once while it is, and a pass cancelled before a
   retry's read begins leaves no read outstanding; a close queued behind the
-  stuck pass happens in the next one; and the storage is only classified when a file
-  is actually read. `NativeVideoDeadlineTests` — the race itself: the operation,
+  stuck pass happens in the next one; and the storage is not classified again for an
+  offer that opens nothing. `NativeVideoDeadlineTests` — the race itself: the operation,
   the timer or the caller's cancellation wins, the caller is always released, the
   loser's timer is cancelled, and a late result of a read that nothing cancels is
   dropped. `NativeVideoStoragePolicyTests` — the classification order over every
   combination of volume flags (an unreadable flag is never taken as internal), the
   deadlines growing with slower storage, a missing file reading as unknown, and a
   classification that never returns counting as unknown after 2 seconds.
+- The first-frame deadline, in the host suite with the same hand-fired clock and a
+  fake surface that never reports a frame: the first miss asks the surface to restart
+  and starts a second deadline of the same length, the second miss hands the wallpaper
+  back once, under its admission key, closes the window and ends its startup, a restart
+  the surface refuses hands it back at once (the text of the reason is not pinned),
+  and each missed deadline counts as `nativeVideoFirstFrameTimeout`. The deadline is
+  10, 30 or 90 seconds per storage class; a frame before the deadline stops the
+  countdown, and a frame after the hand-off, a replaced surface, a closed surface and a
+  shut-down host leave nothing to fire. A display that is hidden (on its own or
+  globally) is not judged: the watch parks and starts again with a full deadline only
+  when every reason has ended, keeping a restart it had already spent; a user-paused
+  clip is still judged, and one display's frame settles only its own watch. A timeout
+  is not remembered by the host as a verdict, so the same key opens again when it is
+  offered, while a decoder failure still is (the bridge's hold on the hand-off is
+  outside this suite). `NativeVideoRecoveryBudgetTests` — two rebuilds per window and a refusal
+  after that, the allowance returning as old rebuilds leave the window, a stable run
+  forgiving the history (measured from its first frame, interrupted only by a
+  permitted rebuild, not by a refusal), and a reset.
+  `NativeVideoPlayerMediaTests` (opt-in) add the real stall: an `hev1` clip
+  (`Hev1Fixture`, skipped when an OS decodes it or rejects it outright) reaches
+  ready with no picture size and no layer frame, is restarted twice and then refused,
+  with every replaced item released; a healthy clip restarts and plays again, its
+  stable run earning the allowance back through the injected clock; and a restart
+  never starts a paused clip and is refused after a stop or a reported failure.
 - `NativeVideoLayoutTests` — where the picture goes under Fit, Fill, Stretch,
   Original size and a scale factor: the rectangles equal the numbers the
   renderer's own `ComputeWallpaperScalingLayout` gives (Original size is one video
@@ -631,9 +655,10 @@ Not covered: first frames presented on a real display, the Mission Control
 or other-Space poster of a rotated clip as macOS shows it, a side-by-side of
 Fit, Original size and a scale factor on a real display against Compatibility
 (including the composition cost of a large factor), and a genuinely stuck volume (a
-sleeping external disk, an unreachable share, an evicted cloud file) with the hand-off
-reason it produces in **In use now**: the limits and rules are covered, but no test
-blocks a real `AVAsset` load.
+sleeping external disk, an unreachable share, an evicted cloud file) with the restart,
+the hand-off and the reason they produce in **In use now**: the limits and rules are
+covered, and the frame-less clip by the opt-in `hev1` test, but no test blocks a real
+`AVAsset` load or starts a clip from a volume that is slow to answer.
 
 ## Panel
 

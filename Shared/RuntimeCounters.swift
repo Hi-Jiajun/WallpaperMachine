@@ -65,6 +65,13 @@ enum RuntimeCounter: String, CaseIterable, Sendable {
     /// count on an internal drive means the read is genuinely stuck; on a
     /// network share or an evicted cloud file it may only be slow.
     case nativeVideoProbeTimeout
+    /// A clip's first-frame deadline passed with nothing on the layer. The first
+    /// miss restarts the player; a second, or a restart the recovery budget
+    /// refused, hands the wallpaper to the scene engine. A count of one with no
+    /// refusal means a restart brought the picture; on an internal drive any
+    /// count means the pipeline stalled, while on a share or a cloud file the
+    /// file may only have been slow to arrive.
+    case nativeVideoFirstFrameTimeout
     /// A poster request was answered by a one-shot image generator instead of
     /// the item that is playing, which is a second decode of a few frames.
     /// Either the playing item produced no frame in time, or the clip is

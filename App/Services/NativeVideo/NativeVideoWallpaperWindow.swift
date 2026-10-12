@@ -36,6 +36,18 @@ protocol NativeVideoSurface: AnyObject {
     /// Called when the clip failed with its audio and keeps playing without
     /// it, with the failure. Not a hand-off: the surface is still playing.
     var onAudioDropped: (@MainActor (String) -> Void)? { get set }
+    /// Where the platform pipeline stands, in one line for the log: the item's
+    /// status, the picture size it reports, whether the clock runs and whether
+    /// the layer has a frame. Read when a clip has not shown a picture, to tell
+    /// a file that is slow to arrive from a decoder that produced nothing.
+    var stateSummary: String { get }
+    /// Rebuilds the playback pipeline from the file, for a clip that is
+    /// nominally playing and shows no picture. True means a rebuild started;
+    /// false means nothing was done and none is left to try (the surface is
+    /// stopped or has failed, or its recovery allowance is spent), so the caller
+    /// gives the wallpaper up instead. Never changes the user's pause, the
+    /// volume or the placement.
+    func restartPlayback(reason: String) -> Bool
     /// Puts the surface on the desktop. Separate from construction so the
     /// caller decides when a surface becomes visible.
     func present()
@@ -157,6 +169,8 @@ extension NativeVideoWallpaperWindow: NativeVideoSurface {
         get { player.onAudioDropped }
         set { player.onAudioDropped = newValue }
     }
+    var stateSummary: String { player.stateSummary }
+    func restartPlayback(reason: String) -> Bool { player.restartPlayback(reason: reason) }
     func present() { orderFrontRegardless() }
     func stop() {
         player.stop()

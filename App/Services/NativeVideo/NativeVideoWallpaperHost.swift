@@ -68,6 +68,15 @@ final class NativeVideoWallpaperHost {
     /// offer; the serial stops a late return from clearing a newer read.
     private var outstandingProbes: [String: UInt64] = [:]
     private var probeSerial: UInt64 = 0
+    /// One display's wait for its first picture. `task` is the countdown, and
+    /// is `nil` while the watch is parked because the display cannot be judged.
+    private struct FirstFrameWatch {
+        var task: Task<Void, Never>?
+        let url: URL
+        /// Whether the player has already been rebuilt once for this clip.
+        let restarted: Bool
+    }
+    private var firstFrameWatches: [UInt32: FirstFrameWatch] = [:]
     private var surfaceGeneration: UInt64 = 0
     private var reconcileInFlight = false
     private var reconcileRequested = false
@@ -134,6 +143,14 @@ final class NativeVideoWallpaperHost {
     /// Metadata reads that have not returned, including ones already given up
     /// on.
     var outstandingProbeCountForTest: Int { outstandingProbes.count }
+    /// First-frame watches counting down, and ones waiting for their display to
+    /// become visible again.
+    var armedFirstFrameWatchCountForTest: Int {
+        firstFrameWatches.values.filter { $0.task != nil }.count
+    }
+    var parkedFirstFrameWatchCountForTest: Int {
+        firstFrameWatches.values.filter { $0.task == nil }.count
+    }
 
     func start() {
         guard posterObserver == nil else { return }
@@ -281,6 +298,7 @@ final class NativeVideoWallpaperHost {
         surface.onReadyForDisplay = { [weak self, weak surface] in
             guard let self, let surface, self.surfaces[displayID] === surface,
                   let current = self.descriptors[displayID] else { return }
+            self.cancelFirstFrameWatch(displayID)
             self.recordState(current, phase: .ready)
         }
         // Installing the callback can deliver a failure the player was already
@@ -291,6 +309,112 @@ final class NativeVideoWallpaperHost {
         guard surfaces[displayID] === surface else { return }
         update(surface: surface, with: wallpaper, displayID: displayID)
         surface.present()
+        armFirstFrameWatch(displayID: displayID, surface: surface, url: url, restarted: false)
+    }
+
+    // MARK: First frame
+
+    /// Starts the wait for a surface's first picture.
+    ///
+    /// Presenting a window says nothing about whether the clip will ever show.
+    /// A clip the platform calls playable can reach `readyToPlay` with its
+    /// clock running and still never produce a frame, and no observer fires for
+    /// that, so without a deadline the display stays black with the scene
+    /// engine excluded and the wallpaper's state stuck at loading. The deadline
+    /// follows where the file lives, like the metadata read's: the same clip
+    /// takes seconds longer to start from a share than from the internal drive.
+    ///
+    /// The countdown holds no reference to the host, so a host that is dropped
+    /// is not kept alive by a clip that never starts. `location` is passed on
+    /// by the second wait of a restarted clip, so the volume is looked at once.
+    private func armFirstFrameWatch(
+        displayID: UInt32, surface: NativeVideoSurface, url: URL, restarted: Bool,
+        location known: NativeVideoStoragePolicy.Location? = nil
+    ) {
+        cancelFirstFrameWatch(displayID)
+        guard !stopped, !surface.isReadyForDisplay else { return }
+        let storage = self.storage
+        let sleep = self.sleep
+        let task = Task { @MainActor [weak self, weak surface] in
+            let location: NativeVideoStoragePolicy.Location
+            if let known {
+                location = known
+            } else {
+                location = await storage(url)
+            }
+            guard !Task.isCancelled else { return }
+            let limit = NativeVideoStoragePolicy.firstFrameDeadline(location)
+            do { try await sleep(limit) } catch { return }
+            guard !Task.isCancelled, let self, let surface else { return }
+            self.firstFrameDeadlinePassed(
+                displayID: displayID, surface: surface, url: url, location: location,
+                limit: limit, restarted: restarted)
+        }
+        firstFrameWatches[displayID] = FirstFrameWatch(task: task, url: url, restarted: restarted)
+    }
+
+    private func cancelFirstFrameWatch(_ displayID: UInt32) {
+        firstFrameWatches.removeValue(forKey: displayID)?.task?.cancel()
+    }
+
+    /// A surface's first-frame deadline passed.
+    ///
+    /// The surface is judged only if it is still this display's surface, still
+    /// has no picture and can show one. A hidden or asleep display is not
+    /// judged: the watch waits for it, and starts again with a full deadline
+    /// when it returns. A clip that has not shown by then gets one rebuild of
+    /// its pipeline and a second deadline of the same length; if that does not
+    /// help, or the player has no rebuild left to spend, the scene engine takes
+    /// the wallpaper. The hand-off is not recorded as a verdict on the file: a
+    /// slow volume or a one-off stall is not proof that the clip cannot play.
+    /// That is this host's memory only; the bridge still holds the hand-off for
+    /// the admission key (see `handOff`).
+    private func firstFrameDeadlinePassed(
+        displayID: UInt32, surface: NativeVideoSurface, url: URL,
+        location: NativeVideoStoragePolicy.Location, limit: Duration, restarted: Bool
+    ) {
+        guard !stopped, surfaces[displayID] === surface else { return }
+        guard !surface.isReadyForDisplay else {
+            firstFrameWatches.removeValue(forKey: displayID)
+            return
+        }
+        if suspended || suspendedDisplays.contains(displayID) {
+            firstFrameWatches[displayID] = FirstFrameWatch(
+                task: nil, url: url, restarted: restarted)
+            return
+        }
+        counters.record(
+            .nativeVideoFirstFrameTimeout,
+            for: RuntimeSurfaceKey(kind: .desktopNativeVideo, displayID: displayID))
+        let seconds = limit.components.seconds
+        let wallpaperID = descriptors[displayID]?.wallpaperId ?? "?"
+        let load = logLoads[displayID]
+        if !restarted, surface.restartPlayback(reason: "no first frame within \(seconds) s") {
+            AppLog.warn(
+                "native video wallpaper \(wallpaperID): no first frame within \(seconds) s "
+                    + "(\(location.label)); \(surface.stateSummary); restarting playback once",
+                load: load)
+            armFirstFrameWatch(
+                displayID: displayID, surface: surface, url: url, restarted: true,
+                location: location)
+            return
+        }
+        firstFrameWatches.removeValue(forKey: displayID)
+        let detail = "no first frame within \(seconds) s\(restarted ? " after one restart" : ""): "
+            + surface.stateSummary
+        handlePreparationFailure(
+            displayID: displayID, surface: surface, detail: detail, settled: false)
+    }
+
+    /// Starts the countdown again for a parked watch whose display can be
+    /// judged once more.
+    private func resumeParkedFirstFrameWatch(_ displayID: UInt32) {
+        guard !suspended, !suspendedDisplays.contains(displayID),
+            let watch = firstFrameWatches[displayID], watch.task == nil,
+            let surface = surfaces[displayID]
+        else { return }
+        armFirstFrameWatch(
+            displayID: displayID, surface: surface, url: watch.url, restarted: watch.restarted)
     }
 
     /// The player could not play an asset admission had accepted.
@@ -299,8 +423,13 @@ final class NativeVideoWallpaperHost {
     /// the same place, because the outcome has to be the same: the scene
     /// engine takes the wallpaper. Leaving it here would mean a display
     /// showing black with the other backend excluded.
+    ///
+    /// `settled` says whether the failure is a verdict on the file. A decoder
+    /// that could not open the track is, and is remembered so the next offer of
+    /// the same key goes straight back to the scene engine. A clip that merely
+    /// never showed a frame in time is not, and a later offer opens it afresh.
     private func handlePreparationFailure(
-        displayID: UInt32, surface: NativeVideoSurface, detail: String
+        displayID: UInt32, surface: NativeVideoSurface, detail: String, settled: Bool = true
     ) {
         guard !stopped, let wallpaper = descriptors[displayID] else { return }
         // Staleness is identity, not a counter. `surfaceGeneration` is
@@ -315,7 +444,7 @@ final class NativeVideoWallpaperHost {
         // backends at once.
         close(displayID: displayID, surface: surface)
         recordState(wallpaper, phase: .failed, message: refusal.reason)
-        admissionCache[wallpaper.admissionKey] = refusal
+        if settled { admissionCache[wallpaper.admissionKey] = refusal }
         Task { @MainActor [weak self] in
             await self?.handOff(wallpaper: wallpaper, refusal: refusal, load: load)
             self?.notifySurfacesChanged()
@@ -523,6 +652,7 @@ final class NativeVideoWallpaperHost {
     }
 
     private func close(displayID: UInt32, surface: NativeVideoSurface) {
+        cancelFirstFrameWatch(displayID)
         if let wallpaper = descriptors[displayID] { recordState(wallpaper, phase: .closed) }
         states.removeValue(forKey: displayID)
         surface.stop()
@@ -536,6 +666,9 @@ final class NativeVideoWallpaperHost {
         for (displayID, surface) in surfaces {
             surface.setPresentationSuspended(value || suspendedDisplays.contains(displayID))
         }
+        if !value {
+            for displayID in Array(firstFrameWatches.keys) { resumeParkedFirstFrameWatch(displayID) }
+        }
     }
 
     /// One display's own suspension. A hidden screen must not stop a visible
@@ -548,6 +681,7 @@ final class NativeVideoWallpaperHost {
         }
         guard let surface = surfaces[displayID] else { return }
         surface.setPresentationSuspended(suspended || value)
+        if !value { resumeParkedFirstFrameWatch(displayID) }
     }
 
     func shutdown() {
@@ -561,6 +695,8 @@ final class NativeVideoWallpaperHost {
         }
         surfaces.removeAll()
         descriptors.removeAll()
+        for watch in firstFrameWatches.values { watch.task?.cancel() }
+        firstFrameWatches.removeAll()
         admissionCache.removeAll()
         admissionCacheOrder.removeAll()
         outstandingProbes.removeAll()

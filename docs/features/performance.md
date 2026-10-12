@@ -509,6 +509,30 @@ the internal drive means the read is stuck, while on a share or a cloud file it 
 only be slow. The same bound applies to a read that fails and is retried: each of the
 three attempts gets the whole limit.
 
+A clip that never shows a picture is handed back too. A file the platform calls
+playable can reach ready with its clock running and still produce no frame (an HEVC
+clip tagged `hev1` does this on macOS 27), and nothing reports a failure, so the
+display would stay black with Compatibility excluded and the wallpaper's startup
+never finishing. Native playback therefore waits for the first picture: 10 seconds on
+the internal drive, 30 seconds on an external drive or when the volume cannot be
+identified, and 90 seconds on a network volume or a cloud-backed file, the same
+storage classes as the metadata read. If none arrives, the player is rebuilt once and
+given the same time again. If that fails as well, or the player has no rebuild left
+(two per ten minutes for a display's clip, given back after a minute of uninterrupted
+frames), the wallpaper goes to Compatibility and **In use now** says that no first
+frame arrived, after one restart or not, with the state of the pipeline (item status,
+the picture size it reports, whether the clock runs, whether the layer has a frame).
+The wait does not run while the display is hidden or asleep: it starts again with a
+full deadline when the display returns. The user's own pause does not stop it, since
+a paused clip still shows its first frame. As with a slow metadata read, the app does
+not remember this as a verdict on the file, so an offer of the same wallpaper would
+open it again, but the bridge keeps its refusal for the session: a clip handed over by
+a slow volume stays on Compatibility until its file or its target frame rate changes,
+or **Video playback** is switched to Compatibility and back. A diagnostic recording
+counts every deadline that passed without a frame as `nativeVideoFirstFrameTimeout`:
+a single count with no refusal means the rebuild brought the picture, and on the
+internal drive any count means the pipeline stalled.
+
 When the clip's audio output cannot start (no output device, or one that will not
 start), AVFoundation fails the whole clip, muted or not, and reports only
 `AVErrorUnknown`. Native playback then rebuilds the clip from its video track alone

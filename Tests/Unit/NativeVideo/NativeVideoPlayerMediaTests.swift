@@ -632,4 +632,142 @@ final class NativeVideoPlayerMediaTests: XCTestCase {
         XCTAssertNotNil(refusal)
         print("[media] corrupt -> \(refusal?.reason ?? "ACCEPTED")")
     }
+
+    // MARK: Restart
+
+    /// The number of items this player has created, and released.
+    private func itemCounts() -> (created: UInt64, released: UInt64) {
+        let snapshot = counters.snapshot()
+        return (
+            snapshot.value(.nativeVideoItemCreated, for: surface),
+            snapshot.value(.nativeVideoItemReleased, for: surface))
+    }
+
+    func testAReadyButFrameLessItemIsRestartedWithinBudget() async throws {
+        // The stall the first-frame watchdog exists for. An `hev1` clip is not
+        // decodable here: the item reaches readyToPlay and its clock runs, but
+        // the picture size stays zero and the layer never becomes ready, and
+        // no failure is delivered. The player can only be rebuilt, and only so
+        // often.
+        let url = try Hev1Fixture.write(name: "hev1", into: directory)
+        let player = makePlayer(url: url)
+        var failures: [String] = []
+        player.onPreparationFailure = { _, detail in failures.append(detail) }
+        let itemReady = await wait { player.itemStatusForTest == .readyToPlay }
+        guard itemReady, failures.isEmpty else {
+            throw XCTSkip("this OS rejects an hev1 item outright (\(failures)); nothing to restart")
+        }
+        let shown = await wait(upTo: .seconds(2)) { player.layerIsReadyForDisplayForTest }
+        try XCTSkipIf(shown, "this OS decodes hev1, so the clip is no longer frame-less")
+        XCTAssertEqual(player.presentationSizeForTest ?? .zero, .zero, "no picture size either")
+        XCTAssertEqual(itemCounts().created, 1)
+
+        XCTAssertTrue(player.restartPlayback(reason: "first restart"))
+        XCTAssertFalse(
+            player.restartPlayback(reason: "while the first is pending"),
+            "a second rebuild does not start while one is pending")
+        let first = await wait { itemCounts().created == 2 }
+        XCTAssertTrue(first, "the first restart never built its item")
+        XCTAssertTrue(player.restartPlayback(reason: "second restart"))
+        let second = await wait { itemCounts().created == 3 }
+        XCTAssertTrue(second, "the second restart never built its item")
+
+        XCTAssertFalse(
+            player.restartPlayback(reason: "third restart"),
+            "two rebuilds inside the window is all the player gets")
+        let counts = itemCounts()
+        XCTAssertEqual(counts.created, 3)
+        XCTAssertEqual(counts.released, counts.created - 1, "every replaced item was released")
+        XCTAssertTrue(failures.isEmpty, "a restart is not a failure: \(failures)")
+        XCTAssertFalse(player.layerIsReadyForDisplayForTest)
+        print("[media] hev1 stall: restarts=2 then refused, state: \(player.stateSummary)")
+    }
+
+    func testARestartKeepsAHealthyClipPlayingAndAStableRunEarnsTheBudgetBack() async throws {
+        // Time is the test's: the budget reads the player's injected clock, so
+        // a minute of healthy playback is one assignment.
+        let url = try await makeClip(name: "restart-healthy")
+        var clock = ContinuousClock.now
+        let player = NativeVideoPlayer(
+            surface: surface, counters: counters, paused: false, now: { clock })
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 64, height: 36))
+        view.wantsLayer = true
+        player.attach(to: view)
+        var frames = 0
+        player.onReadyForDisplay = { frames += 1 }
+        player.load(url: url)
+        self.player = player
+        let firstFrame = await wait { frames >= 1 }
+        XCTAssertTrue(firstFrame, "the clip never showed a frame")
+
+        for round in 1...2 {
+            let framesBefore = frames
+            XCTAssertTrue(player.restartPlayback(reason: "round \(round)"))
+            let rebuilt = await wait { itemCounts().created == UInt64(round + 1) }
+            XCTAssertTrue(rebuilt, "round \(round) never built its item")
+            let shown = await wait { frames > framesBefore }
+            XCTAssertTrue(shown, "round \(round): the rebuilt clip never showed a frame")
+            let advanced = await wait { player.isPlaying }
+            XCTAssertTrue(advanced, "round \(round): the rebuilt clip is not playing")
+        }
+        XCTAssertFalse(
+            player.restartPlayback(reason: "too soon"),
+            "frames that arrived a moment ago do not forgive two rebuilds")
+
+        clock = clock + .seconds(61)
+        XCTAssertTrue(
+            player.restartPlayback(reason: "after a minute of frames"),
+            "a run that long proves the pipeline works, so the allowance is back")
+        let again = await wait { itemCounts().created == 4 }
+        XCTAssertTrue(again, "the restart after the stable run never built its item")
+        let counts = itemCounts()
+        XCTAssertEqual(counts.released, counts.created - 1)
+    }
+
+    func testARestartNeverStartsAClipTheUserPaused() async throws {
+        let url = try await makeClip(name: "restart-paused")
+        let player = makePlayer(url: url, paused: true)
+        let ready = await wait { player.itemStatusForTest == .readyToPlay }
+        XCTAssertTrue(ready)
+
+        XCTAssertTrue(player.restartPlayback(reason: "test"))
+        let rebuilt = await wait { itemCounts().created == 2 }
+        XCTAssertTrue(rebuilt)
+        let readyAgain = await wait { player.itemStatusForTest == .readyToPlay }
+
+        XCTAssertTrue(readyAgain)
+        XCTAssertFalse(player.isPlaying, "a restart never starts a clip the user paused")
+    }
+
+    func testAStoppedPlayerCannotBeRestarted() async throws {
+        let url = try await makeClip(name: "restart-stopped")
+        let player = makePlayer(url: url)
+        let ready = await wait { player.itemStatusForTest == .readyToPlay }
+        XCTAssertTrue(ready)
+        player.stop()
+
+        XCTAssertFalse(player.restartPlayback(reason: "after stop"))
+        XCTAssertEqual(itemCounts().created, 1)
+    }
+
+    func testARestartAfterAFailureHasBeenReportedIsRefused() async throws {
+        // A reported failure is the host's to act on. Rebuilding underneath it
+        // would resurrect a clip the host is already handing over.
+        let good = try await makeClip(name: "restart-failed-source")
+        let broken = directory.appendingPathComponent("restart-failed.mov")
+        let bytes = try Data(contentsOf: good)
+        try bytes.prefix(bytes.count / 3).write(to: broken)
+        let player = NativeVideoPlayer(surface: surface, counters: counters, paused: false)
+        var reported = false
+        player.onPreparationFailure = { _, _ in reported = true }
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 64, height: 36))
+        view.wantsLayer = true
+        player.attach(to: view)
+        player.load(url: broken)
+        self.player = player
+        let failed = await wait(upTo: .seconds(10)) { reported }
+        XCTAssertTrue(failed)
+
+        XCTAssertFalse(player.restartPlayback(reason: "after the failure"))
+    }
 }

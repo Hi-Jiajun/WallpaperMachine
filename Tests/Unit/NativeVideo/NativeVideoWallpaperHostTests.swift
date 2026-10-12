@@ -114,6 +114,15 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         func setScaling(_ mode: BridgeScalingMode, factor: Double) {
             scalingCalls.append((mode: mode, factor: factor))
         }
+        /// Every restart the host asked this surface for, with its reason.
+        private(set) var restartReasons: [String] = []
+        /// What a restart answers: false is a player with no rebuild left.
+        var restartResult = true
+        var stateSummary = "fake pipeline state"
+        func restartPlayback(reason: String) -> Bool {
+            restartReasons.append(reason)
+            return restartResult
+        }
         func setUserPaused(_ paused: Bool) { userPaused = paused }
         func setPresentationSuspended(_ suspended: Bool) { self.suspended = suspended }
         var isPlaying: Bool { !isStopped && !userPaused && !suspended }
@@ -739,6 +748,10 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         let stuck = wallpaper(displayID: 9, id: "301", admissionKey: 2, mediaPath: slow)
         await host.apply([playing])
         XCTAssertEqual(host.activeDisplayIDs, [7])
+        // Display 7 has its picture, so the only timer left is the stuck read's.
+        let shown = surfacesMade[7]
+        shown?.isReadyForDisplay = true
+        shown?.onReadyForDisplay?()
 
         recorder.offered = [playing, stuck]
         host.reconcile()
@@ -781,19 +794,382 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         XCTAssertTrue(host.isEmpty)
     }
 
-    func testTheStorageIsOnlyClassifiedWhenTheFileIsActuallyRead() async {
+    func testTheStorageIsNotClassifiedAgainForAnOfferThatOpensNothing() async {
         // Classifying looks at the file system. A reconcile storm that is
-        // answered from the cache must not touch it.
+        // answered from the cache, or by a surface that is already playing,
+        // must not touch it: a volume is looked at when a file is read and when
+        // a surface starts waiting for its first picture, and not otherwise.
         let recorder = Recorder()
-        let host = makeHost(wallpapers: [], recorder: recorder)
+        let host = makeHost(wallpapers: [], recorder: recorder, manualLimits: true)
         defer { host.shutdown() }
 
         await host.apply([wallpaper(admissionKey: 11)])
-        await host.apply([])
-        await host.apply([wallpaper(admissionKey: 11)])
+        await sleeper.waitUntilPending()
+        let afterOpen = recorder.storageQueries.count
+        for _ in 0..<3 { await host.apply([wallpaper(admissionKey: 11)]) }
 
         XCTAssertEqual(recorder.admissionProbes.count, 1)
-        XCTAssertEqual(recorder.storageQueries.count, 1)
+        XCTAssertEqual(recorder.storageQueries.count, afterOpen)
+
+        // Closed and offered again, the decision is still the cached one.
+        await host.apply([])
+        await host.apply([wallpaper(admissionKey: 11)])
+        XCTAssertEqual(recorder.admissionProbes.count, 1, "no second read of the file")
+    }
+
+    // MARK: First frame
+
+    /// Lets work the host started on its own turn reach `condition`, without
+    /// sleeping: each yield gives the main actor to whatever is queued.
+    private func settle(
+        until condition: @MainActor () -> Bool, file: StaticString = #filePath, line: UInt = #line
+    ) async {
+        for _ in 0..<1_000 where !condition() { await Task.yield() }
+        XCTAssertTrue(condition(), "never settled", file: file, line: line)
+    }
+
+    /// Opens display 7 and waits until its first-frame countdown is running.
+    private func openAndWaitForTheCountdown(
+        _ host: NativeVideoWallpaperHost, _ descriptor: BridgeNativeVideoWallpaper? = nil
+    ) async throws -> FakeSurface {
+        await host.apply([descriptor ?? wallpaper(admissionKey: 5)])
+        await sleeper.waitUntilPending()
+        return try XCTUnwrap(surfacesMade[7])
+    }
+
+    func testASurfaceThatNeverShowsAFrameIsRestartedOnceThenHandedBack() async throws {
+        // A clip the platform calls playable can reach readyToPlay with its
+        // clock running and never produce a picture; nothing reports a failure.
+        // Without a deadline the display stays black with the scene engine
+        // excluded and the wallpaper's state stuck at loading.
+        let recorder = Recorder()
+        let host = makeHost(wallpapers: [], recorder: recorder, manualLimits: true)
+        defer { host.shutdown() }
+        counters.startSession(duration: .seconds(60))
+        var states: [HostWallpaperState] = []
+        host.onStateChanged = { states.append($0) }
+        let surface = try await openAndWaitForTheCountdown(host)
+        XCTAssertEqual(recorder.presented, 1)
+        XCTAssertTrue(surface.restartReasons.isEmpty, "the deadline has not passed")
+        XCTAssertEqual(states.last?.phase, .loading)
+
+        sleeper.fireNext()
+        await sleeper.waitUntilPending()
+
+        XCTAssertEqual(surface.restartReasons.count, 1, "the first miss rebuilds the pipeline")
+        XCTAssertTrue(recorder.rejected.isEmpty, "and gives the rebuilt clip its own deadline")
+        XCTAssertEqual(host.activeDisplayIDs, [7])
+        XCTAssertEqual(recorder.stopped, 0)
+        let passes = PassCounter()
+        host.onSurfacesChanged = { passes.record() }
+
+        sleeper.fireNext()
+        await passes.wait(for: 1)
+
+        XCTAssertEqual(recorder.rejected.count, 1, "the scene engine takes it")
+        XCTAssertEqual(recorder.rejected.first?.key, 5)
+        XCTAssertEqual(surface.restartReasons.count, 1, "one restart and no more")
+        XCTAssertTrue(host.isEmpty, "no window is left behind")
+        XCTAssertEqual(recorder.stopped, 1)
+        XCTAssertEqual(states.last?.phase, .failed, "and the wallpaper's startup ends")
+        XCTAssertEqual(counters.snapshot().total(.nativeVideoFirstFrameTimeout), 2)
+    }
+
+    func testTheRestartedClipGetsADeadlineOfTheSameLength() async throws {
+        let recorder = Recorder()
+        let host = makeHost(
+            wallpapers: [], recorder: recorder, storage: { _ in .networkVolume },
+            manualLimits: true)
+        defer { host.shutdown() }
+        _ = try await openAndWaitForTheCountdown(host)
+
+        sleeper.fireNext()
+        await sleeper.waitUntilPending()
+
+        let waits = sleeper.requested.suffix(2)
+        XCTAssertEqual(Array(waits), [.seconds(90), .seconds(90)])
+    }
+
+    func testAFrameBeforeTheDeadlineCancelsTheWatch() async throws {
+        let recorder = Recorder()
+        let host = makeHost(wallpapers: [], recorder: recorder, manualLimits: true)
+        defer { host.shutdown() }
+        let surface = try await openAndWaitForTheCountdown(host)
+        XCTAssertEqual(host.armedFirstFrameWatchCountForTest, 1)
+        let cancelled = sleeper.cancelledCount
+
+        surface.isReadyForDisplay = true
+        surface.onReadyForDisplay?()
+
+        XCTAssertEqual(host.armedFirstFrameWatchCountForTest, 0)
+        XCTAssertEqual(sleeper.cancelledCount, cancelled + 1, "the countdown is stopped, not left to expire")
+        XCTAssertEqual(sleeper.pendingCount, 0)
+        XCTAssertFalse(sleeper.fireNext(), "nothing is left to fire")
+        XCTAssertTrue(surface.restartReasons.isEmpty)
+        XCTAssertTrue(recorder.rejected.isEmpty)
+        XCTAssertEqual(host.activeDisplayIDs, [7])
+    }
+
+    func testALateFrameAfterTheHandOffIsIgnored() async throws {
+        let recorder = Recorder()
+        let host = makeHost(wallpapers: [], recorder: recorder, manualLimits: true)
+        defer { host.shutdown() }
+        var states: [HostWallpaperState] = []
+        host.onStateChanged = { states.append($0) }
+        let surface = try await openAndWaitForTheCountdown(host)
+        surface.restartResult = false
+        let passes = PassCounter()
+        host.onSurfacesChanged = { passes.record() }
+        sleeper.fireNext()
+        await passes.wait(for: 1)
+        XCTAssertEqual(recorder.rejected.count, 1)
+
+        surface.isReadyForDisplay = true
+        surface.onReadyForDisplay?()
+        await Task.yield()
+
+        XCTAssertEqual(states.last?.phase, .failed, "a picture that arrives too late does not reopen startup")
+        XCTAssertFalse(states.contains { $0.phase == .ready })
+        XCTAssertEqual(recorder.rejected.count, 1, "and nothing is reported twice")
+        XCTAssertEqual(sleeper.pendingCount, 0)
+        XCTAssertTrue(host.isEmpty)
+    }
+
+    func testAReplacedSurfaceIsNotJudgedByTheOldTimer() async throws {
+        let recorder = Recorder()
+        let host = makeHost(wallpapers: [], recorder: recorder, manualLimits: true)
+        defer { host.shutdown() }
+        let old = try await openAndWaitForTheCountdown(host, wallpaper(id: "300", admissionKey: 1))
+
+        await host.apply([wallpaper(id: "301", admissionKey: 2)])
+        await sleeper.waitUntilPending()
+        let new = try XCTUnwrap(surfacesMade[7])
+        XCTAssertFalse(new === old)
+        XCTAssertEqual(sleeper.pendingCount, 1, "the old countdown went with its surface")
+
+        sleeper.fireNext()
+        await sleeper.waitUntilPending()
+
+        XCTAssertTrue(old.restartReasons.isEmpty, "the replaced surface is never touched again")
+        XCTAssertEqual(new.restartReasons.count, 1)
+        XCTAssertTrue(recorder.rejected.isEmpty)
+    }
+
+    func testTheDeadlineFollowsTheStorageClass() async throws {
+        // The same clip takes longer to start from a share than from the
+        // internal drive, and none of that is a fault. Each row is the metadata
+        // read's limit followed by the first-frame deadline for that class.
+        let recorder = Recorder()
+        let rows: [(String, NativeVideoStoragePolicy.Location, Int, Int)] = [
+            ("internal", .internalVolume, 8, 10),
+            ("external", .removableVolume, 30, 30),
+            ("share", .networkVolume, 60, 90),
+            ("cloud", .dataless, 60, 90),
+            ("unreadable", .unknown, 30, 30),
+        ]
+        for (name, storage, probe, frame) in rows {
+            let host = makeHost(
+                wallpapers: [], recorder: recorder, storage: { _ in storage }, manualLimits: true)
+            let before = sleeper.requested.count
+            await host.apply([wallpaper(admissionKey: 1)])
+            await sleeper.waitUntilPending()
+            XCTAssertEqual(
+                Array(sleeper.requested.dropFirst(before)), [.seconds(probe), .seconds(frame)], name)
+            host.shutdown()
+        }
+    }
+
+    func testAHiddenDisplayIsNotHandedBackAndIsJudgedAgainWhenItReturns() async throws {
+        let recorder = Recorder()
+        let host = makeHost(wallpapers: [], recorder: recorder, manualLimits: true)
+        defer { host.shutdown() }
+        counters.startSession(duration: .seconds(60))
+        let surface = try await openAndWaitForTheCountdown(host)
+        host.setPresentationSuspended(true, forDisplay: 7)
+
+        sleeper.fireNext()
+        await settle { host.parkedFirstFrameWatchCountForTest == 1 }
+
+        XCTAssertTrue(surface.restartReasons.isEmpty, "a hidden display is not judged")
+        XCTAssertTrue(recorder.rejected.isEmpty)
+        XCTAssertEqual(host.activeDisplayIDs, [7])
+        XCTAssertEqual(counters.snapshot().total(.nativeVideoFirstFrameTimeout), 0)
+        XCTAssertEqual(sleeper.pendingCount, 0, "and no timer runs while it is hidden")
+
+        host.setPresentationSuspended(false, forDisplay: 7)
+        await sleeper.waitUntilPending()
+        XCTAssertEqual(host.parkedFirstFrameWatchCountForTest, 0)
+        XCTAssertEqual(sleeper.requested.last, .seconds(10), "a full deadline, not the remainder")
+        sleeper.fireNext()
+        await sleeper.waitUntilPending()
+
+        XCTAssertEqual(surface.restartReasons.count, 1, "judged now that it can be seen")
+    }
+
+    func testAParkedWatchWaitsForBothReasonsToEnd() async throws {
+        let recorder = Recorder()
+        let host = makeHost(wallpapers: [], recorder: recorder, manualLimits: true)
+        defer { host.shutdown() }
+        let surface = try await openAndWaitForTheCountdown(host)
+        host.setPresentationSuspended(true)
+        host.setPresentationSuspended(true, forDisplay: 7)
+        sleeper.fireNext()
+        await settle { host.parkedFirstFrameWatchCountForTest == 1 }
+
+        // The display is still hidden on its own account, so the global
+        // resume must not start the clock.
+        host.setPresentationSuspended(false)
+        XCTAssertEqual(host.parkedFirstFrameWatchCountForTest, 1)
+        XCTAssertEqual(sleeper.pendingCount, 0)
+
+        host.setPresentationSuspended(false, forDisplay: 7)
+        await sleeper.waitUntilPending()
+        XCTAssertEqual(host.armedFirstFrameWatchCountForTest, 1)
+        XCTAssertTrue(surface.restartReasons.isEmpty)
+    }
+
+    func testAParkedWatchKeepsTheRestartItAlreadySpent() async throws {
+        // Hidden after the restart: the clip is not given a second restart
+        // when it returns, it is handed back if it still shows nothing.
+        let recorder = Recorder()
+        let host = makeHost(wallpapers: [], recorder: recorder, manualLimits: true)
+        defer { host.shutdown() }
+        let surface = try await openAndWaitForTheCountdown(host)
+        sleeper.fireNext()
+        await sleeper.waitUntilPending()
+        XCTAssertEqual(surface.restartReasons.count, 1)
+        host.setPresentationSuspended(true, forDisplay: 7)
+        sleeper.fireNext()
+        await settle { host.parkedFirstFrameWatchCountForTest == 1 }
+        host.setPresentationSuspended(false, forDisplay: 7)
+        await sleeper.waitUntilPending()
+        let passes = PassCounter()
+        host.onSurfacesChanged = { passes.record() }
+
+        sleeper.fireNext()
+        await passes.wait(for: 1)
+
+        XCTAssertEqual(surface.restartReasons.count, 1, "no second restart for the same clip")
+        XCTAssertEqual(recorder.rejected.count, 1)
+    }
+
+    func testATimeoutIsNotCachedAsAVerdict() async throws {
+        // Slow storage or a one-off stall is not proof that the clip cannot
+        // play, so an offer of the same key opens it again. (The bridge makes
+        // that offer only once the key has changed or the backend was switched.)
+        let recorder = Recorder()
+        let host = makeHost(wallpapers: [], recorder: recorder, manualLimits: true)
+        defer { host.shutdown() }
+        let surface = try await openAndWaitForTheCountdown(host)
+        surface.restartResult = false
+        let passes = PassCounter()
+        host.onSurfacesChanged = { passes.record() }
+        sleeper.fireNext()
+        await passes.wait(for: 1)
+        XCTAssertTrue(host.isEmpty)
+        XCTAssertEqual(recorder.rejected.count, 1)
+
+        await host.apply([wallpaper(admissionKey: 5)])
+
+        XCTAssertEqual(host.activeDisplayIDs, [7], "the same key plays again")
+        XCTAssertEqual(recorder.presented, 2)
+        XCTAssertEqual(recorder.rejected.count, 1, "and is not handed over a second time")
+        XCTAssertEqual(recorder.admissionProbes.count, 1, "the file itself was not re-read")
+    }
+
+    func testADecoderFailureIsStillRememberedAsAVerdict() async throws {
+        // The contrast: a decoder that could not open the track is a statement
+        // about the file, so the same key goes straight back to the scene engine.
+        let recorder = Recorder()
+        let host = makeHost(wallpapers: [], recorder: recorder)
+        defer { host.shutdown() }
+        await host.apply([wallpaper(admissionKey: 5)])
+        let passes = PassCounter()
+        host.onSurfacesChanged = { passes.record() }
+        surfacesMade[7]?.failPreparation("decoder could not open the track")
+        await passes.wait(for: 1)
+        XCTAssertEqual(recorder.rejected.count, 1)
+
+        await host.apply([wallpaper(admissionKey: 5)])
+
+        XCTAssertTrue(host.isEmpty)
+        XCTAssertEqual(recorder.rejected.count, 2, "answered again, from the remembered verdict")
+        XCTAssertEqual(recorder.presented, 1)
+    }
+
+    func testARestartThatThePlayerRefusesHandsOffAtOnce() async throws {
+        // The player's recovery allowance is spent: there is nothing to try, so
+        // waiting a second deadline would only keep the display black longer.
+        let recorder = Recorder()
+        let host = makeHost(wallpapers: [], recorder: recorder, manualLimits: true)
+        defer { host.shutdown() }
+        let surface = try await openAndWaitForTheCountdown(host)
+        surface.restartResult = false
+        let passes = PassCounter()
+        host.onSurfacesChanged = { passes.record() }
+
+        sleeper.fireNext()
+        await passes.wait(for: 1)
+
+        XCTAssertEqual(surface.restartReasons.count, 1, "it was asked, and said no")
+        XCTAssertEqual(recorder.rejected.count, 1)
+        XCTAssertTrue(host.isEmpty)
+        XCTAssertEqual(recorder.stopped, 1)
+        XCTAssertEqual(sleeper.pendingCount, 0, "and no second countdown is left running")
+    }
+
+    func testAUserPausedClipIsStillJudged() async throws {
+        // A paused item that is ready still shows its first frame, so the
+        // user's own pause is no reason to wait longer for it.
+        let recorder = Recorder()
+        let host = makeHost(wallpapers: [], recorder: recorder, manualLimits: true)
+        defer { host.shutdown() }
+        let surface = try await openAndWaitForTheCountdown(
+            host, wallpaper(paused: true, admissionKey: 5))
+
+        sleeper.fireNext()
+        await sleeper.waitUntilPending()
+
+        XCTAssertEqual(surface.restartReasons.count, 1)
+    }
+
+    func testOneDisplaysFrameDoesNotSettleAnothersWatch() async throws {
+        let recorder = Recorder()
+        let host = makeHost(wallpapers: [], recorder: recorder, manualLimits: true)
+        defer { host.shutdown() }
+        await host.apply([
+            wallpaper(displayID: 7, id: "300", admissionKey: 1),
+            wallpaper(displayID: 9, id: "301", admissionKey: 2),
+        ])
+        await sleeper.waitUntilPending(2)
+        let shown = try XCTUnwrap(surfacesMade[7])
+        let black = try XCTUnwrap(surfacesMade[9])
+
+        shown.isReadyForDisplay = true
+        shown.onReadyForDisplay?()
+        XCTAssertEqual(host.armedFirstFrameWatchCountForTest, 1)
+        sleeper.fireNext()
+        await sleeper.waitUntilPending()
+
+        XCTAssertTrue(shown.restartReasons.isEmpty)
+        XCTAssertEqual(black.restartReasons.count, 1)
+    }
+
+    func testClosingTheSurfaceOrShuttingDownStopsTheCountdown() async throws {
+        let recorder = Recorder()
+        let host = makeHost(wallpapers: [], recorder: recorder, manualLimits: true)
+        _ = try await openAndWaitForTheCountdown(host)
+
+        await host.apply([])
+        XCTAssertEqual(sleeper.pendingCount, 0, "a wallpaper that left needs no deadline")
+        XCTAssertEqual(host.armedFirstFrameWatchCountForTest, 0)
+
+        let surface = try await openAndWaitForTheCountdown(host)
+        host.shutdown()
+        XCTAssertEqual(sleeper.pendingCount, 0)
+        XCTAssertFalse(sleeper.fireNext())
+        XCTAssertTrue(surface.restartReasons.isEmpty)
+        XCTAssertTrue(recorder.rejected.isEmpty)
     }
 
     func testAKeyRefusedThenSupersededThenOfferedAgainIsReportedAgain() async {

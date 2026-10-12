@@ -56,7 +56,15 @@ final class NativeVideoPlayer {
     /// replaced by a video-only one. One attempt only: a failure of the
     /// video-only item is about the picture and goes to the host.
     private var audioDropped = false
+    /// The one in-flight rebuild of the item, whether it is the silent
+    /// fallback above or a restart the host asked for. A second repair never
+    /// starts while one is pending.
     private var rebuild: Task<Void, Never>?
+    /// How many times this surface may rebuild its pipeline before the host
+    /// has to give the wallpaper up. Owned here, one per surface, so it
+    /// outlives every item the player replaces.
+    private var recovery: NativeVideoRecoveryBudget
+    private let now: @MainActor () -> ContinuousClock.Instant
     /// The clip's display matrix, read once at load. `nil` until the read
     /// finishes; a clip whose matrix cannot be read is treated as upright.
     ///
@@ -107,11 +115,15 @@ final class NativeVideoPlayer {
     init(
         surface: RuntimeSurfaceKey,
         counters: RuntimeCounters,
-        paused: Bool
+        paused: Bool,
+        recovery: NativeVideoRecoveryBudget.Policy = .init(),
+        now: @escaping @MainActor () -> ContinuousClock.Instant = { .now }
     ) {
         self.surface = surface
         self.counters = counters
         self.userPaused = paused
+        self.recovery = NativeVideoRecoveryBudget(policy: recovery)
+        self.now = now
         player.actionAtItemEnd = .advance
         // Nothing here needs the system's "now playing" treatment, and taking
         // the audio session focus would interrupt whatever the user is
@@ -264,6 +276,9 @@ final class NativeVideoPlayer {
                 guard layer.isReadyForDisplay else { return }
                 Task { @MainActor [weak self] in
                     guard let self, !self.stopped else { return }
+                    // A frame on the layer is the evidence that earns the
+                    // rebuild allowance back, once it has lasted.
+                    self.recovery.healthy(at: self.now())
                     self.onReadyForDisplay?()
                 }
             },
@@ -366,6 +381,79 @@ final class NativeVideoPlayer {
         } catch {
             return nil
         }
+    }
+
+    /// Rebuilds the playback pipeline from the file, on the host's request.
+    ///
+    /// For a clip that reached `readyToPlay` and then never produced a picture:
+    /// no failure was reported, so none of the observers above fire, and
+    /// waiting longer changes nothing. A fresh item and looper is the repair
+    /// that does not need to know why. Returns whether a rebuild was started;
+    /// false means the caller has nothing left to try and must give the
+    /// wallpaper up. The answer is false when the surface is stopped, when a
+    /// failure has already been reported (a restart never resurrects it), when
+    /// another rebuild is pending, and when the recovery budget has no
+    /// allowance left, which is what stops a pipeline that stalls the same way
+    /// every time from being rebuilt for ever.
+    ///
+    /// The user's pause, the volume and the placement belong to the player, not
+    /// to the item, so they carry over untouched. A clip already playing
+    /// without its audio is rebuilt without it.
+    func restartPlayback(reason: String) -> Bool {
+        guard !stopped, !failureReported, let mediaURL, rebuild == nil else { return false }
+        guard recovery.permit(at: now()) else { return false }
+        AppLog.debug(
+            "native video: restarting playback (\(reason)); rebuild \(recovery.spent) of "
+                + "\(recovery.policy.maximum); \(stateSummary)")
+        let silent = audioDropped
+        rebuild = Task { @MainActor [weak self] in
+            let item: AVPlayerItem?
+            if silent {
+                item = await Self.videoOnlyItem(url: mediaURL)
+            } else {
+                item = AVPlayerItem(url: mediaURL)
+            }
+            guard let self, !self.stopped, !Task.isCancelled else { return }
+            self.rebuild = nil
+            guard let item else {
+                self.reportPreparationFailure("the clip could not be reopened for a restart")
+                return
+            }
+            self.releaseItem()
+            self.start(item)
+        }
+        return true
+    }
+
+    /// Where the pipeline stands, in one line, for the log. Read when a clip
+    /// has gone wrong, so it reports the facts that tell the failures apart: a
+    /// ready item with no picture size and a clock that runs is a decoder that
+    /// never produced anything, which is not the same thing as a stall or a
+    /// file that is still arriving.
+    var stateSummary: String {
+        guard !stopped else { return "stopped" }
+        let item = player.currentItem
+        let size = item?.presentationSize ?? .zero
+        var control: String
+        switch player.timeControlStatus {
+        case .paused: control = "paused"
+        case .playing: control = "playing"
+        case .waitingToPlayAtSpecifiedRate:
+            control = "waiting"
+            if let reason = player.reasonForWaitingToPlay { control += " (\(reason.rawValue))" }
+        @unknown default: control = "unknown"
+        }
+        let status: String
+        switch item?.status {
+        case .readyToPlay?: status = "readyToPlay"
+        case .failed?: status = "failed"
+        case .unknown?: status = "unknown"
+        case nil: status = "none"
+        @unknown default: status = "unknown"
+        }
+        return "item \(status), presentationSize \(Int(size.width))x\(Int(size.height)), "
+            + "timeControl \(control), layerReady \(layer.isReadyForDisplay), "
+            + "queued \(queuedItemCount)"
     }
 
     /// The error with its domain and code, and those of the errors beneath
