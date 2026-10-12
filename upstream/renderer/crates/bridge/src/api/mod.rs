@@ -593,7 +593,7 @@ pub struct WallpaperBridge {
     #[allow(dead_code)]
     mouse_poller: Option<MousePoller>,
     #[allow(dead_code)]
-    power_watcher: Option<PowerWatcher<ArcEngineFacade>>,
+    power_watcher: Option<PowerWatcher>,
     /// Last known system media state, held for replay into pages that load
     /// after the fact. Process-wide, like the system player it describes, so
     /// it is deliberately not actor state.

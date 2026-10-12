@@ -367,7 +367,12 @@ cargo test -p shader --test pipeline -- --nocapture
   `project::condition` also pins the input bounds (length, nesting, list size) and
   that hostile input returns an error instead of recursing, and
   `project::localization` pins the table bounds (languages, tokens, text size,
-  overall bytes) and the language-list cleaning in the same way.
+  overall bytes) and the language-list cleaning in the same way; `power::tests`
+  for the power-source watcher: a sleeping or just-started watcher stops promptly
+  when dropped (the old five-second wake would fail it), a wake signalled before
+  the run loop starts is not lost, and a delivery the actor rejected is offered
+  again. They use the real run loop and `IOKit` source but fake the read and the
+  actor, and prove the sleep-until-signalled structure, not a measured saving.
 - `shader`'s `pipeline` test skips asset-dependent cases (for example
   `genericimage4` and a Workshop package) with a printed `skipping …` reason; read
   those lines before claiming shader coverage. See

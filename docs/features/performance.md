@@ -519,6 +519,11 @@ nothing could see or hear.
 - **Installed previews.** Tiles show small still covers, and one animation exists
   only for the tile under the pointer or keyboard focus in a visible document
   ([control panel](control-panel.md#layout)).
+- **Power source watcher.** The thread that follows plugging in and unplugging
+  sleeps until macOS reports a change or the app quits. It used to wake every five
+  seconds only to read a stop flag, and quitting could wait for that wake; it now
+  stops at once. A power change the app could not apply is offered again at the next
+  change instead of being dropped. No power saving is claimed.
 
 The regression coverage for these is in
 [renderer verification](../testing/renderer.md#regression-areas-that-must-stay-covered).
