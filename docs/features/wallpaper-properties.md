@@ -104,6 +104,27 @@ Supported author links use the native external-link policy, including Bilibili
 profile/article pages, and open only when clicked; unsupported links keep their
 text without a clickable action.
 
+An authored visibility rule decides whether a property is listed, and the
+bridge re-evaluates it after every draft edit. A rule may combine property
+checks (`a.value`, `a.value == 3`, with `==`, `===`, `!=`, `!==`, `>`, `>=`, `<`
+and `<=`) with `&&`, `||`, `!` and parentheses; use the constants `true` and
+`false`; compare against numbers, booleans or text in either kind of quotes; and
+test a list such as `[3, 4, 5].includes(a.value)`. A rule using anything else, or
+longer, more deeply nested or more heavily listed than the parser's fixed bounds,
+is unreadable and leaves its property visible rather than hiding a control the
+author may have meant to show. Each library refresh writes one app-log line per
+wallpaper naming how many of its rules could not be read. A property hidden by a
+rule is only left out of the panel's list. The bridge still reports it, not
+enabled and with its current value, so the value (or its authored default) still
+feeds other rules and the renderer and a preset can still name it. These rules
+only choose which rows the panel lists: a scene layer or effect whose visibility is
+bound to a property follows its value whether or not a rule hides the row, and the
+scene file alone says what a value switches on or off ([scene
+rendering](scene-rendering.md)). The rules are evaluated when the panel's property
+list is built, never per frame, and the scene resolves its bindings when it loads
+and on a property change. A rule that is always false, such as a bare `false`,
+hides its property for good, as Wallpaper Engine does.
+
 Audio, scaling mode and frame rate take effect immediately. Everything else is
 pending until committed:
 
@@ -141,6 +162,14 @@ Presets can switch a mode and set fields that mode enables. All values and
 resources are validated first; enabled mode controls are edited before dependent
 fields, and the bridge reevaluates authored conditions after each draft edit. If a
 target field remains disabled, the draft is reverted without applying it.
+
+A preset holds the properties the panel listed when it was saved; one a rule hid
+then is left out, and applying the preset leaves it as it is. A preset may still
+name a property that a rule hides when it is applied, because the wallpaper's
+settings changed since or the preset came from an import: the property is set once
+the preset's own edits to the properties that control it show it. A property the
+wallpaper no longer defines, or whose type changed, is reported as unknown and
+nothing is applied.
 
 Portable documents embed up to 32 MB of managed attachments, within a 48 MB
 document limit. Hidden files in retained directories (such as Finder metadata) are

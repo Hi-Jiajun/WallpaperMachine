@@ -198,7 +198,7 @@ extension WebPanelController {
   {
     var measured: [String: WebPanelPropertyAsset] = [:]
     for property in options.properties
-    where property.kind == .file || property.kind == .directory {
+    where property.enabled && (property.kind == .file || property.kind == .directory) {
       guard case .string(let path) = property.value, !path.isEmpty else { continue }
       if let cached = propertyAssets[options.wallpaperId]?[property.id], cached.path == path {
         measured[property.id] = cached
@@ -349,7 +349,7 @@ extension WebPanelController {
     }
     assets.pixivThumbnails = pixivThumbnails
     var propertyImages: [String: URL] = [:]
-    for property in store.wallpaperOptionsSnapshot?.properties ?? [] {
+    for property in store.wallpaperOptionsSnapshot?.properties ?? [] where property.enabled {
       for image in PropertyImageCache.sources(in: property.labelHtml).values {
         propertyImages[PropertyImageCache.key(for: image)] = image
       }
@@ -931,7 +931,8 @@ extension WebPanelController {
           "fps": row.targetFps, "maxFps": row.maxFps,
         ]
       },
-      "properties": value.properties.map { property -> [String: Any] in
+      // A property a visibility rule hides is not listed; the bridge still reports it.
+      "properties": value.properties.filter(\.enabled).map { property -> [String: Any] in
         let kind: String
         switch property.kind {
         case .bool: kind = "boolean"

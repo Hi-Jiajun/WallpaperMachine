@@ -963,6 +963,14 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                     .ok()
                     .map(|model| (entry.workshop_id.clone(), model))
             })
+            .inspect(|(id, model)| {
+                let unreadable = model.unreadable_condition_count();
+                if unreadable > 0 {
+                    log::info!(
+                        "wallpaper {id}: {unreadable} property visibility rule(s) could not be read; those properties stay visible"
+                    );
+                }
+            })
             .collect();
         self.state.replace_library(
             entries

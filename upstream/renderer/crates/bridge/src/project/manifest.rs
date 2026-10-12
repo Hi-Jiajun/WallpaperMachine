@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 use wallpaper_core::project::WallpaperProjectType;
 
+use super::condition::Condition;
 use super::property::{
     ComboOption, DirectoryMode, FileFilter, FileMedia, PropertyKind, PropertyMetadata,
     PropertyValue,
@@ -274,6 +275,19 @@ impl ProjectModel {
         })
     }
 
+    /// How many properties carry a visibility rule that cannot be read. Such a
+    /// property is shown rather than hidden, so a wrongly shown control is
+    /// explained by this count. A blank rule is no rule at all.
+    #[must_use]
+    pub fn unreadable_condition_count(&self) -> usize {
+        self.properties
+            .iter()
+            .filter_map(|property| property.condition.as_deref())
+            .filter(|condition| !condition.trim().is_empty())
+            .filter(|condition| Condition::parse(condition).is_err())
+            .count()
+    }
+
     /// Loads and parses a project, resolving `preview_file` against the
     /// directory holding `project.json`.
     ///
@@ -365,6 +379,26 @@ mod tests {
         assert_eq!(m.properties[0].id, "combo1");
         assert_eq!(m.properties[1].id, "slide1");
         assert_eq!(m.properties[2].id, "bool1");
+    }
+
+    #[test]
+    fn unreadable_condition_count_ignores_blank_and_readable_rules() {
+        let model = ProjectModel::parse(
+            "1",
+            r#"{
+            "type":"scene","general":{"properties":{
+                "none":{"type":"bool","value":true,"text":"none"},
+                "blank":{"type":"bool","value":true,"text":"blank","condition":""},
+                "spaces":{"type":"bool","value":true,"text":"spaces","condition":"   "},
+                "plain":{"type":"bool","value":true,"text":"plain","condition":"none.value"},
+                "grouped":{"type":"bool","value":true,"text":"grouped","condition":"(none.value || blank.value) && [1, 2].includes(plain.value)"},
+                "call":{"type":"bool","value":true,"text":"call","condition":"Math.abs(none.value)"},
+                "pair":{"type":"bool","value":true,"text":"pair","condition":"none.value == blank.value"}
+            }}
+        }"#,
+        )
+        .unwrap();
+        assert_eq!(model.unreadable_condition_count(), 2);
     }
 
     #[test]

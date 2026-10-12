@@ -354,8 +354,12 @@ cargo test -p shader --test pipeline -- --nocapture
   reconciliation/audio errors; the lock-screen export regression for
   committed-versus-draft scaling, pause/resume and ejection; and
   `tests::property_snapshot` for combo selection, conditional rows after
-  edits/default restoration/discard, hidden-value preservation, and
-  malformed-condition fail-open behavior.
+  edits/default restoration/discard, a rule-hidden row staying in the snapshot
+  (not enabled, with its value and modified state), hidden-value preservation, the visibility
+  grammar (groups, constants, quoted text, `===`, list membership) deciding row
+  visibility with synthetic ids, and fail-open behavior for unreadable rules;
+  `project::condition` also pins the input bounds (length, nesting, list size) and
+  that hostile input returns an error instead of recursing.
 - `shader`'s `pipeline` test skips asset-dependent cases (for example
   `genericimage4` and a Workshop package) with a printed `skipping …` reason; read
   those lines before claiming shader coverage. See

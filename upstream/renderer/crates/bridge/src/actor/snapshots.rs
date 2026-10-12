@@ -157,14 +157,16 @@ impl BridgeActorState {
                 model
                     .properties
                     .iter()
-                    .filter(|property| {
-                        property
+                    .map(|property| {
+                        // A rule that hides a property keeps its row, not enabled: the
+                        // host still sees what the project defines and what its hidden
+                        // overrides hold, and decides what to list. A rule that cannot be
+                        // read leaves the property enabled.
+                        let enabled = property
                             .condition
                             .as_deref()
                             .and_then(|condition| Condition::parse(condition).ok())
-                            .is_none_or(|condition| condition.eval(&lookup))
-                    })
-                    .map(|property| {
+                            .is_none_or(|condition| condition.eval(&lookup));
                         let value = property.effective_value(&overrides);
                         let default_value = property.default_value();
                         let dirty = !property.value_is_default(&value);
@@ -250,7 +252,7 @@ impl BridgeActorState {
                             directory_mode,
                             dirty,
                             can_restore_defaults: dirty,
-                            enabled: true,
+                            enabled,
                             asset_managed: asset.managed,
                             asset_missing: asset.missing,
                             asset_source_path,

@@ -1137,7 +1137,7 @@ final class BridgeStore {
     private func finishSnapshotApply() {
         if let options = wallpaperOptionsSnapshot {
             editorState.reconcile(wallpaperID: options.wallpaperId,
-                textPropertyIDs: Set(options.properties.filter { $0.kind == .textInput }.map(\.id)))
+                textPropertyIDs: Set(options.properties.filter { $0.kind == .textInput && $0.enabled }.map(\.id)))
         }
         self.snapshotRevision &+= 1
         onSnapshotApplied?()

@@ -5120,6 +5120,12 @@ public struct BridgePropertyDescriptor {
     public var directoryMode: BridgeDirectoryMode?
     public var dirty: Bool
     public var canRestoreDefaults: Bool
+    /**
+     * False while an authored visibility rule hides the property. The row is
+     * still listed, with the value the renderer is using, so a host can show only
+     * the enabled rows and still reach the rest. A rule the bridge cannot read
+     * never disables a property.
+     */
     public var enabled: Bool
     /**
      * File and directory properties only: the app holds its own copy of this
@@ -5147,7 +5153,13 @@ public struct BridgePropertyDescriptor {
          */fileFilter: BridgeFileFilter?, 
         /**
          * Present only on directory properties.
-         */directoryMode: BridgeDirectoryMode?, dirty: Bool, canRestoreDefaults: Bool, enabled: Bool, 
+         */directoryMode: BridgeDirectoryMode?, dirty: Bool, canRestoreDefaults: Bool, 
+        /**
+         * False while an authored visibility rule hides the property. The row is
+         * still listed, with the value the renderer is using, so a host can show only
+         * the enabled rows and still reach the rest. A rule the bridge cannot read
+         * never disables a property.
+         */enabled: Bool, 
         /**
          * File and directory properties only: the app holds its own copy of this
          * property's assets in managed storage, so deleting or re-downloading the

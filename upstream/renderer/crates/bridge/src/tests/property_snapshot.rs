@@ -275,7 +275,21 @@ async fn combo_snapshot_options_preserve_labels_and_use_editable_value_types() {
     assert!(!restored.dirty);
 }
 
+/// The rows a host lists: every property no visibility rule hides.
 fn assert_property_ids(snapshot: &BridgeWallpaperOptionsSnapshot, expected: &[&str]) {
+    assert_eq!(
+        snapshot
+            .properties
+            .iter()
+            .filter(|property| property.enabled)
+            .map(|property| property.id.as_str())
+            .collect::<Vec<_>>(),
+        expected
+    );
+}
+
+/// Every property the project defines, listed or hidden, in authored order.
+fn assert_defined_ids(snapshot: &BridgeWallpaperOptionsSnapshot, expected: &[&str]) {
     assert_eq!(
         snapshot.properties.iter().map(|property| property.id.as_str()).collect::<Vec<_>>(),
         expected
@@ -311,6 +325,7 @@ async fn conditional_snapshot_tracks_language_defaults_discard_and_hidden_overri
         .await
         .unwrap();
     assert_property_ids(&initial, &["language", "english", "malformed"]);
+    assert_defined_ids(&initial, &["language", "english", "japanese", "dependent", "malformed"]);
 
     let edited = bridge
         .edit_property("100".to_string(), "english".to_string(), BridgePropertyValue::Bool { value: false })
@@ -356,6 +371,180 @@ async fn conditional_snapshot_tracks_language_defaults_discard_and_hidden_overri
         .unwrap()
         .wallpaper_options;
     assert_property_ids(&japanese_default, &["language", "japanese", "malformed"]);
+}
+
+#[tokio::test]
+async fn real_world_visibility_shapes_decide_row_visibility() {
+    // Ids are synthetic; the rule shapes are the ones Workshop authors write:
+    // trailing `&& true`, constant `false`, `&& false`, and a membership test
+    // beside a boolean comparison.
+    let bridge = WallpaperBridge::new_for_test();
+    bridge
+        .inject_scene_project_for_test(
+            "100",
+            "Scene",
+            r#"{
+                "type":"scene",
+                "general":{"properties":{
+                    "master":{"type":"bool","value":true,"index":0},
+                    "ske":{"type":"bool","value":true,"index":1},
+                    "count":{"type":"slider","value":4,"min":0,"max":40,"step":1,"precision":0,"index":2},
+                    "extras":{"type":"text","text":"Extras","index":3,
+                        "condition":"ske.value == true && [3, 4, 5].includes(count.value)"},
+                    "clock":{"type":"bool","value":true,"index":4,"condition":"master.value&&false"},
+                    "never":{"type":"text","text":"Never","index":5,"condition":"false"},
+                    "both":{"type":"text","text":"Both","index":6,
+                        "condition":"master.value == true && ske.value && true"},
+                    "after_clock":{"type":"text","text":"After clock","index":7,"condition":"clock.value"},
+                    "opaque":{"type":"text","text":"Opaque","index":8,"condition":"master.value == ske.value"}
+                }}
+            }"#,
+        )
+        .await;
+    bridge.select_wallpaper("100".to_string()).await.unwrap();
+
+    let initial = bridge
+        .wallpaper_options_snapshot("100".to_string())
+        .await
+        .unwrap();
+    // `clock` and `never` are hidden for good, yet `clock`'s authored value
+    // still feeds `after_clock`; the rule nobody can read leaves `opaque` shown.
+    assert_property_ids(
+        &initial,
+        &["master", "ske", "count", "extras", "both", "after_clock", "opaque"],
+    );
+    assert_defined_ids(
+        &initial,
+        &[
+            "master", "ske", "count", "extras", "clock", "never", "both", "after_clock", "opaque",
+        ],
+    );
+
+    let count_outside_list = bridge
+        .edit_property("100".to_string(), "count".to_string(), BridgePropertyValue::Number { value: 9.0 })
+        .await
+        .unwrap()
+        .wallpaper_options;
+    assert_property_ids(
+        &count_outside_list,
+        &["master", "ske", "count", "both", "after_clock", "opaque"],
+    );
+
+    let count_in_list = bridge
+        .edit_property("100".to_string(), "count".to_string(), BridgePropertyValue::Number { value: 5.0 })
+        .await
+        .unwrap()
+        .wallpaper_options;
+    assert_property_ids(
+        &count_in_list,
+        &["master", "ske", "count", "extras", "both", "after_clock", "opaque"],
+    );
+
+    let master_off = bridge
+        .edit_property("100".to_string(), "master".to_string(), BridgePropertyValue::Bool { value: false })
+        .await
+        .unwrap()
+        .wallpaper_options;
+    assert_property_ids(
+        &master_off,
+        &["master", "ske", "count", "extras", "after_clock", "opaque"],
+    );
+    assert!(master_off.dirty);
+}
+
+#[tokio::test]
+async fn a_property_hidden_by_a_rule_stays_in_the_snapshot_with_its_value_and_modified_state() {
+    // A saved preset names properties by id, and the panel's Restore all defaults
+    // has to know about values nobody can see, so a closed gate must not make its
+    // property disappear from what the bridge reports.
+    let bridge = WallpaperBridge::new_for_test();
+    bridge
+        .inject_scene_project_for_test(
+            "100",
+            "Scene",
+            r#"{
+                "type":"scene",
+                "general":{"properties":{
+                    "gate":{"type":"bool","value":false,"index":0},
+                    "detail":{"type":"textinput","value":"plain","index":1,"condition":"gate.value"},
+                    "sealed":{"type":"slider","value":3,"min":0,"max":9,"step":1,"precision":0,
+                        "index":2,"condition":"gate.value&&false"}
+                }}
+            }"#,
+        )
+        .await;
+    bridge.select_wallpaper("100".to_string()).await.unwrap();
+    let find = |snapshot: &BridgeWallpaperOptionsSnapshot, id: &str| {
+        snapshot
+            .properties
+            .iter()
+            .find(|property| property.id == id)
+            .unwrap_or_else(|| panic!("{id} should stay in the snapshot"))
+            .clone()
+    };
+
+    let closed = bridge.wallpaper_options_snapshot("100".to_string()).await.unwrap();
+    assert_defined_ids(&closed, &["gate", "detail", "sealed"]);
+    assert_property_ids(&closed, &["gate"]);
+    let detail = find(&closed, "detail");
+    assert!(!detail.enabled);
+    assert_eq!(detail.value, BridgePropertyValue::String { value: "plain".into() });
+    assert!(!detail.dirty && !detail.can_restore_defaults);
+
+    // A value set while its gate is open is still there, and still modified,
+    // once the gate closes; the renderer keeps reading it.
+    bridge
+        .edit_property("100".to_string(), "gate".to_string(), BridgePropertyValue::Bool { value: true })
+        .await
+        .unwrap();
+    let opened = bridge
+        .edit_property(
+            "100".to_string(),
+            "detail".to_string(),
+            BridgePropertyValue::String { value: "typed".into() },
+        )
+        .await
+        .unwrap()
+        .wallpaper_options;
+    assert!(find(&opened, "detail").enabled);
+    let closed_again = bridge
+        .edit_property("100".to_string(), "gate".to_string(), BridgePropertyValue::Bool { value: false })
+        .await
+        .unwrap()
+        .wallpaper_options;
+    assert_property_ids(&closed_again, &["gate"]);
+    let detail = find(&closed_again, "detail");
+    assert!(!detail.enabled);
+    assert_eq!(detail.value, BridgePropertyValue::String { value: "typed".into() });
+    assert!(detail.dirty && detail.can_restore_defaults);
+
+    // Opening the gate again lists the row with that value, which is how a preset
+    // sets a field its own mode switch opens.
+    let reopened = bridge
+        .edit_property("100".to_string(), "gate".to_string(), BridgePropertyValue::Bool { value: true })
+        .await
+        .unwrap()
+        .wallpaper_options;
+    assert_property_ids(&reopened, &["gate", "detail"]);
+    assert_eq!(
+        find(&reopened, "detail").value,
+        BridgePropertyValue::String { value: "typed".into() }
+    );
+    bridge
+        .edit_property("100".to_string(), "gate".to_string(), BridgePropertyValue::Bool { value: false })
+        .await
+        .unwrap();
+
+    // A rule that is always false never opens, and the draft can still reach its row.
+    let sealed = bridge
+        .edit_property("100".to_string(), "sealed".to_string(), BridgePropertyValue::Number { value: 7.0 })
+        .await
+        .unwrap()
+        .wallpaper_options;
+    let sealed = find(&sealed, "sealed");
+    assert!(!sealed.enabled);
+    assert_eq!(sealed.value, BridgePropertyValue::Number { value: 7.0 });
+    assert!(sealed.dirty);
 }
 
 #[tokio::test]

@@ -322,9 +322,10 @@ on [manual-smoke.md](manual-smoke.md).
   — library order, skipping unsupported wallpapers, wrapping.
   `WallpaperHistoryStoreTests` — per-display persistence, bounded recent lists,
   repeated Previous, removal and clearing.
-- `WallpaperPresetStoreTests` — typed applied-property snapshots, portable managed
-  attachments, size limits, alias rejection, draft and permission rollback, and
-  applied-source retention after deleting a preset.
+- `WallpaperPresetStoreTests` — typed applied-property snapshots (the listed
+  properties only, with a rule-hidden one still known to a preset that names it),
+  portable managed attachments, size limits, alias rejection, draft and
+  permission rollback, and applied-source retention after deleting a preset.
 - `WallpaperBackupTests` — real package export, preview, staged next-launch
   restore, conflict policy (Keep existing, Replace), parser and schema rejection,
   authorization, rollback and interrupted recovery, persistent-only preferences,
@@ -550,6 +551,8 @@ follows the developer's in-app language choice.
   `WebUI/*.js` passes the allowlist), `WebPanelGeneralSettingsTests` (the Login
   Items note and button, and that returning to the panel re-reads the status only
   while approval is pending),
+  `WebPanelHiddenPropertyTests` (a property a visibility rule hides is not given
+  to the page, its folder is not measured and its pending text is dropped),
   `WebPanelPerformanceSettingsTests` and `WebPanelSceneSettingsTests` (unknown,
   non-boolean or non-numeric values are refused, out-of-range ones clamped; the
   Retry on a stopped scene refuses an id that names no enabled display, is

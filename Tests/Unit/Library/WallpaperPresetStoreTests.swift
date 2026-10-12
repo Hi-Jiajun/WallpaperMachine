@@ -190,6 +190,35 @@ final class WallpaperPresetStoreTests: XCTestCase {
     XCTAssertThrowsError(try context.store.mutations(for: boolPreset, options: options(properties: [disabled])))
   }
 
+  func testSavingKeepsTheListedPropertiesAndLeavesRuleHiddenOnesOut() async throws {
+    let context = try Context()
+    defer { context.close() }
+    var hidden = property("detail", .textInput, .string(value: "tucked away"))
+    hidden.enabled = false
+    var legacy = property("legacy", .unknown, .empty)
+    legacy.enabled = false
+    let saved = try await context.store.save(
+      name: "Listed", options: options(properties: [property("mode", .bool, .bool(value: true)), hidden, legacy]),
+      hasPendingEdits: false)
+    XCTAssertEqual(saved.properties.map(\.id), ["mode"], "A preset holds what the panel lists, and a hidden unknown type does not block saving")
+  }
+
+  func testAHiddenPropertyStaysKnownToAPresetThatNamesIt() async throws {
+    let context = try Context()
+    defer { context.close() }
+    var hidden = property("detail", .textInput, .string(value: "before"))
+    hidden.enabled = false
+    let preset = WallpaperPropertyPreset(id: UUID().uuidString, wallpaperID: "wallpaper", name: "Detail", properties: [
+      .init(id: "detail", kind: "textInput", value: .string("after"), usesDefault: false),
+    ])
+    let hiding = options(properties: [hidden])
+    XCTAssertEqual(
+      try context.store.mutations(for: preset, options: hiding, allowConditional: true).map(\.propertyID), ["detail"],
+      "A rule hiding the field now is what apply and import resolve with the preset's own mode changes")
+    XCTAssertThrowsError(try context.store.mutations(for: preset, options: hiding), "Outside that, a hidden field is disabled, not changed")
+    XCTAssertThrowsError(try context.store.mutations(for: preset, options: options(), allowConditional: true), "A field the wallpaper no longer defines is still unknown")
+  }
+
   func testCorruptArchiveCannotBeOverwrittenByNewSave() async throws {
     let context = try Context()
     defer { context.close() }

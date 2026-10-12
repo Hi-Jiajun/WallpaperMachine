@@ -310,6 +310,10 @@ pub struct BridgePropertyDescriptor {
     pub directory_mode: Option<BridgeDirectoryMode>,
     pub dirty: bool,
     pub can_restore_defaults: bool,
+    /// False while an authored visibility rule hides the property. The row is
+    /// still listed, with the value the renderer is using, so a host can show only
+    /// the enabled rows and still reach the rest. A rule the bridge cannot read
+    /// never disables a property.
     pub enabled: bool,
     /// File and directory properties only: the app holds its own copy of this
     /// property's assets in managed storage, so deleting or re-downloading the
