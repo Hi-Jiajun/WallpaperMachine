@@ -20,7 +20,9 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         paused: Bool = false,
         volume: Float = 1.0,
         muted: Bool = false,
-        admissionKey: UInt64 = 1
+        admissionKey: UInt64 = 1,
+        scalingMode: BridgeScalingMode = .fill,
+        scalingFactor: Double = 1.0
     ) -> BridgeNativeVideoWallpaper {
         BridgeNativeVideoWallpaper(
             displayId: displayID,
@@ -34,8 +36,8 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
             paused: paused,
             volume: volume,
             muted: muted,
-            scalingMode: .fill,
-            scalingFactor: 1.0)
+            scalingMode: scalingMode,
+            scalingFactor: scalingFactor)
     }
 
     private final class Recorder {
@@ -98,7 +100,11 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
             self.volume = volume
             self.muted = muted
         }
-        func setScaling(_ mode: BridgeScalingMode) {}
+        /// Every scaling choice the host handed this surface, in order.
+        private(set) var scalingCalls: [(mode: BridgeScalingMode, factor: Double)] = []
+        func setScaling(_ mode: BridgeScalingMode, factor: Double) {
+            scalingCalls.append((mode: mode, factor: factor))
+        }
         func setUserPaused(_ paused: Bool) { userPaused = paused }
         func setPresentationSuspended(_ suspended: Bool) { self.suspended = suspended }
         var isPlaying: Bool { !isStopped && !userPaused && !suspended }
@@ -842,7 +848,48 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         host.shutdown()
     }
 
-    func testPosterUsesTheSameFillCropOrStretchAsTheVideoSurface() throws {
+    func testTheUsersScalingReachesTheSurfaceWithoutReopeningIt() async throws {
+        let recorder = Recorder()
+        let fit = wallpaper(scalingMode: .match, scalingFactor: 1.5)
+        let host = makeHost(wallpapers: [fit], recorder: recorder)
+        defer { host.shutdown() }
+        await host.apply([fit])
+        let surface = try XCTUnwrap(surfacesMade[7])
+        XCTAssertEqual(surface.scalingCalls.map(\.mode), [.match])
+        XCTAssertEqual(surface.scalingCalls.map(\.factor), [1.5])
+        let generation = host.surfaceGenerationForTest
+
+        // The user switches to Original size and back to 1x. Same clip, same
+        // admission key: the running surface is told, and nothing is re-read
+        // or reopened.
+        let original = wallpaper(scalingMode: .none, scalingFactor: 1.0)
+        await host.apply([original])
+
+        XCTAssertTrue(surfacesMade[7] === surface)
+        XCTAssertEqual(surface.scalingCalls.last?.mode, BridgeScalingMode.none)
+        XCTAssertEqual(surface.scalingCalls.last?.factor, 1.0)
+        XCTAssertEqual(recorder.admissionProbes.count, 1)
+        XCTAssertEqual(host.surfaceGenerationForTest, generation)
+        XCTAssertEqual(recorder.stopped, 0)
+        XCTAssertTrue(surface.isPlaying)
+    }
+
+    func testEachDisplayKeepsItsOwnScaling() async throws {
+        let recorder = Recorder()
+        let first = wallpaper(displayID: 7, scalingMode: .match, scalingFactor: 1)
+        let second = wallpaper(displayID: 9, scalingMode: .stretch, scalingFactor: 2)
+        let host = makeHost(wallpapers: [first, second], recorder: recorder)
+        defer { host.shutdown() }
+        await host.apply([first, second])
+
+        XCTAssertEqual(try XCTUnwrap(surfacesMade[7]).scalingCalls.last?.mode, .match)
+        XCTAssertEqual(try XCTUnwrap(surfacesMade[9]).scalingCalls.last?.mode, .stretch)
+        XCTAssertEqual(try XCTUnwrap(surfacesMade[9]).scalingCalls.last?.factor, 2)
+    }
+
+    /// Eight columns of two pixels, red, green, blue, white, four rows high: a
+    /// clip frame whose crop and zoom can be read off a few pixels.
+    private func stripedSource() throws -> CGImage {
         let space = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
         let context = try XCTUnwrap(CGContext(data: nil, width: 8, height: 4, bitsPerComponent: 8,
             bytesPerRow: 32, space: space,
@@ -853,17 +900,88 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
             context.setFillColor(color)
             context.fill(CGRect(x: index * 2, y: 0, width: 2, height: 4))
         }
-        let source = try XCTUnwrap(context.makeImage())
-        let fill = try XCTUnwrap(NativeVideoWallpaperWindow.fittedPoster(source, pixelSize: CGSize(width: 4, height: 4), stretching: false))
-        let stretch = try XCTUnwrap(NativeVideoWallpaperWindow.fittedPoster(source, pixelSize: CGSize(width: 4, height: 4), stretching: true))
-        let filled = try XCTUnwrap(DesktopPosterFrame.rgba(fill))
-        let stretched = try XCTUnwrap(DesktopPosterFrame.rgba(stretch))
-        XCTAssertEqual(Array(filled.pixels.prefix(3)), [0, 255, 0])
-        for (actual, expected) in zip(stretched.pixels.prefix(3), [255, 0, 0]) {
-            XCTAssertEqual(Double(actual), Double(expected), accuracy: 4)
-        }
+        return try XCTUnwrap(context.makeImage())
+    }
+
+    /// One pixel of a poster as RGB, counted from the top-left corner.
+    private func pixel(_ image: CGImage, _ x: Int, _ y: Int) throws -> [Int] {
+        let frame = try XCTUnwrap(DesktopPosterFrame.rgba(image))
+        let offset = (y * frame.width + x) * 4
+        return frame.pixels[offset..<offset + 3].map(Int.init)
+    }
+
+    private func isColor(_ actual: [Int], _ expected: [Int]) -> Bool {
+        // ImageIO and resampling can move an 8-bit channel by a few levels.
+        zip(actual, expected).allSatisfy { abs($0 - $1) <= 6 }
+    }
+
+    func testPosterUsesTheSameFillCropOrStretchAsTheVideoSurface() throws {
+        let source = try stripedSource()
+        let fill = try XCTUnwrap(NativeVideoWallpaperWindow.fittedPoster(
+            source, pixelSize: CGSize(width: 4, height: 4), backingScale: 1, mode: .fill, factor: 1))
+        let stretch = try XCTUnwrap(NativeVideoWallpaperWindow.fittedPoster(
+            source, pixelSize: CGSize(width: 4, height: 4), backingScale: 1, mode: .stretch, factor: 1))
+        XCTAssertEqual(try pixel(fill, 0, 0), [0, 255, 0])
+        XCTAssertTrue(isColor(try pixel(stretch, 0, 0), [255, 0, 0]))
         XCTAssertEqual(fill.width, 4)
         XCTAssertEqual(fill.height, 4)
+    }
+
+    func testPosterOfFitLeavesBlackBarsLikeTheVideoSurface() throws {
+        let source = try stripedSource()
+        // 8x4 into 4x4 at the smaller ratio: a 4x2 picture with a bar above and below.
+        let fit = try XCTUnwrap(NativeVideoWallpaperWindow.fittedPoster(
+            source, pixelSize: CGSize(width: 4, height: 4), backingScale: 1, mode: .match, factor: 1))
+        XCTAssertEqual(try pixel(fit, 0, 0), [0, 0, 0], "the bar above the picture")
+        XCTAssertEqual(try pixel(fit, 3, 3), [0, 0, 0], "the bar below it")
+        XCTAssertTrue(isColor(try pixel(fit, 0, 1), [255, 0, 0]), "the whole width is the picture")
+        XCTAssertTrue(isColor(try pixel(fit, 3, 2), [255, 255, 255]))
+    }
+
+    func testPosterOfOriginalSizeIsNotScaledToTheDisplay() throws {
+        let source = try stripedSource()
+        // 8x4 points on a 16x16 point display: one video pixel is one point, so
+        // the picture is a small 8x4 island in the middle, and Fill would not be.
+        let original = try XCTUnwrap(NativeVideoWallpaperWindow.fittedPoster(
+            source, pixelSize: CGSize(width: 16, height: 16), backingScale: 1, mode: .none, factor: 1))
+        XCTAssertEqual(try pixel(original, 0, 0), [0, 0, 0])
+        XCTAssertEqual(try pixel(original, 3, 8), [0, 0, 0], "left of the picture")
+        XCTAssertTrue(isColor(try pixel(original, 4, 7), [255, 0, 0]), "the picture's first column")
+        XCTAssertTrue(isColor(try pixel(original, 11, 7), [255, 255, 255]), "its last column")
+        XCTAssertEqual(try pixel(original, 12, 7), [0, 0, 0], "right of the picture")
+        XCTAssertEqual(try pixel(original, 8, 3), [0, 0, 0], "above the picture")
+
+        // On a 2x display the same 8x4 points cover 16x8 device pixels.
+        let retina = try XCTUnwrap(NativeVideoWallpaperWindow.fittedPoster(
+            source, pixelSize: CGSize(width: 16, height: 16), backingScale: 2, mode: .none, factor: 1))
+        XCTAssertTrue(isColor(try pixel(retina, 0, 8), [255, 0, 0]), "the picture spans the width")
+        XCTAssertTrue(isColor(try pixel(retina, 15, 8), [255, 255, 255]))
+        XCTAssertEqual(try pixel(retina, 8, 3), [0, 0, 0])
+    }
+
+    func testPosterFollowsTheScaleFactor() throws {
+        let source = try stripedSource()
+        let plain = try XCTUnwrap(NativeVideoWallpaperWindow.fittedPoster(
+            source, pixelSize: CGSize(width: 4, height: 4), backingScale: 1, mode: .stretch, factor: 1))
+        XCTAssertTrue(isColor(try pixel(plain, 0, 0), [255, 0, 0]))
+        // Doubled, the display shows only the middle half of the stretched picture.
+        let zoomed = try XCTUnwrap(NativeVideoWallpaperWindow.fittedPoster(
+            source, pixelSize: CGSize(width: 4, height: 4), backingScale: 1, mode: .stretch, factor: 2))
+        XCTAssertTrue(isColor(try pixel(zoomed, 0, 0), [0, 255, 0]))
+        XCTAssertTrue(isColor(try pixel(zoomed, 3, 0), [0, 0, 255]))
+        // Halved, the picture shrinks to an island with black around it.
+        let shrunk = try XCTUnwrap(NativeVideoWallpaperWindow.fittedPoster(
+            source, pixelSize: CGSize(width: 4, height: 4), backingScale: 1, mode: .stretch, factor: 0.5))
+        XCTAssertEqual(try pixel(shrunk, 0, 0), [0, 0, 0])
+        XCTAssertEqual(try pixel(shrunk, 3, 3), [0, 0, 0])
+    }
+
+    func testPosterRefusesADisplayItCannotDrawInto() throws {
+        let source = try stripedSource()
+        for size in [CGSize.zero, CGSize(width: 20_000, height: 100), CGSize(width: CGFloat.nan, height: 4)] {
+            XCTAssertNil(NativeVideoWallpaperWindow.fittedPoster(
+                source, pixelSize: size, backingScale: 1, mode: .fill, factor: 1), "\(size)")
+        }
     }
 
     private final class PosterWorkspace: DesktopPictureWorkspace {

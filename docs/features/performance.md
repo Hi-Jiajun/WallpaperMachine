@@ -470,6 +470,22 @@ in Matroska. This applies both to **Apply** and **Apply changes**, with either
 backend preference. Missing or empty files fail before display settings change;
 decoder failures still go through the engine's apply recovery.
 
+Native playback honours the wallpaper's scaling mode and scale factor the way
+Compatibility does, so switching backends does not move the picture: **Fill**,
+**Fit** and **Stretch** scale it to the display, **Original size** shows one video
+pixel per point (a 1920x1080 clip covers 1920x1080 points of a Retina display, not
+1920x1080 device pixels), and the scale factor multiplies whichever applies, with
+the picture centred and anything outside the display cropped. A factor that is not a
+positive number counts as 1. Changing the mode or factor moves the running picture;
+it does not reopen the clip or read the file again. The desktop picture shown in
+other Spaces and Mission Control is drawn with the same layout. One known difference:
+the native player applies a clip's pixel aspect ratio to the picture's size and
+Compatibility ignores it, so an anamorphic clip is laid out by its displayed size
+here. Layer placement is in `NativeVideoLayout`; its expected rectangles come from
+the renderer's own layout code (see [coverage](../testing/coverage.md#nativevideo)).
+How a very large factor affects composition cost on a real display has not been
+measured.
+
 When the clip's audio output cannot start (no output device, or one that will not
 start), AVFoundation fails the whole clip, muted or not, and reports only
 `AVErrorUnknown`. Native playback then rebuilds the clip from its video track alone

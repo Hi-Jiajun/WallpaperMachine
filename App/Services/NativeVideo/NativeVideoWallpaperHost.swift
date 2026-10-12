@@ -372,9 +372,22 @@ final class NativeVideoWallpaperHost {
         surface: NativeVideoSurface, with wallpaper: BridgeNativeVideoWallpaper,
         displayID: UInt32
     ) {
+        let priorDescriptor = descriptors[displayID]
         descriptors[displayID] = wallpaper
         surface.setVolume(wallpaper.volume, muted: wallpaper.muted)
-        surface.setScaling(wallpaper.scalingMode)
+        // A scaling change moves the picture on a running surface; it neither
+        // reopens it nor re-reads the file. Logged under the clip's load so a
+        // report shows which choice the picture followed.
+        if let before = priorDescriptor, before.scalingMode != wallpaper.scalingMode
+            || before.scalingFactor != wallpaper.scalingFactor
+        {
+            AppLog.debug(
+                "native video wallpaper \(wallpaper.wallpaperId): scaling "
+                    + "\(before.scalingMode) x\(before.scalingFactor) -> "
+                    + "\(wallpaper.scalingMode) x\(wallpaper.scalingFactor)",
+                load: logLoads[displayID])
+        }
+        surface.setScaling(wallpaper.scalingMode, factor: wallpaper.scalingFactor)
         // The descriptor's paused flag already carries the user's own choice
         // and this display's suspension, as the activation rules combined them.
         surface.setUserPaused(wallpaper.paused)

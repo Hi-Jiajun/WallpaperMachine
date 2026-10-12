@@ -573,6 +573,21 @@ need an authorized runtime check
   posters from replaced surfaces not published. `NativeVideoPlaybackFailureTests` — the
   reported failure keeps the codes under the localized message and a clip with
   sound is rebuilt with its picture alone.
+- `NativeVideoLayoutTests` — where the picture goes under Fit, Fill, Stretch,
+  Original size and a scale factor: the rectangles equal the numbers the
+  renderer's own `ComputeWallpaperScalingLayout` gives (Original size is one video
+  pixel per point; an unusable factor is 1; rounding ties fall on the renderer's
+  side), degenerate sizes and absurd factors stay valid, and the plain modes at
+  factor 1 stay AVFoundation's gravity while Original size and a factor wait for the
+  picture's size. The host suite checks the user's mode and factor reach a running
+  surface without reopening or re-probing it, and the desktop-picture poster is drawn
+  with the same layout (Fit leaves black bars, Original size is not scaled to the
+  display, a factor zooms). To regenerate or extend the expected rectangles, compile
+  `upstream/renderer/external/open-wallpaper-engine/src/Presentation/WallpaperScaling.cpp`
+  with a stub `vulkan/vulkan.h` that defines `VkViewport`, `VkRect2D` and their
+  member structs, hand `ComputeWallpaperScalingLayout` the display as
+  `lround(devicePixels / scale)` logical points (as `MetalRender::Impl::scalingLayout`
+  does), and print `viewport_px`.
 - `NativeVideoPosterOrientationTests` — which clips cannot take a poster from
   the playing item: the display matrix of real generated clips (rotated by 0, 90,
   180 and 270 degrees, one mirrored, and a movie with no picture) is read back,
@@ -582,14 +597,22 @@ need an authorized runtime check
   waiting; the writer can store a clip rotated by a display matrix.
   `NativeVideoPlayerMediaTests` drive the real player and are opt-in
   (`WALLPAPER_MACHINE_MEDIA_TESTS=1`, see
-  [README.md](README.md#opt-in-layers)). Among them, the poster of a
+  [README.md](README.md#opt-in-layers)). Among them, the player layer lands where
+  the layout says (`AVPlayerLayer.videoRect` for Fit and Stretch, the layer's frame
+  for Original size and a factor, for an upright and a quarter-turned clip; Fill's
+  crop is not observable because AVFoundation clips an aspect-fill `videoRect` to the
+  layer, so only its gravity is asserted), moves
+  when the display is resized or its density changes, and a window follows its screen
+  frame without being shown; the poster of a
   portrait-rotated clip has the picture's orientation and size and matches an
   upright reference frame, a paused rotated clip still answers without resuming,
   and an upright clip keeps reading the playing frame (`nativeVideoPosterFallback`
   stays 0).
 
-Not covered: first frames presented on a real display, and the Mission Control
-or other-Space poster of a rotated clip as macOS shows it.
+Not covered: first frames presented on a real display, the Mission Control
+or other-Space poster of a rotated clip as macOS shows it, and a side-by-side of
+Fit, Original size and a scale factor on a real display against Compatibility
+(including the composition cost of a large factor).
 
 ## Panel
 

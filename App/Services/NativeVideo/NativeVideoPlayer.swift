@@ -65,6 +65,21 @@ final class NativeVideoPlayer {
     /// trusted for an upright result.
     private var displayTransform: CGAffineTransform?
     private var orientationTask: Task<Void, Never>?
+
+    /// What the user chose, and the geometry it is applied to. The layer is
+    /// positioned from these by `applyPlacement`, never by autoresizing: a
+    /// picture that is larger or smaller than its display has to follow the
+    /// layout rules, not the view's edges.
+    private var scalingMode: BridgeScalingMode = .fill
+    private var scalingFactor = 1.0
+    private var viewportBounds = CGRect.zero
+    private var backingScale: CGFloat = 1
+    /// The size the picture is shown at, rotation applied, as the playing item
+    /// reports it. `nil` until an item has reported one; a loop copy that has
+    /// not loaded yet reports zero, which says nothing and is ignored.
+    private var presentationSize: CGSize?
+    /// Follows the playing item's `presentationSize`, re-pointed with it.
+    private var sizeObservation: NSKeyValueObservation?
     /// Reported when the clip keeps playing without its audio, with the
     /// failure that caused it, so the host can log it against its load.
     var onAudioDropped: (@MainActor (String) -> Void)?
@@ -107,9 +122,48 @@ final class NativeVideoPlayer {
     }
 
     func attach(to view: NSView) {
-        layer.frame = view.bounds
-        layer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+        // A picture larger than the display (Fill, Original size, a scale
+        // factor above one) overflows its layer's parent; the overflow is
+        // cropped here, so it never spills over a neighbouring display's
+        // window or the desktop around it.
+        view.layer?.masksToBounds = true
         view.layer?.addSublayer(layer)
+        relayout(bounds: view.bounds, backingScale: view.window?.backingScaleFactor ?? 1)
+    }
+
+    /// The display's size or pixel density changed. Called by the view that
+    /// hosts the layer, synchronously, so a resize never shows the picture at
+    /// its old geometry for a frame.
+    func relayout(bounds: CGRect, backingScale: CGFloat) {
+        viewportBounds = bounds
+        self.backingScale = backingScale
+        applyPlacement()
+    }
+
+    /// Positions the layer for the current scaling choice, picture size and
+    /// display geometry.
+    private func applyPlacement() {
+        guard !stopped else { return }
+        let placement = NativeVideoLayout.placement(
+            mode: scalingMode, factor: scalingFactor, videoSize: presentationSize,
+            viewport: viewportBounds.size, backingScale: backingScale)
+        // Implicit animation would visibly slide the picture to its new place
+        // every time the display is resized or the user changes the mode.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        switch placement {
+        case .gravity(let gravity):
+            layer.videoGravity = gravity
+            layer.frame = viewportBounds
+        case .frame(let rect):
+            // The rectangle already has the picture's own aspect; anything but
+            // a plain stretch would re-apply an aspect rule to it.
+            layer.videoGravity = .resize
+            layer.frame = rect.offsetBy(dx: viewportBounds.minX, dy: viewportBounds.minY)
+        case .pending:
+            break
+        }
     }
 
     func load(url: URL) {
@@ -178,6 +232,7 @@ final class NativeVideoPlayer {
         // teardown, not a fault worth reacting to.
         statusObservations.removeAll()
         currentItemObservation = nil
+        sizeObservation = nil
         observedItem = nil
         detachPosterOutput()
         // The looper holds the queue; disabling it first stops it re-filling
@@ -230,6 +285,7 @@ final class NativeVideoPlayer {
         guard !stopped else { return }
         guard let item else {
             currentItemObservation = nil
+            sizeObservation = nil
             return
         }
         guard item !== observedItem else { return }
@@ -240,6 +296,19 @@ final class NativeVideoPlayer {
             let detail = item.error.map(Self.describe) ?? "player item failed"
             MainActor.assumeIsolated { self?.playbackFailed(detail) }
         }
+        // The picture's size is what Fit, Original size and the scale factor
+        // are computed from, and it only exists once the item has loaded.
+        sizeObservation = item.observe(\.presentationSize, options: [.initial, .new]) {
+            [weak self] item, _ in
+            let size = item.presentationSize
+            MainActor.assumeIsolated { self?.presentationSizeChanged(size) }
+        }
+    }
+
+    private func presentationSizeChanged(_ size: CGSize) {
+        guard !stopped, size.width > 0, size.height > 0, size != presentationSize else { return }
+        presentationSize = size
+        applyPlacement()
     }
 
     /// The platform player failed. A clip with sound gets one more attempt
@@ -328,10 +397,14 @@ final class NativeVideoPlayer {
         onPreparationFailure?(surface.generation, detail)
     }
 
-    func setScaling(_ mode: BridgeScalingMode) {
-        // The subset this backend declares. Anything else is refused before a
-        // window is created, so there is no silent substitution here.
-        layer.videoGravity = mode == .stretch ? .resize : .resizeAspectFill
+    /// The user's scaling choice for this display. Applied to the layer
+    /// immediately and again whenever the picture's size or the display's
+    /// geometry changes; a repeated identical choice does nothing.
+    func setScaling(_ mode: BridgeScalingMode, factor: Double) {
+        guard mode != scalingMode || factor != scalingFactor else { return }
+        scalingMode = mode
+        scalingFactor = factor
+        applyPlacement()
     }
 
     func setVolume(_ volume: Float, muted: Bool) {
@@ -376,6 +449,13 @@ final class NativeVideoPlayer {
     var layerIsReadyForDisplayForTest: Bool { layer.isReadyForDisplay }
     var itemStatusForTest: AVPlayerItem.Status? { player.currentItem?.status }
     var audioDroppedForTest: Bool { audioDropped }
+    /// The player layer's frame in its parent's coordinates, in points.
+    var layerFrameForTest: CGRect { layer.frame }
+    var layerGravityForTest: AVLayerVideoGravity { layer.videoGravity }
+    /// Where AVFoundation draws the picture inside the layer, in the layer's
+    /// own coordinates.
+    var layerVideoRectForTest: CGRect { layer.videoRect }
+    var presentationSizeForTest: CGSize? { presentationSize }
     /// Sends the audio to an output that does not exist: an audio path that
     /// cannot start, reproduced without opening a real output device.
     func setAudioOutputDeviceForTest(_ uniqueID: String) {
@@ -503,6 +583,7 @@ final class NativeVideoPlayer {
         rebuild = nil
         orientationTask?.cancel()
         orientationTask = nil
+        sizeObservation = nil
         detachPosterOutput()
         lastPoster = nil
         pendingFailure = nil

@@ -13,7 +13,10 @@ protocol NativeVideoSurface: AnyObject {
     var posterLayer: CALayer? { get }
     func setScreenFrame(_ frame: NSRect)
     func setVolume(_ volume: Float, muted: Bool)
-    func setScaling(_ mode: BridgeScalingMode)
+    /// The user's scaling mode and scale factor. Both are honoured on this
+    /// backend exactly as Compatibility draws them, so the surface never
+    /// substitutes another mode for the one chosen.
+    func setScaling(_ mode: BridgeScalingMode, factor: Double)
     func setUserPaused(_ paused: Bool)
     func setPresentationSuspended(_ suspended: Bool)
     var isPlaying: Bool { get }
@@ -49,6 +52,7 @@ protocol NativeVideoSurface: AnyObject {
 final class NativeVideoWallpaperWindow: NSWindow {
     let player: NativeVideoPlayer
     private var scalingMode: BridgeScalingMode = .fill
+    private var scalingFactor = 1.0
 
     init(frame: NSRect, player: NativeVideoPlayer) {
         self.player = player
@@ -67,7 +71,8 @@ final class NativeVideoWallpaperWindow: NSWindow {
         isExcludedFromWindowsMenu = true
         animationBehavior = .none
         backgroundColor = .black
-        let container = NSView(frame: NSRect(origin: .zero, size: frame.size))
+        let container = NativeVideoContainerView(frame: NSRect(origin: .zero, size: frame.size))
+        container.player = player
         container.wantsLayer = true
         container.layer?.backgroundColor = NSColor.black.cgColor
         container.autoresizesSubviews = true
@@ -85,9 +90,10 @@ extension NativeVideoWallpaperWindow: NativeVideoSurface {
         if self.frame != frame { setFrame(frame, display: false) }
     }
     func setVolume(_ volume: Float, muted: Bool) { player.setVolume(volume, muted: muted) }
-    func setScaling(_ mode: BridgeScalingMode) {
+    func setScaling(_ mode: BridgeScalingMode, factor: Double) {
         scalingMode = mode
-        player.setScaling(mode)
+        scalingFactor = factor
+        player.setScaling(mode, factor: factor)
     }
     func setUserPaused(_ paused: Bool) { player.setUserPaused(paused) }
     func setPresentationSuspended(_ suspended: Bool) {
@@ -103,12 +109,17 @@ extension NativeVideoWallpaperWindow: NativeVideoSurface {
         guard let image = await player.posterImage() else { return nil }
         return Self.fittedPoster(image, pixelSize: CGSize(
             width: frame.width * backingScaleFactor, height: frame.height * backingScaleFactor),
-            stretching: scalingMode == .stretch)
+            backingScale: backingScaleFactor, mode: scalingMode, factor: scalingFactor)
     }
 
-    /// The desktop picture API stretches the supplied poster. Bake the same crop as
-    /// AVPlayerLayer into it first, so other Spaces do not stretch an uncropped clip.
-    static func fittedPoster(_ image: CGImage, pixelSize: CGSize, stretching: Bool) -> CGImage? {
+    /// The desktop picture API stretches the supplied poster to the display.
+    /// Draw the clip's frame where the live layer puts the picture first, so
+    /// other Spaces show the same crop, bars and zoom: Fit leaves black bars,
+    /// Fill and Original size crop, and a scale factor magnifies.
+    static func fittedPoster(
+        _ image: CGImage, pixelSize: CGSize, backingScale: CGFloat, mode: BridgeScalingMode,
+        factor: Double
+    ) -> CGImage? {
         guard pixelSize.width.isFinite, pixelSize.height.isFinite,
               pixelSize.width > 0, pixelSize.height > 0,
               pixelSize.width <= 16_384, pixelSize.height <= 16_384 else { return nil }
@@ -119,11 +130,21 @@ extension NativeVideoWallpaperWindow: NativeVideoSurface {
                   bytesPerRow: width * 4, space: space,
                   bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.noneSkipLast.rawValue)
         else { return nil }
-        let size = CGSize(width: width, height: height)
-        let scale = max(size.width / CGFloat(image.width), size.height / CGFloat(image.height))
-        let drawn = stretching ? size : CGSize(width: CGFloat(image.width) * scale, height: CGFloat(image.height) * scale)
-        context.draw(image, in: CGRect(x: (size.width - drawn.width) / 2, y: (size.height - drawn.height) / 2,
-                                      width: drawn.width, height: drawn.height))
+        // Whatever the picture does not cover is black, as the window is.
+        context.setFillColor(CGColor(colorSpace: space, components: [0, 0, 0, 1]) ?? .black)
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        // The context is the display in device pixels, so the layout is asked
+        // for the same display expressed in points.
+        let scale = CGFloat(NativeVideoLayout.normalizedFactor(Double(backingScale)))
+        let rect = NativeVideoLayout.pictureRect(
+            mode: mode, factor: factor,
+            videoSize: CGSize(width: image.width, height: image.height),
+            viewport: CGSize(width: CGFloat(width) / scale, height: CGFloat(height) / scale),
+            backingScale: scale)
+        // The layout measures from the top edge and a bitmap context from the
+        // bottom; the picture is centred, so only rounding could tell them apart.
+        context.draw(image, in: CGRect(
+            x: rect.x, y: height - rect.y - rect.height, width: rect.width, height: rect.height))
         return context.makeImage()
     }
     /// Forwarded straight to the player, which is what observes
@@ -141,5 +162,34 @@ extension NativeVideoWallpaperWindow: NativeVideoSurface {
         player.stop()
         orderOut(nil)
         close()
+    }
+}
+
+/// The window's content view. It tells the player about every change to the
+/// display's size or pixel density the moment it happens.
+///
+/// `setFrameSize` rather than `layout()`: a window that is not on screen
+/// never lays its views out, and a wallpaper window moved between displays
+/// must not show the picture at the old display's geometry until it is.
+final class NativeVideoContainerView: NSView {
+    weak var player: NativeVideoPlayer?
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        relayoutPlayer()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        relayoutPlayer()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        relayoutPlayer()
+    }
+
+    private func relayoutPlayer() {
+        player?.relayout(bounds: bounds, backingScale: window?.backingScaleFactor ?? 1)
     }
 }

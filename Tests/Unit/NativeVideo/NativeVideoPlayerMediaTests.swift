@@ -63,12 +63,14 @@ final class NativeVideoPlayerMediaTests: XCTestCase {
             into: directory)
     }
 
-    private func makePlayer(url: URL, paused: Bool = false) -> NativeVideoPlayer {
+    private func makePlayer(
+        url: URL, paused: Bool = false, viewSize: CGSize = CGSize(width: 64, height: 36)
+    ) -> NativeVideoPlayer {
         let player = NativeVideoPlayer(surface: surface, counters: counters, paused: paused)
         // A layer with no window shows nothing, but it still has to be the
         // production object: the poster path reads the item the layer's player
         // is playing.
-        let view = NSView(frame: NSRect(x: 0, y: 0, width: 64, height: 36))
+        let view = NSView(frame: NSRect(origin: .zero, size: viewSize))
         view.wantsLayer = true
         player.attach(to: view)
         player.load(url: url)
@@ -448,6 +450,149 @@ final class NativeVideoPlayerMediaTests: XCTestCase {
             snapshot.value(.nativeVideoItemReleased, for: surface), 2,
             "the item that failed with its audio must be released, not leaked")
         print("[media] audio cannot start -> \(dropped ?? "none")")
+    }
+
+    /// A 64x36 clip, or its quarter-turned twin, playing in a 40x40 point view
+    /// whose picture size the item has reported.
+    private func sizedPlayer(
+        name: String, degrees: Int = 0, view: CGSize = CGSize(width: 40, height: 40)
+    ) async throws -> NativeVideoPlayer {
+        let url = degrees == 0
+            ? try await makeClip(name: name)
+            : try await makeRotatedClip(name: name, degrees: degrees)
+        let player = makePlayer(url: url, viewSize: view)
+        let sized = await wait { player.presentationSizeForTest != nil }
+        XCTAssertTrue(sized, "the item never reported a presentation size")
+        return player
+    }
+
+    private func assertRect(
+        _ actual: CGRect, _ expected: CGRect, accuracy: CGFloat, _ message: String,
+        file: StaticString = #filePath, line: UInt = #line
+    ) {
+        for (name, a, e) in [
+            ("x", actual.minX, expected.minX), ("y", actual.minY, expected.minY),
+            ("width", actual.width, expected.width), ("height", actual.height, expected.height),
+        ] {
+            XCTAssertEqual(
+                a, e, accuracy: accuracy, "\(message): \(name) of \(actual) vs \(expected)",
+                file: file, line: line)
+        }
+    }
+
+    func testThePlayerLayerLandsWhereTheLayoutSays() async throws {
+        let player = try await sizedPlayer(name: "layout")
+        XCTAssertEqual(player.presentationSizeForTest, CGSize(width: 64, height: 36))
+        let bounds = CGRect(x: 0, y: 0, width: 40, height: 40)
+        _ = await wait(upTo: .seconds(3)) { player.layerIsReadyForDisplayForTest }
+
+        // The three plain modes leave the layer on the display and let
+        // AVFoundation place the picture; where it puts it is the layout's
+        // rectangle, within the whole-pixel rounding of the layout.
+        player.relayout(bounds: bounds, backingScale: 1)
+        player.setScaling(.match, factor: 1)
+        XCTAssertEqual(player.layerFrameForTest, bounds)
+        assertRect(player.layerVideoRectForTest, CGRect(x: 0, y: 9, width: 40, height: 23),
+            accuracy: 0.75, "fit")
+        player.setScaling(.fill, factor: 1)
+        XCTAssertEqual(player.layerFrameForTest, bounds)
+        // `videoRect` of an aspect-fill layer is the visible part, clipped to
+        // the layer, so the crop itself is not observable here; the gravity is.
+        XCTAssertEqual(player.layerGravityForTest, .resizeAspectFill)
+        player.setScaling(.stretch, factor: 1)
+        XCTAssertEqual(player.layerFrameForTest, bounds)
+        assertRect(player.layerVideoRectForTest, bounds, accuracy: 0.75, "stretch")
+
+        // Original size is one video pixel per point: the 64x36 picture,
+        // centred, larger than the 40x40 display.
+        player.setScaling(.none, factor: 1)
+        assertRect(player.layerFrameForTest, CGRect(x: -12, y: 2, width: 64, height: 36),
+            accuracy: 0, "original size")
+        assertRect(player.layerVideoRectForTest, CGRect(x: 0, y: 0, width: 64, height: 36),
+            accuracy: 0.75, "the picture fills its own layer")
+
+        // A scale factor on Fit: 60 points wide on a 40 point display.
+        player.setScaling(.match, factor: 1.5)
+        assertRect(player.layerFrameForTest, CGRect(x: -10, y: 3, width: 60, height: 34),
+            accuracy: 0, "fit x1.5")
+        assertRect(player.layerVideoRectForTest, CGRect(origin: .zero, size: player.layerFrameForTest.size),
+            accuracy: 0.75, "fit x1.5 picture")
+
+        // Back to a plain mode: the layer returns to the display.
+        player.setScaling(.fill, factor: 1)
+        XCTAssertEqual(player.layerFrameForTest, bounds)
+    }
+
+    func testAResizedOrDenserDisplayMovesThePictureAtOnce() async throws {
+        let player = try await sizedPlayer(name: "resize")
+        player.setScaling(.none, factor: 1)
+        assertRect(player.layerFrameForTest, CGRect(x: -12, y: 2, width: 64, height: 36),
+            accuracy: 0, "before")
+
+        // A larger display: the same 64x36 picture stays 64x36 points, centred.
+        player.relayout(bounds: CGRect(x: 0, y: 0, width: 100, height: 50), backingScale: 1)
+        assertRect(player.layerFrameForTest, CGRect(x: 18, y: 7, width: 64, height: 36),
+            accuracy: 0, "after a resize")
+
+        // A denser display shows it at the same size in points: Original size is
+        // not tied to the pixel density.
+        player.relayout(bounds: CGRect(x: 0, y: 0, width: 100, height: 50), backingScale: 2)
+        assertRect(player.layerFrameForTest, CGRect(x: 18, y: 7, width: 64, height: 36),
+            accuracy: 0, "after a density change")
+
+        // Fit follows the display's size.
+        player.setScaling(.match, factor: 0.5)
+        player.relayout(bounds: CGRect(x: 0, y: 0, width: 128, height: 72), backingScale: 1)
+        assertRect(player.layerFrameForTest, CGRect(x: 32, y: 18, width: 64, height: 36),
+            accuracy: 0, "fit x0.5 on 128x72")
+    }
+
+    func testARotatedClipIsLaidOutByItsUprightSize() async throws {
+        // presentationSize and the layer both apply the display matrix, so the
+        // picture the layout places is the turned one: 36x64, not 64x36.
+        let player = try await sizedPlayer(name: "layout-rotated", degrees: 90)
+        XCTAssertEqual(player.presentationSizeForTest, CGSize(width: 36, height: 64))
+        _ = await wait(upTo: .seconds(3)) { player.layerIsReadyForDisplayForTest }
+        player.relayout(bounds: CGRect(x: 0, y: 0, width: 40, height: 40), backingScale: 1)
+
+        player.setScaling(.match, factor: 1)
+        assertRect(player.layerVideoRectForTest, CGRect(x: 9, y: 0, width: 23, height: 40),
+            accuracy: 0.75, "fit, turned clip")
+        player.setScaling(.none, factor: 1)
+        assertRect(player.layerFrameForTest, CGRect(x: 2, y: -12, width: 36, height: 64),
+            accuracy: 0, "original size, turned clip")
+    }
+
+    func testTheContainerViewRelaysOutThePlayerWhenItsSizeChanges() async throws {
+        let player = NativeVideoPlayer(surface: surface, counters: counters, paused: true)
+        self.player = player
+        let container = NativeVideoContainerView(frame: NSRect(x: 0, y: 0, width: 40, height: 40))
+        container.wantsLayer = true
+        container.player = player
+        player.attach(to: container)
+        XCTAssertEqual(player.layerFrameForTest, CGRect(x: 0, y: 0, width: 40, height: 40))
+        XCTAssertTrue(container.layer?.masksToBounds ?? false,
+            "a picture larger than the display must be cropped to it")
+
+        // Through the frame setter, the way a window resizes its content view.
+        container.frame = NSRect(x: 0, y: 0, width: 80, height: 60)
+
+        XCTAssertEqual(player.layerFrameForTest, CGRect(x: 0, y: 0, width: 80, height: 60))
+    }
+
+    func testAWindowFollowsItsScreenFrameWithoutBeingShown() async throws {
+        // Built and resized, never ordered onto the desktop.
+        let player = NativeVideoPlayer(surface: surface, counters: counters, paused: true)
+        self.player = player
+        let window = NativeVideoWallpaperWindow(
+            frame: NSRect(x: 0, y: 0, width: 40, height: 40), player: player)
+        defer { window.stop() }
+        XCTAssertEqual(player.layerFrameForTest, CGRect(x: 0, y: 0, width: 40, height: 40))
+
+        window.setScreenFrame(NSRect(x: 0, y: 0, width: 90, height: 50))
+
+        XCTAssertEqual(player.layerFrameForTest, CGRect(x: 0, y: 0, width: 90, height: 50),
+            "the picture must not wait for the window to be laid out or shown")
     }
 
     func testABrokenClipWithSoundStillReachesTheHostOnce() async throws {
