@@ -60,6 +60,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var desktopSpaces: WallpaperSpaceMonitor?
     private var powerSourceResampler: PowerSourceResampler?
     private var posterRefreshTask: Task<Void, Never>?
+    /// Putting the user's own desktop picture back after the Settings switch went off, or after
+    /// a poster was found left behind.
+    private var restoringDesktopPicture: Task<Void, Never>?
+    /// A restore has run since a poster could last have been written, whether it worked or not.
+    /// It is not tried again until the switch is turned on again or the lock screen hands the
+    /// desktop back; a failed one is retried by quitting, which keeps its suspended sync.
+    private var desktopPictureRestoreSettled = false
     private var globalHotKeys: GlobalHotKeys?
     private var playbackPreferencesObserver: NSObjectProtocol?
     private var wallpaperEnergy: WallpaperEnergyRecorder?
@@ -179,6 +186,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                     guard let self, !self.shutdownInProgress else { return }
                     self.desktopWallpaperSync = nil
                     try self.startDesktopWallpaperSync()
+                    // With the switch off, a poster the provider handed back is not kept.
+                    self.desktopPictureRestoreSettled = false
+                    self.applyDesktopPicturePreference()
                 }
             }
             let mediaScheduler = FoundationMediaTimerScheduler()
@@ -278,10 +288,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 }
                 // Posters keep the desktop unless the native provider has it or an animated lock
                 // screen is on its way to taking it; a screen saver chosen on its own leaves it here.
-                let nativeDesktop = lockScreen.map {
-                    $0.ownsDesktopProvider || ($0.isRequested && $0.canRefreshAutomatically && $0.errorMessage == nil)
-                } ?? false
-                if !nativeDesktop {
+                if lockScreen?.claimsDesktopPicture != true {
                     // A suspended poster sync must never outlive the native provider.
                     do { try self.startDesktopWallpaperSync() } catch {
                         self.lastError = error
@@ -309,6 +316,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                     self?.syncPlaybackMonitors()
                     self?.presentationPolicy?.evaluate()
                     self?.desktopWallpaperSync?.refreshesPeriodically = preferences.refreshesDesktopPicturePeriodically
+                    self?.applyDesktopPicturePreference()
                 }
             }
             let policy = WallpaperPresentationPolicy(
@@ -517,6 +525,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             do {
                 try lockScreen?.start()
                 if lockScreen?.isRequested != true { try startDesktopWallpaperSync() }
+                // With the switch off this puts back a poster a crash or an older run left behind.
+                applyDesktopPicturePreference()
             } catch {
                 lastError = error
                 AppLog.error("startup: Native wallpaper recovery failed: \(error.localizedDescription)")
@@ -848,6 +858,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         previewWindow?.session.close()
         previewWindow?.close()
         previewWindow = nil
+        // The quit restores the desktop itself; a restore the switch started must not race it.
+        restoringDesktopPicture?.cancel()
         desktopWallpaperSync?.suspendForNativeProvider()
         // Keep this restorer through native-provider callbacks and reloads.
         let wallpaperRestorer = desktopWallpaperSync
@@ -1208,6 +1220,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     private func startDesktopWallpaperSync() throws {
         guard !shutdownInProgress else { return }
+        // Every start comes through here, so with the switch off no poster can be written.
+        guard PlaybackPreferences.shared.writesDesktopPicture else { return }
+        // A restore the switch started still owns the journal and the posters folder, and its
+        // sync is suspended: a second sync would write posters the restore then overwrites.
+        // The restore re-runs this through `applyDesktopPicturePreference` when it ends.
+        guard restoringDesktopPicture == nil else { return }
         if let sync = desktopWallpaperSync, !sync.isSuspended {
             sync.refresh()
             return
@@ -1225,6 +1243,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         sync.refreshesPeriodically = PlaybackPreferences.shared.refreshesDesktopPicturePeriodically
         sync.start()
         sync.refresh()
+    }
+
+    /// Makes the desktop picture follow Settings › General › Use the wallpaper as the macOS desktop
+    /// picture. On, posters start if they are not running. Off, the user's own picture is put
+    /// back with the same verified restore a quit uses, and the poster sync is dropped; a poster
+    /// that a crash or an earlier run left behind is found in the journal and put back too.
+    /// Idle while the animated lock screen has the desktop: the switch is locked then, and the
+    /// native provider journals the poster as its own original.
+    private func applyDesktopPicturePreference() {
+        guard store != nil, !shutdownInProgress, !shutdownComplete, restoringDesktopPicture == nil,
+              store?.lockScreenWallpaper?.claimsDesktopPicture != true else { return }
+        if PlaybackPreferences.shared.writesDesktopPicture {
+            desktopPictureRestoreSettled = false
+            // Another preference changing must not take every poster again.
+            if desktopWallpaperSync?.isSuspended == false { return }
+            do { try startDesktopWallpaperSync() } catch {
+                lastError = error
+                AppLog.error("Desktop poster sync could not be started: \(error.localizedDescription)")
+            }
+            return
+        }
+        guard !desktopPictureRestoreSettled else { return }
+        let folder = ClientPaths.supportURL.appendingPathComponent("DesktopPosters")
+        let sync: DesktopWallpaperSync
+        if let running = desktopWallpaperSync {
+            sync = running
+        } else if DesktopWallpaperLedger.hasRecordedOriginals(in: folder) {
+            do { sync = try DesktopWallpaperSync(folder: folder) } catch {
+                lastError = error
+                AppLog.error("Desktop picture could not be restored: \(error.localizedDescription)")
+                return
+            }
+        } else {
+            return
+        }
+        AppLog.info("Desktop picture: writing is off; putting the macOS wallpaper back")
+        // At once, not when the task starts: no frame may be written in between.
+        sync.suspendForNativeProvider()
+        restoringDesktopPicture = Task { @MainActor [weak self] in
+            do {
+                try await sync.restoreForTermination()
+                guard let self else { return }
+                self.desktopPictureRestoreSettled = true
+                if self.desktopWallpaperSync === sync { self.desktopWallpaperSync = nil }
+                AppLog.info("Desktop picture: the macOS wallpaper is back")
+            } catch is CancellationError {
+                // A quit began and restores the desktop itself.
+            } catch {
+                guard let self else { return }
+                // Kept suspended, so quitting retries the restore.
+                if self.desktopWallpaperSync == nil { self.desktopWallpaperSync = sync }
+                self.desktopPictureRestoreSettled = true
+                self.lastError = error
+                AppLog.error("Desktop picture could not be put back: \(error.localizedDescription)")
+                self.rebuildMenu()
+            }
+            // The switch may have been turned on again meanwhile; a restore that ran is not repeated here.
+            self?.restoringDesktopPicture = nil
+            self?.applyDesktopPicturePreference()
+        }
     }
 
     private func desktopPosterScope(_ physicalDisplay: String) -> DesktopPosterScope {

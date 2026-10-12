@@ -9,6 +9,13 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-12 — Control panel stays closed at login (issue #41)
+
+- Change: ControlPanelLaunch reads the open-application Apple event's keyAELaunchedAsLogInItem; a login launch skips the startup panel unless the welcome guide is unfinished or BridgeStore failed to start.
+- python3 scripts/test.py --only ControlPanelLaunchTests: 3 passed.
+- python3 scripts/test.py on origin/main 1607a15 + this change: 1339 passed, 0 failed, 14 skipped of 1353.
+- Gap: not verified with a real logout/login; whether SMAppService.mainApp launches still carry keyAELaunchedAsLogInItem on macOS 27 is unconfirmed. Look for 'startup: launched at login; control panel stays closed' in the app log after the next login.
+
 ## 2026-10-11 — macOS 27 per-Space poster writes: absolute paths and late acknowledgement
 
 - Diagnosis (read-only, M5 Pro, macOS 27.0.1): DesktopPictureSetDisplayForSpace forwards to WallpaperServices, whose result HIServices discards; every poster write logged 'Failed to set legacy configuration: … no such file' because the sandboxed WallpaperAgent resolves the root-relative path inside its container.

@@ -61,6 +61,16 @@ unattached `CAMetalLayer`s and injected notification and encoding services:
   cannot be blocked forever by an unreachable reference; cancelling a restoration
   that is waiting (a logout's deadline) stops it and leaves the journal entry and the
   poster for a later run to finish.
+- Switching posters off: the journal reports an original until it is restored (a
+  missing, damaged or emptied journal reports none); a running sync restores every
+  desktop, stays suspended and writes nothing for a frame, refresh or resume that
+  follows; a fresh sync over a journal left behind restores it, the launch repair.
+  `PlaybackPreferencesTests` (on until turned off, one change notification),
+  `LockScreenWallpaperServiceTests` (when the lock screen claims the picture and locks
+  the choice) and `WebPanelGeneralSettingsTests` (the action stores the choice or is
+  refused while the lock screen is requested; the row, its disabled five-minute
+  neighbor and its lock reason) cover the rest. The `AppDelegate` wiring that decides
+  when to restore is not unit-tested.
 - Retention: frame URLs are immutable and pruned only after every Space updates;
   displays on the current-Space fallback or with an unreadable Space keep a
   bounded number of the newest posters.
@@ -870,8 +880,9 @@ follows the developer's in-app language choice.
   `WebPanelDeliveryStatusTests`,
   `WebPanelEnergyUsageTests` (sampling only while Settings is visible),
   `WebPanelExternalLinkTests` (every fixed link in `WebUI/*.js` passes the allowlist),
-  `WebPanelGeneralSettingsTests` (the Login Items note and button, and that returning
-  to the panel re-reads the status only while approval is pending),
+  `WebPanelGeneralSettingsTests` (the Login Items note and button, that returning
+  to the panel re-reads the status only while approval is pending, and the
+  desktop-picture switch with its lock),
   `WebPanelHiddenPropertyTests` (a property a visibility rule hides is not given
   to the page, its folder is not measured and its pending text is dropped),
   `WebPanelPerformanceSettingsTests` and `WebPanelSceneSettingsTests` (unknown,

@@ -55,7 +55,7 @@ struct AppRule: Codable, Equatable, Identifiable, Sendable {
 
 /// UserDefaults-backed playback rules for display sleep, other-app audio, a
 /// covered desktop, Low Power Mode, a hot Mac, a low battery, playing only on the display in use
-/// and per-app pause, mute and stop.
+/// and per-app pause, mute and stop, and whether the macOS desktop picture is written at all.
 /// Mutations post `didChangeNotification` once.
 @MainActor
 final class PlaybackPreferences {
@@ -77,6 +77,7 @@ final class PlaybackPreferences {
     private static let lowBatteryActionKey = "WallpaperMachine.lowBatteryAction"
     private static let lowBatteryThresholdKey = "WallpaperMachine.lowBatteryThreshold"
     private static let periodicDesktopPictureKey = "WallpaperMachine.refreshDesktopPicturePeriodically"
+    private static let writeDesktopPictureKey = "WallpaperMachine.writeDesktopPicture"
     private static let playOnlyOnActiveDisplayKey = "WallpaperMachine.playOnlyOnActiveDisplay"
 
     /// The charge levels the user can pick for the low-battery rule, in percent.
@@ -145,6 +146,18 @@ final class PlaybackPreferences {
         get { defaults.bool(forKey: Self.playOnlyOnActiveDisplayKey) }
         set {
             defaults.set(newValue, forKey: Self.playOnlyOnActiveDisplayKey)
+            postChange()
+        }
+    }
+
+    /// On until turned off. Whether the app installs a still frame of the wallpaper as macOS's own
+    /// desktop picture, the one Mission Control and the moment before a wallpaper loads show. Off,
+    /// no picture is written and the user's own comes back. Local to this Mac, so it is not part of
+    /// a settings backup.
+    var writesDesktopPicture: Bool {
+        get { defaults.object(forKey: Self.writeDesktopPictureKey) as? Bool ?? true }
+        set {
+            defaults.set(newValue, forKey: Self.writeDesktopPictureKey)
             postChange()
         }
     }

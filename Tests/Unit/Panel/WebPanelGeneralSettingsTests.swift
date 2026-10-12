@@ -11,11 +11,13 @@ final class WebPanelGeneralSettingsTests: ControlPanelTestCase {
     let defaults: UserDefaults
     let root: URL
     let workshop: WorkshopStore
-    func makeController() -> WebPanelController {
+    func makeController(store: BridgeStore? = nil, playback: PlaybackPreferences? = nil)
+      -> WebPanelController
+    {
       WebPanelController(
-        store: BridgeStore(bridge: WallpaperBridge(noPointer: .init())),
+        store: store ?? BridgeStore(bridge: WallpaperBridge(noPointer: .init())),
         navigation: ControlPanelNavigation(), workshop: workshop, defaults: defaults,
-        appLanguage: .english())
+        appLanguage: .english(), playback: playback)
     }
   }
 
@@ -69,6 +71,120 @@ final class WebPanelGeneralSettingsTests: ControlPanelTestCase {
     let third = panel.makeController()
     defer { third.stop() }
     XCTAssertEqual(try reported(third), true)
+  }
+
+  /// The lock screen as the app finds it after a launch: asked for, or left off. It only starts and
+  /// recovers; no publication, activation or monitor runs.
+  private func lockScreen(requested: Bool) throws -> LockScreenWallpaperService {
+    let defaults = try TemporaryDefaults.make(for: self).defaults
+    defaults.set(requested, forKey: "WallpaperMachineAnimateLockScreen")
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "panel-lock-\(UUID().uuidString)")
+    addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+    let service = LockScreenWallpaperService(
+      prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [] },
+      selection: LockScreenWallpaperSelection(
+        storeURL: root.appendingPathComponent("Index.plist"),
+        journalURL: root.appendingPathComponent("journal.plist"), reload: {}),
+      exchange: root, defaults: defaults,
+      // Never registered with a run loop, so the monitor cannot fire during the test.
+      scheduleMonitor: { _ in Timer(timeInterval: 2, repeats: true) { _ in } })
+    try service.start()
+    return service
+  }
+
+  func testDesktopPictureSwitchPersistsAndIsRefusedWhileTheLockScreenIsRequested() async throws {
+    let panel = try makePanel()
+    let playback = PlaybackPreferences(defaults: panel.defaults)
+    let store = BridgeStore(bridge: WallpaperBridge(noPointer: .init()))
+    let controller = panel.makeController(store: store, playback: playback)
+    defer { controller.stop() }
+    func settings() throws -> [String: Any] {
+      try XCTUnwrap(controller.snapshot()["settings"] as? [String: Any])
+    }
+
+    XCTAssertEqual(try settings()["writeDesktopPicture"] as? Bool, true, "On until the user turns it off")
+    XCTAssertEqual(try settings()["desktopPictureLocked"] as? Bool, false)
+    try await controller.perform("setting", body: ["key": "writeDesktopPicture", "value": false])
+    XCTAssertFalse(playback.writesDesktopPicture)
+    XCTAssertEqual(try settings()["writeDesktopPicture"] as? Bool, false)
+    XCTAssertFalse(
+      PlaybackPreferences(defaults: panel.defaults).writesDesktopPicture, "The choice must survive a relaunch")
+    do {
+      try await controller.perform("setting", body: ["key": "writeDesktopPicture", "value": "yes"])
+      XCTFail("A string must not be accepted for a switch")
+    } catch {}
+    XCTAssertFalse(playback.writesDesktopPicture)
+
+    // Animate lock screen sets the picture itself: the choice waits until it is off again.
+    store.lockScreenWallpaper = try lockScreen(requested: true)
+    XCTAssertEqual(try settings()["desktopPictureLocked"] as? Bool, true)
+    do {
+      try await controller.perform("setting", body: ["key": "writeDesktopPicture", "value": true])
+      XCTFail("The picture belongs to the lock screen while it is requested")
+    } catch let error as WallpaperActionError {
+      XCTAssertFalse(error.localizedDescription.isEmpty, "The user is told why")
+    }
+    XCTAssertFalse(playback.writesDesktopPicture, "A refused change must not be stored")
+    XCTAssertEqual(try settings()["writeDesktopPicture"] as? Bool, false)
+
+    store.lockScreenWallpaper = try lockScreen(requested: false)
+    XCTAssertEqual(try settings()["desktopPictureLocked"] as? Bool, false, "Off, the lock screen owns nothing")
+    try await controller.perform("setting", body: ["key": "writeDesktopPicture", "value": true])
+    XCTAssertTrue(playback.writesDesktopPicture)
+  }
+
+  /// What the user reads and can press: the switch is on by default, turning it off disables the
+  /// timed Mission Control refresh that depends on it, and the lock screen locks it with a reason.
+  func testDesktopPictureRowFollowsThePreferenceAndTheLockScreen() async throws {
+    try await withPanel { panel in
+      try await panel.finishWelcome()
+      panel.navigation.selection = .settings
+      panel.show()
+      try await panel.waitJS("powerProbe.received.at(-1)?.page === 'settings'")
+      _ = try await panel.js("document.querySelector('[data-section=\"general\"]').click()")
+      let rows = """
+        const read = key => {
+          const toggle = document.querySelector(`.settings-row[data-key="${key}"] input[type="checkbox"]`);
+          const note = document.getElementById(toggle.getAttribute('aria-describedby') || '');
+          return { checked: toggle.checked, usable: !toggle.disabled, note: note?.textContent.trim() ?? '' };
+        };
+        return { writes: read('writeDesktopPicture'), refresh: read('refreshDesktopPicture') };
+        """
+      func state() async throws -> (writes: [String: Any], refresh: [String: Any]) {
+        let result = try await panel.js(rows)
+        let page = try XCTUnwrap(result as? [String: Any])
+        return (
+          try XCTUnwrap(page["writes"] as? [String: Any]), try XCTUnwrap(page["refresh"] as? [String: Any])
+        )
+      }
+      try await panel.waitJS("document.querySelector('.settings-row[data-key=\"writeDesktopPicture\"]')")
+
+      let initial = try await state()
+      XCTAssertEqual(initial.writes["checked"] as? Bool, true)
+      XCTAssertEqual(initial.writes["usable"] as? Bool, true)
+      XCTAssertEqual(initial.refresh["usable"] as? Bool, true)
+
+      panel.controller.playback.writesDesktopPicture = false
+      try await panel.waitJS("powerProbe.received.at(-1)?.settings?.writeDesktopPicture === false")
+      try await panel.waitJS(
+        "!document.querySelector('.settings-row[data-key=\"writeDesktopPicture\"] input').checked")
+      let off = try await state()
+      XCTAssertEqual(off.writes["usable"] as? Bool, true, "It can be turned back on")
+      XCTAssertEqual(
+        off.refresh["usable"] as? Bool, false, "A timed retake of a picture that is not written does nothing")
+
+      panel.store.lockScreenWallpaper = try lockScreen(requested: true)
+      panel.store.snapshotRevision &+= 1
+      try await panel.waitJS("powerProbe.received.at(-1)?.settings?.desktopPictureLocked === true")
+      try await panel.waitJS(
+        "document.querySelector('.settings-row[data-key=\"writeDesktopPicture\"] input').disabled")
+      let locked = try await state()
+      XCTAssertEqual(locked.writes["checked"] as? Bool, false, "The lock does not change the choice")
+      let note = try XCTUnwrap(locked.writes["note"] as? String)
+      XCTAssertFalse(note.isEmpty, "The row says why it cannot be changed")
+      XCTAssertNotEqual(note, initial.writes["note"] as? String)
+    }
   }
 
   /// A launch at login the user switched off in System Settings stays off however often the app

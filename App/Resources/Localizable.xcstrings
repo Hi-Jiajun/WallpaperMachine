@@ -699,6 +699,9 @@
     "Lock Screen integration is unavailable." : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Lock Screen integration is unavailable."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ロック画面との連携は利用できません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "锁定屏幕集成不可用。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "無法使用鎖定畫面整合。"}}}
     },
+    "Turn off Animate lock screen before changing this: it sets the desktop picture itself." : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Turn off Animate lock screen before changing this: it sets the desktop picture itself."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "この設定を変更する前に、「ロック画面をアニメーション表示」をオフにしてください。デスクトップピクチャはその機能が自身で設定します。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "请先关闭“锁定屏幕动态壁纸”再更改此项：桌面图片由它自行设置。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "請先關閉「鎖定畫面動態桌布」再變更此項目：桌面圖片由它自行設定。"}}}
+    },
     "Screen saver integration is unavailable." : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Screen saver integration is unavailable."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "スクリーンセーバとの連携は利用できません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "屏幕保护程序集成不可用。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "無法使用螢幕保護程式整合。"}}}
     },

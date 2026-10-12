@@ -20,6 +20,15 @@ final class LockScreenWallpaperService {
     anyRequested && screenSaverError == nil
       && (errorMessage == nil || (screenSaverRequested && lockScreenActivationError != nil))
   }
+  /// Whether the native provider has the desktop picture, or an animated lock screen is on its way
+  /// to taking it. Poster sync then stays out of the way; a screen saver chosen on its own and a
+  /// lock screen that failed to start leave the picture to the posters.
+  var claimsDesktopPicture: Bool {
+    ownsDesktopProvider || (isRequested && canRefreshAutomatically && errorMessage == nil)
+  }
+  /// Whether the choice to write the desktop picture is not the user's to make right now: from the
+  /// moment the lock screen is asked for until it has handed the desktop back, even when it failed.
+  var locksDesktopPictureChoice: Bool { isRequested || ownsDesktopProvider }
   @ObservationIgnored var beforeActivation: (() throws -> Void)?
   @ObservationIgnored var afterDeactivation: (() throws -> Void)?
 

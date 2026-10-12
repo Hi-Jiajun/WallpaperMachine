@@ -360,7 +360,8 @@ function draw(view) {
     + group('general-behavior', t('Startup & desktop'), settingToggle('launchAtLogin', 'Launch at login', !settings.launchAtLoginAvailable, loginNote, loginAction)
       + settingToggle('hideAfterActivating', 'Hide window after applying a wallpaper')
       + settingToggle('keepWindowsOnWallpaperClick', 'Keep windows in place when clicking the wallpaper', false, t('Turns off macOS’s “Click wallpaper to reveal desktop” so clicks reach interactive wallpapers.'))
-      + settingToggle('refreshDesktopPicture', 'Update the Mission Control picture every 5 minutes', false, t('Mission Control shows a still picture of the wallpaper, retaken when it starts, changes or resumes. This also retakes it while it plays. Not used while the lock screen is animated.')))
+      + settingToggle('writeDesktopPicture', 'Use the wallpaper as the macOS desktop picture', settings.desktopPictureLocked === true, settings.desktopPictureLocked === true ? t('Animate lock screen sets the desktop picture itself, so this cannot be changed while it is on.') : t('Mission Control and the moment before a wallpaper loads show a still frame of the wallpaper. Turn this off to leave macOS’s own wallpaper settings alone; your own picture comes back at once.'))
+      + settingToggle('refreshDesktopPicture', 'Update the Mission Control picture every 5 minutes', settings.writeDesktopPicture === false, t('Mission Control shows a still picture of the wallpaper, retaken when it starts, changes or resumes. This also retakes it while it plays. Not used while the lock screen is animated.')))
     + group('general-shortcuts', t('Keyboard shortcuts'), (settings.hotkeys || []).map(hotkey => {
       const id = String(hotkey.id);
       const recording = view.recording === id;

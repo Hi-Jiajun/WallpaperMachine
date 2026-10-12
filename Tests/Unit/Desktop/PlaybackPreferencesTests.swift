@@ -108,6 +108,29 @@ final class PlaybackPreferencesTests: XCTestCase {
         XCTAssertEqual(posts.value, 2)
     }
 
+    func testWritingTheDesktopPictureIsOnUntilTurnedOff() {
+        let preferences = PlaybackPreferences(defaults: defaults)
+        XCTAssertTrue(preferences.writesDesktopPicture, "A fresh install keeps installing the Mission Control picture")
+        preferences.lowBatteryThreshold = 30
+
+        let posts = ChangeCount()
+        let token = NotificationCenter.default.addObserver(
+            forName: PlaybackPreferences.didChangeNotification, object: preferences, queue: .main
+        ) { _ in posts.value += 1 }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        preferences.writesDesktopPicture = false
+        XCTAssertFalse(preferences.writesDesktopPicture)
+        XCTAssertEqual(posts.value, 1, "The app starts putting the picture back from this notification")
+        XCTAssertFalse(PlaybackPreferences(defaults: defaults).writesDesktopPicture, "The choice survives a relaunch")
+        XCTAssertEqual(PlaybackPreferences(defaults: defaults).lowBatteryThreshold, 30, "No other choice moved")
+        XCTAssertFalse(PlaybackPreferences(defaults: defaults).refreshesDesktopPicturePeriodically)
+
+        preferences.writesDesktopPicture = true
+        XCTAssertTrue(PlaybackPreferences(defaults: defaults).writesDesktopPicture)
+        XCTAssertEqual(posts.value, 2)
+    }
+
     func testAddingTheSameBundleReturnsTheExistingRule() {
         let preferences = PlaybackPreferences(defaults: defaults)
         let first = preferences.addRule(bundleIdentifier: "com.example.Player", name: "Player")

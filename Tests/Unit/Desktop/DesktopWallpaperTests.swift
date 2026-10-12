@@ -416,6 +416,81 @@ final class DesktopWallpaperTests: XCTestCase {
         XCTAssertEqual(workspace.pictures[one], original("one"))
     }
 
+    /// The probe behind the startup repair: a poster is only worth looking for while the journal
+    /// still names an original.
+    @MainActor
+    func testRecordedOriginalsAreReportedUntilTheyAreRestored() throws {
+        XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: root), "no journal yet")
+        XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: root.appendingPathComponent("absent")))
+        let workspace = MemoryDesktopWorkspace()
+        workspace.pictures = [one: original("before")]
+        let ledger = try DesktopWallpaperLedger(folder: root, workspace: workspace)
+        XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: root), "a ledger with nothing written leaves no journal")
+
+        try ledger.synchronize(posters: ["1": Data([1])], liveDisplays: ["1"])
+        XCTAssertTrue(DesktopWallpaperLedger.hasRecordedOriginals(in: root))
+        try ledger.restoreAll()
+        XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: root), "restoring prunes what it put back")
+
+        try Data("not json".utf8).write(to: root.appendingPathComponent("originals.json"))
+        XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: root), "a damaged journal names nothing to restore")
+    }
+
+    /// Turning writes off: the running sync puts every original back with the quit's verified
+    /// restore, and nothing it is told afterwards writes again.
+    @MainActor
+    func testTurningWritesOffRestoresTheOriginalsAndLaterFramesWriteNothing() async throws {
+        let workspace = MemoryDesktopWorkspace()
+        workspace.pictures = [one: original("one"), two: original("two")]
+        let center = NotificationCenter(), layer = CAMetalLayer()
+        let sync = try DesktopWallpaperSync(folder: root, workspace: workspace,
+                                            surfaces: { [DesktopPosterSurface(layer: layer, display: "1")] },
+                                            frameCenter: center, encode: { $0.pixels })
+        sync.start()
+        let installed = expectation(description: "Both desktops show the poster")
+        installed.expectedFulfillmentCount = 2
+        workspace.didWrite = { installed.fulfill() }
+        post(Data([1]), layer: layer, center: center)
+        await fulfillment(of: [installed], timeout: 2)
+        workspace.didWrite = nil
+        XCTAssertNotEqual(workspace.pictures[one], original("one"))
+
+        try await sync.restoreForTermination(wait: {})
+        XCTAssertEqual(workspace.pictures[one], original("one"))
+        XCTAssertEqual(workspace.pictures[two], original("two"))
+        XCTAssertTrue(sync.isSuspended, "a restored sync must not start writing again by itself")
+        XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: root))
+
+        let written = workspace.writes.count
+        post(Data([2]), layer: layer, center: center)
+        sync.refresh()
+        sync.presentationResumed()
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertEqual(workspace.writes.count, written, "no frame after the restore may reach a desktop")
+        XCTAssertEqual(workspace.pictures[one], original("one"))
+    }
+
+    /// The repair at launch: a poster a crash or an earlier run left behind is found through the
+    /// journal and put back by a sync that never started.
+    @MainActor
+    func testAJournalLeftBehindIsRestoredByAFreshSync() async throws {
+        let workspace = MemoryDesktopWorkspace()
+        workspace.pictures = [one: original("one"), two: original("two")]
+        let first = try DesktopWallpaperLedger(folder: root, workspace: workspace)
+        try first.synchronize(posters: ["1": Data([1])], liveDisplays: ["1"])
+        XCTAssertNotEqual(workspace.pictures[one], original("one"))
+        XCTAssertTrue(DesktopWallpaperLedger.hasRecordedOriginals(in: root))
+
+        // The app is gone; nothing but the journal and the poster files remain.
+        let fresh = try DesktopWallpaperSync(folder: root, workspace: workspace,
+                                             surfaces: { [] }, frameCenter: NotificationCenter())
+        try await fresh.restoreForTermination(wait: {})
+        XCTAssertEqual(workspace.pictures[one], original("one"))
+        XCTAssertEqual(workspace.pictures[two], original("two"))
+        XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: root))
+        XCTAssertTrue(try posterNames().isEmpty, "the posters themselves are deleted once nothing shows them")
+    }
+
     @MainActor
     func testUnreachablePosterReferenceDoesNotBlockQuitForever() async throws {
         let workspace = MemoryDesktopWorkspace()

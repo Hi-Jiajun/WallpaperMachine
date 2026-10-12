@@ -527,6 +527,14 @@ extension WebPanelController {
         try DesktopClickRevealPreference.setEnabled(!(try request.boolean("value")))
       case "refreshDesktopPicture":
         playback.refreshesDesktopPicturePeriodically = try request.boolean("value")
+      case "writeDesktopPicture":
+        let writes = try request.boolean("value")
+        if store.lockScreenWallpaper?.locksDesktopPictureChoice == true {
+          throw WallpaperActionError(
+            message: String(
+              localized: "Turn off Animate lock screen before changing this: it sets the desktop picture itself."))
+        }
+        playback.writesDesktopPicture = writes
       case "playOnlyOnActiveDisplay":
         playback.playsOnlyOnActiveDisplay = try request.boolean("value")
       case "hideAfterActivating":

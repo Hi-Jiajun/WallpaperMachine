@@ -197,6 +197,8 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     await waitFor("the lock screen provider to enable") { service.isEnabled }
     XCTAssertTrue(service.isEnabled)
     XCTAssertTrue(service.ownsDesktopProvider)
+    XCTAssertTrue(service.claimsDesktopPicture)
+    XCTAssertTrue(service.locksDesktopPictureChoice)
     XCTAssertEqual(before, 1)
     failReload = true
     service.setEnabled(false)
@@ -204,6 +206,8 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     XCTAssertEqual(after, 1)
     XCTAssertFalse(service.ownsDesktopProvider)
     XCTAssertNotNil(service.errorMessage)
+    XCTAssertFalse(service.claimsDesktopPicture, "handed back, so the posters may start again")
+    XCTAssertFalse(service.locksDesktopPictureChoice)
   }
 
   /// Any snapshot refreshes the service, so refreshes arrive while the first frame is awaited.
@@ -470,6 +474,37 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     XCTAssertTrue(try XCTUnwrap(timers.last).isValid)
     try await service.shutdown()
     XCTAssertTrue(timers.allSatisfy { !$0.isValid })
+  }
+
+  /// The poster sync stays away from the desktop picture exactly while the lock screen is asked
+  /// for and able to take it; the Settings switch stays locked from the ask until the handback.
+  @MainActor
+  func testTheLockScreenClaimsTheDesktopPictureOnlyWhileItCanTakeIt() throws {
+    func makeService() -> LockScreenWallpaperService {
+      LockScreenWallpaperService(prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [] },
+        selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {}),
+        exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor)
+    }
+    let off = makeService()
+    XCTAssertFalse(off.claimsDesktopPicture, "Off, the posters keep the desktop")
+    XCTAssertFalse(off.locksDesktopPictureChoice)
+    try off.start()
+    XCTAssertFalse(off.claimsDesktopPicture)
+    XCTAssertFalse(off.locksDesktopPictureChoice)
+
+    defaults.set(true, forKey: preference)
+    let requested = makeService()
+    try requested.start()
+    XCTAssertTrue(requested.isRequested)
+    XCTAssertTrue(requested.claimsDesktopPicture, "Asked for and able to start: posters wait for it")
+    XCTAssertTrue(requested.locksDesktopPictureChoice)
+
+    try Data("invalid journal".utf8).write(to: journal)
+    let failed = makeService()
+    XCTAssertThrowsError(try failed.start())
+    XCTAssertNotNil(failed.errorMessage)
+    XCTAssertFalse(failed.claimsDesktopPicture, "A lock screen that could not start leaves the desktop to the posters")
+    XCTAssertTrue(failed.locksDesktopPictureChoice, "but the choice stays locked until it is turned off")
   }
 
   @MainActor

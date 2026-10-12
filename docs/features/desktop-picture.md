@@ -29,10 +29,48 @@ wakeup with other timers. Without it the poster is taken only at the moments lis
 [below](#when-a-poster-is-taken), so it shows the wallpaper as it looked once it
 settled. The setting applies to the running sync at once and has no effect while the
 lock screen is animated, because poster sync is then suspended
-([below](#the-native-lock-screen-provider-and-space-selection)).
+([below](#the-native-lock-screen-provider-and-space-selection)), or while posters are
+[switched off](#leaving-macoss-own-wallpaper-alone), where its row is disabled.
 
 With no live wallpaper on a display, nothing is written there: its desktops show the
 user's own wallpaper again.
+
+### Leaving macOS's own wallpaper alone
+
+**Settings › General › Startup & desktop › Use the wallpaper as the macOS desktop
+picture** (`PlaybackPreferences.writesDesktopPicture`, on by default) decides whether
+the app installs posters at all. Turned off, the app never changes macOS's wallpaper
+settings: Mission Control and the Spaces bar show the user's own picture, as does the
+moment before a wallpaper loads. The switch is local to the Mac, like the periodic
+refresh, so a [settings backup](backup-restore.md) neither exports nor restores it.
+
+- **Every write goes through one gate.** `AppDelegate.startDesktopWallpaperSync` returns
+  early while the switch is off or a restore is still running, and each start (a
+  snapshot, a surface change, the lock-screen handback, a cancelled quit, launch) comes
+  through it, so no poster can be written whatever triggers it. The five-minute row is
+  disabled while the switch is off, because a retake would write nothing.
+- **Turning it off puts the user's picture back at once.** The running sync stops and
+  restores with the same verified path a quit uses (`restoreForTermination`: every
+  desktop read back, retried for about five seconds while WallpaperAgent reloads, the
+  macOS 27 leftover reference tolerated), then the sync is dropped. A poster still
+  being written is waited for. If the restore fails, the suspended sync is kept so a
+  quit retries it, the error shows in the menu bar menu and the log, and nothing
+  retries on its own; turning the switch on and off again does. Turning it back on
+  while a restore runs waits for the restore to finish, then starts posters again.
+- **A poster left behind is found at launch.** With the switch off and no sync running,
+  the launch (and the end of an animated lock screen) reads the journal
+  (`DesktopWallpaperLedger.hasRecordedOriginals`): if it still names an original, a
+  sync that never starts restores it, for a poster that a crash or an earlier run with
+  the switch on left on a desktop. A desktop showing anything but a poster keeps its
+  choice, as on every restore.
+- **Animate lock screen decides.** While the lock screen is requested, or the native
+  provider has the desktop, the extension owns the picture and journals the poster as
+  its own original. The switch is then locked in the panel with the reason, the action
+  refuses a change (`LockScreenWallpaperService.locksDesktopPictureChoice`, from the
+  request until the handback, even after a failure), and neither the restore nor the
+  repair runs (`claimsDesktopPicture`, the condition poster sync already used to stay
+  away). When the provider hands the desktop back with the switch off, nothing starts and
+  a poster the handback left is put back.
 
 ## When a poster is taken
 
@@ -188,7 +226,9 @@ agent's on-disk `Index.plist` can lag its in-memory store until a scheduled writ
 ## Quitting
 
 `applicationShouldTerminate` first suspends poster sync, so no new poster is written
-during the quit. The native lock-screen service then restores its own selections
+during the quit (a restore the [switch](#leaving-macoss-own-wallpaper-alone) started is
+cancelled, since the quit restores the desktop itself). The native lock-screen service
+then restores its own selections
 (without a lock-screen service, on macOS earlier than 26, restoration starts
 directly), and the poster service restores the originals: it puts each desktop's
 journaled original back, checks image references in the native store read-only, and
@@ -203,7 +243,8 @@ takes longer than 20 seconds (`QuitSupervisor`). Nothing after restoration start
 cancelled quit. Because the app is hidden while it quits, a cancelled quit puts things back
 and says so:
 
-- poster synchronization restarts unless the native lock-screen provider has the desktop;
+- poster synchronization restarts unless the native lock-screen provider has the desktop
+  or the switch is off;
 - the control panel (and What's New) comes back if it was open, on the section it was on;
 - an alert gives the reason: the restoration error's own text (macOS is still restoring the
   desktop wallpaper, or the original could not be recovered and the user should select
@@ -299,8 +340,9 @@ the animated lock screen in
 
 ## Verification
 
-`DesktopWallpaperTests` cover posters, timing, refusals, originals and quit with
-synthetic pixels and an in-memory workspace that never touches the user's wallpaper;
+`DesktopWallpaperTests` cover posters, timing, refusals, originals, quit and the
+switch's restore with synthetic pixels and an in-memory workspace that never touches
+the user's wallpaper;
 the inventory is under [Posters](../testing/coverage.md#posters-mission-control). What
 Mission Control actually shows, its refresh latency, and macOS accepting and restoring
 the native selections are not covered and need an authorized desktop run

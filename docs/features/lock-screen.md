@@ -24,7 +24,9 @@ an unlocked lock-screen surface keeps animating for 15 seconds after its first
 frame (`WallpaperPresentationAuthority.desktopSettleBudget`) rather than holding an
 intro's opening (often black) or a setting before it has faded in. A new wallpaper
 or changed setting replaces the renderer and settles again; the periodic Mission
-Control update in Settings does not apply in this mode.
+Control update in Settings does not apply in this mode. Nor does the Settings switch
+for using the wallpaper as the macOS desktop picture, which stays locked while the
+lock screen is requested ([desktop picture](desktop-picture.md#leaving-macoss-own-wallpaper-alone)).
 
 Once settled, the surface pauses its renderer while retaining scene state, textures
 and device allocations, and reads the held frame back. That frame is committed

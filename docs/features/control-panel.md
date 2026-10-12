@@ -137,8 +137,9 @@ the state as a disabled line. See [crash recovery](crash-recovery.md).
   (the section Settings opens on), General, Appearance, Displays, Library & Steam,
   Storage and About.
   - **General** starts with the [Language](#language) picker, then startup and
-    desktop (including the optional five-minute Mission Control picture update;
-    see [architecture](../architecture.md#desktop-wallpaper-windows-and-private-api-handling)),
+    desktop (including the switch for using the wallpaper as the macOS desktop
+    picture and the optional five-minute Mission Control picture update; see
+    [desktop picture](desktop-picture.md#leaving-macoss-own-wallpaper-alone)),
     keyboard shortcuts (see [automation](automation.md)) and lock-screen groups.
     Battery behavior is one choice on Performance, not a General toggle.
     **Launch at login** is disabled with its reason while the app is outside

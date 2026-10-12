@@ -513,6 +513,9 @@ extension WebPanelController {
       "lowBatteryThreshold": playback.lowBatteryThreshold,
       "batteryPercent": BatteryReading.read()?.percent as Any? ?? null,
       "playOnlyOnActiveDisplay": playback.playsOnlyOnActiveDisplay,
+      // The animated lock screen sets the desktop picture itself, so the choice waits for it.
+      "writeDesktopPicture": playback.writesDesktopPicture,
+      "desktopPictureLocked": lock?.locksDesktopPictureChoice ?? false,
     ]
     // The sections are built separately: as one literal, the Swift compiler on the
     // macOS 15 release runner gives up type-checking it in reasonable time.

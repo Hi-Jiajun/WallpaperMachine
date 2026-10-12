@@ -247,6 +247,20 @@ reuse, or visual behavior, which is why these items are manual.
       thumbnail shows the wallpaper as it looked within the last two minutes, and
       a Desktop created in the middle of the swipes has a picture at once. After
       two more minutes, swipe once more and check the thumbnails moved on.
+- [ ] Turn off **Use the wallpaper as the macOS desktop picture** with a wallpaper
+      playing: within a few seconds every Desktop shows the user's own picture in
+      Mission Control and the Spaces bar, the five-minute row is disabled, and
+      applying or changing wallpapers, switching Spaces and waking the Mac leave it
+      alone. Turn it on again: the posters return. Quit with it off: nothing
+      changes, and nothing is logged as unfinished.
+- [ ] With the switch off, enable **Animate lock screen**: the switch is disabled with
+      its reason. Disable the lock screen: no poster is written, and the switch can be
+      changed again.
+- [ ] Repair at launch: with the switch on and a wallpaper playing, quit the app abruptly
+      (`kill -9`) so a poster stays installed, run
+      `defaults write app.wallpapermachine WallpaperMachine.writeDesktopPicture -bool NO`
+      and relaunch. Within a few seconds no Desktop shows a poster any more and the log
+      says `Desktop picture: the macOS wallpaper is back`. Delete the key afterwards.
 - [ ] Eject a wallpaper: all Desktops recover their previous native image and
       scaling.
 - [ ] Quit and reopen to check restoration journaling.
