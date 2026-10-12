@@ -88,8 +88,8 @@ previous session: ended unexpectedly (a crash, a force quit or a kill) (1.3.2 (4
 | Record found | Logged as | Meaning |
 |---|---|---|
 | none, or a file that cannot be read | `none recorded` | first launch, or the ledger was lost |
-| `ended` | `quit normally` | the app quit through its own shutdown |
-| `quitting` | `quit did not finish` | a quit began and the process died before it ended: a stage hung and was killed, or the system cut the quit short |
+| `ended` | `quit normally (<reason>)` | the app quit through its own shutdown; the reason is the one logged at the start of the quit ([below](#why-the-app-quit)) |
+| `quitting` | `quit did not finish (<reason>)` | a quit began and the process died before it ended: a stage hung and was killed, or the system cut the quit short |
 | `running`, same boot | `ended unexpectedly` | a crash, a force quit, a `kill` or an out-of-memory kill |
 | `running`, another boot | `ended by a restart, shutdown or power loss` | the machine went down while the app ran |
 | any phase, with an exception named | `ended by uncaught exception <name>` | see below |
@@ -123,6 +123,50 @@ replaces the file atomically. If a second copy of the app is started on the same
 support folder, the older copy no longer touches the record. The ledger is per
 support folder, so `WALLPAPER_MACHINE_HOME` copies keep their own. Hosted tests and
 the import-picker helper process do not use it.
+
+### Why the app quit
+
+Every request to quit reaches `applicationShouldTerminate`, which logs who made it before
+anything is torn down. The line is written for a request that arrives while a quit is
+already running too, which is how a second Exit or a logout during a user quit shows up:
+
+```
+quit: reason=logout frontmost=com.apple.loginwindow panelVisible=false updateInstallPending=false alreadyInProgress=false powerOffNotified=true appleEventReason='rlgo'
+```
+
+`reason` (`QuitReason`) is the first of these that applies:
+
+| reason | when |
+|---|---|
+| `signal` | a termination signal was turned into the quit; reserved, the app handles no signals yet |
+| `logout`, `restart`, `shutdown` | the quit Apple event names that kind (`why?`: `rlgo`/`logo`, `rest`/`rrst`, `shut`/`rsdn`), or macOS announced a power-off (`NSWorkspace.willPowerOffNotification`) and the event named none. The announcement cannot say which kind it is, so that case reads `shutdown`; `appleEventReason=none` in the line tells it apart |
+| `update` | the updater has started its installer and is waiting for the app to quit (`AppUpdateStore.isInstallPending`). A Quit chosen while the update is still being prepared is the user's: it cancels the preparation |
+| `unknown` | the event carries a reason code this build does not know |
+| `user` | anything else: the menu, the Dock, another app's plain quit |
+
+The event's reason is a parameter of the quit event, readable only while that event is being
+handled, so it is read at the top of `applicationShouldTerminate` and nowhere else. A quit
+that comes from a menu or from the updater has no event. The power-off announcement is
+believed for 120 seconds (a judgment, not a measurement) and forgotten when a quit is
+refused: nothing tells the app when another app cancels a logout, and a stale announcement
+would otherwise relabel the next Quit. The reason is also written to the session ledger,
+so the next launch's `previous session:` line names it, including for a quit that never
+finished.
+
+The stages of the quit are timed, also when they fail:
+
+```
+quit: stage restore took 840 ms
+quit: stage imports took 2 ms
+quit: finished after 1310 ms: restore 840 ms, imports 2 ms, steamcmd 1 ms, workshop 1 ms, pixiv 0 ms, bridge 455 ms
+```
+
+`restore` is the lock-screen and desktop-picture restoration, `bridge` the renderer's shutdown;
+the others are the import, SteamCMD, Workshop and pixiv work. When restoration fails the quit is
+refused and the summary reads `quit: cancelled after … ms: restore … ms (failed)`. The total runs
+from the start of the quit, so it also counts the work between stages. These durations are what
+a stage's time limit has to be chosen from; the lines change no behavior. The remaining
+synchronous teardown in `applicationWillTerminate` is not timed.
 
 ### Levels and detailed logging
 
@@ -227,7 +271,9 @@ reproduce.
   - `log_context::tests` (`upstream/renderer/crates/core/src/log_context.rs`): scope nesting, project summary.
   - `settings_intents::verbose_logging_persists_across_relaunch_and_can_be_turned_off`.
 - Swift: `AppLogRouterTests`, `DiagnosticsRedactorTests`, `DiagnosticsBundleTests`,
-  `SessionLedgerTests`, `CrashReportIndexTests`, `UncaughtExceptionLogTests`.
+  `SessionLedgerTests`, `CrashReportIndexTests`, `UncaughtExceptionLogTests`,
+  `QuitReasonTests`, `QuitTimingsTests`, and `AppUpdateTests` for when an install counts as
+  pending.
 - Not established by tests:
   - that a real scene's renderer lines carry its number on the desktop;
   - the unreadable-folder note on a Mac whose account is not in `_analyticsusers`
@@ -235,6 +281,9 @@ reproduce.
   - spin and hang reports from a real hang: the fixtures are named after the
     `.diag` reports macOS wrote on this machine, and no `.spin` or `.hang` file was
     available to check the naming against;
+  - what a real Dock Quit, menu Exit, update, logout, restart and shutdown put in the
+    `quit:` line (the classification is tested on constructed events and flags, and a real
+    `why?` parameter was never captured from loginwindow);
   - how a real force quit, `kill -9`, crash and restart appear in `previous session:` on the
     next launch: the classification is exercised on records and injected boot sessions, and
     `.ips` fixtures are modeled on the shape of a real report;

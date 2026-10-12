@@ -37,6 +37,7 @@ App/                               WallpaperMachine application target sources o
     GitHub/                        GitHub release client, update models, update store, installer, what's-new records
     Library/                       ClientPaths (owns the app-support layout), import/deletion, still-image wallpapers,
                                    collections, presets, history, compatibility checks, backup and restore
+    Lifecycle/                     why the app is quitting (QuitReason, the power-off notice) and how long each quit stage takes
     Localization/                  AppLanguage.swift: shipped-language registry and the language preference store
     LockScreen/                    lock-screen selection overrides, extension registration and configuration publishing
     NativeVideo/                   AVFoundation video backend: admission, player and host window

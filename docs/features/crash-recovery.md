@@ -76,7 +76,10 @@ behind it) is not recorded, and the `succeed` of the load that was cut short doe
 
 A reconcile that fails, returns early or panics drops its record without a strike: the
 process is alive and the failure was reported. Quitting on purpose clears the record too
-(`Shutdown` calls `clean_shutdown`), so quitting during a load is not a crash.
+(`Shutdown` calls `clean_shutdown`), so quitting during a load is not a crash. The `quit:`
+log line says who asked for the quit and how long each stage took, so a quit that was cut short
+by a logout or a kill can be told apart from one the user chose; see
+[diagnostics.md](diagnostics.md#why-the-app-quit).
 
 ## Strikes and the hold
 

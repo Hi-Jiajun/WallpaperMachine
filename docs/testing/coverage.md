@@ -147,7 +147,9 @@ per-Space assignments; see
   the ring keeps five sessions and counts unexpected ends in a row; an unreadable
   or foreign-format file reads as a first run and is replaced; a refused quit goes
   back to running; a session writes the file three times and nothing writes it
-  again; an older copy does not rewrite a newer copy's record.
+  again; an older copy does not rewrite a newer copy's record; every quit reason
+  survives to the next launch and is named in its report, for a finished quit and a
+  stalled one.
 - `CrashReportIndexTests` — a report is matched by process id and boot session in
   its body, not by name; wrong prefix, wrong extension, another boot, an older
   file, a header without a body and a malformed body are passed over.
@@ -240,6 +242,23 @@ on [manual-smoke.md](manual-smoke.md).
 - `LibraryMetricsTests`, `ClientPreferencesTests` — folder size and date measured
   off the snapshot path, manifest approval and tags, and an explicit defaults
   suite staying independent of the application's own preferences.
+
+## Lifecycle
+
+- `QuitReasonTests` — the reason a quit is given for every combination of what the system
+  told the app: a signal beats everything, the system leaving beats an update, an update
+  beats a plain quit, the event's own reason beats the power-off announcement, an unknown
+  code is not taken for the user's; the codes match the SDK's; the reason is read from a
+  real `NSAppleEventDescriptor` parameter and not from an attribute, text or an integer; an
+  announcement stops counting after its lifetime and after a refused quit.
+- `QuitTimingsTests` — stages keep their own duration in finishing order, a stage that
+  throws is timed and still rethrows, the total covers the work between stages, one line
+  per stage plus one summary. A scripted clock, no sleeping.
+- `AppUpdateTests` (GitHub) also pin when an install counts as pending: not while the
+  update is prepared, yes once the installer waits and the app is asked to quit, not when
+  the installer could not start.
+- Not covered: a real quit, logout or restart; `applicationShouldTerminate` itself needs
+  the running app (hosted tests short-circuit it).
 
 ## Localization
 

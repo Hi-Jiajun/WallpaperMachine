@@ -150,6 +150,27 @@ final class SessionLedgerTests: XCTestCase {
         XCTAssertEqual(previous.consecutiveUnexpected, 1)
     }
 
+    func testEveryQuitReasonSurvivesToTheNextLaunchAndIsNamedInItsReport() {
+        for (index, reason) in QuitReason.allCases.enumerated() {
+            let finished = makeLedger(pid: Int32(200 + index))
+            _ = finished.begin(app: "1.0 (1)")
+            finished.markQuitting(reason: reason.rawValue)
+            finished.markEnded()
+
+            let afterQuit = makeLedger(pid: 300).begin(app: "1.0 (1)")
+            XCTAssertEqual(afterQuit.outcome, .cleanQuit(reason: reason.rawValue))
+            XCTAssertTrue(afterQuit.summary.contains(reason.rawValue), afterQuit.summary)
+
+            let stalled = makeLedger(pid: Int32(400 + index))
+            _ = stalled.begin(app: "1.0 (1)")
+            stalled.markQuitting(reason: reason.rawValue)
+
+            let afterStall = makeLedger(pid: 500).begin(app: "1.0 (1)")
+            XCTAssertEqual(afterStall.outcome, .quitStalled(reason: reason.rawValue))
+            XCTAssertTrue(afterStall.summary.contains(reason.rawValue), afterStall.summary)
+        }
+    }
+
     func testTheRingRemembersWhyEarlierSessionsEnded() {
         let quit = makeLedger(pid: 1)
         _ = quit.begin(app: "1.0 (1)")

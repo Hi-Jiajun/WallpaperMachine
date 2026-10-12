@@ -33,6 +33,11 @@ final class AppUpdateStore {
     @ObservationIgnored private var installAttempt: UInt64 = 0
     @ObservationIgnored private var retryCancellationInProgress = false
 
+    /// An installer has been started and is waiting for this app to quit, so a quit now
+    /// is the update's. False while the update is still being prepared: a Quit chosen
+    /// then cancels the preparation and is the user's.
+    var isInstallPending: Bool { installScheduled && installationTask != nil }
+
     init(currentVersion: String = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
          client: any AppUpdateClient = GitHubReleaseClient(),
          installer: any AppUpdateInstalling = AppUpdateInstaller(),

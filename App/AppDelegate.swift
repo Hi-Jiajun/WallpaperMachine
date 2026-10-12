@@ -21,6 +21,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     /// The version the unattended check last prompted for; "Later" holds until the next launch.
     private var promptedUpdateVersion: String?
     private var displayChangeObserver: NSObjectProtocol?
+    private var powerOffObserver: NSObjectProtocol?
+    /// Set when macOS announces a logout, restart or shutdown, ahead of the quit event.
+    private var powerOffNotice = PowerOffNotice()
     private lazy var displayRefresh = DisplayRefreshCoalescer { [weak self] in
         guard let self else { return false }
         return await self.refreshDisplaysFromSystemEvent()
@@ -116,6 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         synchronizeStatusItem()
         installDisplayChangeObserver()
         AppLog.info("startup: display change observer installed")
+        installPowerOffObserver()
         installApplicationMenu()
         AppLog.info("startup: application menu installed")
         if let store {
@@ -661,6 +665,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             NotificationCenter.default.removeObserver(displayChangeObserver)
             self.displayChangeObserver = nil
         }
+        if let powerOffObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(powerOffObserver)
+            self.powerOffObserver = nil
+        }
         if let diagnostics {
             self.diagnostics = nil
             Task { await diagnostics.stop() }
@@ -672,15 +680,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         // The test host must not instantiate services against the user's app-support folder.
         if NSClassFromString("XCTestCase") != nil { return .terminateNow }
+        let reason = logQuitRequest()
         guard !shutdownComplete else {
             return .terminateNow
         }
         guard !shutdownInProgress else {
+            AppLog.info("quit: already in progress, this request is refused")
             return .terminateCancel
         }
 
         shutdownInProgress = true
-        SessionLedger.shared?.markQuitting(reason: nil)
+        SessionLedger.shared?.markQuitting(reason: reason.rawValue)
+        let timings = QuitTimings()
         previewWindow?.session.close()
         previewWindow?.close()
         previewWindow = nil
@@ -693,12 +704,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
         Task {
             do {
-                if let lockScreen = store?.lockScreenWallpaper {
-                    try await lockScreen.shutdown {
+                try await timings.measure("restore") {
+                    if let lockScreen = store?.lockScreenWallpaper {
+                        try await lockScreen.shutdown {
+                            try await wallpaperRestorer?.restoreForTermination()
+                        }
+                    } else {
                         try await wallpaperRestorer?.restoreForTermination()
                     }
-                } else {
-                    try await wallpaperRestorer?.restoreForTermination()
                 }
                 globalHotKeys?.stop()
                 AppAutomation.shared.handler = nil
@@ -724,6 +737,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 lastError = error
                 shutdownInProgress = false
                 SessionLedger.shared?.markRunning()
+                // The system was told no, so an earlier announcement no longer applies.
+                powerOffNotice.clear()
+                timings.finish("cancelled")
                 // Native restoration may already have released the desktop even
                 // though poster restoration failed. Resume without waiting for
                 // another bridge snapshot, but never overwrite an owned provider.
@@ -737,25 +753,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 sender.reply(toApplicationShouldTerminate: false)
                 return
             }
-            await libraryImports.shutdown()
+            await timings.measure("imports") { await libraryImports.shutdown() }
             automaticUpdates?.cancel()
             appUpdater.cancel()
-            await workshopStore.steamCMDSetup.shutdown()
-            await workshopStore.downloader.shutdown()
-            await pixivStore.downloads.shutdown()
+            await timings.measure("steamcmd") { await workshopStore.steamCMDSetup.shutdown() }
+            await timings.measure("workshop") { await workshopStore.downloader.shutdown() }
+            await timings.measure("pixiv") { await pixivStore.downloads.shutdown() }
             do {
-                try await store?.shutdownAsync()
+                try await timings.measure("bridge") { try await store?.shutdownAsync() }
                 lastError = nil
             } catch {
                 lastError = error
             }
 
+            timings.finish("finished")
             shutdownInProgress = false
             shutdownComplete = true
             sender.reply(toApplicationShouldTerminate: true)
         }
 
         return .terminateLater
+    }
+
+    /// Works out who asked for this quit and logs it, also for a request that arrives
+    /// while a quit is already running. The Apple event is only readable here, while it
+    /// is being handled.
+    private func logQuitRequest() -> QuitReason {
+        let appleEventReason = QuitReason.appleEventReason(from: NSAppleEventManager.shared().currentAppleEvent)
+        let powerOffNotified = powerOffNotice.isCurrent()
+        let updateInstallPending = appUpdater.isInstallPending
+        let reason = QuitReason.classify(
+            appleEventReason: appleEventReason,
+            powerOffNotified: powerOffNotified,
+            updateInstallPending: updateInstallPending,
+            // Nothing in the app turns a termination signal into a quit today.
+            terminationSignal: nil)
+        let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none"
+        AppLog.info(
+            "quit: reason=\(reason.rawValue) frontmost=\(frontmost) "
+                + "panelVisible=\(controlPanelWindow?.isVisible ?? false) "
+                + "updateInstallPending=\(updateInstallPending) "
+                + "alreadyInProgress=\(shutdownInProgress || shutdownComplete) "
+                + "powerOffNotified=\(powerOffNotified) "
+                + "appleEventReason=\(appleEventReason.map(QuitReason.text(forCode:)) ?? "none")")
+        return reason
     }
 
     private func syncPlaybackMonitors() {
@@ -939,6 +980,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         ) { [weak self] _ in
             Task { @MainActor in
                 self?.displayRefresh.request()
+            }
+        }
+    }
+
+    private func installPowerOffObserver() {
+        powerOffObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willPowerOffNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.powerOffNotice.record()
+                AppLog.info("system: logout, restart or shutdown announced")
             }
         }
     }

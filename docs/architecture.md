@@ -67,7 +67,10 @@ automation schedulers, the web and native-video wallpaper hosts, system media).
   asynchronous teardown: lock-screen and desktop-poster restoration first (a failure cancels the
   quit), then import, update, SteamCMD, Workshop and pixiv work, and the renderer bridge last.
   The bridge's `Shutdown` also ends the load journal's in-flight record, so quitting during a
-  load is not counted as a crash ([crash recovery](features/crash-recovery.md)).
+  load is not counted as a crash ([crash recovery](features/crash-recovery.md)). Each quit logs
+  who asked for it (`QuitReason`: the user, an update, logout, restart, shutdown, a signal) and
+  how long each stage took (`QuitTimings`); both are logging only and change no behavior
+  ([diagnostics](features/diagnostics.md#why-the-app-quit)).
 - **Hosted tests.** Under a hosted test run (`NSClassFromString("XCTestCase") != nil`) the
   delegate short-circuits: no services are created against the user's real app-support folder.
 
