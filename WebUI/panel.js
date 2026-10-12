@@ -259,7 +259,7 @@ function render() {
   const discover = state.page === 'discover';
   const settings = state.page === 'settings';
   const pixivPage = state.page === 'pixiv';
-  if (!discover) retireLivePreviews(new Set());
+  if (livePage !== state.page) { releaseLivePreviews(); livePage = state.page; }
   document.querySelectorAll('.tabs [data-page]').forEach(tab => { if (tab.dataset.page === state.page) tab.setAttribute('aria-current', 'page'); else tab.removeAttribute('aria-current'); });
   document.documentElement.style.setProperty('--window-controls-inset', `${Math.max(0, Number(state.windowControlsInset) || 0)}px`);
   morph($('app-identity'), `<span class="app-brand-mark">${icon('wallpaperMachine', 22)}</span><span class="app-title"><span class="app-name">WallpaperMachine</span></span>`);
@@ -431,6 +431,24 @@ function emptyRecovery(discover) {
   };
   return { description: t('The Workshop returned no results.'), actions: button(t('Refresh Workshop'), 'refreshWorkshop', {}, { icon: 'refresh' }) };
 }
+// A tile's still. Discover shows the Workshop thumbnail; Installed shows the cover the native cache
+// keeps for the preview file (libraryStill), so a GIF preview is not decoded at full size for a tile.
+function tileStillMarkup(item, discover) {
+  const still = discover ? { source: safeImage(item.thumbnail || item.preview), key: item.thumbnail || item.preview, fallback: '' } : libraryStill(item);
+  if (!still.source) return '';
+  return `<img ${keyAttr(still.key)} class="tile-still" src="${escapeHTML(still.source)}" alt=""${discover ? '' : ' loading="lazy"'} decoding="async"${still.source.startsWith('mwe-ui:') ? ' crossorigin="anonymous"' : ''}${still.fallback ? ` data-fallback="${escapeHTML(still.fallback)}"` : ''} referrerpolicy="no-referrer">`;
+}
+// Covers the native cache could not make, by cover address. The preview file itself stands in for
+// them once; a cover address carries a stamp of the preview file, so they retry when it is replaced.
+const brokenCovers = new Set();
+function libraryStill(item) {
+  const cover = safeImage(item.thumbnail), file = safeImage(item.preview);
+  // The stamp is still being read: show nothing yet, never the full-size preview the cover stands for.
+  if (!cover && item.coverPending) return { source: '', key: item.preview, fallback: '' };
+  if (!cover) return { source: file, key: item.preview, fallback: '' };
+  if (brokenCovers.has(cover) && file) return { source: file, key: item.preview, fallback: '' };
+  return { source: cover, key: item.thumbnail, fallback: file };
+}
 function renderGrid(discover) {
   const workshop = state.workshop;
   const items = discover ? workshop.items || [] : visibleWallpapers();
@@ -452,10 +470,11 @@ function renderGrid(discover) {
   const subscriptionBar = discover && workshopSource().key === 'subscriptions' && workshop.steamSignedIn ? `<div class="selection-bar subscription-bar"><span class="steam-session">${icon('circleCheck', 14)}<span>${escapeHTML(t('Signed in to Steam'))}</span></span>${workshop.loaded ? `<span>${escapeHTML(t('{count} subscribed', { count: Number(workshop.totalCount).toLocaleString() }))}</span>` : ''}${button(t('Download the ones not in your library'), 'workshopDownloadSubscribed', {}, { icon: 'download', className: 'primary', title: t('Downloads every wallpaper you subscribe to that isn’t in your library yet'), disabled: busy('workshopDownloadSubscribed') || (workshop.loaded && !Number(workshop.totalCount)) })}${button(t('Sign out of Steam'), 'steamWebSignOut', {}, { className: 'link', title: t('Forgets the Steam session this app read your subscriptions with') })}${steamPageLink}</div>` : '';
   morph($('browser-summary'), loading ? escapeHTML(discover ? t('Searching Steam Workshop…') : t('Loading your library…')) : subscriptionBar || (discover ? `<div class="selection-bar"><span>${escapeHTML(workshop.loaded ? t('{count} results', { count: Number(workshop.totalCount).toLocaleString() }) : t('Steam Workshop'))}</span>${steamPageLink}</div>` : selection.size ? `<div class="selection-bar"><span class="selection-count">${escapeHTML(t('{count} selected', { count: selection.size.toLocaleString() }))}</span>${button(t('Select all'), 'selectAllVisible', {}, { className: 'link', disabled: items.every(item => selection.has(item.id)) })}${button(t('Clear'), 'clearSelection', {}, { className: 'link' })}${button(selection.size === 1 ? t('Add to playlist') : t('Add {count} to playlist', { count: selection.size.toLocaleString() }), 'addSelectedToPlaylist', {}, { icon: 'listPlus', title: t('Adds them to the list of the target display’s playlist'), disabled: !target?.enabled || target.mode === 'mirror' || busy('playlistAdd') })}${collections.selectionTools()}${button(selection.size === 1 ? t('Move to Trash') : t('Move {count} to Trash', { count: selection.size.toLocaleString() }), 'deleteSelected', {}, { icon: 'trash', className: 'danger', disabled: state.busy || busy('deleteMany') })}${sweepTip}</div>` : `<div class="selection-bar"><span>${escapeHTML(count)}</span>${updateAll}${items.length && selecting ? `${sweepTip ? '' : `<span class="muted">${escapeHTML(t('Click or drag across tiles to select them.'))}</span>`}${button(t('Select all'), 'selectAllVisible', {}, { className: 'link' })}${sweepTip}` : ''}</div>`));
   $('wallpaper-grid').classList.toggle('selecting', !discover && (selecting || selection.size > 0));
-  // Animations belong to Discover. An installed wallpaper keeps its Workshop id, so a live entry
-  // left over from Discover would mark its Installed tile as playing and hide that tile's still.
-  retireLivePreviews(new Set(discover ? items.map(item => item.id) : []));
-  morph($('wallpaper-grid'), items.map(item => `<article class="wallpaper-tile${selection.has(item.id) ? ' checked' : ''}${!discover && sweepArmingID() === item.id ? ' arming' : ''}${live.get(item.id)?.playing ? ' playing' : ''}" ${keyAttr(item.id)}><button type="button" class="tile-select" data-action="${discover ? 'workshopSelect' : 'select'}" data-id="${escapeHTML(item.id)}" aria-pressed="${item.id === selectedID}" aria-label="${escapeHTML(item.title)}, ${escapeHTML(kindLabel(item))}${tileMarkNames(item, discover).map(name => `, ${escapeHTML(t(tileMarkGlyphs[name][1]))}`).join('')}${item.id === selectedID ? `, ${escapeHTML(t('selected'))}` : ''}"><span class="tile-placeholder">${icon('image', 28)}</span>${discover && ['loading', 'ready'].includes(live.get(item.id)?.status) ? `<img ${keyAttr(`live-${item.id}`)} class="tile-live" src="${escapeHTML(safeImage(item.animated))}" alt="" decoding="async" crossorigin="anonymous" referrerpolicy="no-referrer">` : ''}${safeImage(item.thumbnail || item.preview) ? `<img ${keyAttr(item.thumbnail || item.preview)} class="tile-still" src="${escapeHTML(safeImage(item.thumbnail || item.preview))}" alt=""${discover ? '' : ' loading="lazy"'} decoding="async"${safeImage(item.thumbnail || item.preview).startsWith('mwe-ui:') ? ' crossorigin="anonymous"' : ''} referrerpolicy="no-referrer">` : ''}<span class="tile-caption"><span class="tile-title">${escapeHTML(item.title)}</span><span class="tile-kind">${escapeHTML(kindLabel(item))}</span></span></button>${tileMarksMarkup(item, discover)}${discover ? (item.collection ? '' : tileDownloadMarkup(item)) : tileApplyMarkup(item)}${!discover ? `<button type="button" class="tile-check" data-action="toggleSelect" data-id="${escapeHTML(item.id)}" aria-pressed="${selection.has(item.id)}" aria-label="${escapeHTML(selection.has(item.id) ? t('Deselect: {title}', { title: item.title }) : t('Select: {title}', { title: item.title }))}" title="${escapeHTML(t('Click to select, or drag from here across other tiles to select them too.'))}">${icon('check', 14)}</button><button type="button" class="tile-favorite" data-action="favorite" data-id="${escapeHTML(item.id)}" aria-pressed="${state.favorites.includes(item.id)}" aria-label="${escapeHTML(state.favorites.includes(item.id) ? t('Remove favorite: {title}', { title: item.title }) : t('Add favorite: {title}', { title: item.title }))}"${disabled(busy('favorite', { id: item.id }))}>${icon('heart', 14)}</button>${target?.wallpaperID === item.id ? `<span class="active-badge">${escapeHTML(t('Active'))}</span>` : item.active ? `<span class="active-badge">${escapeHTML(t('Other display'))}</span>` : ''}` : ''}</article>`).join(''));
+  // Discover animates every tile on screen; Installed only the one under the pointer or keyboard
+  // focus. An installed wallpaper keeps its Workshop id, so a live entry left over from Discover
+  // would mark its Installed tile as playing and hide that tile's still: render() retires them.
+  retireLivePreviews(new Set(discover ? items.map(item => item.id) : installedLiveKeep(items)));
+  morph($('wallpaper-grid'), items.map(item => `<article class="wallpaper-tile${selection.has(item.id) ? ' checked' : ''}${!discover && sweepArmingID() === item.id ? ' arming' : ''}${live.get(item.id)?.playing ? ' playing' : ''}" ${keyAttr(item.id)}><button type="button" class="tile-select" data-action="${discover ? 'workshopSelect' : 'select'}" data-id="${escapeHTML(item.id)}" aria-pressed="${item.id === selectedID}" aria-label="${escapeHTML(item.title)}, ${escapeHTML(kindLabel(item))}${tileMarkNames(item, discover).map(name => `, ${escapeHTML(t(tileMarkGlyphs[name][1]))}`).join('')}${item.id === selectedID ? `, ${escapeHTML(t('selected'))}` : ''}"><span class="tile-placeholder">${icon('image', 28)}</span>${['loading', 'ready'].includes(live.get(item.id)?.status) ? `<img ${keyAttr(`live-${item.id}`)} class="tile-live" src="${escapeHTML(safeImage(item.animated))}" alt="" decoding="async" crossorigin="anonymous" referrerpolicy="no-referrer">` : ''}${tileStillMarkup(item, discover)}<span class="tile-caption"><span class="tile-title">${escapeHTML(item.title)}</span><span class="tile-kind">${escapeHTML(kindLabel(item))}</span></span></button>${tileMarksMarkup(item, discover)}${discover ? (item.collection ? '' : tileDownloadMarkup(item)) : tileApplyMarkup(item)}${!discover ? `<button type="button" class="tile-check" data-action="toggleSelect" data-id="${escapeHTML(item.id)}" aria-pressed="${selection.has(item.id)}" aria-label="${escapeHTML(selection.has(item.id) ? t('Deselect: {title}', { title: item.title }) : t('Select: {title}', { title: item.title }))}" title="${escapeHTML(t('Click to select, or drag from here across other tiles to select them too.'))}">${icon('check', 14)}</button><button type="button" class="tile-favorite" data-action="favorite" data-id="${escapeHTML(item.id)}" aria-pressed="${state.favorites.includes(item.id)}" aria-label="${escapeHTML(state.favorites.includes(item.id) ? t('Remove favorite: {title}', { title: item.title }) : t('Add favorite: {title}', { title: item.title }))}"${disabled(busy('favorite', { id: item.id }))}>${icon('heart', 14)}</button>${target?.wallpaperID === item.id ? `<span class="active-badge">${escapeHTML(t('Active'))}</span>` : item.active ? `<span class="active-badge">${escapeHTML(t('Other display'))}</span>` : ''}` : ''}</article>`).join(''));
   const empty = $('browser-empty'); empty.hidden = items.length > 0;
   $('wallpaper-grid').hidden = !items.length;
   const signInFirst = discover && workshopSource().key === 'subscriptions' && !workshop.steamSignedIn;
@@ -932,9 +951,10 @@ function pixivActivity() {
   const summary = jobs.length === 1 ? t('pixiv: {title}', { title: jobs[0].title || t('Untitled') }) + (percent === null ? '' : ` · ${percent}%`) : t('{count} pixiv downloads', { count: jobs.length });
   return button(summary, 'navigate', { page: 'pixiv' }, { icon: 'download', className: 'quiet', title: summary });
 }
-function previewThumb(url) {
+function libraryThumb(item) { const still = libraryStill(item); return previewThumb(still.source, still.fallback); }
+function previewThumb(url, fallback = '') {
   const source = safeImage(url);
-  return `<span class="thumb-placeholder">${icon('image', 15)}</span>${source ? `<img ${keyAttr(source)} src="${escapeHTML(source)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : ''}`;
+  return `<span class="thumb-placeholder">${icon('image', 15)}</span>${source ? `<img ${keyAttr(source)} src="${escapeHTML(source)}" alt="" loading="lazy" decoding="async"${fallback ? ` data-fallback="${escapeHTML(fallback)}"` : ''} referrerpolicy="no-referrer">` : ''}`;
 }
 function renderPopover() {
   for (const [kind, id, markup] of [['downloads', 'queue-popover', queueMarkup], ['import', 'import-popover', importMarkup], ['history', 'history-popover', historyMarkup]]) {
@@ -948,7 +968,7 @@ function historyMarkup() {
   const wallpapers = new Map((state.wallpapers || []).map(item => [item.id, item]));
   const recent = (state.history?.recentIDs || []).map(id => wallpapers.get(id)).filter(Boolean);
   const available = target?.enabled && target.mode !== 'mirror';
-  const rows = recent.map(item => `<li data-key="history-${escapeHTML(item.id)}"><button type="button" class="history-item" data-action="activate" data-id="${escapeHTML(item.id)}" aria-label="${escapeHTML(t('Apply {title}', { title: item.title }))}"${target?.wallpaperID === item.id ? ' aria-current="true"' : ''}${disabled(!available || busy('activate', { id: item.id }))}><span class="queue-thumb">${previewThumb(item.thumbnail || item.preview)}</span><span class="history-title">${escapeHTML(item.title)}</span>${target?.wallpaperID === item.id ? `<span class="history-active">${escapeHTML(t('Active'))}</span>` : ''}</button></li>`).join('');
+  const rows = recent.map(item => `<li data-key="history-${escapeHTML(item.id)}"><button type="button" class="history-item" data-action="activate" data-id="${escapeHTML(item.id)}" aria-label="${escapeHTML(t('Apply {title}', { title: item.title }))}"${target?.wallpaperID === item.id ? ' aria-current="true"' : ''}${disabled(!available || busy('activate', { id: item.id }))}><span class="queue-thumb">${libraryThumb(item)}</span><span class="history-title">${escapeHTML(item.title)}</span>${target?.wallpaperID === item.id ? `<span class="history-active">${escapeHTML(t('Active'))}</span>` : ''}</button></li>`).join('');
   const body = rows ? `<ul class="queue-list history-list">${rows}</ul>` : `<p class="queue-empty">${escapeHTML(t('No recent wallpapers for this display. Apply a wallpaper to start its history.'))}</p>`;
   return `<div class="popover-heading"><h2 id="history-popover-title">${escapeHTML(t('Recently used'))}</h2>${button('', 'closePopover', {}, { icon: 'close', title: t('Close history'), className: 'quiet icon-button' })}</div><p class="history-display">${escapeHTML(target?.title || '')}</p>${body}<div class="popover-footer"><p class="queue-note">${escapeHTML(t('Keeps the last 50 wallpapers used on this display.'))}</p>${recent.length ? button(t('Clear history'), 'historyClear', { displayID: state.targetDisplayID }, { className: 'quiet', disabled: !available }) : ''}</div>`;
 }
@@ -1477,7 +1497,14 @@ window.addEventListener('resize', () => { if (popover) renderPopover(); queueLiv
 // the grid: CSS alone decides how many columns the tiles fill, and a page scrolls for the rest,
 // so a window resize only reflows the tiles and never asks the native side for anything.
 function workshopMaxPages() { return Math.max(1, Number(state?.workshop?.maxPages) || 1000); }
-document.addEventListener('error', event => { if (event.target.tagName === 'IMG') { event.target.classList.add('failed'); event.target.style.visibility = 'hidden'; if (event.target.classList.contains('tile-live')) settleLivePreview(event.target, false); else if (event.target.classList.contains('tile-still')) queueLivePreviews(); } }, true);
+document.addEventListener('error', event => {
+  const image = event.target;
+  if (image.tagName !== 'IMG') return;
+  // A cover the native cache could not make: the preview file itself stands in, once.
+  if (image.dataset.fallback && image.getAttribute('src') !== image.dataset.fallback) { brokenCovers.add(image.getAttribute('src')); image.src = image.dataset.fallback; return; }
+  image.classList.add('failed'); image.style.visibility = 'hidden';
+  if (image.classList.contains('tile-live')) settleLivePreview(image, false); else if (image.classList.contains('tile-still')) queueLivePreviews();
+}, true);
 // Tiles pulse their placeholder until the image arrives, so a slow connection reads as loading, not broken.
 document.addEventListener('load', event => { if (event.target.tagName !== 'IMG') return; event.target.classList.add('loaded'); if (event.target.classList.contains('tile-live')) settleLivePreview(event.target, true); else if (event.target.classList.contains('tile-still')) queueLivePreviews(); }, true);
 // Discover tiles show their cached still at once. The animated preview then loads through
@@ -1506,6 +1533,7 @@ function stillsSettled() {
   return [...$('wallpaper-grid').querySelectorAll('img.tile-still')].every(still => still.complete);
 }
 function queueLivePreviews() {
+  if (state?.page === 'installed') { if (document.hidden) releaseLivePreviews(); return; }
   if (state?.page !== 'discover') return;
   const canLoad = !document.hidden && stillsSettled();
   let changed = false;
@@ -1547,8 +1575,67 @@ function settleLivePreview(image, loaded) {
   if (!entry || !['loading', 'ready'].includes(entry.status)) return;
   entry.playing = loaded && image.complete && image.naturalWidth > 0;
   entry.status = entry.playing ? 'ready' : 'failed';
-  pumpLivePreviews(true);
+  if (state?.page === 'discover') pumpLivePreviews(true); else renderGrid(false);
 }
+// Installed tiles hold still covers. The animation plays for one tile at a time: the one under the
+// pointer or holding keyboard focus, and only after the pointer settles on it, so sweeping across
+// the grid, dragging a selection or tabbing through it starts nothing. The preview file loads
+// from disk only then; leaving the tile, hiding the page, a page change or a lost window focus
+// releases it. A mouse click alone does not count as focus, so a selected tile does not keep playing.
+const INSTALLED_LIVE_DELAY = 160;
+let livePage = null;
+let pointerLiveID = null;
+let focusLiveID = null;
+let installedLiveTimer = null;
+function installedLiveTarget() {
+  const id = pointerLiveID ?? focusLiveID;
+  return id !== null && state?.page === 'installed' && !document.hidden ? id : null;
+}
+function installedLiveKeep(items) {
+  for (const id of [pointerLiveID, focusLiveID]) if (id !== null && !items.some(item => item.id === id)) { if (id === pointerLiveID) pointerLiveID = null; if (id === focusLiveID) focusLiveID = null; }
+  const id = installedLiveTarget();
+  return id === null ? [] : [id];
+}
+// Drops every animation and forgets which tile was under the pointer or focused.
+function releaseLivePreviews() {
+  clearTimeout(installedLiveTimer);
+  pointerLiveID = null; focusLiveID = null;
+  retireLivePreviews(new Set());
+}
+function syncInstalledLive() {
+  clearTimeout(installedLiveTimer);
+  const id = installedLiveTarget();
+  retireLivePreviews(new Set(id === null ? [] : [id]));
+  if (id === null || live.has(id)) return;
+  installedLiveTimer = setTimeout(() => {
+    const item = installedLiveTarget() === id ? (state.wallpapers || []).find(each => each.id === id) : null;
+    if (!item || !safeImage(item.animated)) return;
+    live.set(id, { status: 'loading', playing: false });
+    renderGrid(false);
+  }, INSTALLED_LIVE_DELAY);
+}
+const liveTileID = (node) => node instanceof Element ? node.closest('.wallpaper-tile')?.dataset.key ?? null : null;
+$('wallpaper-grid').addEventListener('pointerover', event => {
+  const id = liveTileID(event.target);
+  if (state?.page !== 'installed' || id === null || id === pointerLiveID || event.buttons) return;
+  pointerLiveID = id; syncInstalledLive();
+});
+$('wallpaper-grid').addEventListener('pointerout', event => {
+  const id = liveTileID(event.target);
+  if (state?.page !== 'installed' || id === null || id !== pointerLiveID || liveTileID(event.relatedTarget) === id) return;
+  pointerLiveID = null; syncInstalledLive();
+});
+$('wallpaper-grid').addEventListener('focusin', event => {
+  const id = liveTileID(event.target);
+  if (state?.page !== 'installed' || id === null || id === focusLiveID || !event.target.matches(':focus-visible')) return;
+  focusLiveID = id; syncInstalledLive();
+});
+$('wallpaper-grid').addEventListener('focusout', event => {
+  const id = liveTileID(event.target);
+  if (state?.page !== 'installed' || id === null || id !== focusLiveID || liveTileID(event.relatedTarget) === id) return;
+  focusLiveID = null; syncInstalledLive();
+});
+window.addEventListener('blur', () => { if (state?.page === 'installed') releaseLivePreviews(); });
 $('wallpaper-grid').addEventListener('scroll', () => { clearTimeout(liveScrollTimer); liveScrollTimer = setTimeout(queueLivePreviews, 120); }, { passive: true });
 document.addEventListener('visibilitychange', queueLivePreviews);
 const welcomeInert = new Set();

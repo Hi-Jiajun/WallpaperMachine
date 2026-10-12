@@ -306,6 +306,12 @@ on [manual-smoke.md](manual-smoke.md).
 - `LibraryMetricsTests`, `ClientPreferencesTests` — folder size and date measured
   off the snapshot path, manifest approval and tags, and an explicit defaults
   suite staying independent of the application's own preferences.
+- `LibraryCoverStampsTests` — preview stamps read after the snapshot answered and
+  announced once per pass, a rescan that replaced nothing announcing nothing, a
+  replaced preview (by size or by time) keeping its old stamp until the new one is
+  read and then announced, a wallpaper that left or whose preview moved having
+  nothing known, an unreadable preview stamped 0, and an ask made while a pass was
+  reading not being lost.
 
 ## Lifecycle
 
@@ -456,7 +462,15 @@ follows the developer's in-app language choice.
 - `ControlPanelLibraryTests` — sorting, tile marks, filter sidebar, hold-and-drag
   selection, the inspector report link, download setup, a rejected download
   account staying visible, and error dismissal (library and download failures
-  stay suppressed until they recur).
+  stay suppressed until they recur), Installed tiles showing cached covers and
+  animating only the pointed-at tile (dwell, sweep, drag, blur, hide, tab change),
+  the snapshot offering animation only to gif/webp/apng previews, a tile showing
+  no image while its cover's stamp is read, a rescan that replaced no preview
+  leaving every cover address and page node alone while a replaced preview
+  redoes only its own tile, and a tile falling back to the preview file when its
+  cover cannot be made. Not covered:
+  WebKit's own `:focus-visible` verdict for real keyboard input (the test states
+  it), and how the animation looks or what it saves in power.
 - `ControlPanelDiscoverTests` — pagination does not navigate with the page number
   and clamps to Steam's page limit, the grid keeps square tiles in at least three
   columns, download rings and telemetry, and previews that play without canvas
@@ -635,8 +649,14 @@ suspension (`WebWallpaperSuspensionTests`), pointer routing
 - `WorkshopThumbnailCacheTests` — one download per URL under concurrent requests,
   disk hits across instances, no cache entry after a failed fetch, the concurrency
   cap, oldest-first pruning, still-frame extraction from animated previews
-  (skipping a black fade-in), and animations relayed on their own lane. The
-  scheme handler refuses ids it has not announced (`WebPanelAssetsTests`).
+  (skipping a black fade-in), animations relayed on their own lane, a cache that
+  keeps no animation writing stills only, and the source size limit. The scheme
+  handler refuses ids it has not announced and answers library covers as small
+  JPEGs only for images inside the library (`WebPanelAssetsTests`).
+- `LibraryPreviewFetcherTests` — which files an Installed cover may be made from
+  (inside the library, no symlink out, images only, size limit), a replaced
+  preview getting a new cover, and the stamp in a cover's address changing with
+  the preview's size or modification time only.
 
 ### Downloads
 

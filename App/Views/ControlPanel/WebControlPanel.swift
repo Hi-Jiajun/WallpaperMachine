@@ -114,6 +114,9 @@ final class WebPanelController: NSObject, WKNavigationDelegate {
   var dragSelectLearned: Bool
   /// Folder sizes and dates for Installed's sort menu, measured off the main thread.
   let libraryMetrics: LibraryMetricsService
+  /// Stamps of the Installed tiles' preview files, read off the main thread, so a cover is
+  /// requested again only when its preview changed.
+  let libraryCovers: LibraryCoverStamps
   /// Energy readout on Settings › Performance; samples only while Settings is on screen.
   let energyUsage: EnergyUsageMonitor
   let defaults: UserDefaults
@@ -161,6 +164,7 @@ final class WebPanelController: NSObject, WKNavigationDelegate {
     displayTitles: DisplayTitleResolver = .system,
     defaults: UserDefaults = ClientPreferences.defaults,
     libraryMetrics: LibraryMetricsService? = nil,
+    libraryCovers: LibraryCoverStamps? = nil,
     assets: WebPanelAssets? = nil,
     energyUsage: EnergyUsageMonitor? = nil,
     appLanguage: AppLanguageStore? = nil,
@@ -206,6 +210,7 @@ final class WebPanelController: NSObject, WKNavigationDelegate {
     welcomeSeen = defaults.bool(forKey: Self.welcomeSeenKey)
     dragSelectLearned = defaults.bool(forKey: Self.dragSelectLearnedKey)
     self.libraryMetrics = libraryMetrics ?? LibraryMetricsService()
+    self.libraryCovers = libraryCovers ?? LibraryCoverStamps()
     self.energyUsage = energyUsage ?? EnergyUsageMonitor()
     defaults.removeObject(forKey: Self.legacyInspectorWidthKey)
     favoriteIDs = Set(
@@ -213,6 +218,7 @@ final class WebPanelController: NSObject, WKNavigationDelegate {
         [String].self, from: defaults.data(forKey: Self.favoriteKey) ?? Data())) ?? [])
     super.init()
     self.libraryMetrics.onChange = { [weak self] in self?.scheduleUpdate() }
+    self.libraryCovers.onChange = { [weak self] in self?.scheduleUpdate() }
     self.energyUsage.onChange = { [weak self] in self?.pushEnergyUsage() }
     // What the engine routed to the native player: the report Settings shows as In use now.
     self.energyUsage.nativeVideoPlaying = { [weak self] in
@@ -686,6 +692,9 @@ final class WebPanelAssets: NSObject, WKURLSchemeHandler {
   static let indexURL = URL(string: "mwe-ui://app/index.html")!
   /// Library preview files by wallpaper id, served as `mwe-ui://preview/<id>`.
   var previews: [String: URL] = [:]
+  /// The same preview files, served as small still covers at `mwe-ui://library-thumbnail/<id>`.
+  /// Installed tiles show these; `previews` stays for the inspector and a tile's hover animation.
+  var libraryThumbnails: [String: URL] = [:]
   /// Workshop preview URLs by item id, served as still thumbnails at `mwe-ui://thumbnail/<id>`
   /// and relayed with their animation at `mwe-ui://animated/<id>`.
   var thumbnails: [String: URL] = [:]
@@ -697,6 +706,9 @@ final class WebPanelAssets: NSObject, WKURLSchemeHandler {
   let thumbnailCache: WorkshopThumbnailCache
   /// A cache of its own, so pixiv's images and Steam's never evict each other.
   let pixivThumbnailCache: WorkshopThumbnailCache
+  /// Still covers of the library's own previews. It keeps no animation: a tile that animates
+  /// plays the preview file itself.
+  let libraryThumbnailCache: WorkshopThumbnailCache
   /// In-flight loads by scheme task identity. WebKit frees a stopped task, and a new one can
   /// land on the same address, so each entry carries a unique ticket: a finished job may only
   /// act when the entry for its key still belongs to it.
@@ -719,6 +731,7 @@ final class WebPanelAssets: NSObject, WKURLSchemeHandler {
     case thumbnail(URL)
     case animated(URL)
     case pixivThumbnail(URL)
+    case libraryThumbnail(URL)
     case propertyImage(URL)
   }
 
@@ -726,10 +739,15 @@ final class WebPanelAssets: NSObject, WKURLSchemeHandler {
     thumbnailCache: WorkshopThumbnailCache = WorkshopThumbnailCache(),
     pixivThumbnailCache: WorkshopThumbnailCache = WorkshopThumbnailCache(
       directory: ClientPaths.pixivThumbnailCacheURL, fetcher: PixivThumbnailFetcher(),
-      maxConcurrentFetches: 6, byteLimit: 256 * 1024 * 1024)
+      maxConcurrentFetches: 6, byteLimit: 256 * 1024 * 1024),
+    libraryThumbnailCache: WorkshopThumbnailCache = WorkshopThumbnailCache(
+      directory: ClientPaths.libraryThumbnailCacheURL, fetcher: LibraryPreviewFetcher(),
+      maxConcurrentFetches: 4, byteLimit: 128 * 1024 * 1024, keepsAnimation: false,
+      sourceByteLimit: LibraryPreviewFetcher.maximumBytes)
   ) {
     self.thumbnailCache = thumbnailCache
     self.pixivThumbnailCache = pixivThumbnailCache
+    self.libraryThumbnailCache = libraryThumbnailCache
     super.init()
   }
 
@@ -768,6 +786,16 @@ final class WebPanelAssets: NSObject, WKURLSchemeHandler {
           headers["Cache-Control"] = "max-age=86400"
         case .pixivThumbnail(let image):
           data = try await pixivThumbnailCache.thumbnail(for: image)
+          headers["Content-Type"] = "image/jpeg"
+          headers["Cache-Control"] = "max-age=86400"
+        case .libraryThumbnail(let file):
+          // Stamped with the file's modification time and size, so a replaced preview is a new
+          // cache entry; the address's own stamp keeps the page from reusing the old image.
+          let root = ClientPaths.libraryURL
+          let identity = try await Task.detached(priority: .utility) {
+            try LibraryPreviewFetcher.identity(of: file, in: root)
+          }.value
+          data = try await libraryThumbnailCache.thumbnail(for: identity)
           headers["Content-Type"] = "image/jpeg"
           headers["Cache-Control"] = "max-age=86400"
         case .propertyImage(let source):
@@ -820,6 +848,10 @@ final class WebPanelAssets: NSObject, WKURLSchemeHandler {
       url.password == nil, url.port == nil,
       let image = pixivThumbnails[String(url.path.dropFirst())], PixivService.isImageURL(image)
     { return .pixivThumbnail(image) }
+    if url.scheme == "mwe-ui", url.host == "library-thumbnail", url.user == nil,
+      url.password == nil, url.port == nil, url.fragment == nil, Self.isStampQuery(url.query),
+      let file = libraryThumbnails[String(url.path.dropFirst())]
+    { return .libraryThumbnail(file) }
     guard url.scheme == "mwe-ui", let host = url.host, url.user == nil, url.password == nil,
       url.port == nil, let preview = thumbnails[String(url.path.dropFirst())],
       preview.scheme == "https"
@@ -829,6 +861,13 @@ final class WebPanelAssets: NSObject, WKURLSchemeHandler {
     case "animated": return .animated(preview)
     default: return nil
     }
+  }
+
+  /// The only query an address may carry: the stamp of the preview file (`v=<digits>`) it was announced with.
+  private static func isStampQuery(_ query: String?) -> Bool {
+    guard let query else { return true }
+    guard query.hasPrefix("v="), (3...22).contains(query.count) else { return false }
+    return query.dropFirst(2).unicodeScalars.allSatisfy { ("0"..."9").contains($0) }
   }
 
   func webView(_ webView: WKWebView, stop task: WKURLSchemeTask) {
@@ -845,13 +884,7 @@ final class WebPanelAssets: NSObject, WKURLSchemeHandler {
         .appendingPathComponent(name)
     }
     if url.host == "preview", let file = previews[name] {
-      let resolved = file.resolvingSymlinksInPath().standardizedFileURL
-      let root = ClientPaths.libraryURL.resolvingSymlinksInPath().standardizedFileURL.path + "/"
-      guard resolved.path.hasPrefix(root),
-        ["jpg", "jpeg", "png", "gif", "webp", "heic", "avif", "bmp", "tiff"].contains(
-          resolved.pathExtension.lowercased())
-      else { return nil }
-      return resolved
+      return LibraryPreviewFetcher.confined(file, in: ClientPaths.libraryURL)
     }
     return nil
   }

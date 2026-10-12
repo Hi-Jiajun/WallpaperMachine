@@ -34,6 +34,8 @@ enum ClientPaths {
     static var managedSteamCMDURL: URL { supportURL.appendingPathComponent("SteamCMD", isDirectory: true) }
     static var thumbnailCacheURL: URL { supportURL.appendingPathComponent("Cache/WorkshopThumbnails", isDirectory: true) }
     static var pixivThumbnailCacheURL: URL { supportURL.appendingPathComponent("Cache/PixivThumbnails", isDirectory: true) }
+    /// Still covers of the installed wallpapers' own preview files, for the Installed grid.
+    static var libraryThumbnailCacheURL: URL { supportURL.appendingPathComponent("Cache/LibraryThumbnails", isDirectory: true) }
 
     static func prepare() throws {
         try FileManager.default.createDirectory(at: libraryURL, withIntermediateDirectories: true)

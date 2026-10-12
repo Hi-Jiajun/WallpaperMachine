@@ -252,6 +252,7 @@ extension WebPanelController {
     var content: UInt64
     var refresh: UInt64
     var metrics: UInt64
+    var covers: UInt64
     var updates: UInt64
     var energy: UInt64
     var target: String
@@ -267,26 +268,40 @@ extension WebPanelController {
   private func librarySection() -> LibrarySection {
     let key = LibrarySectionKey(content: store.libraryPresentationRevision,
       refresh: store.libraryRefreshRevision, metrics: libraryMetrics.contentRevision,
-      updates: workshop.updates.availableRevision, energy: store.wallpaperEnergyRatings?.revision ?? 0,
+      covers: libraryCovers.contentRevision, updates: workshop.updates.availableRevision,
+      energy: store.wallpaperEnergyRatings?.revision ?? 0,
       target: navigation.targetDisplayID, language: appLanguage.effective.tag)
     if let cached = librarySectionCache, cached.key == key { return cached }
     let null = NSNull()
-    var previews: [String: URL] = [:]
+    let revision = store.libraryRefreshRevision
+    var previewFiles: [String: URL] = [:]
+    for entry in store.librarySnapshot.wallpapers {
+      if let path = entry.previewPath { previewFiles[entry.id] = URL(fileURLWithPath: path) }
+    }
+    // Read in the background; the section is rebuilt once a stamp is new or moved.
+    let covers = libraryCovers.stamps(for: previewFiles, revision: revision)
     let metrics = libraryMetrics.metrics(
-      for: store.librarySnapshot.wallpapers.map(\.id), revision: store.libraryRefreshRevision)
+      for: store.librarySnapshot.wallpapers.map(\.id), revision: revision)
     let updates = workshop.updates.available
     let wallpapers: [[String: Any]] = store.librarySnapshot.wallpapers.map { entry in
       var preview: Any = null
-      if let path = entry.previewPath {
-        previews[entry.id] = URL(fileURLWithPath: path)
-        var components = URLComponents()
-        components.scheme = "mwe-ui"
-        components.host = "preview"
-        components.path = "/" + entry.id
-        preview = components.url?.absoluteString as Any? ?? null
+      var thumbnail: Any = null
+      var animated: Any = null
+      if let file = previewFiles[entry.id] {
+        preview = Self.libraryAddress(host: "preview", id: entry.id) as Any? ?? null
+        // Tiles show the cached still, asked for under the preview file's stamp so that it is
+        // asked for again only when the file changed; only a preview that can move offers the file
+        // itself to play. Until the stamp is read there is no cover yet, and the page shows
+        // nothing rather than the full-size preview.
+        if let stamp = covers[entry.id] {
+          thumbnail = Self.libraryAddress(host: "library-thumbnail", id: entry.id, stamp: stamp) as Any? ?? null
+        }
+        if Self.previewAnimates(file) { animated = preview }
       }
       return [
         "id": entry.id, "title": entry.title, "kind": Self.kind(entry.kind), "preview": preview,
+        "thumbnail": thumbnail, "coverPending": previewFiles[entry.id] != nil && covers[entry.id] == nil,
+        "animated": animated,
         "active": store.isWallpaperActive(id: entry.id, displayId: navigation.targetDisplayID),
         "supported": entry.supported,
         // Folder size, date added, staff approval and the manifest's Workshop-style tags
@@ -303,7 +318,9 @@ extension WebPanelController {
         "updatedAt": updates[entry.id]?.timeUpdated.map { $0.timeIntervalSince1970 * 1000 } as Any? ?? null,
       ]
     }
-    assets.previews = previews
+    // The same files are served whole as the preview and as the small cover tiles show.
+    assets.previews = previewFiles
+    assets.libraryThumbnails = previewFiles
     let result = LibrarySection(key: key, revision: UUID().uuidString, wallpapers: wallpapers)
     librarySectionCache = result
     return result
@@ -999,6 +1016,25 @@ extension WebPanelController {
       .replacingOccurrences(of: "&amp;", with: "&")
       .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
       .trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  /// `mwe-ui://<host>/<id>`, the panel-local address of a library wallpaper's preview file
+  /// (`preview` for the file itself, `library-thumbnail` for its cached still). A still carries
+  /// the stamp of the file (`LibraryPreviewFetcher.coverStamp`), so a preview that was replaced is
+  /// not shown from the page's old image and one that was not keeps its address.
+  static func libraryAddress(host: String, id: String, stamp: UInt64? = nil) -> String? {
+    var components = URLComponents()
+    components.scheme = "mwe-ui"
+    components.host = host
+    components.path = "/" + id
+    if let stamp { components.queryItems = [URLQueryItem(name: "v", value: String(stamp))] }
+    return components.url?.absoluteString
+  }
+
+  /// Whether the preview file can hold an animation, judged by its extension alone so that
+  /// building a snapshot never touches the disk. A `.png` that is an APNG shows as a still.
+  static func previewAnimates(_ file: URL) -> Bool {
+    ["gif", "webp", "apng"].contains(file.pathExtension.lowercased())
   }
 
   static func workshopItem(_ value: WorkshopItem) -> [String: Any] {

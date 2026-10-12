@@ -126,8 +126,8 @@ Protocol, both directions:
   page loads from `mwe-ui://app/index.html`. Only an allowlisted set of bundled files is served
   (plus `locales/<tag>.js` for each language in `AppLanguage.supported`); a new `WebUI/` file
   must be added to that list. Library and download images are served by id from per-snapshot
-  maps (`mwe-ui://preview/<wallpaperID>`, `thumbnail/`, `animated/`, `pixiv-thumbnail/`,
-  `property-image/`), so no library path is exposed to the page. `index.html` carries a
+  maps (`mwe-ui://preview/<wallpaperID>`, `library-thumbnail/`, `thumbnail/`, `animated/`,
+  `pixiv-thumbnail/`, `property-image/`), so no library path is exposed to the page. `index.html` carries a
   restrictive CSP (`default-src 'none'`, `connect-src 'none'`).
 - **Swift to page.** `WebPanelController.snapshot()` produces one dictionary describing the whole
   UI, delivered by `callAsyncJavaScript("return window.wallpaperUI.receive(state)")`. Updates
@@ -195,7 +195,7 @@ Services are grouped by domain under `App/Services/`; each domain has a matching
 | `Desktop/` | `DesktopSpaceWallpaperAPI`, `DesktopWallpaperLedger`, `DesktopWallpaperSync`, `WallpaperSpaceMonitor`, `WallpaperPresentationPolicy`, `WallpaperCoverageProbes`, `WallpaperWindowAuditor`, `DesktopWindowObservation`, `SystemWakeRevalidator`, `PlaybackPreferences`, `AppRuleMonitor`, `OtherAudioMonitor`, `SystemConditionMonitor`, `DisplayConfiguration`, `WallpaperDisplayTransfer` | Per-Space desktop picture control, original-wallpaper journal, still-poster sync, playback rules, per-display renderer suspension, display refresh and multi-display copy/swap |
 | `Diagnostics/` | `RuntimeDiagnosticsSession`, `DiagnosticsBundle`, `SessionLedger`, `EnergyUsageMonitor`, `WallpaperEnergyRecorder`, `MemoryPressureMonitor`, `ProcessFootprint` | Runtime counters, the diagnostics report, how the previous session ended, energy readout, per-wallpaper ratings and memory-pressure logging; see [features/diagnostics.md](features/diagnostics.md) |
 | `GitHub/` | `GitHubReleaseClient`, `AppUpdateStore`, `AppUpdateInstaller`, `WhatsNewStore` | GitHub Releases update check, download, in-place install; which what's-new announcements were shown |
-| `Library/` | `ClientPaths`, `WallpaperImportService`, `LibraryImportStore`, `WallpaperDeletionService`, `StillImageWallpaper`, `WallpaperBackupService`, `WallpaperCollectionStore`, `WallpaperPresetStore`, `WallpaperHistoryStore` | App-support layout, non-destructive import (run for the app, not the panel page, so Finder and Dock drops import too), still pictures packaged as `web` wallpapers, guarded deletion, collections, presets, history, backup and restore |
+| `Library/` | `ClientPaths`, `WallpaperImportService`, `LibraryImportStore`, `LibraryCoverStamps`, `WallpaperDeletionService`, `StillImageWallpaper`, `WallpaperBackupService`, `WallpaperCollectionStore`, `WallpaperPresetStore`, `WallpaperHistoryStore` | App-support layout, non-destructive import (run for the app, not the panel page, so Finder and Dock drops import too), still pictures packaged as `web` wallpapers, guarded deletion, collections, presets, history, backup and restore |
 | `Localization/` | `AppLanguage`, `AppLanguageStore` | Shipped-language registry and the language preference; see [localization.md](localization.md) |
 | `LockScreen/` | `LockScreenWallpaperSelection`, `LockScreenWallpaperService`, `LockScreenExtensionRegistration` | System lock-screen selection overrides and configuration publishing |
 | `NativeVideo/` | `NativeVideoAdmission`, `NativeVideoPlayer`, `NativeVideoWallpaperHost`, `NativeVideoWallpaperWindow` | AVFoundation video backend: admission rules (a refusal routes back to the scene engine), player and desktop window |
@@ -207,7 +207,7 @@ Services are grouped by domain under `App/Services/`; each domain has a matching
 | `SystemMedia/` | `DesktopMediaSession`, `SystemMediaProvider`, `SceneMediaSink` | One system now-playing session (MediaRemote adapter with AppleScript fallback) feeding web and scene wallpapers; see [features/media-integration.md](features/media-integration.md) |
 | `UserAssets/` | `UserAssetStore`, `ManagedUserAssetStore`, `UserAssetWorker` | Importing, watching and picking for file/directory wallpaper properties |
 | `WebWallpaper/` | `WebWallpaperHost`, `WebWallpaperWindow`, `WebWallpaperPage` | Desktop-level `WKWebView` windows for `type: "web"` projects, driven by the bridge's `webWallpapers()`; see [features/web-wallpapers.md](features/web-wallpapers.md) |
-| `Workshop/` | `WorkshopService`, `WorkshopSource`, `WorkshopStore`, `WorkshopDownloader`, `WorkshopDownloadManager`, `WorkshopThumbnailCache`, `WorkshopUpdateStore` | Workshop query model and browse state, SteamCMD-driven downloads and their queue, previews for Discover tiles, updates of installed items; see [features/workshop-downloads.md](features/workshop-downloads.md) |
+| `Workshop/` | `WorkshopService`, `WorkshopSource`, `WorkshopStore`, `WorkshopDownloader`, `WorkshopDownloadManager`, `WorkshopThumbnailCache`, `LibraryPreviewFetcher`, `WorkshopUpdateStore` | Workshop query model and browse state, SteamCMD-driven downloads and their queue, previews for Discover tiles and still covers for Installed tiles, updates of installed items; see [features/workshop-downloads.md](features/workshop-downloads.md) |
 
 `ClientPaths` fixes the on-disk contract: everything lives under
 `~/Library/Application Support/WallpaperMachine` (overridable with `WALLPAPER_MACHINE_HOME`),

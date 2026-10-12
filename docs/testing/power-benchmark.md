@@ -106,8 +106,12 @@ actual power window. Neither the configured ceiling nor timer-wakeup counts
 provide elapsed time or displayed-frame counts.
 
 The app opens its control panel at launch, so each such run includes it, and
-animated GIF previews on the library page add WebContent and WindowServer work;
-say whether the panel was open. System power includes every other application,
+animated GIF previews add WebContent and WindowServer work (Discover animates the
+tiles on screen; Installed shows still covers and animates only the tile under
+the pointer or keyboard focus, see [control panel](../features/control-panel.md));
+say whether the panel was open and on which tab. The saving from Installed's
+still covers has not been measured: compare a run with the panel open on
+Installed against a build before the change. System power includes every other application,
 so it is only comparable against a paired baseline taken minutes from the run;
 the app's own CPU and GPU percentages are the steadier signal.
 

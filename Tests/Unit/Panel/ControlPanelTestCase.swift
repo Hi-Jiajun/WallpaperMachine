@@ -142,6 +142,11 @@ class LayoutSnapshotBridge: WallpaperBridge {
     guard let snapshot else { throw CancellationError() }
     return snapshot
   }
+
+  /// A rescan of the library answers with whatever `bundleProvider` (or `snapshot`) holds.
+  override func refreshLibrary() async throws -> BridgeSnapshotBundle {
+    try await reply { _ in }
+  }
 }
 
 final class PanelUpdateClient: AppUpdateClient, @unchecked Sendable {

@@ -489,6 +489,9 @@ nothing could see or hear.
   while renderer counters are on.
 - **Discover previews.** Animation sources exist only for visible tiles in a visible
   document ([tile thumbnails](workshop-downloads.md#tile-thumbnails)).
+- **Installed previews.** Tiles show small still covers, and one animation exists
+  only for the tile under the pointer or keyboard focus in a visible document
+  ([control panel](control-panel.md#layout)).
 
 The regression coverage for these is in
 [renderer verification](../testing/renderer.md#regression-areas-that-must-stay-covered).

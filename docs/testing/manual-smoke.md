@@ -45,6 +45,14 @@ was run.
       (a different video, say) and import that folder with **Replace if changed**:
       the display shows the new file without being reapplied, the library holds
       one folder for it, and a second import of the same folder ends as skipped.
+- [ ] With animated GIF previews in the library, Installed shows every tile as a
+      still, with nothing moving at rest. Resting the pointer on a tile plays only
+      that tile, Tab or arrow keys play only the focused one, and leaving it, a
+      selection drag, another tab or another window stops it with no flicker when
+      the grid re-renders. When a Workshop download finishes or the library is
+      rescanned, the covers stay as they are with no flicker; after a preview
+      file is replaced (import it again with Replace if changed), only that
+      tile's cover refreshes.
 - [ ] Search for a nonexistent local title, clear the search, and confirm the
       collection returns.
 - [ ] Select a wallpaper and refresh: the selection survives.
