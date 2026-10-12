@@ -254,6 +254,11 @@ running app.
   the downloaded image.
 - The offscreen About flow (`ControlPanelShellTests`) checks again from the
   no-release state before downloading a fixture update.
+- `UpdatePromptGateTests`: when the unattended alert is held (suspended
+  presentation, a covered display, What's New open, quitting), that the control
+  panel in front overrides the presentation holds, and that a held prompt is
+  offered exactly once after the hold lifts. The alert itself, and leaving a
+  full-screen app, are on [manual-smoke.md](manual-smoke.md).
 
 `WhatsNewTests` — what a launch announces across fresh installs, upgrades that
 skip versions, downgrades and language choice. Not covered: a live release

@@ -299,6 +299,10 @@ smoothness cannot be captured and have to be judged by eye.
 - [ ] A live GitHub release check, the published disk image mounting and the
       replacement of the app in Applications. Update tests use fixture JSON, a
       fake client and locally made images, so this path is manual only.
+- [ ] With an update available (a build older than the latest release) and
+      another app full-screen, no update alert appears and the log has
+      `update prompt deferred`; leaving full screen shows the alert once, and
+      opening the control panel while a display is covered shows it too.
 - [ ] Opening the disk image shows one window without toolbar or sidebar: the
       app and Applications at their places over the background, labels readable,
       the volume icon. Dragging installs; the first launch is refused and opens

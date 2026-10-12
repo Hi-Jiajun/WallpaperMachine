@@ -18,8 +18,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var finishedLaunching = false
     private lazy var appUpdater = AppUpdateStore()
     private var automaticUpdates: Task<Void, Never>?
-    /// The version the unattended check last prompted for; "Later" holds until the next launch.
-    private var promptedUpdateVersion: String?
+    /// The version the unattended check last prompted for ("Later" holds until the next launch)
+    /// and whether a prompt is waiting for wallpapers to present again.
+    private var updatePrompts = UpdatePromptLedger()
     private var displayChangeObserver: NSObjectProtocol?
     private var powerOffObserver: NSObjectProtocol?
     /// Set when macOS announces a logout, restart or shutdown, ahead of the quit event.
@@ -353,6 +354,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                             // running for scenes that stopped presenting, until
                             // some unrelated UI change happens to apply one.
                             self.sceneMediaSink?.reconcile()
+                            // Wallpapers presenting again is the moment an update alert held
+                            // back by sleep, a lock or an app rule may appear.
+                            self.retryHeldUpdatePrompt()
                             completion(.success(()))
                         } catch {
                             AppLog.error("presentation suspend failed: \(error.localizedDescription)")
@@ -401,6 +405,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                             // dark changes the effective consumer set and
                             // produces no snapshot of its own.
                             self.sceneMediaSink?.reconcile()
+                            // Leaving a full-screen app shows the hidden display again.
+                            if !suspended { self.retryHeldUpdatePrompt() }
                             completion(.success(()))
                         } catch {
                             AppLog.error("""
@@ -1140,12 +1146,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         ControlPanelWindow.setFullScreenLayout(false, for: window)
     }
 
+    func windowDidBecomeKey(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, window === controlPanelWindow else { return }
+        retryHeldUpdatePrompt()
+    }
+
     func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
         if window === whatsNewWindow {
             whatsNewWindow = nil
             window.contentViewController = nil
             if controlPanelWindow?.isVisible != true, previewWindow == nil { NSApp.setActivationPolicy(.accessory) }
+            retryHeldUpdatePrompt()
             return
         }
         guard window === controlPanelWindow else { return }
@@ -1458,26 +1470,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         checkWorkshopUpdatesIfDue()
         let state = await appUpdater.checkInBackground()
         rebuildMenu()
-        guard !shutdownInProgress, !shutdownComplete, whatsNewWindow == nil,
-              let version = state.availableVersion, version != promptedUpdateVersion else { return }
+        offerUpdateIfNeeded(state)
+    }
+
+    /// Offers the update in `state` once per version, but only when `UpdatePromptGate` says an
+    /// alert would not interrupt (not over a full-screen app, a locked screen or a sleeping
+    /// display). A held prompt is not marked offered; `retryHeldUpdatePrompt` asks again
+    /// without a network check when one of the gate's inputs changes.
+    private func offerUpdateIfNeeded(_ state: AppUpdateState) {
+        let version: String?
         switch state {
-        case .ready:
-            promptedUpdateVersion = version
-            promptUpdate(
-                title: String(localized: "WallpaperMachine \(version) is ready to install"),
-                detail: String(localized: "It has been downloaded. WallpaperMachine quits and reopens to finish installing it."),
-                confirm: String(localized: "Restart to Update"),
-                confirmed: installDownloadedUpdate)
-        case .available, .manual:
-            promptedUpdateVersion = version
-            promptUpdate(
-                title: String(localized: "WallpaperMachine \(version) is available"),
-                detail: String(localized: "See what's new and download it in Settings."),
-                confirm: String(localized: "View Update"),
-                confirmed: showUpdate)
-        default:
-            break
+        case .ready(_, let ready): version = ready
+        case .available(_, let available), .manual(_, let available): version = available
+        default: version = nil
         }
+        switch updatePrompts.offer(version: version, input: updatePromptInput()) {
+        case .none:
+            return
+        case .held(let reason, let isNew):
+            if isNew { AppLog.info("update prompt deferred: \(reason.rawValue)") }
+        case .present(let version):
+            if case .ready = state {
+                promptUpdate(
+                    title: String(localized: "WallpaperMachine \(version) is ready to install"),
+                    detail: String(localized: "It has been downloaded. WallpaperMachine quits and reopens to finish installing it."),
+                    confirm: String(localized: "Restart to Update"),
+                    confirmed: installDownloadedUpdate)
+            } else {
+                promptUpdate(
+                    title: String(localized: "WallpaperMachine \(version) is available"),
+                    detail: String(localized: "See what's new and download it in Settings."),
+                    confirm: String(localized: "View Update"),
+                    confirmed: showUpdate)
+            }
+        }
+    }
+
+    private func updatePromptInput() -> UpdatePromptGate.Input {
+        UpdatePromptGate.Input(
+            panelVisibleAndActive: controlPanelWindow.map { $0.isVisible && $0.isKeyWindow } ?? false,
+            globalPresentation: presentationPolicy?.globalPresentation ?? .running,
+            hasSuspendedDisplay: presentationPolicy?.suspendedDisplayIDs.isEmpty == false,
+            whatsNewOpen: whatsNewWindow != nil,
+            shuttingDown: shutdownInProgress || shutdownComplete)
+    }
+
+    /// Asks again for a prompt the gate held, with the update state the app already has.
+    private func retryHeldUpdatePrompt() {
+        guard updatePrompts.holdReason != nil else { return }
+        offerUpdateIfNeeded(appUpdater.state)
     }
 
     /// Shown from the main run loop, not this task: a modal run inside a main-actor task would
