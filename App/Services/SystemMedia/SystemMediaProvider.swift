@@ -84,13 +84,6 @@ struct SystemMediaTimeline: Equatable, Sendable {
     var duration: Double
 }
 
-/// Source of system now-playing state for web and scene media integration.
-///
-/// The provider is dormant until a wallpaper asks for it: nothing is loaded, probed or
-/// observed before the first `addConsumer()`, and everything is released again at zero.
-/// Each callback fires only when its own part of the state changed, matching the
-/// protocol's promise that a listener is called when that specific part changes.
-@MainActor
 /// A transport command a wallpaper's user can bind one of its buttons to.
 ///
 /// Deliberately the three Wallpaper Engine wallpapers ask for, not the whole
@@ -102,6 +95,13 @@ enum SystemMediaCommand: String, Sendable {
     case previousTrack = "media:previous"
 }
 
+/// Source of system now-playing state for web and scene media integration.
+///
+/// The provider is dormant until a wallpaper asks for it: nothing is loaded, probed or
+/// observed before the first `addConsumer()`, and everything is released again at zero.
+/// Each callback fires only when its own part of the state changed, matching the
+/// protocol's promise that a listener is called when that specific part changes.
+@MainActor
 protocol SystemMediaProvider: AnyObject {
     var availability: SystemMediaAvailability { get }
     var onPropertiesChanged: ((SystemMediaProperties) -> Void)? { get set }
