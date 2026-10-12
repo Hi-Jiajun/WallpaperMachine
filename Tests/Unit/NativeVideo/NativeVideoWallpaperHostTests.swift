@@ -98,6 +98,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
             }
         }
         var onAudioDropped: (@MainActor (String) -> Void)?
+        var onHealthEvent: (@MainActor (NativeVideoHealthEvent) -> Void)?
         /// The generation this surface was opened with, so a test can report a
         /// failure as either this surface's or a stale one's.
         let generation: UInt64
@@ -1457,6 +1458,82 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         XCTAssertFalse(sleeper.fireNext())
         XCTAssertTrue(surface.restartReasons.isEmpty)
         XCTAssertTrue(recorder.rejected.isEmpty)
+    }
+
+    // MARK: Health
+
+    private let displaySevenKey = RuntimeSurfaceKey(kind: .desktopNativeVideo, displayID: 7)
+
+    /// Opens display 7 and gives it the picture a health check needs to have
+    /// seen before it is worth running.
+    private func openAShowingSurface(_ host: NativeVideoWallpaperHost) async throws -> FakeSurface {
+        await host.apply([wallpaper(admissionKey: 5)])
+        let surface = try XCTUnwrap(surfacesMade[7])
+        surface.isReadyForDisplay = true
+        surface.onReadyForDisplay?()
+        return surface
+    }
+
+    func testAStalledReportIsCountedButNothingIsDoneAboutIt() async throws {
+        // Observation first: the premise that a long pause costs the decoder
+        // has to show up in the counter before anything repairs it.
+        let recorder = Recorder()
+        let host = makeHost(wallpapers: [], recorder: recorder)
+        defer { host.shutdown() }
+        counters.startSession(duration: .seconds(60))
+        var states: [HostWallpaperState] = []
+        host.onStateChanged = { states.append($0) }
+        let surface = try await openAShowingSurface(host)
+        let statesBefore = states
+
+        for _ in 0..<2 {
+            surface.onHealthEvent?(NativeVideoHealthEvent(
+                trigger: "resumed after 2 h",
+                verdict: .stalled("the clock advances but no frame is produced")))
+        }
+
+        XCTAssertEqual(counters.snapshot().value(.nativeVideoPlaybackStalled, for: displaySevenKey), 2)
+        XCTAssertEqual(host.activeDisplayIDs, [7], "the surface stays open")
+        XCTAssertEqual(recorder.stopped, 0)
+        XCTAssertTrue(recorder.rejected.isEmpty, "and is not handed to the scene engine")
+        XCTAssertTrue(surface.restartReasons.isEmpty, "nor rebuilt")
+        XCTAssertEqual(host.isPlaying(displayID: 7), true)
+        XCTAssertEqual(states, statesBefore, "the wallpaper's startup state is untouched")
+    }
+
+    func testAHealthyOrUnjudgedReportIsNotCountedAsAStall() async throws {
+        let recorder = Recorder()
+        let host = makeHost(wallpapers: [], recorder: recorder)
+        defer { host.shutdown() }
+        counters.startSession(duration: .seconds(60))
+        let surface = try await openAShowingSurface(host)
+
+        surface.onHealthEvent?(NativeVideoHealthEvent(trigger: "resumed after 2 h", verdict: .advancing))
+        surface.onHealthEvent?(NativeVideoHealthEvent(
+            trigger: "resumed after 2 h", verdict: .waiting("the player was waiting for data throughout")))
+
+        XCTAssertEqual(counters.snapshot().total(.nativeVideoPlaybackStalled), 0)
+        XCTAssertEqual(host.activeDisplayIDs, [7])
+    }
+
+    func testAReportFromAReplacedSurfaceIsIgnored() async throws {
+        let recorder = Recorder()
+        let host = makeHost(wallpapers: [], recorder: recorder)
+        defer { host.shutdown() }
+        counters.startSession(duration: .seconds(60))
+        let old = try await openAShowingSurface(host)
+        await host.apply([wallpaper(id: "replacement", admissionKey: 6)])
+        let current = try XCTUnwrap(surfacesMade[7])
+        XCTAssertFalse(old === current)
+        let stalled = NativeVideoHealthEvent(trigger: "resumed after 2 h", verdict: .stalled("no frame"))
+
+        old.onHealthEvent?(stalled)
+        XCTAssertEqual(
+            counters.snapshot().total(.nativeVideoPlaybackStalled), 0,
+            "a surface that has since been replaced is not the display's pipeline")
+
+        current.onHealthEvent?(stalled)
+        XCTAssertEqual(counters.snapshot().value(.nativeVideoPlaybackStalled, for: displaySevenKey), 1)
     }
 
     func testAKeyRefusedThenSupersededThenOfferedAgainIsReportedAgain() async {

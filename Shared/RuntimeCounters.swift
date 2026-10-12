@@ -81,6 +81,12 @@ enum RuntimeCounter: String, CaseIterable, Sendable {
     /// the normal path for an upright clip is visible instead of being
     /// inferred from CPU use.
     case nativeVideoPosterFallback
+    /// A clip that had shown a picture was checked after a long pause and its
+    /// pipeline delivered none, although the player reported it was playing.
+    /// Observation only: nothing acts on it yet. A steady zero over many
+    /// long suspensions means the decoder survives them; a count says it does
+    /// not, and how often.
+    case nativeVideoPlaybackStalled
 }
 
 /// Time-limited, aggregated runtime counters. Off by default: recording happens

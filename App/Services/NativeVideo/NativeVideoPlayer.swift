@@ -74,6 +74,23 @@ final class NativeVideoPlayer {
     private var displayTransform: CGAffineTransform?
     private var orientationTask: Task<Void, Never>?
 
+    /// Looks at the pipeline after a long pause. Owned here because its verdict
+    /// is about this player's item, and it dies with the player.
+    private let supervisor: NativeVideoHealthSupervisor
+    private let healthPolicy: NativeVideoHealthSupervisor.Policy
+    /// Since when the player has not been playing, whatever the reason: the
+    /// user's pause and a hidden display both stop the decoder. `nil` while it
+    /// plays.
+    private var pausedSince: ContinuousClock.Instant?
+    /// Whether a picture has ever been on the layer. A pipeline that never
+    /// showed one is the first-frame watch's to judge, not the health check's.
+    private var hasShownFrame = false
+    /// Attached only while a health check is sampling, and to the item playing
+    /// at that moment. It takes the source's own pixel format, so reading it
+    /// converts nothing.
+    private var livenessOutput: AVPlayerItemVideoOutput?
+    private weak var livenessItem: AVPlayerItem?
+
     /// What the user chose, and the geometry it is applied to. The layer is
     /// positioned from these by `applyPlacement`, never by autoresizing: a
     /// picture that is larger or smaller than its display has to follow the
@@ -91,6 +108,8 @@ final class NativeVideoPlayer {
     /// Reported when the clip keeps playing without its audio, with the
     /// failure that caused it, so the host can log it against its load.
     var onAudioDropped: (@MainActor (String) -> Void)?
+    /// What a health check concluded. Reported, never acted on here.
+    var onHealthEvent: (@MainActor (NativeVideoHealthEvent) -> Void)?
     /// A failure seen before anyone was listening. The host installs its
     /// callback after constructing the surface, and a synchronous failure at
     /// load would otherwise be dropped on the floor — which is the one case
@@ -117,13 +136,17 @@ final class NativeVideoPlayer {
         counters: RuntimeCounters,
         paused: Bool,
         recovery: NativeVideoRecoveryBudget.Policy = .init(),
-        now: @escaping @MainActor () -> ContinuousClock.Instant = { .now }
+        health: NativeVideoHealthSupervisor.Policy = .init(),
+        now: @escaping @MainActor () -> ContinuousClock.Instant = { .now },
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     ) {
         self.surface = surface
         self.counters = counters
         self.userPaused = paused
         self.recovery = NativeVideoRecoveryBudget(policy: recovery)
         self.now = now
+        self.healthPolicy = health
+        self.supervisor = NativeVideoHealthSupervisor(policy: health, sleep: sleep)
         player.actionAtItemEnd = .advance
         // Nothing here needs the system's "now playing" treatment, and taking
         // the audio session focus would interrupt whatever the user is
@@ -131,6 +154,7 @@ final class NativeVideoPlayer {
         player.preventsDisplaySleepDuringVideoPlayback = false
         layer.player = player
         layer.videoGravity = .resizeAspectFill
+        supervisor.target = self
     }
 
     func attach(to view: NSView) {
@@ -246,6 +270,9 @@ final class NativeVideoPlayer {
         currentItemObservation = nil
         sizeObservation = nil
         observedItem = nil
+        // A check in flight describes the item that is going away.
+        supervisor.cancel()
+        detachLivenessOutput()
         detachPosterOutput()
         // The looper holds the queue; disabling it first stops it re-filling
         // the queue while the items are being removed.
@@ -278,6 +305,7 @@ final class NativeVideoPlayer {
                     guard let self, !self.stopped else { return }
                     // A frame on the layer is the evidence that earns the
                     // rebuild allowance back, once it has lasted.
+                    self.hasShownFrame = true
                     self.recovery.healthy(at: self.now())
                     self.onReadyForDisplay?()
                 }
@@ -672,12 +700,15 @@ final class NativeVideoPlayer {
         orientationTask?.cancel()
         orientationTask = nil
         sizeObservation = nil
+        supervisor.cancel()
+        detachLivenessOutput()
         detachPosterOutput()
         lastPoster = nil
         pendingFailure = nil
         onPreparationFailure = nil
         onReadyForDisplay = nil
         onAudioDropped = nil
+        onHealthEvent = nil
         player.pause()
         releaseItem()
         layer.player = nil
@@ -687,9 +718,86 @@ final class NativeVideoPlayer {
     private func applyPlaybackState() {
         guard !stopped else { return }
         if userPaused || presentationSuspended {
+            if pausedSince == nil { pausedSince = now() }
+            // What a check in flight would conclude no longer holds.
+            supervisor.cancel()
             player.pause()
         } else {
+            let paused = pausedSince.map { now() - $0 }
+            pausedSince = nil
             player.play()
+            // The decoder can be reclaimed while nothing is playing, and
+            // `play()` does not say whether the clip has one again. A long
+            // enough pause earns a look at whether pictures come out.
+            if let paused, paused >= healthPolicy.minimumPause {
+                supervisor.schedule(trigger: "resumed after \(Self.describe(pause: paused))")
+            }
         }
     }
+
+    nonisolated static func describe(pause: Duration) -> String {
+        let seconds = Int(pause.components.seconds)
+        if seconds < 120 { return "\(seconds) s" }
+        if seconds < 7_200 { return "\(seconds / 60) min" }
+        return "\(seconds / 3_600) h"
+    }
+}
+
+// MARK: Health checks
+
+extension NativeVideoPlayer: NativeVideoHealthTarget {
+    var isEligibleForCheck: Bool {
+        !stopped && !userPaused && !presentationSuspended && hasShownFrame && rebuild == nil
+    }
+
+    /// One look at the pipeline: where the clock is, and whether the playing
+    /// item handed over a frame nobody has read yet.
+    ///
+    /// The frame is what matters. A pipeline whose decoder died keeps a clock
+    /// that runs, so the position alone would call it healthy. A video output
+    /// reports each frame once and has to be read to consume it; leaving one
+    /// unread would answer yes for ever after the first.
+    func liveSample() -> NativeVideoLivenessEvaluator.Sample? {
+        guard !stopped, let item = player.currentItem else { return nil }
+        let output = attachLivenessOutput(to: item)
+        let time = item.currentTime()
+        var produced = false
+        if output.hasNewPixelBuffer(forItemTime: time) {
+            produced = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil) != nil
+        }
+        return NativeVideoLivenessEvaluator.Sample(
+            time: time, item: ObjectIdentifier(item), producedFrame: produced,
+            waiting: player.timeControlStatus == .waitingToPlayAtSpecifiedRate)
+    }
+
+    func finishSampling() {
+        detachLivenessOutput()
+    }
+
+    func reportHealth(_ event: NativeVideoHealthEvent) {
+        guard !stopped else { return }
+        onHealthEvent?(event)
+    }
+
+    /// Re-attached whenever the loop replaces the playing item: an output left
+    /// on the retired copy would never see another frame.
+    private func attachLivenessOutput(to item: AVPlayerItem) -> AVPlayerItemVideoOutput {
+        if let output = livenessOutput, livenessItem === item { return output }
+        detachLivenessOutput()
+        let output = AVPlayerItemVideoOutput(pixelBufferAttributes: nil)
+        item.add(output)
+        livenessOutput = output
+        livenessItem = item
+        return output
+    }
+
+    private func detachLivenessOutput() {
+        if let output = livenessOutput, let item = livenessItem {
+            item.remove(output)
+        }
+        livenessOutput = nil
+        livenessItem = nil
+    }
+
+    var livenessOutputIsAttachedForTest: Bool { livenessOutput != nil }
 }

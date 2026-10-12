@@ -770,4 +770,216 @@ final class NativeVideoPlayerMediaTests: XCTestCase {
 
         XCTAssertFalse(player.restartPlayback(reason: "after the failure"))
     }
+
+    // MARK: Health checks
+
+    /// A player on injected clocks, attached to a view the way `makePlayer`
+    /// does. `clock` decides how long it was paused; `sleep` runs the check's
+    /// timers.
+    private func makeCheckedPlayer(
+        url: URL, health: NativeVideoHealthSupervisor.Policy = .init(),
+        now: @escaping @MainActor () -> ContinuousClock.Instant,
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    ) -> NativeVideoPlayer {
+        let player = NativeVideoPlayer(
+            surface: surface, counters: counters, paused: false, health: health, now: now,
+            sleep: sleep)
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 64, height: 36))
+        view.wantsLayer = true
+        player.attach(to: view)
+        player.load(url: url)
+        self.player = player
+        return player
+    }
+
+    func testAHealthyClipIsReportedAdvancingAfterAResume() async throws {
+        let url = try await makeClip(name: "health-healthy")
+        var clock = ContinuousClock.now
+        let player = makeCheckedPlayer(
+            url: url,
+            health: .init(
+                minimumPause: .seconds(5), settle: .milliseconds(50), window: .seconds(2),
+                step: .milliseconds(50)),
+            now: { clock })
+        var events: [NativeVideoHealthEvent] = []
+        player.onHealthEvent = { events.append($0) }
+        let shown = await wait { player.isEligibleForCheck }
+        XCTAssertTrue(shown, "the clip never showed a frame")
+
+        player.setUserPaused(true)
+        clock = clock + .seconds(6)
+        player.setUserPaused(false)
+        let reported = await wait(upTo: .seconds(10)) { !events.isEmpty }
+
+        XCTAssertTrue(reported, "no check followed the resume")
+        XCTAssertEqual(events.first?.verdict, .advancing)
+        XCTAssertEqual(events.count, 1)
+        XCTAssertFalse(
+            player.livenessOutputIsAttachedForTest, "a finished check leaves nothing attached")
+        XCTAssertEqual(itemCounts().created, 1, "a healthy clip is not rebuilt")
+    }
+
+    func testOnlyALongPauseIsFollowedByACheckAndAnotherPauseEndsIt() async throws {
+        let url = try await makeClip(name: "health-rules")
+        var clock = ContinuousClock.now
+        let sleeper = ManualSleeper()
+        let player = makeCheckedPlayer(url: url, now: { clock }, sleep: sleeper.closure)
+        let shown = await wait { player.isEligibleForCheck }
+        XCTAssertTrue(shown, "the clip never showed a frame")
+
+        // A flick of the occlusion state is not worth a look.
+        player.setUserPaused(true)
+        clock = clock + .seconds(2)
+        player.setUserPaused(false)
+        for _ in 0..<50 { await Task.yield() }
+        XCTAssertTrue(sleeper.requested.isEmpty, "a short pause starts no check")
+
+        // A long one is, whichever way the clip was stopped.
+        player.setUserPaused(true)
+        clock = clock + .seconds(6)
+        player.setUserPaused(false)
+        await sleeper.waitUntilPending()
+        XCTAssertEqual(sleeper.requested.count, 1, "the check is waiting out its settle")
+
+        // Pausing again ends it: what it would conclude no longer holds.
+        player.setPresentationSuspended(true)
+        XCTAssertEqual(sleeper.cancelledCount, 1)
+        XCTAssertFalse(player.livenessOutputIsAttachedForTest)
+        clock = clock + .seconds(6)
+        player.setPresentationSuspended(false)
+        await sleeper.waitUntilPending()
+        XCTAssertEqual(sleeper.requested.count, 2, "a hidden display counts as a pause too")
+
+        // A resume that leaves the clip paused starts nothing.
+        player.setUserPaused(true)
+        player.setPresentationSuspended(true)
+        clock = clock + .seconds(6)
+        player.setPresentationSuspended(false)
+        for _ in 0..<50 { await Task.yield() }
+        XCTAssertEqual(sleeper.requested.count, 2)
+        XCTAssertFalse(player.isPlaying)
+    }
+
+    func testAClipThatNeverShowedAFrameIsNotChecked() async throws {
+        // That is the first-frame watch's to judge; a check would only ever
+        // find the stall that watch already knows about.
+        let url = try Hev1Fixture.write(name: "health-hev1", into: directory)
+        var clock = ContinuousClock.now
+        let sleeper = ManualSleeper()
+        let player = makeCheckedPlayer(url: url, now: { clock }, sleep: sleeper.closure)
+        let ready = await wait { player.itemStatusForTest == .readyToPlay }
+        try XCTSkipUnless(ready, "this OS does not get an hev1 item as far as ready")
+        let shown = await wait(upTo: .seconds(2)) { player.layerIsReadyForDisplayForTest }
+        try XCTSkipIf(shown, "this OS decodes hev1, so the clip is no longer frame-less")
+
+        player.setUserPaused(true)
+        clock = clock + .seconds(6)
+        player.setUserPaused(false)
+        for _ in 0..<50 { await Task.yield() }
+
+        XCTAssertFalse(player.isEligibleForCheck)
+        XCTAssertTrue(sleeper.requested.isEmpty)
+    }
+
+    func testAFrameLessItemIsStalledEvenThoughItsClockRuns() async throws {
+        // The signature that makes frame evidence necessary: the item reports
+        // that it is playing and its position moves, and nothing is decoded.
+        let url = try Hev1Fixture.write(name: "health-stall", into: directory)
+        let player = makePlayer(url: url)
+        var failures: [String] = []
+        player.onPreparationFailure = { _, detail in failures.append(detail) }
+        let ready = await wait { player.itemStatusForTest == .readyToPlay }
+        guard ready, failures.isEmpty else {
+            throw XCTSkip("this OS rejects an hev1 item outright (\(failures))")
+        }
+        let shown = await wait(upTo: .seconds(2)) { player.layerIsReadyForDisplayForTest }
+        try XCTSkipIf(shown, "this OS decodes hev1, so the clip is no longer frame-less")
+
+        var evaluator = NativeVideoLivenessEvaluator()
+        var readings: Set<Int> = []
+        var frames = 0
+        for _ in 0..<20 {
+            if let sample = player.liveSample() {
+                evaluator.record(sample)
+                readings.insert(Int(sample.time.seconds * 1_000))
+                if sample.producedFrame { frames += 1 }
+            }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        player.finishSampling()
+
+        XCTAssertGreaterThan(readings.count, 1, "the clock ran, so a time-only check would pass")
+        XCTAssertEqual(frames, 0)
+        XCTAssertNil(evaluator.verdict)
+        guard case .stalled = evaluator.timedOut() else {
+            return XCTFail("a pipeline that decodes nothing is stalled: \(evaluator.timedOut())")
+        }
+        XCTAssertFalse(player.livenessOutputIsAttachedForTest)
+    }
+
+    func testSamplingProvesAHealthyClipAndFollowsTheLoopToItsNextCopy() async throws {
+        let url = try await makeClip(name: "health-loop")
+        let player = makePlayer(url: url)
+        let shown = await wait { player.layerIsReadyForDisplayForTest }
+        XCTAssertTrue(shown, "the clip never showed a frame")
+
+        var evaluator = NativeVideoLivenessEvaluator()
+        var itemsThatProducedFrames: Set<ObjectIdentifier> = []
+        let deadline = ContinuousClock.now + .seconds(6)
+        // The clip is one second long, so a boundary is crossed within a few.
+        while ContinuousClock.now < deadline, itemsThatProducedFrames.count < 2 {
+            if let sample = player.liveSample() {
+                evaluator.record(sample)
+                if sample.producedFrame { itemsThatProducedFrames.insert(sample.item) }
+            }
+            try? await Task.sleep(for: .milliseconds(30))
+        }
+
+        XCTAssertEqual(evaluator.verdict, .advancing)
+        XCTAssertGreaterThanOrEqual(
+            itemsThatProducedFrames.count, 2,
+            "an output left on the retired copy would never see another frame")
+        player.finishSampling()
+        XCTAssertFalse(player.livenessOutputIsAttachedForTest)
+    }
+
+    func testAFrozenPipelineStopsAnsweringThatItProducedAFrame() async throws {
+        // A frame is reported once and has to be read to be consumed. If a
+        // sample left it unread, a pipeline that died after one picture would
+        // be reported healthy for ever.
+        let url = try await makeClip(name: "health-frozen")
+        let player = makePlayer(url: url)
+        let shown = await wait { player.layerIsReadyForDisplayForTest }
+        XCTAssertTrue(shown, "the clip never showed a frame")
+        player.setUserPaused(true)
+        // An output attached to a paused item may be handed the picture that is
+        // on screen once, a moment later. That one is not the point.
+        for _ in 0..<10 {
+            _ = player.liveSample()
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+
+        var produced = 0
+        for _ in 0..<10 {
+            if player.liveSample()?.producedFrame == true { produced += 1 }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        player.finishSampling()
+
+        XCTAssertEqual(produced, 0, "a paused clip has no new pictures to report")
+    }
+
+    func testAStoppedPlayerCannotBeSampled() async throws {
+        let url = try await makeClip(name: "health-stopped")
+        let player = makePlayer(url: url)
+        let ready = await wait { player.itemStatusForTest == .readyToPlay }
+        XCTAssertTrue(ready)
+        _ = player.liveSample()
+        XCTAssertTrue(player.livenessOutputIsAttachedForTest)
+        player.stop()
+
+        XCTAssertNil(player.liveSample())
+        XCTAssertFalse(player.livenessOutputIsAttachedForTest, "stopping releases the output")
+        XCTAssertFalse(player.isEligibleForCheck)
+    }
 }

@@ -615,6 +615,31 @@ need an authorized runtime check
   with every replaced item released; a healthy clip restarts and plays again, its
   stable run earning the allowance back through the injected clock; and a restart
   never starts a paused clip and is refused after a stop or a reported failure.
+- The liveness check after a long pause. `NativeVideoLivenessTests` — the pure rule: a
+  new picture plus a clock that moved by about a frame is advancing, in any order across
+  samples; a clock that runs with no picture (what an `hev1` pipeline looks like) is
+  stalled, and so are pictures with a frozen clock and neither; less than a frame of
+  movement does not count but builds up across samples; time going backwards and a new
+  item are the loop wrapping, and a new item is never picture evidence; times that are not
+  finite anchor nothing; a player waiting for data throughout, or a window with nothing to
+  sample, is waiting rather than stalled. `NativeVideoHealthSupervisorTests` — with a
+  scripted target and the hand-fired clock: a healthy pipeline is reported and sampling
+  stops at the proof; a dead one is reported only after the whole window and the window
+  bounds the samples (20 for the default policy); waiting and sample-less windows are
+  reported as such; a surface that cannot be judged is not even waited for, and one that
+  stops being judgeable during the settle or mid-run is dropped without a report; a cancel
+  releases what sampling attached at once; a newer trigger replaces the one in flight and
+  starts over from its own settle. The host suite checks that a stalled report is counted
+  as `nativeVideoPlaybackStalled` and leaves the surface open, playing, unrejected and
+  unrestarted, that healthy and waiting reports are not counted, and that a report from a
+  replaced surface is ignored. `NativeVideoPlayerMediaTests` (opt-in) add the real player:
+  a healthy clip resumed after a long pause is reported advancing and not rebuilt, with
+  nothing left attached; only a pause of at least 5 seconds (user or hidden display) starts
+  a check and pausing again cancels it; an `hev1` clip (skipped when an OS decodes it)
+  is never checked because it never showed a picture, and sampled by hand its clock moves
+  while no picture is produced, which is the stall a time-only check would miss; sampling
+  follows the loop to its next copy; a paused clip stops reporting pictures; and a stopped
+  player has nothing to sample.
 - A pass overtaken while it waited, in the host suite with a metadata read held open by
   a gate while the next snapshot arrives: a wallpaper that was replaced, dropped from
   the native list or given another admission key by then is never built (the host
@@ -670,7 +695,11 @@ Fit, Original size and a scale factor on a real display against Compatibility
 sleeping external disk, an unreachable share, an evicted cloud file) with the restart,
 the hand-off and the reason they produce in **In use now**: the limits and rules are
 covered, and the frame-less clip by the opt-in `hev1` test, but no test blocks a real
-`AVAsset` load or starts a clip from a volume that is slow to answer.
+`AVAsset` load or starts a clip from a volume that is slow to answer. Also not covered:
+whether a real long suspension (a covered desktop for hours, display sleep, Low Power Mode)
+ever costs a clip its decoder on this Mac. The check is covered, and so is the dead
+pipeline it must recognise, but nothing here reclaims a decoder, so the premise it exists
+to measure is only answered by the `nativeVideoPlaybackStalled` counter on a real machine.
 
 ## Panel
 

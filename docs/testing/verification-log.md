@@ -25,6 +25,15 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-13 — Native video liveness detection after a long pause
+
+Observation only: the check logs and counts a stalled pipeline and acts on nothing. Commit `feat(native-video): detect a pipeline that stops delivering frames`, checked in an isolated worktree on macOS 27.0.1.
+
+- `python3 scripts/test.py --only NativeVideoLivenessTests --only NativeVideoHealthSupervisorTests --only NativeVideoWallpaperHostTests` — 100 passed, 0 failed, 0 skipped
+- `WALLPAPER_MACHINE_MEDIA_TESTS=1 python3 scripts/test.py --only NativeVideoPlayerMediaTests` — 31 passed, 0 skipped (the hev1 clip is frame-less on this OS, so its two cases ran); the other NativeVideo classes with media on: 182 passed, 0 failed, 0 skipped
+- The lock-screen extension target compiled the new `RuntimeCounter` case in the same builds.
+- Not run: the full gate, a Release build, any desktop run. Unverified: whether a real long suspension (covered desktop for hours, display sleep, Low Power Mode) ever costs a clip its decoder; no test reclaims one, so only the `nativeVideoPlaybackStalled` counter on a real Mac answers it. Cost of the check's video output on a 4K clip not measured.
+
 ## 2026-10-13 — Play only on the display in use
 
 Commit `feat(playback): optionally play only on the display you are using`: opt-in Playback toggle `Only play on the display I’m using`. ActiveDisplayTracker follows the pointer through event monitors that exist only while the option is on and two displays are connected; WallpaperPresentationPolicy treats every other display as hidden after a 3 s dwell and resumes at once, never darkening every display. No bridge or Rust change. Taken in a worktree; the full gate was not run here.
@@ -113,14 +122,3 @@ Issue #45 reported the Colorful Fluid Animation web wallpaper (1748506393) sampl
 - Unit: python3 scripts/test.py --only DesktopWallpaperTests (51 passed), including late-acknowledgement, never-acknowledged pause, absolute-path configuration and the poster-pruning race the new test exposed.
 - Gate: python3 scripts/test.py — 1339 passed, 0 failed, 14 skipped.
 - Not checked: a full app session on macOS 27 with the rebuilt app, Mission Control thumbnails, or macOS 15/26 (root-relative path path unchanged there).
-
-## 2026-10-11 — Aligned layers turn about their anchor
-
-SceneRuntimeContext rotated a non-centre layer about its centre and slid its anchor offset along the scene's axes. Every gate below ran in a detached worktree at HEAD plus this change only, because another session's uncommitted audio edits in the shared tree stop audio_tests from compiling (SmoothAudioResponseBinsForTesting undeclared).
-
-- `script_runtime_compat_test`: 97 passed; the new `RotatedAnchoredLayerTurnsAboutItsAnchor` and `ScriptedRingBarsHangOutwardFromTheirCircle` fail on HEAD's runtime (rotation assertions only). `scene_schema_tests` 110, `scenescript_media_event_smoke` 20, `text_object_runtime_test` 64 passed, 2 skipped (local assets).
-- `metal_scene_draw_smoke` LocalProjects, 2850003448 at 2560x1440, 60 Hz noise (amplitude 0.5 for legible bars): before, the ring slid down over the planet; after, bars hang outward from a dark ring, as in the Workshop preview.
-- Local corpus A/B, 57 scenes, `offscreen_scene_probe` `nodes.txt`, both arms built from HEAD: placement moves only on rotated non-centre layers in 6 scenes. 3276911872's audio strip now rests on the date line, flush with its left edge; 3665954520's hidden visualizer bar now spans its sibling bars' 150 units from their shared corner; three text layers tilted 0.6-2.2 degrees move up to 4.4 units. 3589454154's node diffs, and every pixel/state diff, also appear between two baseline runs.
-- `python3 scripts/check_renderer.py`: exit 0; 12/12 generated scenes pixel-equal pooled vs isolated; reload cycles 0. Skipped: 2 local-asset text tests, local video import, local-project Metal (run by hand above).
-- `python3 scripts/test.py`: Python suites OK; native 1334 passed, 0 failed, 14 skipped of 1348.
-- Gap: Wallpaper Engine's offset for a script-set alignment (full size*scale vs this renderer's scale delta) is unconfirmed; 8-unit bars differ by 4 units, too little for a preview. Not rebuilt as a Release app.

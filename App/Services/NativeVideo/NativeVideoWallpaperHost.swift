@@ -388,6 +388,10 @@ final class NativeVideoWallpaperHost {
             self.cancelFirstFrameWatch(displayID)
             self.recordState(current, phase: .ready)
         }
+        surface.onHealthEvent = { [weak self, weak surface] event in
+            guard let self, let surface, self.surfaces[displayID] === surface else { return }
+            self.record(health: event, displayID: displayID, surface: surface)
+        }
         // Installing the callback can deliver a failure the player was already
         // holding, and that runs the hand-off synchronously — closing this
         // surface and removing it from the registry before the next line.
@@ -491,6 +495,36 @@ final class NativeVideoWallpaperHost {
             + surface.stateSummary
         handlePreparationFailure(
             displayID: displayID, surface: surface, detail: detail, settled: false)
+    }
+
+    // MARK: Health
+
+    /// Logs and counts what a health check found. Observation only: a stalled
+    /// pipeline is not repaired and the wallpaper is not handed back, because
+    /// nothing yet shows that a stall after a pause is real on the machines that
+    /// run this. The counter is what answers that.
+    private func record(
+        health event: NativeVideoHealthEvent, displayID: UInt32, surface: NativeVideoSurface
+    ) {
+        let wallpaperID = descriptors[displayID]?.wallpaperId ?? "?"
+        let load = logLoads[displayID]
+        switch event.verdict {
+        case .advancing:
+            AppLog.debug(
+                "native video wallpaper \(wallpaperID): playback advancing after \(event.trigger)",
+                load: load)
+        case let .waiting(detail):
+            AppLog.debug(
+                "native video wallpaper \(wallpaperID): playback not judged after "
+                    + "\(event.trigger): \(detail)", load: load)
+        case let .stalled(detail):
+            counters.record(
+                .nativeVideoPlaybackStalled,
+                for: RuntimeSurfaceKey(kind: .desktopNativeVideo, displayID: displayID))
+            AppLog.warn(
+                "native video wallpaper \(wallpaperID): playback did not advance after "
+                    + "\(event.trigger): \(detail) (\(surface.stateSummary))", load: load)
+        }
     }
 
     /// Starts the countdown again for a parked watch whose display can be

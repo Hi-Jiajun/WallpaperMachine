@@ -36,6 +36,10 @@ protocol NativeVideoSurface: AnyObject {
     /// Called when the clip failed with its audio and keeps playing without
     /// it, with the failure. Not a hand-off: the surface is still playing.
     var onAudioDropped: (@MainActor (String) -> Void)? { get set }
+    /// Called with what a health check concluded about the pipeline, after a
+    /// long pause. A report, not a failure: the surface keeps playing whatever
+    /// it says, and the host is the one to decide whether anything follows.
+    var onHealthEvent: (@MainActor (NativeVideoHealthEvent) -> Void)? { get set }
     /// Where the platform pipeline stands, in one line for the log: the item's
     /// status, the picture size it reports, whether the clock runs and whether
     /// the layer has a frame. Read when a clip has not shown a picture, to tell
@@ -168,6 +172,10 @@ extension NativeVideoWallpaperWindow: NativeVideoSurface {
     var onAudioDropped: (@MainActor (String) -> Void)? {
         get { player.onAudioDropped }
         set { player.onAudioDropped = newValue }
+    }
+    var onHealthEvent: (@MainActor (NativeVideoHealthEvent) -> Void)? {
+        get { player.onHealthEvent }
+        set { player.onHealthEvent = newValue }
     }
     var stateSummary: String { player.stateSummary }
     func restartPlayback(reason: String) -> Bool { player.restartPlayback(reason: reason) }

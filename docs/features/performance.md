@@ -533,6 +533,27 @@ counts every deadline that passed without a frame as `nativeVideoFirstFrameTimeo
 a single count with no refusal means the rebuild brought the picture, and on the
 internal drive any count means the pipeline stalled.
 
+A clip that has shown a picture is checked once more after a long pause. The system can
+reclaim the decoder while nothing is playing (a covered desktop for hours, display sleep,
+Low Power Mode), and a clip resumed after that can report that it is playing, with its
+clock running, while no picture comes out. When a clip is resumed after at least 5 seconds
+paused (by the user's Pause or because its display was hidden), native playback waits half
+a second and then, for up to 2 seconds, looks every tenth of a second at the playing item.
+It needs both signs of life in that time: a new picture handed over by a video output
+attached to the item for the check, and a clock that moved by about a frame. The clock
+alone is not enough, because a pipeline that decodes nothing keeps its clock running. A
+clip whose player said throughout that it was waiting for data is not judged, so a slow disk
+is not mistaken for a dead decoder. A clip that never showed a picture is left to the
+first-frame wait above, and pausing again, hiding the display or switching the clip
+cancels a check in flight. A second resume replaces a check that has not finished, so one
+long suspension is judged once. This is observation only for now: a stalled result is
+written to the diagnostics log with the pipeline's state (`playback did not advance after
+resumed after 2 h`) and counted as `nativeVideoPlaybackStalled`, and the wallpaper stays on
+native video, neither rebuilt nor handed to Compatibility. A clip that shows fewer than one
+picture in two seconds can be reported as stalled while it plays. The cost of the check's
+video output on a 4K clip has not been measured; it exists only while the check samples,
+normally a fraction of a second after the settle, and reads the clip's own pixel format.
+
 Switching wallpapers quickly does not put the ones in between on the desktop. Reading
 a clip's metadata can take a moment, and the next switch may be committed meanwhile.
 When one has, native playback asks the bridge again before it builds a window, and
