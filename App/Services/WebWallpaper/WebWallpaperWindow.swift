@@ -240,6 +240,10 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         weak var page: WebWallpaperPage?
 
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+            // The channel is registered for every frame, but only the wallpaper's
+            // own document speaks for it: a frame it embeds, which may belong to
+            // a remote site, must not subscribe to audio or ask for files.
+            guard message.frameInfo.isMainFrame else { return }
             let body = message.body
             MainActor.assumeIsolated { page?.receiveScriptMessage(body) }
         }
@@ -407,9 +411,7 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
             framePacing: true, frameLimit: frameLimit, renderScale: Double(committed.renderScale))
         let controller = webView.configuration.userContentController
         controller.removeAllUserScripts()
-        controller.addUserScript(WKUserScript(
-            source: WebWallpaperProtocol.makeHostScript(seed: seed),
-            injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        for script in WebWallpaperProtocol.userScripts(seed: seed) { controller.addUserScript(script) }
         for script in extraUserScripts { controller.addUserScript(script) }
     }
 

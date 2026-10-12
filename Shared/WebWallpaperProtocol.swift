@@ -55,96 +55,19 @@ enum WebWallpaperProtocol {
         return min(max(scale, renderScaleRange.lowerBound), renderScaleRange.upperBound)
     }
 
-    /// The host script of one document. Only numbers and booleans are
-    /// interpolated into it.
-    static func makeHostScript(seed: Seed) -> String {
-        """
-        \(hostScriptSource)({ framePacing: \(seed.framePacing), frameLimit: \(seed.frameLimit), \
-        renderScale: \(clampedRenderScale(seed.renderScale)) })
-        """
-    }
-
-    /// The script without a seed: no `requestAnimationFrame` wrapper, no limit and
-    /// no render scale.
-    /// The native screen-saver surface injects this one.
-    static let hostScript = makeHostScript(seed: Seed())
-
-    /// A function expression taking the seed; `makeHostScript` calls it.
-    private static let hostScriptSource = """
-    (seed => {
-      if (window.__mweWallpaperHost) return;
-      // Frame-rate limit. WebKit gives a page no frame-rate control, so a limit
-      // below the ceiling is enforced on requestAnimationFrame itself: callbacks
-      // are held back to the limit and run on the native frame that follows, with
-      // that frame's timestamp. Only the main frame's requestAnimationFrame is
-      // paced; timers, video frame callbacks, CSS, workers and subframes are not.
-      // At the ceiling or above, or with no limit, the wrapper hands every call
-      // straight to the native function. The wrappers are in place before any page
-      // script runs, so a library that stores requestAnimationFrame at load holds
-      // the paced one.
-      const createFramePacer = \(framePacerSource);
-      let pacer = null;
-      if (seed.framePacing && typeof window.requestAnimationFrame === "function"
-          && typeof window.cancelAnimationFrame === "function") {
-        const nativeRequest = window.requestAnimationFrame.bind(window);
-        const nativeCancel = window.cancelAnimationFrame.bind(window);
-        pacer = createFramePacer(nativeRequest, nativeCancel, error => {
-          try { window.reportError(error); } catch (unavailable) { setTimeout(() => { throw error; }, 0); }
-        });
-        pacer.setLimit(seed.frameLimit);
-        const pacedRequest = function requestAnimationFrame(callback) {
-          return typeof callback === "function" && pacer.isPacing()
-            ? pacer.request(callback) : nativeRequest(...arguments);
-        };
-        // A handle is cancelled where it was issued: paced ids sit above every native one.
-        const pacedCancel = function cancelAnimationFrame(handle) {
-          const id = typeof handle === "number" || typeof handle === "string" ? Number(handle) : NaN;
-          if (pacer.owns(id)) { pacer.cancel(id); return; }
-          return nativeCancel(...arguments);
-        };
-        const replace = (names, wrapper) => {
-          for (const name of names) if (typeof window[name] === "function") window[name] = wrapper;
-        };
-        replace(["requestAnimationFrame", "webkitRequestAnimationFrame"], pacedRequest);
-        replace(["cancelAnimationFrame", "webkitCancelAnimationFrame", "webkitCancelRequestAnimationFrame"], pacedCancel);
-      }
-      // Internal render scale. A page sizes its canvases and WebGL buffers from
-      // window.devicePixelRatio, so multiplying that number by the scale gives it
-      // fewer pixels to draw, and WebKit stretches the result over the same area.
-      // The scaled property is an accessor installed only while the scale is below
-      // 1, and returning to 1 puts WebKit's own descriptor back unchanged. A live
-      // change raises one resize event, which is what resize-aware pages listen for
-      // to rebuild their buffers; the value the document starts with raises none.
-      // Pages that read the ratio once keep full resolution until they reload,
-      // media queries on resolution and subframes are not touched, and a page that
-      // assigned the property itself keeps its own value. The getter and the event
-      // use what is captured here, whatever the page does to its globals later.
-      const nativeRatio = Object.getOwnPropertyDescriptor(window, "devicePixelRatio");
-      const nativeDispatch = EventTarget.prototype.dispatchEvent;
-      const NativeEvent = Event;
-      let renderScale = 1;
-      let scaledRatio = null;
-      let resizePending = false;
-      const setScale = value => {
-        if (!nativeRatio || !nativeRatio.configurable || typeof nativeRatio.get !== "function") return false;
-        const next = Number.isFinite(value) ? Math.min(1, Math.max(0.5, value)) : 1;
-        if (next === renderScale) return false;
-        renderScale = next;
-        if (next < 1 && !scaledRatio) {
-          scaledRatio = Object.getOwnPropertyDescriptor({
-            get devicePixelRatio() { return nativeRatio.get.call(window) * renderScale; },
-          }, "devicePixelRatio").get;
-          Object.defineProperty(window, "devicePixelRatio", {
-            configurable: true, enumerable: nativeRatio.enumerable, get: scaledRatio, set: nativeRatio.set,
-          });
-        } else if (next === 1 && scaledRatio) {
-          const current = Object.getOwnPropertyDescriptor(window, "devicePixelRatio");
-          if (current && current.get === scaledRatio) Object.defineProperty(window, "devicePixelRatio", nativeRatio);
-          scaledRatio = null;
-        }
-        return true;
-      };
-      setScale(seed.renderScale);
+    /// The file-request fixes, and nothing else. They are the one part of the page
+    /// host that every frame of a page gets, the main frame and the subframes it
+    /// embeds, so this source reaches for no seed, no author API and no message
+    /// handler: a subframe never sees `wallpaperPropertyListener` or the channel to
+    /// the host. It is idempotent per document. `userScripts(seed:)` injects it.
+    static let compatScript = """
+    (() => {
+      if (window.__mweFileCompat) return;
+      Object.defineProperty(window, "__mweFileCompat", { value: true });
+      // A document served over http(s) cannot read a project file, so there is
+      // nothing for the fixes to do there, and a remote page a wallpaper embeds
+      // keeps its own fetch and XMLHttpRequest exactly as the browser made them.
+      if (location.protocol === "http:" || location.protocol === "https:") return;
       // WebKit resolves fetch() of a project file with status 0, ok === false and
       // no headers. Wallpaper Engine's Chromium host answers like a server: 200 OK
       // with a Content-Type from the extension. Loaders that check response.ok,
@@ -233,6 +156,95 @@ enum WebWallpaperProtocol {
           statusText: { ...statusText, get() { return isServedFile(this) ? "OK" : statusText.get.call(this); } },
         });
       }
+    })()
+    """
+
+    /// The host script of one document, for the main frame only: the author API,
+    /// the message channel, the frame-rate limit and the render scale. Only
+    /// numbers and booleans are interpolated into it.
+    static func makeHostScript(seed: Seed) -> String {
+        """
+        \(hostScriptSource)({ framePacing: \(seed.framePacing), frameLimit: \(seed.frameLimit), \
+        renderScale: \(clampedRenderScale(seed.renderScale)) })
+        """
+    }
+
+    /// A function expression taking the seed; `makeHostScript` calls it.
+    private static let hostScriptSource = """
+    (seed => {
+      if (window.__mweWallpaperHost) return;
+      // Frame-rate limit. WebKit gives a page no frame-rate control, so a limit
+      // below the ceiling is enforced on requestAnimationFrame itself: callbacks
+      // are held back to the limit and run on the native frame that follows, with
+      // that frame's timestamp. Only the main frame's requestAnimationFrame is
+      // paced; timers, video frame callbacks, CSS, workers and subframes are not.
+      // At the ceiling or above, or with no limit, the wrapper hands every call
+      // straight to the native function. The wrappers are in place before any page
+      // script runs, so a library that stores requestAnimationFrame at load holds
+      // the paced one.
+      const createFramePacer = \(framePacerSource);
+      let pacer = null;
+      if (seed.framePacing && typeof window.requestAnimationFrame === "function"
+          && typeof window.cancelAnimationFrame === "function") {
+        const nativeRequest = window.requestAnimationFrame.bind(window);
+        const nativeCancel = window.cancelAnimationFrame.bind(window);
+        pacer = createFramePacer(nativeRequest, nativeCancel, error => {
+          try { window.reportError(error); } catch (unavailable) { setTimeout(() => { throw error; }, 0); }
+        });
+        pacer.setLimit(seed.frameLimit);
+        const pacedRequest = function requestAnimationFrame(callback) {
+          return typeof callback === "function" && pacer.isPacing()
+            ? pacer.request(callback) : nativeRequest(...arguments);
+        };
+        // A handle is cancelled where it was issued: paced ids sit above every native one.
+        const pacedCancel = function cancelAnimationFrame(handle) {
+          const id = typeof handle === "number" || typeof handle === "string" ? Number(handle) : NaN;
+          if (pacer.owns(id)) { pacer.cancel(id); return; }
+          return nativeCancel(...arguments);
+        };
+        const replace = (names, wrapper) => {
+          for (const name of names) if (typeof window[name] === "function") window[name] = wrapper;
+        };
+        replace(["requestAnimationFrame", "webkitRequestAnimationFrame"], pacedRequest);
+        replace(["cancelAnimationFrame", "webkitCancelAnimationFrame", "webkitCancelRequestAnimationFrame"], pacedCancel);
+      }
+      // Internal render scale. A page sizes its canvases and WebGL buffers from
+      // window.devicePixelRatio, so multiplying that number by the scale gives it
+      // fewer pixels to draw, and WebKit stretches the result over the same area.
+      // The scaled property is an accessor installed only while the scale is below
+      // 1, and returning to 1 puts WebKit's own descriptor back unchanged. A live
+      // change raises one resize event, which is what resize-aware pages listen for
+      // to rebuild their buffers; the value the document starts with raises none.
+      // Pages that read the ratio once keep full resolution until they reload,
+      // media queries on resolution and subframes are not touched, and a page that
+      // assigned the property itself keeps its own value. The getter and the event
+      // use what is captured here, whatever the page does to its globals later.
+      const nativeRatio = Object.getOwnPropertyDescriptor(window, "devicePixelRatio");
+      const nativeDispatch = EventTarget.prototype.dispatchEvent;
+      const NativeEvent = Event;
+      let renderScale = 1;
+      let scaledRatio = null;
+      let resizePending = false;
+      const setScale = value => {
+        if (!nativeRatio || !nativeRatio.configurable || typeof nativeRatio.get !== "function") return false;
+        const next = Number.isFinite(value) ? Math.min(1, Math.max(0.5, value)) : 1;
+        if (next === renderScale) return false;
+        renderScale = next;
+        if (next < 1 && !scaledRatio) {
+          scaledRatio = Object.getOwnPropertyDescriptor({
+            get devicePixelRatio() { return nativeRatio.get.call(window) * renderScale; },
+          }, "devicePixelRatio").get;
+          Object.defineProperty(window, "devicePixelRatio", {
+            configurable: true, enumerable: nativeRatio.enumerable, get: scaledRatio, set: nativeRatio.set,
+          });
+        } else if (next === 1 && scaledRatio) {
+          const current = Object.getOwnPropertyDescriptor(window, "devicePixelRatio");
+          if (current && current.get === scaledRatio) Object.defineProperty(window, "devicePixelRatio", nativeRatio);
+          scaledRatio = null;
+        }
+        return true;
+      };
+      setScale(seed.renderScale);
       const post = message => {
         try { window.webkit.messageHandlers.\(WebWallpaperProtocol.messageHandlerName).postMessage(message); }
         catch (error) { console.error("wallpaper host channel unavailable", error); }

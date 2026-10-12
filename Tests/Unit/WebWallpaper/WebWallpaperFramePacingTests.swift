@@ -471,8 +471,7 @@ final class WebWallpaperFramePacingTests: XCTestCase {
   /// must never carry the wrappers, whatever it is told.
   func testTheScreenSaverScriptNeverPacesFrames() async throws {
     let configuration = WKWebViewConfiguration()
-    configuration.userContentController.addUserScript(
-      WKUserScript(source: WebWallpaperProtocol.hostScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+    for script in WebWallpaperProtocol.userScripts() { configuration.userContentController.addUserScript(script) }
     let webView = WKWebView(frame: .zero, configuration: configuration)
     webView.loadHTMLString("<!doctype html><html><body></body></html>", baseURL: nil)
     let deadline = Date().addingTimeInterval(10)

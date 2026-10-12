@@ -643,7 +643,8 @@ preparation and main-actor latency.
 
 `Tests/Unit/WebWallpaper/` runs real offscreen `WKWebView`s and injected hosts,
 with no desktop window. It covers the page contract (`WebWallpaperPageTests`,
-`WebWallpaperLocalRequestTests`), property payloads and file staging
+`WebWallpaperLocalRequestTests`, which also covers the file-request fixes in iframe,
+`srcdoc` and script-created frames), property payloads and file staging
 (`WebWallpaperPropertyPayloadTests`), the author API (`WebWallpaperAuthorAPITests`:
 audio, media, random-file and directory listeners), audio delivery, output and
 single-owner rules (`WebWallpaperAudioMediaTests`, `WebWallpaperAudioOutputTests`,

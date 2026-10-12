@@ -279,6 +279,53 @@ final class ScreenSaverWebSurfaceTests: XCTestCase {
     XCTAssertTrue(surface.isStopped)
   }
 
+  /// A project file fetched from a frame the page embeds is served like one fetched from the
+  /// page itself, and the frame gets none of the host API.
+  func testSubframesGetTheFileRequestFixesButNotTheHostApi() async throws {
+    try #"{"answer":42}"#.write(to: project.appendingPathComponent("settings.json"), atomically: true, encoding: .utf8)
+    try """
+      <!doctype html><html><body style="background:rgb(0,255,0)"><iframe src="frame.html"></iframe><script>
+      window.reports = [];
+      window.addEventListener("message", event => window.reports.push(event.data));
+      </script></body></html>
+      """.write(to: project.appendingPathComponent("framed.html"), atomically: true, encoding: .utf8)
+    try """
+      <!doctype html><html><body><script>
+      (async () => {
+        const response = await fetch("settings.json");
+        const request = new XMLHttpRequest();
+        request.open("GET", "settings.json", false);
+        request.send();
+        parent.postMessage({
+          ok: response.ok, status: response.status, type: response.headers.get("Content-Type"),
+          xhr: request.status, host: typeof window.__mweWallpaperHost,
+          audio: typeof window.wallpaperRegisterAudioListener, listener: "wallpaperPropertyListener" in window,
+        }, "*");
+      })();
+      </script></body></html>
+      """.write(to: project.appendingPathComponent("frame.html"), atomically: true, encoding: .utf8)
+    let surface = try make(entry: "framed.html")
+    try await start(surface)
+    var reports: [[String: Any]] = []
+    try await poll {
+      let value = try await surface.webView.callAsyncJavaScript(
+        "return window.reports", arguments: [:], in: nil, contentWorld: .page)
+      reports = (value as? [[String: Any]]) ?? []
+      return !reports.isEmpty
+    }
+    let report = try XCTUnwrap(reports.first)
+    XCTAssertEqual(report["ok"] as? Bool, true, "\(report)")
+    XCTAssertEqual(report["status"] as? Int, 200)
+    XCTAssertEqual(report["type"] as? String, "application/json")
+    XCTAssertEqual(report["xhr"] as? Int, 200)
+    XCTAssertEqual(report["host"] as? String, "undefined")
+    XCTAssertEqual(report["audio"] as? String, "undefined")
+    XCTAssertEqual(report["listener"] as? Bool, false)
+    let main = try await surface.webView.callAsyncJavaScript(
+      "return typeof window.__mweWallpaperHost", arguments: [:], in: nil, contentWorld: .page)
+    XCTAssertEqual(main as? String, "object")
+  }
+
   func testAudioAndDisplayCaptureAreDeniedWithoutHostSubscription() async throws {
     let surface = try make()
     try await start(surface)

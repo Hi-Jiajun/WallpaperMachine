@@ -50,9 +50,12 @@ folder work, and `location.protocol` is `file:`. The top frame cannot navigate a
 from the entry page; subframes and network requests are unrestricted (macOS ATS
 applies, so plain `http://` requests fail).
 
-The host script (`Shared/WebWallpaperProtocol.swift`, installed at document start and
-shared with the screen-saver web surface; desktop and preview pages get a copy
-built for each document) also closes one gap between WebKit and Chromium. WebKit
+Two scripts are installed at document start, built in one place
+(`Shared/WebWallpaperUserScripts.swift`) for the desktop page, the preview and the
+screen-saver web surface alike; desktop and preview pages get a copy built for each
+document. The host script (`Shared/WebWallpaperProtocol.swift`) is the author API and
+everything in the table below, and runs in the main frame only. The other script
+closes one gap between WebKit and Chromium. WebKit
 answers a `fetch()` or `XMLHttpRequest` of a project file with status 0 and no
 headers, where Chromium answers 200 with a `Content-Type` taken from the extension. The script gives a found `file://` GET/HEAD response that status and
 type, so loaders that check `ok`, and WebGL exports (Unity, Emscripten) that call
@@ -60,6 +63,17 @@ type, so loaders that check `ok`, and WebGL exports (Unity, Emscripten) that cal
 their bytes rather than by WebKit's streaming compiler, which was slower to boot a
 large module. Missing, failed and aborted requests, non-file responses and all
 bodies stay native: nothing is copied, retried or run per frame.
+
+That file-request script runs in every frame, so a page that hosts its player in an
+iframe of a project file, or in a `srcdoc` or script-created frame, gets the same
+answers as the page itself; it installs once per document and marks it with a
+non-enumerable `window.__mweFileCompat`. A subframe gets nothing else: no
+`wallpaperPropertyListener` delivery, no audio, media or random-file registration,
+and the host drops any message on the host channel that does not come from the main
+frame, so a frame (a remote embed included) cannot subscribe to audio or ask for
+files on the wallpaper's behalf. A frame served over http(s) keeps its own `fetch` and `XMLHttpRequest`.
+Web workers are out of reach of a user script, so a worker's own `fetch` of a project
+file still sees WebKit's status 0.
 
 | Call into the page | When |
 |---|---|
@@ -186,7 +200,7 @@ separate web view with its own handler (see [architecture](../architecture.md#co
 - Swift (`App/Services/WebWallpaper/`): `WebWallpaperHost` re-reads
   `webWallpapers()` on every snapshot and diffs it against one `WebWallpaperWindow`
   (`MWEWebWallpaperDesktopWindow`, desktop level, all Spaces, mouse-transparent) per
-  display. `WebWallpaperPage` owns the `WKWebView`, the host script (installed again
+  display. `WebWallpaperPage` owns the `WKWebView`, the user scripts (installed again
   with the committed frame-rate limit and render scale on every `load()`),
   property/pause delivery,
   host-side suspension and content-process recovery.
@@ -425,6 +439,9 @@ never substitutes Pause for an unavailable mute.
   queries and subframes see the display's own ratio, and a page that mixes the
   ratio into CSS pixel math can lay out differently at a lower scale. The image
   softens by design, like a scene's.
+- The `fetch`/`XMLHttpRequest` fixes for project files reach the page and every frame
+  it embeds, not web workers: a `fetch` made inside a worker still gets WebKit's
+  status 0 and no `Content-Type` for a local file.
 - Nonzero WebAudio gain is not controlled by the native media-volume interface;
   whole-page Mute still applies where WebKit exposes it.
 - A paused wallpaper's WebAudio is muted (`WebWallpaperAudioOwnership` gives a paused
@@ -436,7 +453,8 @@ never substitutes Pause for an unavailable mute.
 
 The page host is tested against a real offscreen `WKWebView` with no desktop window
 (`Tests/Unit/WebWallpaper/`: module loading, late-listener replay, local request
-metadata, pause composition, suspension by presentation and by pause with its
+metadata in the page and in iframe, `srcdoc` and script-created frames, pause
+composition, suspension by presentation and by pause with its
 first-frame grace and edits shown while paused, navigation lockdown, forwarded pointer events, mouse routing
 policy and move pacing, changed-only property delivery, frame pacing against a fake display
 cadence and in a real page with the rate a slow or full-refresh page draws at, the page
@@ -463,4 +481,5 @@ WebContent savings on WebGL, Spine and three.js pages (an A/B with
 that mix it into CSS pixel math also need an authorized desktop run. So does a real
 smoothing visualizer (bars that decay per callback) after the system audio stops, and
 a comparison with Wallpaper Engine's own behavior in silence if a Windows reference is
-ever available.
+ever available. A real Workshop page that hosts its player in an iframe needs an authorized
+desktop run, as does a page that makes its local requests from a worker.
