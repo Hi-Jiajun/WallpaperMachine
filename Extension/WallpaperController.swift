@@ -145,7 +145,9 @@ final class WallpaperController {
   }
 
   func acquire(id value: Any?, request: Any?, reply: @escaping (Any?, Error?) -> Void) {
+    let started = ContinuousClock.now
     var acquiring: LockScreenScene?
+    WallpaperRuntime.logRequestShape("acquire", request)
     do {
       guard let id = WallpaperRuntime.identifier(value), let request,
         let destination = WallpaperRuntime.field("destination", in: request),
@@ -189,12 +191,15 @@ final class WallpaperController {
           if let error { throw error }
           let contextReply = try WallpaperRuntime.contextReply(surface.context.contextId)
           self.acknowledge(surface: surface)
+          let elapsed = ContinuousClock.now - started
           reply(contextReply, nil)
-          WallpaperRuntime.log("Acquired id=\(id) display=\(scene.displayID) preview=\(preview)")
+          self.logFirstFrame(id: id, scene: scene, preview: preview, elapsed: elapsed)
         } catch {
           if !(error is CancellationError) {
             WallpaperRuntime.log(
-              "Acquire failed display=\(scene.displayID): \(error.localizedDescription)")
+              "Acquire failed display=\(scene.displayID) after "
+                + "\(LockScreenFirstFrameTiming.seconds(ContinuousClock.now - started)) s: "
+                + error.localizedDescription)
             self.acknowledge(surface: surface, error: error)
           }
           self.surfaces.retireAfterFailure(id, surface: surface, error: error)
@@ -214,6 +219,21 @@ final class WallpaperController {
       reply(nil, error)
       WallpaperRuntime.log("Acquire failed: \(error.localizedDescription)")
       if let acquiring { acknowledge(scene: acquiring, error: error) }
+    }
+  }
+
+  /// The time from the request arriving to the reply carrying the surface. A first frame that
+  /// takes most of WallpaperAgent's patience is called out on a line of its own.
+  private func logFirstFrame(id: UUID, scene: LockScreenScene, preview: Bool, elapsed: Duration) {
+    let seconds = LockScreenFirstFrameTiming.seconds(elapsed)
+    let verdict = LockScreenFirstFrameTiming.classify(elapsed)
+    WallpaperRuntime.log(
+      "Acquired id=\(id) display=\(scene.displayID) preview=\(preview) "
+        + "firstFrameAfter=\(seconds)s" + (verdict == .normal ? "" : " (\(verdict.rawValue))"))
+    if verdict == .nearLimit {
+      let patience = LockScreenFirstFrameTiming.seconds(LockScreenFirstFrameTiming.agentPatience)
+      WallpaperRuntime.log(
+        "First frame took \(seconds) s; WallpaperAgent gives up at about \(patience) s")
     }
   }
 
@@ -238,6 +258,7 @@ final class WallpaperController {
   }
 
   func update(id value: Any?, request: Any?) throws {
+    WallpaperRuntime.logRequestShape("update", request)
     guard let id = WallpaperRuntime.identifier(value), let surface = surfaces[id], let request
     else { throw WallpaperRuntime.failure("Unknown wallpaper surface.") }
     if let mode = WallpaperRuntime.field("presentationMode", in: request) {
@@ -263,6 +284,9 @@ final class WallpaperController {
     }
     surface.snapshot(reply: reply)
   }
+
+  /// Surfaces alive, for the line logged when a connection closes.
+  var surfaceCount: Int { surfaces.values.count }
 
   private func remove(_ id: UUID) {
     surfaces.remove(id)

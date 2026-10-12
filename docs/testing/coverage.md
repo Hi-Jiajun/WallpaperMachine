@@ -507,8 +507,18 @@ or depend on a second physical monitor.
   registry back, reports an election that does not change or a refused command, and
   leaves an election alone that is not this copy's ignore.
   `LockScreenExtensionDiagnosticsTests`, `LockScreenSurfaceRegistryTests`,
-  `LockScreenIdleExitTests` and `LockScreenFrameBackingTests` (snapshot pixels
-  composited under a Metal layer without a drawable) cover the extension side.
+  `LockScreenIdleExitTests` (including the open-connection count the close line
+  reports) and `LockScreenFrameBackingTests` (snapshot pixels composited under a Metal
+  layer without a drawable) cover the extension side.
+- `LockScreenFirstFrameTimingTests`, `LockScreenRequestShapeTests` and
+  `LockScreenConnectionTraceTests` — the log measurements: first-frame timing classified
+  at its 10 s and 20 s thresholds (with the near-limit warning before the agent's 31 s),
+  the seconds field printed with one decimal; request shapes reduced to sorted dotted
+  field names that never contain the values (optionals looked through, an enum case named
+  only when it carries a payload, dictionary keys and set members left out, names that are not
+  identifiers hidden) and bounded in depth, count and line length; and a connection's served
+  count exact under concurrent calls. Which fields the system's real requests carry, and how
+  long real first frames take, are what the extension logs report after a desktop run.
 - `LockScreenExtensionProcessesTests` — which running extension processes are
   stale (another bundle; a binary replaced after launch, by a newer file or by a
   copy that kept its source's old dates but holds another build than the one

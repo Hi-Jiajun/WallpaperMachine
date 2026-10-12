@@ -120,6 +120,20 @@ enum WallpaperRuntime {
     return onceKeys.insert(key).inserted
   }
 
+  /// Logs the field names of a request (never what they hold) the first time each distinct
+  /// shape of `kind` arrives in this process. The request types are private, and a later
+  /// decision about them needs to know what real requests carry; see
+  /// `LockScreenRequestShape`.
+  static func logRequestShape(_ kind: String, _ request: Any?) {
+    guard let request else { return }
+    // Deeper than the default: the system wraps the payload in one or two private layers.
+    let labels = LockScreenRequestShape.labels(of: request, maxDepth: 6)
+    guard firstTime("request-shape-\(kind)-" + labels.joined(separator: ",")) else { return }
+    log(
+      "Request shape \(kind): \(String(describing: type(of: request))) "
+        + LockScreenRequestShape.summary(labels))
+  }
+
   /// Compares the protocol this extension exports with the system's own declaration, once per
   /// process, and logs `XPC protocol matches the system` or `XPC protocol drift`. The check
   /// cannot change behavior: a system without the protocol or the runtime lookup is logged and

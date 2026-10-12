@@ -2,12 +2,21 @@ import AppKit
 import ExtensionFoundation
 
 private final class WallpaperHandler: NSObject, WallpaperExtensionXPCProtocol {
+  /// Counts what this connection carries, for the line logged when it closes.
+  private let trace: LockScreenConnectionTrace
+
+  init(trace: LockScreenConnectionTrace) {
+    self.trace = trace
+    super.init()
+  }
+
   /// Every request the system sends comes through here. One this extension has nothing to do
   /// for (`inert`) is answered with an empty result, and the first of each kind is logged so a
   /// request that macOS starts sending shows up in `extension.log`.
   private func serve<Result>(
     _ selector: String, inert: Bool = false, _ body: () -> Result
   ) -> Result {
+    trace.noteServed()
     if inert, WallpaperRuntime.firstTime("inert-\(selector)") {
       WallpaperRuntime.log("Unsupported request \(selector) answered inertly")
     }
@@ -194,13 +203,22 @@ private struct NativeWallpaperConfiguration: AppExtensionConfiguration {
     }
     WallpaperRuntime.verifyXPCProtocol(ours: interface.protocol)
     connection.exportedInterface = interface
-    connection.exportedObject = WallpaperHandler()
+    let trace = LockScreenConnectionTrace()
+    connection.exportedObject = WallpaperHandler(trace: trace)
     // Surface lifetime is owned by WallpaperID, not transient settings/thumbnail connections.
     // Counted before the connection resumes, so a pending idle exit cannot end
     // the process under it; the close always follows on the main queue.
     WallpaperController.idleExit.connectionOpened()
+    let pid = connection.processIdentifier
     connection.invalidationHandler = {
-      DispatchQueue.main.async { WallpaperController.idleExit.connectionClosed() }
+      DispatchQueue.main.async {
+        WallpaperController.idleExit.connectionClosed()
+        // served=0 is a connection that opened and closed without asking for anything.
+        WallpaperRuntime.log(
+          "Connection closed pid=\(pid) served=\(trace.served) "
+            + "open=\(WallpaperController.idleExit.openConnections) "
+            + "surfaces=\(WallpaperController.shared.surfaceCount)")
+      }
     }
     connection.resume()
     WallpaperRuntime.log("Accepted native host pid=\(connection.processIdentifier)")

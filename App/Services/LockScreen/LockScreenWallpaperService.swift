@@ -601,12 +601,22 @@ final class LockScreenWallpaperService {
     do {
       try await awaitFrames(configuration, until: deadline)
       unconfirmed = nil
+      AppLog.info(
+        "Native lock screen: first frame acknowledged after \(waited(until: deadline)) s "
+          + "(waited from selection reload)")
     } catch is CancellationError {
       throw CancellationError()
     } catch {
       unconfirmed = nil
       throw error
     }
+  }
+
+  /// Seconds since this activation began waiting, which includes the time an interrupted wait
+  /// already spent: a wait ends `readinessTimeout` after it began, whichever refresh resumes it.
+  private func waited(until deadline: Date) -> String {
+    let began = deadline.addingTimeInterval(-readinessTimeout)
+    return LockScreenFirstFrameTiming.seconds(.seconds(max(0, Date().timeIntervalSince(began))))
   }
 
   private func awaitFrames(_ configuration: LockScreenConfiguration, until deadline: Date) async throws {
@@ -634,10 +644,13 @@ final class LockScreenWallpaperService {
     if let other = runningExtensionBundles().first(where: {
       !LockScreenExtensionDiagnostics.isSameBundle($0, expected)
     }) {
-      AppLog.error("Native extension timeout: running bundle=\(other.path), expected=\(expected.path)")
+      AppLog.error(
+        "Native extension timeout: running bundle=\(other.path), expected=\(expected.path), "
+          + "waited \(waited(until: deadline)) s")
       throw LockScreenWallpaperFailure(
         message: LockScreenExtensionDiagnostics.differentCopyMessage, reason: .differentExtensionCopy)
     }
+    AppLog.error("Native lock screen: no first frame acknowledged after \(waited(until: deadline)) s")
     throw RendererUnavailable()
   }
 

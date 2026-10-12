@@ -481,6 +481,11 @@ contracts they must agree on:
 - `LockScreenXPCDrift` reads the extension's and the system's XPC protocol declarations and
   reports requests or reply types that differ; the extension logs the result once per launch
   (see [After a macOS update](features/lock-screen.md#after-a-macos-update)).
+- `LockScreenFirstFrameTiming`, `LockScreenRequestShape` and `LockScreenConnectionTrace` only
+  measure: how long an acquire took to reply, which field names a private request carries
+  (never their values) and how many requests each service connection served. The extension
+  and the app write them to their logs (see
+  [What the logs record](features/lock-screen.md#what-the-logs-record)); nothing reads them back.
 
 Rules of the exchange:
 

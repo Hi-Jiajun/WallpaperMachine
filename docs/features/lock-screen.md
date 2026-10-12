@@ -319,6 +319,42 @@ in-app updater. A process that cannot be told apart from the registered build (t
 build, or one whose build cannot be read) is left alone; quit it with
 `pkill -x WallpaperMachineExtension` or log out.
 
+### What the logs record
+
+Beyond failures, the extension and the app log a few measurements, so that decisions
+about the private wallpaper-service requests rest on what real activations do. They
+change no behavior, and none has yet been read from a real activation, so this page
+states no latency or request finding.
+
+In `extension.log`:
+
+- `Acquired id=... firstFrameAfter=3.4s`: the time from the request arriving to the reply
+  that carries the surface, which is when WallpaperAgent receives its first frame. From
+  10 seconds the line adds `(slow)`, and from 20 seconds `(near limit)` together with
+  `First frame took 21.0 s; WallpaperAgent gives up at about 31.0 s`. WallpaperAgent was
+  observed to stop waiting after about 31 seconds on macOS 27, and the extension's own
+  deadline is 30. A failed acquire logs `Acquire failed display=... after X s: <reason>`.
+- `Connection closed pid=... served=K open=M surfaces=S`: one line per wallpaper-service
+  connection, with the requests it carried, the connections still open and the surfaces
+  still alive. `served=0` is a connection that opened and closed without asking for
+  anything. Nothing acts on it.
+- `Request shape acquire: <type> destination destination.size ...` (and `update`): the field
+  names an acquire or update request carries, once per distinct shape per launch. Only
+  names are recorded, never what they hold: no paths, titles, identifiers or sizes; dictionary
+  keys and set members, which are data, are left out, and a name that is not a plain
+  identifier shows as `?`. The line is capped in length.
+
+In the app log (the [diagnostics report](diagnostics.md#diagnostics-report) includes it):
+`Native lock screen: first frame acknowledged after 4.2 s (waited from selection reload)`
+is how long the app waited, from applying the selection (which reloads the wallpaper
+service when the selection changed) to the first acknowledged frame, so it includes that
+reload; a timeout logs `no first frame acknowledged after 35.0 s` (or adds `waited` to the
+running-copy line) instead.
+
+```sh
+grep 'firstFrameAfter\|First frame took\|Connection closed\|Request shape' ~/Library/Application\ Support/WallpaperMachine/LockScreenExchange/extension.log
+```
+
 ## Turning it off
 
 Disabling either control restores only its still-owned selections. Quitting restores
@@ -394,9 +430,10 @@ native-context/WebKit surface) are inventoried under *Lock screen* in
 select no real wallpaper. Real idle transitions, password UI, multi-monitor compositor
 delivery, sleep/wake visuals, live registration repair, ending a genuinely stale
 extension process, macOS choosing the intended extension, switching a really ignored
-renderer back on from Retry and the wallpaper service's wake and time-change notices
-completing without an error in WallpaperAgent's log still require an authorized desktop
-check.
+renderer back on from Retry, the wallpaper service's wake and time-change notices
+completing without an error in WallpaperAgent's log, and what the timing, connection and
+request-shape lines report after a real activation (see [What the logs
+record](#what-the-logs-record)) still require an authorized desktop check.
 
 ### After sleep, wake, lock and unlock
 
