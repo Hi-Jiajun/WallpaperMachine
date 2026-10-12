@@ -1177,6 +1177,8 @@ extension WebPanelController {
     }
     // Read once, here: the report is the only consumer, so nothing polls the window server.
     environment.append(contentsOf: DesktopWindowDiagnostics.current())
+    environment.append(ProcessFootprint.reportLine(
+      bytes: ProcessFootprint.current(), wallpaperWindows: WallpaperPresentationPolicy.wallpaperWindows().count))
     let bundle = DiagnosticsBundle(
       sources: DiagnosticsBundle.sources(logsRoot: try store.logFolderURL()),
       redactor: DiagnosticsRedactor(

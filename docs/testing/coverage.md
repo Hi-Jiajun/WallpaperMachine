@@ -196,6 +196,12 @@ per-Space assignments; see
   self-expiring session, per surface, with a bounded table; the report keeps
   surface-exclusive and shared work apart, never labels present requests as
   displayed frames, and states the milliseconds it counted.
+- `MemoryPressureMonitorTests` and `ProcessFootprintTests` — each pressure level's
+  report with the footprint and presenting-scene count, the length of a stretch of
+  pressure, the 5-second collapse of repeats, an unreadable footprint staying unknown
+  rather than zero, one test pinning the wording of the two lines the diagnostics doc
+  shows, and the footprint of the test process growing with the memory it touches.
+  A real pressure transition is not provoked.
 - `EnergyUsageMonitorTests` and `WallpaperEnergyRatingsTests` — coalition
   readings, contention, before/after comparisons, grades, battery share and the
   rating recorder; two `testKernelCounters…` cases read the test process's real

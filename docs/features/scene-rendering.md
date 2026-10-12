@@ -402,6 +402,11 @@ Closing the control panel releases its web view and allows its WebKit helpers to
 exit, rather than keeping the whole page hidden. Reopening reloads the page; see
 [panel lifecycle](control-panel.md#tabs).
 
+The app records macOS memory-pressure events together with its process footprint and
+the scenes it is presenting ([diagnostics](diagnostics.md#memory-pressure)). It does
+not unload, pause or stop a wallpaper on them: the footprint is for the whole process,
+so a scene cannot be singled out, and no threshold has been measured.
+
 ## Repeated-work reduction
 
 These renderer-internal optimizations do not change any setting, target frame rate,

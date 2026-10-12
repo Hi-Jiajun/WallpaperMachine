@@ -36,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var presentationPolicy: WallpaperPresentationPolicy?
     private var windowAuditor: WallpaperWindowAuditor?
     private var wakeRevalidator: SystemWakeRevalidator?
+    private var memoryPressureMonitor: MemoryPressureMonitor?
     private var appRuleMonitor: AppRuleMonitor?
     private var otherAudioMonitor: OtherAudioMonitor?
     private var systemConditionMonitor: SystemConditionMonitor?
@@ -416,6 +417,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 guard let self, !self.shutdownInProgress else { return }
                 self.wakeRevalidator?.presentationResumed()
             }
+            // Records the system's memory-pressure events beside the app's footprint;
+            // it never unloads or pauses anything.
+            let pressure = MemoryPressureMonitor(presentingScenes: { [weak store] in
+                MemoryPressureMonitor.presentingSceneCount(store?.settingsSnapshot.sceneUpdateModes ?? [])
+            })
+            memoryPressureMonitor = pressure
+            pressure.start()
             startPlaylistScheduler(store: store)
             startAutomaticWallpapers(store: store)
             // The Shortcuts app lists these; commands wait for the handler set after bootstrap.
@@ -701,6 +709,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         windowAuditor = nil
         wakeRevalidator?.stop()
         wakeRevalidator = nil
+        memoryPressureMonitor?.stop()
+        memoryPressureMonitor = nil
         desktopWallpaperSync?.stop()
         previewWindow?.session.close()
         previewWindow?.close()
@@ -873,6 +883,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 windowAuditor = nil
                 wakeRevalidator?.stop()
                 wakeRevalidator = nil
+                memoryPressureMonitor?.stop()
+                memoryPressureMonitor = nil
                 desktopWallpaperSync = nil
                 sceneMediaSink?.shutdown()
                 sceneMediaSink = nil

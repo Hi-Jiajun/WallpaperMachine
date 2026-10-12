@@ -200,6 +200,42 @@ the next launch logs `previous session: quit normally (logout; desktop restorati
 unfinished)`. A stage that stalls
 is a sign of what to look at (a SteamCMD that does not stop, a renderer shutdown that
 hangs), and the stage durations of ordinary quits are what its budget has to be tuned from.
+### Memory pressure
+
+macOS tells every process when the Mac's memory gets short and when it recovers. The
+app writes each change to the log with the memory it was using and the scenes it was
+drawing at that moment, so a report can show whether memory was short when something
+went wrong:
+
+```
+memory pressure warning: process footprint 3.2 GB, 2 scenes presenting
+memory pressure normal after 42 s: process footprint 2.1 GB
+```
+
+The first is a `WARN` line, the second an `INFO` line.
+
+- **Level**: `warning` and `critical` are warnings; the return to `normal` is information
+  and is written only after pressure the log reported, with how long it lasted.
+- **Footprint**: the process's physical footprint, the figure Activity Monitor shows as
+  "Memory" (`ri_phys_footprint`). It is for the whole app and cannot say which wallpaper
+  holds the memory. When macOS does not answer the line says `unknown`, never `0`.
+- **Scenes presenting**: scene wallpapers drawing or waiting to draw, as of the last
+  snapshot. A scene the user paused, the system suspended or that stopped after a failure
+  is not counted. Web pages and native videos are not scenes and are not counted.
+- **Rate**: the same level repeated within 5 seconds is one line, measured from the line
+  that was written. A change of level is always a line.
+
+The app only records. It does not unload, pause or lower a wallpaper in response, and
+nothing reads a threshold: a limit would need footprints measured on real Macs and a way
+to tell which scene to give up, and stopping a wallpaper unprompted is more intrusive
+than the problem it guards against. The event source is cancelled when the app quits
+and nothing polls. The lock-screen extension is a separate process, and neither
+its footprint nor its pressure events are recorded.
+
+The report's `environment.txt` includes the footprint at export time and the number of
+wallpaper windows open (`process footprint 2.4 GB (physical), 6 wallpaper windows`, or
+`process footprint unknown, …`), which gives the figure above something to be read
+against.
 
 ### Levels and detailed logging
 
@@ -244,7 +280,7 @@ reveals it in Finder. It is built off the main actor by `DiagnosticsBundle`
 | `load-journal.json` | The crash-loop guard's journal, [crash-recovery.md](crash-recovery.md): the strikes per wallpaper and the scenes that were opening when the app last stopped. Wallpaper ids, display numbers, times, the build and an opaque session id; no paths. The file exists once a scene has been opened; without it the report notes that it was not present |
 | `crash-reports/*.ips` | Up to 5 macOS crash reports from the last 14 days whose name starts with `WallpaperMachine` (app and extension) |
 | `diagnostic-reports/*.diag`, `*.spin`, `*.hang` | Up to 5 macOS resource, spin and hang reports from the last 14 days whose name starts with `WallpaperMachine`, newest first across both report folders. See [below](#macos-resource-spin-and-hang-reports) |
-| `environment.txt` | The environment lines above, read at export time, plus the saved renderer preferences, the backend and live mode of each running scene (`mode stopped_after_failure` for a scene whose renderer stopped after a failure, apart from `user_paused` and `policy_suspended`; see [scene rendering](scene-rendering.md#a-scene-that-stops-drawing)), and the state of each wallpaper window with whether the displays have separate Spaces ([below](#wallpaper-window-state)) |
+| `environment.txt` | The environment lines above, read at export time, plus the saved renderer preferences, the backend and live mode of each running scene (`mode stopped_after_failure` for a scene whose renderer stopped after a failure, apart from `user_paused` and `policy_suspended`; see [scene rendering](scene-rendering.md#a-scene-that-stops-drawing)), the state of each wallpaper window with whether the displays have separate Spaces ([below](#wallpaper-window-state)), and the app's memory footprint at export time ([above](#memory-pressure)) |
 | `README.txt` | What is included, what was missing or skipped, and what was redacted |
 
 Everything except `README.txt` passes through `DiagnosticsRedactor` first:
@@ -436,6 +472,11 @@ them as well as for a repair. A check that fails to reach the bridge writes
   `SystemWakeRevalidatorTests` (when the wake check is asked for, deferred and
   superseded, and how its answer is logged, with injected notifications, delays and
   bridge answers).
+  `MemoryPressureMonitorTests` (what each pressure level logs, the duration of a
+  stretch of pressure, the 5-second collapse and an unreadable footprint, with events
+  fed to the handler and an injected clock) and `ProcessFootprintTests` (the byte
+  formatting, and the real footprint read of the test process, which grows when the
+  process touches memory).
 - Not established by tests:
   - that a real scene's renderer lines carry its number on the desktop;
   - the unreadable-folder note on a Mac whose account is not in `_analyticsusers`
@@ -455,6 +496,8 @@ them as well as for a repair. A check that fails to reach the bridge writes
   - the wallpaper window lines for open wallpaper windows (the window server read is checked
     against whatever window the session lists on screen, and skipped when there is none; the
     AppKit read against an `NSWindow` that is never shown);
+  - a real memory-pressure transition: the test host cannot provoke one safely, so the
+    handler is called directly and the dispatch source that feeds it is not exercised;
   - whether macOS ever leaves a wallpaper window on another Space on a given release, whether
     a window of these kinds reports `isOnActiveSpace` in a full-screen Space, and whether
     either repair step brings an off-Space window back: the audit's decisions are tested, the
