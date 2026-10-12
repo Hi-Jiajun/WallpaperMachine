@@ -521,6 +521,120 @@ final class WorkshopSourceTests: XCTestCase {
         .first { $0.name == "searchtext" }?.value, Self.pasted)
   }
 
+  // MARK: A browse page whose markup changed
+
+  private static let degradedIDs = ["1000000001", "1000000002", "1000000003"]
+
+  private func serve(_ ids: [String]) {
+    fixture.details = Dictionary(uniqueKeysWithValues: ids.map { ($0, detailsRow($0, tags: ["Scene", "Everyone"])) })
+  }
+
+  /// A page without the render context is not an error while its links still name the items:
+  /// they are listed in the page's order from their details, once each, and the list says it
+  /// is approximate. Its totals are the number of items seen.
+  func testAPageWithoutTheRenderContextIsListedFromItsLinks() async throws {
+    let store = fixture.store
+    let ids = Self.degradedIDs
+    fixture.browse = linksOnlyHTML(ids: [ids[2], ids[0], ids[1], ids[0]])
+    serve(ids)
+    store.search()
+    try await finished(store)
+    XCTAssertEqual(store.items.map(\.id), [ids[2], ids[0], ids[1]])
+    XCTAssertTrue(store.isDegraded)
+    XCTAssertNil(store.errorMessage)
+    XCTAssertTrue(store.hasLoaded)
+    XCTAssertEqual(store.page, 1)
+    XCTAssertEqual(store.totalPages, 1)
+    XCTAssertEqual(store.totalCount, 3)
+    XCTAssertEqual(fixture.detailsRequests, 1, "one batched request for the whole page")
+  }
+
+  /// Steam renaming the query key leaves the rows in its data: their ids are found there, and
+  /// an id Steam no longer serves, or that is not Wallpaper Engine's, is left out.
+  func testARenamedQueryIsListedFromTheIdsInItsData() async throws {
+    let store = fixture.store
+    let ids = Self.degradedIDs
+    fixture.browse = browseHTML(
+      rows: [ids[1], "1000000099", ids[2], ids[0]].map { wallpaperRow($0, tags: ["Scene"]) }, queryKey: "workshop_browse_v2")
+    serve(ids)
+    store.search()
+    try await finished(store)
+    XCTAssertEqual(store.items.map(\.id), [ids[1], ids[2], ids[0]])
+    XCTAssertTrue(store.isDegraded)
+    XCTAssertNil(store.errorMessage)
+
+    // The next search reads an ordinary page again, and the list is no longer approximate.
+    fixture.browse = browseHTML(rows: [wallpaperRow("12", tags: ["Scene"])])
+    store.searchText = "forest"
+    store.search()
+    try await finished(store)
+    XCTAssertEqual(store.items.map(\.id), ["12"])
+    XCTAssertFalse(store.isDegraded)
+  }
+
+  /// A full page of links suggests a page after it, and a page past the first counts the pages
+  /// before it; a short page is taken as the last.
+  func testAFullDegradedPageOffersAnotherPageAndAShortOneIsTheLast() async throws {
+    let store = fixture.store
+    let first = (0..<30).map { String(2_000_000_000 + $0) }
+    let second = (30..<35).map { String(2_000_000_000 + $0) }
+    fixture.browsePages = [1: linksOnlyHTML(ids: first), 2: linksOnlyHTML(ids: second)]
+    serve(first + second)
+    store.search()
+    try await finished(store)
+    XCTAssertEqual(store.items.map(\.id), first)
+    XCTAssertTrue(store.isDegraded)
+    XCTAssertEqual(store.totalPages, 2)
+
+    store.loadPage(2)
+    try await finished(store)
+    XCTAssertEqual(store.items.map(\.id), second)
+    XCTAssertTrue(store.isDegraded)
+    XCTAssertEqual(store.page, 2)
+    XCTAssertEqual(store.totalPages, 2)
+    XCTAssertEqual(store.totalCount, 35)
+  }
+
+  /// With nothing in the page to list, the original failure stands: an unreadable page never
+  /// passes for an empty list, and a list that cannot be listed is not invented.
+  func testAPageThatNamesNoItemFailsAsItDidBefore() async throws {
+    let store = fixture.store
+    func fails(_ page: Data, serving ids: [String]) async throws {
+      fixture.browse = page
+      serve(ids)
+      store.search()
+      try await finished(store)
+      XCTAssertEqual(store.errorMessage, WorkshopLayoutChanged.message)
+      XCTAssertTrue(store.items.isEmpty)
+      XCTAssertFalse(store.isDegraded)
+      XCTAssertFalse(store.hasLoaded)
+      XCTAssertNotNil(store.failedRequest)
+    }
+    try await fails(Data("<html><body>Steam is being rebuilt.</body></html>".utf8), serving: [])
+    // Links, but not to anything Steam serves for Wallpaper Engine.
+    try await fails(linksOnlyHTML(ids: Self.degradedIDs), serving: [])
+    // Steam answered its own query with a failure: its links are not a list to trust.
+    let before = fixture.detailsRequests
+    try await fails(
+      browseHTML(rows: [wallpaperRow(Self.degradedIDs[0], tags: ["Scene"])], eresult: 15), serving: Self.degradedIDs)
+    XCTAssertEqual(fixture.detailsRequests, before, "no item was looked up from a page Steam failed")
+  }
+
+  /// Collections are read by the same decoder but are not listed from links: their pages carry
+  /// every collection's children, which are not the page's items.
+  func testCollectionsAreNotListedFromLinks() async throws {
+    let store = fixture.store
+    fixture.browse = linksOnlyHTML(ids: Self.degradedIDs)
+    serve(Self.degradedIDs)
+    store.excludedTags = []
+    store.open(.collections)
+    try await finished(store)
+    XCTAssertEqual(store.errorMessage, WorkshopLayoutChanged.message)
+    XCTAssertTrue(store.items.isEmpty)
+    XCTAssertFalse(store.isDegraded)
+    XCTAssertEqual(fixture.detailsRequests, 0)
+  }
+
   // MARK: Fixtures
 
   private func finished(_ store: WorkshopStore) async throws {
@@ -611,15 +725,26 @@ final class WorkshopSourceTests: XCTestCase {
     ]
   }
 
+  /// A browse page of the kind Steam serves when it has changed its markup: item links and
+  /// no render context to read them from.
+  private func linksOnlyHTML(ids: [String]) -> Data {
+    let tiles = ids.map { id in
+      let link = "https://steamcommunity.com/sharedfiles/filedetails/?id=\(id)&searchtext="
+      return "<div class=\"workshopItem\"><a href=\"\(link)\"><img src=\"x\"></a><a href=\"\(link)\">Item \(id)</a></div>"
+    }.joined()
+    return Data("<html><body><div class=\"workshopBrowseItems\">\(tiles)</div></body></html>".utf8)
+  }
+
   private func browseHTML(
-    rows: [[String: Any]], page: Int = 1, pages: Int = 1, count: Int? = nil, legacy: Bool = false
+    rows: [[String: Any]], page: Int = 1, pages: Int = 1, count: Int? = nil, legacy: Bool = false,
+    queryKey: String = "workshop_browse", eresult: Int = 1
   ) -> Data {
     let queries: [[String: Any]] = [
       [
-        "queryKey": ["workshop_browse"],
+        "queryKey": [queryKey],
         "state": [
           "data": [
-            "eresult": 1, "current_page": page, "total_pages": pages, "total_count": count ?? rows.count,
+            "eresult": eresult, "current_page": page, "total_pages": pages, "total_count": count ?? rows.count,
             "results": rows,
           ]
         ],

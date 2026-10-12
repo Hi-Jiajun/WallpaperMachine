@@ -266,6 +266,7 @@ export default {
   '{count} results': '{count} 个结果',
   'Steam Workshop': 'Steam 创意工坊',
   'Showing the item from your link. Filters don’t apply to it.': '正在显示链接指向的项目，筛选对它不起作用。',
+  'Steam changed its Workshop page, so this list may be incomplete.': 'Steam 更改了创意工坊页面，因此此列表可能不完整。',
   '{count} selected': '已选 {count} 项',
   'Select all': '全选',
   'Move to Trash': '移到废纸篓',

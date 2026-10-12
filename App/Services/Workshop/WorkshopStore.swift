@@ -112,6 +112,9 @@ final class WorkshopStore {
   static let maxPages = WorkshopService.maxPages
   private(set) var isLoading = false
   private(set) var hasLoaded = false
+  /// The list on show was found from the links on a Steam page this app could no longer read
+  /// the usual way, so it may be incomplete and its page count is an estimate.
+  private(set) var isDegraded = false
   var errorMessage: String?
   let downloader: WorkshopDownloadManager
   let steamCMDSetup: SteamCMDSetupStore
@@ -790,6 +793,7 @@ final class WorkshopStore {
     committedQuery = nil
     sourceTitle = nil
     hasLoaded = false
+    isDegraded = false
   }
 
   /// The ids of subscribed wallpapers not in `installed`, asking Steam for every page of
@@ -950,6 +954,7 @@ final class WorkshopStore {
     reachableCount = min(result.totalCount, totalPages * Self.pageSize)
     page = min(totalPages, request.page)
     hasLoaded = true
+    isDegraded = result.isDegraded
     committedQuery = request.query
     sourceTitle = result.title
     failedRequest = nil

@@ -1001,8 +1001,10 @@ following (`WebWallpaperRenderScaleTests`, plus the render-scale cases of
   look-alikes that must stay searches (other hosts, user info or ports, bad ids,
   free text holding an id or a link); only the wallpapers list reads an id.
 - `WorkshopTests` — query and tag encoding, sort mapping, the details request and
-  its answers (served, withdrawn and other apps' items), and the single-item lookup
-  with a distinct reason for a removed, foreign, Application or unreadable row. The two `testLive…`
+  its answers (served, withdrawn and other apps' items), the single-item lookup
+  with a distinct reason for a removed, foreign, Application or unreadable row, the
+  ids a page names (every marker, first-seen order, uniqueness, junk digits, the
+  limit) and which pages count as a changed layout rather than a Steam failure. The two `testLive…`
   cases fetch Steam's real pages and are opt-in
   (`WALLPAPER_MACHINE_NETWORK_TESTS=1`, see
   [README.md](README.md#opt-in-layers)); the page format stays covered offline
@@ -1015,10 +1017,14 @@ following (`WebWallpaperRenderScaleTests`, plus the render-scale cases of
   passing for empty, the store's back history, sign-in, ended session and
   sign-out, and a pasted link or id: one tile that no sidebar filter hides, no
   browse page read, failures on the normal retry path, other sources ignoring the
-  id. `WebPanelWorkshopSourceTests` (Panel) cover the panel's source
+  id, and a browse page whose markup changed: listed from its links or the ids in
+  its renamed data, an id Steam does not serve left out, paging estimates, the
+  original failure when no item can be listed or Steam failed its own query, and
+  collections left alone. `WebPanelWorkshopSourceTests` (Panel) cover the panel's source
   actions, sign-in through an injected window, refusing to download a
-  collection and the snapshot's `lookup` flag. Steam's real sign-in window and a
-  real lookup against Steam are not covered.
+  collection and the snapshot's `lookup` and `degraded` flags. Steam's real sign-in
+  window, a real lookup against Steam and a real changed page (the markup is
+  fixture-built) are not covered.
 - `WorkshopThumbnailCacheTests` — one download per URL under concurrent requests,
   disk hits across instances, no cache entry after a failed fetch, the concurrency
   cap, oldest-first pruning, still-frame extraction from animated previews

@@ -84,6 +84,9 @@ struct WorkshopPage: Sendable {
     let totalCount: Int
     /// A name for the source the page came from when it has one, such as an author's.
     var title: String?
+    /// Set when Steam's page could not be read the usual way and the items were found from the
+    /// links it still carries: the list may be incomplete and its totals are estimates.
+    var isDegraded = false
 }
 
 /// Wallpaper Engine's Steam app id; every Workshop request is scoped to it.
@@ -94,6 +97,16 @@ enum WorkshopApp {
 struct WorkshopFailure: LocalizedError, Sendable {
     let message: String
     var errorDescription: String? { message }
+}
+
+/// A browse page that lacks what this app reads it by, its render context or the
+/// `workshop_browse` query inside it: Steam has changed its markup. A type of its own, so
+/// `WorkshopService.browse` can fall back to the item links the page still carries.
+struct WorkshopLayoutChanged: LocalizedError, Sendable {
+    static var message: String {
+        String(localized: "Steam changed its public page or requires a browser sign-in. Open Workshop on Steam, then retry.")
+    }
+    var errorDescription: String? { Self.message }
 }
 
 actor WorkshopService {
@@ -137,7 +150,34 @@ actor WorkshopService {
                 excludedTags: [String] = []) async throws -> WorkshopPage {
         let html = try await communityPage(Self.browseURL(search: search, kind: kind, sort: sort, page: page, tags: tags,
                                                           excludedTags: excludedTags))
-        return try Self.decodePage(html)
+        do {
+            return try Self.decodePage(html)
+        } catch let changed as WorkshopLayoutChanged {
+            return try await degradedPage(html: html, page: page, original: changed)
+        }
+    }
+
+    private var loggedDegradedPage = false
+
+    /// A browse page whose markup this app no longer reads, shown from the item links it still
+    /// carries: Steam's own order, each item's details from the public endpoint (which drops
+    /// whatever is not a Wallpaper Engine item), and totals that can only be estimated. With no
+    /// item found the original failure stands, so an unreadable page never passes for an empty list.
+    private func degradedPage(html: String, page: Int, original: WorkshopLayoutChanged) async throws -> WorkshopPage {
+        let ids = Self.itemIDs(in: html, limit: Self.pageSize)
+        guard !ids.isEmpty else { throw original }
+        let served = Dictionary(try await details(ids: ids).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let items = ids.compactMap { served[$0] }
+        guard !items.isEmpty else { throw original }
+        if !loggedDegradedPage {
+            loggedDegradedPage = true
+            AppLog.warn("Steam's Workshop page no longer has the data this app reads it by; listing the items its links name instead")
+        }
+        let number = max(1, page)
+        // A full page of links suggests another page after it; a short one is taken as the last.
+        return WorkshopPage(
+            items: items, page: number, totalPages: ids.count >= Self.pageSize ? number + 1 : number,
+            totalCount: (number - 1) * Self.pageSize + items.count, isDegraded: true)
     }
 
     /// A Steam Community page as text. `account` adds its session cookie, and only ever to a
@@ -570,11 +610,55 @@ actor WorkshopService {
         return nil
     }
 
+    /// How a browse page names an item: the link on its tile, the `publishedfileid` key of its
+    /// row in the page's JSON (also in the escaped form of the older `JSON.parse` literal), and
+    /// the attribute of older tiles.
+    private static let itemNeedles: [[UInt8]] = [
+        "sharedfiles/filedetails/?id=", #""publishedfileid":""#, #"publishedfileid\":\""#, #"data-publishedfileid=""#,
+    ].map { Array($0.utf8) }
+
+    /// The ids of the Workshop items a browse page names, in the order they first appear, at
+    /// most `limit`. Scanned as bytes for the markers an item has carried, not parsed, so it
+    /// still works when the page's structure is not what `decodeBrowse` expects. An id is 5 to 20
+    /// digits, none leading, that fit a `UInt64`.
+    static func itemIDs(in html: String, limit: Int) -> [String] {
+        guard limit > 0 else { return [] }
+        let bytes = Array(html.utf8)
+        var found: [(offset: Int, id: String)] = []
+        for needle in itemNeedles {
+            // Once a marker has named `limit` different items, a later one cannot be among the
+            // first `limit` of the page, so a page of any size is read only as far as it takes.
+            var named = Set<String>()
+            var from = 0
+            while named.count < limit, let at = firstIndex(of: needle, in: bytes, from: from) {
+                from = at + needle.count
+                if let id = itemID(in: bytes, at: from), named.insert(id).inserted { found.append((at, id)) }
+            }
+        }
+        var unique = Set<String>()
+        var ids: [String] = []
+        for entry in found.sorted(by: { $0.offset < $1.offset }) where unique.insert(entry.id).inserted {
+            ids.append(entry.id)
+            if ids.count == limit { break }
+        }
+        return ids
+    }
+
+    /// The id written at `start`: the whole run of digits there, when it is a plausible one
+    /// (no leading zero, and a number a `UInt64` holds).
+    private static func itemID(in bytes: [UInt8], at start: Int) -> String? {
+        var end = start
+        while end < bytes.count, (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(bytes[end]) { end += 1 }
+        guard (5...20).contains(end - start), bytes[start] != UInt8(ascii: "0") else { return nil }
+        let id = String(decoding: bytes[start..<end], as: UTF8.self)
+        return UInt64(id) == nil ? nil : id
+    }
+
     private static func firstIndex(of needle: [UInt8], in haystack: [UInt8], from start: Int) -> Int? {
         guard !needle.isEmpty, haystack.count >= needle.count else { return nil }
         var index = start
         while index <= haystack.count - needle.count {
-            if haystack[index] == needle[0], Array(haystack[index..<index + needle.count]) == needle { return index }
+            if haystack[index] == needle[0], haystack[index..<index + needle.count].elementsEqual(needle) { return index }
             index += 1
         }
         return nil
@@ -589,17 +673,21 @@ actor WorkshopService {
     /// A browse page and, for each collection on it, the ids of the wallpapers it holds (not
     /// the collections it holds), in the collection's order.
     static func decodeBrowse(_ html: String) throws -> (page: WorkshopPage, children: [String: [String]]) {
+        // Without the context or its query the page is not laid out as it was; `browse` then
+        // falls back to the links the page still carries.
         guard let context = renderContext(in: html),
               let queryString = context["queryData"] as? String,
               let queryData = try? JSONSerialization.jsonObject(with: Data(queryString.utf8)) as? [String: Any],
               let queries = queryData["queries"] as? [[String: Any]],
               let query = queries.first(where: { ($0["queryKey"] as? [Any])?.first as? String == "workshop_browse" }),
               let state = query["state"] as? [String: Any],
-              let result = state["data"] as? [String: Any],
-              let rows = result["results"] as? [[String: Any]],
-              (result["eresult"] as? Int) == 1 else {
-            throw WorkshopFailure(message: String(localized: "Steam changed its public page or requires a browser sign-in. Open Workshop on Steam, then retry."))
+              let result = state["data"] as? [String: Any] else {
+            throw WorkshopLayoutChanged()
         }
+        // The query is there and Steam answered it with something other than success: not a
+        // change of layout, so no list is guessed at from the page's links.
+        guard (result["eresult"] as? Int) == 1 else { throw WorkshopFailure(message: WorkshopLayoutChanged.message) }
+        guard let rows = result["results"] as? [[String: Any]] else { throw WorkshopLayoutChanged() }
         var creators: [String: String] = [:]
         for query in queries {
             guard let key = query["queryKey"] as? [String], key.count == 2, key[0] == "PlayerLinkDetails",

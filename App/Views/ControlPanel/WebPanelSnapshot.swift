@@ -79,6 +79,7 @@ extension WebPanelController {
     _ = workshop.totalCount
     _ = workshop.isLoading
     _ = workshop.hasLoaded
+    _ = workshop.isDegraded
     _ = workshop.errorMessage
     _ = workshop.sceneAssetsReady
     _ = workshop.sceneAssetsURL
@@ -599,6 +600,8 @@ extension WebPanelController {
       "error": workshop.errorMessage as Any? ?? null,
       // The grid shows the one item a pasted link or id named, which no filter applies to.
       "lookup": workshop.committedQuery?.itemID != nil,
+      // The list was found from the links on a Steam page whose markup changed: it may be incomplete.
+      "degraded": workshop.isDegraded,
       "source": workshopSource,
       // The Steam page listing what is on show, for Open on Steam.
       "steamURL": workshop.browseURL.absoluteString,

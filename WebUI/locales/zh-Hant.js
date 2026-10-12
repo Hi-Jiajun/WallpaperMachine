@@ -266,6 +266,7 @@ export default {
   '{count} results': '{count} 個結果',
   'Steam Workshop': 'Steam 工作坊',
   'Showing the item from your link. Filters don’t apply to it.': '正在顯示連結指向的項目，篩選對它不適用。',
+  'Steam changed its Workshop page, so this list may be incomplete.': 'Steam 變更了工作坊頁面，因此此清單可能不完整。',
   '{count} selected': '已選取 {count} 項',
   'Select all': '全選',
   'Move to Trash': '丟到垃圾桶',

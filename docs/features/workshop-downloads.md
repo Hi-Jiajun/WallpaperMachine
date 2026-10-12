@@ -83,6 +83,31 @@ it is an Application wallpaper, which runs Windows programs and is never offered
 id (six digits or more) when Return or Search is pressed, so typing an id never looks up
 its prefixes; a link typed by hand and ordinary words wait for the usual short pause.
 
+### When Steam changes the page's markup
+
+The wallpapers list reads Steam's browse page through the render context the page
+embeds and the `workshop_browse` query inside it. When Steam renames either (or the
+query's `results`), `decodeBrowse` throws `WorkshopLayoutChanged` instead of the generic
+failure, and `WorkshopService.browse` falls back to a degraded list instead of an
+error: it scans the page's bytes for the ids it names (item links, the
+`publishedfileid` key of a row in its JSON, also in the escaped form of the older
+`JSON.parse` literal, and the attribute of older tiles; `WorkshopService.itemIDs`),
+keeps the first 30 in page order, and asks the public details endpoint for them. The
+details endpoint already drops anything that is not a Wallpaper Engine item, so
+unrelated links the page carries fall away. The page keeps Steam's own filtering and
+order, because the request that fetched it carried them.
+
+The result is marked `isDegraded`: the summary line then says "Steam changed its
+Workshop page, so this list may be incomplete." instead of the result count (`degraded`
+in the snapshot), because the totals are only estimates. A full page of ids suggests
+one more page; a short one is the last, and a page past the first counts the pages
+before it as full. The fallback is logged once per run. The original failure stands,
+and no empty list is shown, when the page names no id, when no id belongs to a
+Wallpaper Engine item, and when the query is there but Steam answered it with a
+failure (`eresult` other than 1: a sign-in or access problem is not a layout change).
+Collections, which are read by the same decoder, are not listed this way: their pages
+carry every collection's children, so the ids they name are not the page's items.
+
 ### Tile thumbnails
 
 Steam's `preview_url` is the full-size preview, and most trending previews are

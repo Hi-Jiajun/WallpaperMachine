@@ -201,4 +201,87 @@ final class WorkshopTests: XCTestCase {
             XCTAssertEqual(($0 as? WorkshopFailure)?.message, unreadable)
         }
     }
+
+    // MARK: A browse page whose markup changed
+
+    /// Every way a page has named an item is found, in the order the page first names them, once
+    /// each; a run of digits that cannot be an id is not one.
+    func testItemIDsKeepFirstSeenOrderAndUniqueness() {
+        let escaped = #"JSON.parse("{\"rows\":[{\"publishedfileid\":\"7000000003\"}]}")"#
+        let html = """
+            <html><a href="https://steamcommunity.com/sharedfiles/filedetails/?id=1000000001&searchtext=">one</a>
+            <a href="https://steamcommunity.com/sharedfiles/filedetails/?id=1000000001&amp;searchtext=">one again</a>
+            <div data-publishedfileid="2000000002"></div>
+            <script>{"rows":[{"publishedfileid":"3000000003"},{"publishedfileid":"1000000001"}]}</script>
+            <script>\(escaped)</script>
+            <a href="/sharedfiles/filedetails/?id=1234">too short</a>
+            <a href="/sharedfiles/filedetails/?id=99999999999999999999">more than a UInt64 holds</a>
+            <a href="/sharedfiles/filedetails/?id=123456789012345678901">too long</a>
+            <a href="/sharedfiles/filedetails/?id=abc">not digits</a>
+            <a href="/sharedfiles/filedetails/?id=0000000">zero</a>
+            <a href="/sharedfiles/filedetails/?id=0000000042">padded with zeros</a>
+            <a href="/sharedfiles/filedetails/?id=4000000004">last</a>
+            </html>
+            """
+        XCTAssertEqual(
+            WorkshopService.itemIDs(in: html, limit: 30),
+            ["1000000001", "2000000002", "3000000003", "7000000003", "4000000004"])
+    }
+
+    /// A page of any size yields its first `limit` items, in page order, however the markers
+    /// interleave, and nothing when it names none.
+    func testItemIDsStopAtTheLimitAndAnEmptyPageNamesNone() {
+        var html = "<html>"
+        for index in 0..<200 {
+            let id = 5_000_000_000 + index
+            // The link comes first for even items and the JSON key first for odd ones; every item
+            // is named by both, so repeats must not count towards the limit.
+            let link = "<a href=\"/sharedfiles/filedetails/?id=\(id)\"></a>"
+            let key = "{\"publishedfileid\":\"\(id)\"}"
+            html += index % 2 == 0 ? link + key : key + link
+        }
+        html += "</html>"
+        let expected = (0..<30).map { String(5_000_000_000 + $0) }
+        XCTAssertEqual(WorkshopService.itemIDs(in: html, limit: 30), expected)
+        XCTAssertEqual(WorkshopService.itemIDs(in: html, limit: 3), Array(expected.prefix(3)))
+        XCTAssertEqual(WorkshopService.itemIDs(in: html, limit: 0), [])
+        XCTAssertEqual(WorkshopService.itemIDs(in: "<html>nothing here, id=1234567890</html>", limit: 30), [])
+    }
+
+    /// Only a page without the data the app reads it by is a change of layout. A page whose query
+    /// Steam answered with a failure is not: nothing is guessed from its links then.
+    func testOnlyAMissingContextOrQueryIsALayoutChange() throws {
+        func queryData(_ queries: [[String: Any]]) throws -> String {
+            String(decoding: try JSONSerialization.data(withJSONObject: ["queries": queries]), as: UTF8.self)
+        }
+        func page(_ queries: [[String: Any]]) throws -> String {
+            let ssr = String(
+                decoding: try JSONSerialization.data(
+                    withJSONObject: ["renderContext": ["queryData": try queryData(queries)]]), as: UTF8.self)
+            return "<html><script type=\"application/json\" id=\"valve-ssr-data\">\(ssr)</script></html>"
+        }
+        func browseQuery(_ data: [String: Any], key: String = "workshop_browse") -> [String: Any] {
+            ["queryKey": [key], "state": ["data": data]]
+        }
+        let row: [String: Any] = ["publishedfileid": "1000000001", "consumer_appid": 431960, "title": "A"]
+
+        for html in [
+            "<html>Sign in required</html>",
+            try page([]),
+            try page([browseQuery(["eresult": 1, "results": [row]], key: "workshop_browse_v2")]),
+            try page([browseQuery(["eresult": 1, "items": [row]])]),
+        ] {
+            XCTAssertThrowsError(try WorkshopService.decodePage(html)) {
+                XCTAssertTrue($0 is WorkshopLayoutChanged, "\(html)")
+            }
+        }
+        XCTAssertThrowsError(try WorkshopService.decodePage(try page([browseQuery(["eresult": 15, "results": [row]])]))) {
+            XCTAssertFalse($0 is WorkshopLayoutChanged)
+            XCTAssertTrue($0 is WorkshopFailure)
+        }
+        XCTAssertEqual(
+            try WorkshopService.decodePage(try page([browseQuery(["eresult": 1, "results": [row]])])).items.map(\.id),
+            ["1000000001"])
+        XCTAssertFalse(try WorkshopService.decodePage(try page([browseQuery(["eresult": 1, "results": [row]])])).isDegraded)
+    }
 }

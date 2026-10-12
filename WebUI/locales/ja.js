@@ -266,6 +266,7 @@ export default {
   '{count} results': '{count}件の結果',
   'Steam Workshop': 'Steamワークショップ',
   'Showing the item from your link. Filters don’t apply to it.': 'リンク先のアイテムを表示しています。フィルタは適用されません。',
+  'Steam changed its Workshop page, so this list may be incomplete.': 'Steamがワークショップのページを変更したため、この一覧は不完全な可能性があります。',
   '{count} selected': '{count}個を選択中',
   'Select all': 'すべてを選択',
   'Move to Trash': 'ゴミ箱に入れる',
