@@ -35,10 +35,11 @@ enum GlobalPresentation: Comparable, Sendable {
 
 /// Suspends wallpaper presentation per display while no pixel from that display
 /// can reach the user, or, unless the user chose to keep it running, while
-/// other windows cover that display's working area; and globally only for
-/// conditions that really do cover every screen. Suspension never changes the
-/// user's Play/Pause choice: the bridge composes this signal with the playback
-/// state and restores playback when it clears.
+/// other windows cover that display's working area, or, if the user chose to
+/// play only where they are working, while the pointer is on another display;
+/// and globally only for conditions that really do cover every screen.
+/// Suspension never changes the user's Play/Pause choice: the bridge composes
+/// this signal with the playback state and restores playback when it clears.
 ///
 /// The split matters for power: a window covering the wallpaper on one display
 /// must stop that display's decoding and rendering, and must not stop a display
@@ -60,6 +61,7 @@ final class WallpaperPresentationPolicy {
     private let otherAudioAction: @MainActor () -> OtherAudioAction
     private let desktopCoveredAction: @MainActor () -> DesktopCoveredAction
     private let coveredDisplays: @MainActor () -> Set<UInt32>
+    private let inactiveDisplays: @MainActor (Set<UInt32>) -> Set<UInt32>
     private let screenLayout: @MainActor () -> [NSRect]
     /// Owned only when neither surfaces nor coverage were injected.
     private let probes: WallpaperCoverageProbes?
@@ -105,6 +107,22 @@ final class WallpaperPresentationPolicy {
     /// does not set this.
     var isSuspended: Bool { globalPresentation != .running }
 
+    /// The suspended displays that something hides from the user (a full-screen app, a covered
+    /// working area), leaving out the ones paused only because they chose to play where they work
+    /// and are elsewhere. The unattended update alert waits for the first and not for the second.
+    /// A display the user is not using that a full-screen app also fills is hidden: being idle
+    /// by choice does not make that app's window any less in the way of a modal alert.
+    var hiddenDisplayIDs: Set<UInt32> {
+        suspendedDisplayIDs.subtracting(idleInPlainSight(surfaces()))
+    }
+
+    /// Whether the display is suspended only because the user is working on another one: its
+    /// wallpaper is on screen, nothing covers it and no full-screen app is on it. A web page on
+    /// such a display still owes it a first frame before it stops; on a hidden display it owes none.
+    func isSuspendedInPlainSight(displayID: UInt32) -> Bool {
+        idleInPlainSight(surfaces()).contains(displayID)
+    }
+
     /// Called once the bridge has accepted a resume: the whole desktop running
     /// again after a suspend or unload, or one display running again after its
     /// own suspension. Not called for a suspension, for a first delivery to a
@@ -131,6 +149,7 @@ final class WallpaperPresentationPolicy {
         otherAudioAction: (@MainActor () -> OtherAudioAction)? = nil,
         desktopCoveredAction: (@MainActor () -> DesktopCoveredAction)? = nil,
         coveredDisplays: (@MainActor () -> Set<UInt32>)? = nil,
+        inactiveDisplays: (@MainActor (Set<UInt32>) -> Set<UInt32>)? = nil,
         screenLayout: (@MainActor () -> [NSRect])? = nil,
         occlusionSettleDelay: Duration = .seconds(1),
         counters: RuntimeCounters? = nil,
@@ -159,6 +178,7 @@ final class WallpaperPresentationPolicy {
             self.coveredDisplays = { [] }
             probes = nil
         }
+        self.inactiveDisplays = inactiveDisplays ?? { _ in [] }
         self.screenLayout = screenLayout ?? { Self.systemScreenLayout() }
         self.occlusionSettleDelay = occlusionSettleDelay
         self.counters = counters ?? .shared
@@ -299,17 +319,37 @@ final class WallpaperPresentationPolicy {
     }
 
     /// Wallpaper visibility with a covered working area counted as hidden when
-    /// the user chose to pause for it.
+    /// the user chose to pause for it, and the displays the user is not using
+    /// when they chose to play only on the one they are.
     private func currentSurfaces() -> [WallpaperSurfaceVisibility] {
         let current = surfaces()
-        guard desktopCoveredAction() == .pause else { return current }
-        let covered = coveredDisplays()
-        guard !covered.isEmpty else { return current }
+        var hiddenByPolicy: Set<UInt32> = []
+        if desktopCoveredAction() == .pause { hiddenByPolicy = coveredDisplays() }
+        hiddenByPolicy.formUnion(unusedDisplays(known: Set(current.map(\.displayID))))
+        guard !hiddenByPolicy.isEmpty else { return current }
         return current.map { surface in
-            covered.contains(surface.displayID)
+            hiddenByPolicy.contains(surface.displayID)
                 ? WallpaperSurfaceVisibility(displayID: surface.displayID, isVisible: false)
                 : surface
         }
+    }
+
+    /// The displays among `known` the user is not using, when they chose to play only where they
+    /// are. Never the only reason every display is dark: a mistaken answer cannot freeze the desktop.
+    private func unusedDisplays(known: Set<UInt32>) -> Set<UInt32> {
+        let inactive = inactiveDisplays(known).intersection(known)
+        return inactive == known ? [] : inactive
+    }
+
+    /// The displays the user is not using whose wallpaper nothing else hides: on screen, not
+    /// under a full-screen app and, when a covered working area pauses, not under other windows.
+    /// Only for these is not being used the one reason to stop. A display that is idle and also
+    /// hidden is not here, because its wallpaper would be stopped for the hiding alone.
+    private func idleInPlainSight(_ current: [WallpaperSurfaceVisibility]) -> Set<UInt32> {
+        var idle = unusedDisplays(known: Set(current.map(\.displayID)))
+        idle.subtract(current.filter { !$0.isVisible }.map(\.displayID))
+        if desktopCoveredAction() == .pause { idle.subtract(coveredDisplays()) }
+        return idle
     }
 
     /// Probes exist only while a covered desktop pauses, so keeping the

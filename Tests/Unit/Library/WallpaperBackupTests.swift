@@ -613,6 +613,23 @@ final class WallpaperBackupTests: XCTestCase {
         }
     }
 
+    func testPlayingOnlyOnTheActiveDisplayIsBackedUpAndOnlyABooleanRestores() throws {
+        let preferences = try defaults()
+        preferences.set(true, forKey: "WallpaperMachine.playOnlyOnActiveDisplay")
+        let export = try WallpaperBackupPreferences(defaults: preferences, domainName: domainName(for: preferences))
+        let key = "WallpaperMachine.playOnlyOnActiveDisplay"
+
+        let stored = try WallpaperBackupPreferences.decode(XCTUnwrap(export.values[key], key))
+        try WallpaperBackupPreferences.validate(stored, forKey: key)
+        XCTAssertEqual(stored as? Bool, true)
+        for value: Any in [true, false] {
+            XCTAssertNoThrow(try WallpaperBackupPreferences.validate(value, forKey: key), "\(value)")
+        }
+        for value: Any in ["yes", 1, 0, 2.5, NSNull(), ["true"]] {
+            XCTAssertThrowsError(try WallpaperBackupPreferences.validate(value, forKey: key), "\(value)")
+        }
+    }
+
     func testStructuredPreferenceRejectionPreservesPendingAndLiveArchive() async throws {
         let original = try fixture()
         let live = try defaults()

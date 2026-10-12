@@ -1087,6 +1087,10 @@ export default {
   'Low battery level': '低电量阈值',
   'Applies only while the Mac runs on battery. It ends 5 points above the level you choose, or when you plug in. The battery is at {percent}% now.': '仅在 Mac 使用电池供电时生效。电量回升到所选阈值再高 5 个百分点，或接上电源后结束。目前电量为 {percent}%。',
   'When the battery is low, wallpapers pause or stop once the charge falls to the level you chose, and resume when you plug in or the charge recovers.': '电量低时，壁纸会在电量降到你所选的阈值后暂停或停止，并在你接上电源或电量回升后恢复。',
+  // Play only on the display in use
+  'Only play on the display I’m using': '仅在我正在使用的显示器上播放',
+  'The display your pointer is on keeps playing. The others pause a few seconds after you leave them and resume the moment you return. Your own Play and Pause are not changed.': '鼠标指针所在的显示器会继续播放。其他显示器会在指针离开几秒后暂停，指针回来后立即恢复。不会改动你自己的播放和暂停。',
+  'With two or more displays, Only play on the display I’m using pauses the others a few seconds after your pointer leaves them.': '有两台或更多显示器时，“仅在我正在使用的显示器上播放”会在指针离开几秒后暂停其他显示器。',
   // Low Power Mode, heat and Focus
   'In Low Power Mode': '低电量模式下',
   'Low Power Mode is on now.': '低电量模式现已开启。',

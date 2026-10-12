@@ -25,6 +25,7 @@ final class PlaybackPreferencesTests: XCTestCase {
         XCTAssertEqual(preferences.lowBatteryAction, .keepRunning, "A low battery alone never changes playback")
         XCTAssertEqual(preferences.lowBatteryThreshold, 20)
         XCTAssertFalse(preferences.refreshesDesktopPicturePeriodically, "The Mission Control picture refreshes on a timer only when chosen")
+        XCTAssertFalse(preferences.playsOnlyOnActiveDisplay, "Every display plays unless the user asks otherwise")
         XCTAssertTrue(preferences.appRules.isEmpty)
     }
 
@@ -38,6 +39,7 @@ final class PlaybackPreferencesTests: XCTestCase {
         preferences.lowBatteryAction = .stop
         preferences.lowBatteryThreshold = 30
         preferences.refreshesDesktopPicturePeriodically = true
+        preferences.playsOnlyOnActiveDisplay = true
         let added = preferences.addRule(bundleIdentifier: "com.example.Player", name: "Player")
         try? preferences.updateRule(id: added.id, condition: .frontmost)
         try? preferences.updateRule(id: added.id, action: .stop)
@@ -51,6 +53,7 @@ final class PlaybackPreferencesTests: XCTestCase {
         XCTAssertEqual(reloaded.lowBatteryAction, .stop)
         XCTAssertEqual(reloaded.lowBatteryThreshold, 30)
         XCTAssertTrue(reloaded.refreshesDesktopPicturePeriodically)
+        XCTAssertTrue(reloaded.playsOnlyOnActiveDisplay)
         XCTAssertEqual(reloaded.appRules.count, 1)
         XCTAssertEqual(reloaded.appRules[0].bundleIdentifier, "com.example.Player")
         XCTAssertEqual(reloaded.appRules[0].condition, .frontmost)
@@ -149,6 +152,8 @@ final class PlaybackPreferencesTests: XCTestCase {
         XCTAssertEqual(posts.value, 5)
         preferences.removeRule(id: added.id)
         XCTAssertEqual(posts.value, 5, "Removing an unknown rule changes nothing")
+        preferences.playsOnlyOnActiveDisplay = true
+        XCTAssertEqual(posts.value, 6, "The policy re-evaluates from this notification")
     }
 }
 

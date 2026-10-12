@@ -46,6 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var systemConditionMonitor: SystemConditionMonitor?
     private var powerSourceMonitor: PowerSourceMonitor?
     private var powerSourceRefresh: Task<Void, Never>?
+    private var activeDisplayTracker: ActiveDisplayTracker?
     private var playlistScheduler: PlaylistScheduler?
     private var automaticWallpapers: WallpaperAutomationController?
     private var desktopSpaces: WallpaperSpaceMonitor?
@@ -284,12 +285,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             let appRules = AppRuleMonitor(preferences: preferences)
             let otherAudio = OtherAudioMonitor(preferences: preferences)
             let conditions = SystemConditionMonitor(preferences: preferences, focus: .shared)
+            let activeDisplay = ActiveDisplayTracker()
             appRuleMonitor = appRules
             otherAudioMonitor = otherAudio
             systemConditionMonitor = conditions
+            activeDisplayTracker = activeDisplay
             appRules.onChange = { [weak self] in self?.presentationPolicy?.evaluate() }
             otherAudio.onChange = { [weak self] in self?.presentationPolicy?.evaluate() }
             conditions.onChange = { [weak self] in self?.presentationPolicy?.evaluate() }
+            activeDisplay.onChange = { [weak self] in self?.presentationPolicy?.evaluate() }
             playbackPreferencesObserver = NotificationCenter.default.addObserver(
                 forName: PlaybackPreferences.didChangeNotification, object: preferences, queue: .main
             ) { [weak self] _ in
@@ -306,6 +310,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 otherAudioActive: { otherAudio.isActive },
                 otherAudioAction: { preferences.otherAudioAction },
                 desktopCoveredAction: { preferences.desktopCoveredAction },
+                // Another display than the one the pointer is on, for those who chose to play only there.
+                inactiveDisplays: { known in
+                    preferences.playsOnlyOnActiveDisplay ? activeDisplay.inactive(among: known) : []
+                },
                 applyGlobal: { [weak self] presentation, completion in
                     guard let self, let store = self.store,
                           !self.shutdownInProgress, !self.shutdownComplete else {
@@ -387,7 +395,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                         completion(.failure(CancellationError()))
                         return
                     }
-                    self.webWallpaperHost?.setPresentationSuspended(suspended, forDisplay: displayID)
+                    // A display paused only for the pointer being elsewhere is still on screen,
+                    // so a web page there draws its first frame before it stops.
+                    self.webWallpaperHost?.setPresentationSuspended(
+                        suspended, forDisplay: displayID,
+                        stillVisible: suspended && self.presentationPolicy?.isSuspendedInPlainSight(displayID: displayID) == true)
                     self.nativeVideoHost?.setPresentationSuspended(suspended, forDisplay: displayID)
                     self.wallpaperEnergy?.invalidate()
                     Task {
@@ -1087,6 +1099,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         } else {
             otherAudioMonitor?.start()
         }
+        activeDisplayTracker?.setEnabled(preferences.playsOnlyOnActiveDisplay)
     }
 
     private func stopPlaybackMonitoring() {
@@ -1098,6 +1111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         otherAudioMonitor?.stop()
         systemConditionMonitor?.stop()
         powerSourceMonitor?.stop()
+        activeDisplayTracker?.stop()
         powerSourceResampler?.stop()
         powerSourceRefresh?.cancel()
         powerSourceRefresh = nil
@@ -1523,7 +1537,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         UpdatePromptGate.Input(
             panelVisibleAndActive: controlPanelWindow.map { $0.isVisible && $0.isKeyWindow } ?? false,
             globalPresentation: presentationPolicy?.globalPresentation ?? .running,
-            hasSuspendedDisplay: presentationPolicy?.suspendedDisplayIDs.isEmpty == false,
+            hasSuspendedDisplay: presentationPolicy?.hiddenDisplayIDs.isEmpty == false,
             whatsNewOpen: whatsNewWindow != nil,
             shuttingDown: shutdownInProgress || shutdownComplete)
     }

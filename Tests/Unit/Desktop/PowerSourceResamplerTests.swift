@@ -146,32 +146,3 @@ private final class Rig {
         }
     }
 }
-
-private final class ManualSleep: @unchecked Sendable {
-    private let lock = NSLock()
-    private var continuations: [CheckedContinuation<Void, Never>] = []
-    private var count = 0
-
-    /// Sleeps begun and not yet released.
-    var waiting: Int { lock.withLock { continuations.count } }
-    /// Sleeps begun in all.
-    var started: Int { lock.withLock { count } }
-
-    func sleep(for duration: Duration) async {
-        await withCheckedContinuation { continuation in
-            lock.withLock {
-                count += 1
-                continuations.append(continuation)
-            }
-        }
-    }
-
-    func releaseAll() {
-        let released: [CheckedContinuation<Void, Never>] = lock.withLock {
-            let all = continuations
-            continuations.removeAll()
-            return all
-        }
-        for continuation in released { continuation.resume() }
-    }
-}

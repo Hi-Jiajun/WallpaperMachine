@@ -475,8 +475,13 @@ function draw(view) {
       t('Includes the control panel, the lock screen and the CPU side of video decoding. Screen compositing, the hardware video decoder, videos played with Native video, memory and the display itself are not included.'),
       t('Low: below 0.5 W. Medium: 0.5 W to below 2 W. High: 2 W or more.'),
       t('Change a quality setting below to compare energy use.')), 'settings-energy-help'));
+  // The option needs a second display to mean anything; it stays on screen while on, so it can be turned off.
+  const enabledDisplayCount = (state.displays || []).filter(display => display.enabled).length;
   const playback = group('performance-playback', t('Playback'),
     row('desktop-covered', t('When windows cover the desktop'), select('desktopCoveredAction', t('When windows cover the desktop'), draft('desktopCoveredAction', settings.desktopCoveredAction || 'pause'), localizedOptions(desktopCoveredActions), 'data-setting="desktopCoveredAction"', busy || unavailable), t('Covered means windows hide everything but the menu bar and the screen edges. Pause keeps the last frame there. Wallpapers you can’t see at all always pause.'))
+    + (enabledDisplayCount >= 2 || settings.playOnlyOnActiveDisplay
+      ? settingToggle('playOnlyOnActiveDisplay', 'Only play on the display I’m using', false, t('The display your pointer is on keeps playing. The others pause a few seconds after you leave them and resume the moment you return. Your own Play and Pause are not changed.'))
+      : '')
     + row('other-audio', t('When another app plays sound'), select('otherAudioAction', t('When another app plays sound'), draft('otherAudioAction', settings.otherAudioAction || 'keepRunning'), localizedOptions(otherAudioActions), 'data-setting="otherAudioAction"', busy || unavailable), t('Mute silences scene and video wallpapers, and Web wallpapers when page-output mute is available. Pause applies to every wallpaper.'))
     + row('display-sleep', t('When displays sleep'), select('displaySleepAction', t('When displays sleep'), draft('displaySleepAction', settings.displaySleepAction || 'pause'), localizedOptions(displaySleepActions), 'data-setting="displaySleepAction"', busy || unavailable), t('Stop frees renderer memory and reloads the wallpaper when the display wakes. Pause keeps it loaded.'))
     + row('battery-mode', t('On battery'), select('batteryMode', t('On battery'), draft('batteryMode', settings.batteryMode || 'keepRunning'), localizedOptions(batteryModes), 'data-setting="batteryMode"', busy || unavailable), t('Reduced quality uses the scale and frame rate below instead of your usual quality settings. Pause stops wallpapers until you plug in.'))
@@ -517,6 +522,7 @@ function draw(view) {
     + disclosure('performance-advanced', t('Advanced'), videoGroup + sceneGroup + experimentalGroup, 'settings-group settings-performance-advanced', t('Renderers & experimental options'))
     + disclosure('performance-context', t('What these settings change'), paragraphs(
       t('Wallpapers you can’t see, such as behind a full-screen app, pause on their own. When windows cover the desktop, Pause keeps the last frame and Keep running keeps it moving in the gaps.'),
+      t('With two or more displays, Only play on the display I’m using pauses the others a few seconds after your pointer leaves them.'),
       t('When another app plays sound, Mute uses each wallpaper’s output mute channel. Web mute availability is shown in its details. Pause stops every wallpaper until that sound ends.'),
       t('When displays sleep, Pause keeps wallpapers loaded. Stop frees renderer memory and reloads them when the display wakes.'),
       t('On battery, Keep running leaves quality alone, Reduced quality uses the battery scale and frame rate, and Pause stops wallpapers until you plug in. None of these promises a measured power saving.'),

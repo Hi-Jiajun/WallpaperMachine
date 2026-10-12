@@ -1087,6 +1087,10 @@ export default {
   'Low battery level': '低電量門檻',
   'Applies only while the Mac runs on battery. It ends 5 points above the level you choose, or when you plug in. The battery is at {percent}% now.': '僅在 Mac 使用電池供電時生效。電量回升到所選門檻再高 5 個百分點，或接上電源後結束。目前電量為 {percent}%。',
   'When the battery is low, wallpapers pause or stop once the charge falls to the level you chose, and resume when you plug in or the charge recovers.': '電量低時，桌布會在電量降到你所選的門檻後暫停或停止，並在你接上電源或電量回升後恢復。',
+  // Play only on the display in use
+  'Only play on the display I’m using': '僅在我正在使用的顯示器上播放',
+  'The display your pointer is on keeps playing. The others pause a few seconds after you leave them and resume the moment you return. Your own Play and Pause are not changed.': '游標所在的顯示器會繼續播放。其他顯示器會在游標離開幾秒後暫停，游標回來時立即恢復。不會變更你自己的播放與暫停操作。',
+  'With two or more displays, Only play on the display I’m using pauses the others a few seconds after your pointer leaves them.': '有兩台或更多顯示器時，「僅在我正在使用的顯示器上播放」會在游標離開幾秒後暫停其他顯示器。',
   // Low Power Mode, heat and Focus
   'In Low Power Mode': '低耗電模式時',
   'Low Power Mode is on now.': '低耗電模式目前已開啟。',

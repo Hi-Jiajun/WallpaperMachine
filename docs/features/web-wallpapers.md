@@ -220,7 +220,14 @@ separate web view with its own handler (see [architecture](../architecture.md#co
   by the same content layer, and a suspended page receives no pointer events. The
   document is never reloaded to suspend it, so its JavaScript state survives.
   Two reasons suspend a page and they compose, so clearing one leaves the other in
-  force. The presentation policy (no pixel can reach the display) suspends at once.
+  force. The presentation policy suspends at once when no pixel can reach the display
+  (asleep, locked, a full-screen app, a covered working area). A display that the
+  user can see but that is paused only because they chose to play on the display
+  they are using ([performance](performance.md#playback)) is not hidden: the
+  policy tells the host (`WallpaperPresentationPolicy.isSuspendedInPlainSight`,
+  `WebWallpaperHost.setPresentationSuspended(_:forDisplay:stillVisible:)`), and its
+  page waits for the first frame like a paused one, including a page created on a
+  display that is already paused, so a wallpaper set there is not left black.
   A paused wallpaper suspends once its first frame has had time to draw:
   `BridgeWebWallpaper.paused` is the bridge's composed flag (Play/Pause, battery
   Pause, and the bridge's own presentation and per-display suspension), and

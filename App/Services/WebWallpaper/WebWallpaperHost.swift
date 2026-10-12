@@ -52,6 +52,11 @@ final class WebWallpaperHost {
     /// Displays suspended on their own, kept apart from the global flag so one
     /// occluded screen cannot suspend a page on a visible screen.
     private var suspendedDisplays: Set<UInt32> = []
+    /// The part of `suspendedDisplays` the user can still see: paused only because
+    /// they are working on another display, not covered, asleep or behind a
+    /// full-screen app. A page on such a display is given its first frame before it
+    /// is detached, including one created after the display was suspended.
+    private var suspendedInPlainSight: Set<UInt32> = []
     private var stopped = false
     private let counters: RuntimeCounters
     /// Distinguishes surfaces that reused one display id across a wallpaper
@@ -553,7 +558,7 @@ final class WebWallpaperHost {
         if previous?.paused != wallpaper.paused {
             page.setPaused(wallpaper.paused)
         }
-        page.setPresentationSuspended(isSuspended(displayID: wallpaper.displayId))
+        applyPresentationSuspension(to: page, displayID: wallpaper.displayId)
         if page.isLoaded { recordState(wallpaper, phase: .ready) }
         else if let prior = states[wallpaper.displayId], prior.startupRevision != wallpaper.startupRevision {
             recordState(wallpaper, phase: prior.phase, message: prior.message, canRetry: prior.canRetry)
@@ -615,26 +620,41 @@ final class WebWallpaperHost {
         suspended || suspendedDisplays.contains(displayID)
     }
 
+    /// The desktop-wide conditions (sleep, lock, an app rule) hide every display,
+    /// so they leave nothing in sight whatever one display was told.
+    private func applyPresentationSuspension(to page: WebWallpaperPage, displayID: UInt32) {
+        page.setPresentationSuspended(
+            isSuspended(displayID: displayID),
+            stillVisible: !suspended && suspendedInPlainSight.contains(displayID))
+    }
+
     /// Mirrors `WallpaperPresentationPolicy`: pages suspend while no pixel can
     /// reach any display, without touching the user's play/pause choice.
     func setPresentationSuspended(_ suspended: Bool) {
         self.suspended = suspended
         for (displayID, window) in windows {
-            window.page.setPresentationSuspended(isSuspended(displayID: displayID))
+            applyPresentationSuspension(to: window.page, displayID: displayID)
         }
         refreshPointerMonitor()
         refreshAudioOutputs()
     }
 
     /// Suspends the page on one display only. A window covering the wallpaper
-    /// on one screen must not stop the page on another.
-    func setPresentationSuspended(_ suspended: Bool, forDisplay displayID: UInt32) {
+    /// on one screen must not stop the page on another. `stillVisible` marks a
+    /// display the user can see that is paused only because they are working on
+    /// another one, whose page draws a frame before it is detached.
+    func setPresentationSuspended(_ suspended: Bool, forDisplay displayID: UInt32, stillVisible: Bool = false) {
         if suspended {
             suspendedDisplays.insert(displayID)
         } else {
             suspendedDisplays.remove(displayID)
         }
-        windows[displayID]?.page.setPresentationSuspended(isSuspended(displayID: displayID))
+        if suspended && stillVisible {
+            suspendedInPlainSight.insert(displayID)
+        } else {
+            suspendedInPlainSight.remove(displayID)
+        }
+        if let page = windows[displayID]?.page { applyPresentationSuspension(to: page, displayID: displayID) }
         refreshPointerMonitor()
         refreshAudioOutputs()
     }

@@ -25,6 +25,15 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-13 — Play only on the display in use
+
+Commit `feat(playback): optionally play only on the display you are using`: opt-in Playback toggle `Only play on the display I’m using`. ActiveDisplayTracker follows the pointer through event monitors that exist only while the option is on and two displays are connected; WallpaperPresentationPolicy treats every other display as hidden after a 3 s dwell and resumes at once, never darkening every display. No bridge or Rust change. Taken in a worktree; the full gate was not run here.
+
+- `python3 scripts/test.py --only ActiveDisplayTrackerTests --only WallpaperPresentationPolicyTests --only PlaybackPolicyCompositionTests --only PlaybackPreferencesTests --only WebPanelPerformanceSettingsTests --only PowerSourceResamplerTests --only WallpaperBackupTests` plus SystemConditionMonitorTests, LowBatteryTests, WebPanelGeneralSettingsTests, ControlPanelPlaybackToolsTests, ControlPanelSnapshotDeliveryTests, WebPanelAssetsTests, AppRuleMonitorTests, OtherAudioMonitorTests — 152 passed of 152 (19 new).
+- Deliberate breaks (a wait that ignores cancellation, a pointer entry that leaves the old wait running, no never-darken-every-display guard) each failed the new tests; all were reverted.
+- `python3 -m unittest scripts.tests.test_panel_localization` — 5 passed (three new WebUI strings in ja, zh-Hans, zh-Hant).
+- Not run: the full gate; real global and local pointer events across two physical displays, whether the global monitor sees the pointer while this app is in front, the display-ID mapping with mixed scaling, how the 3 s dwell feels, and the live row layout. All need an authorized two-display desktop run.
+
 ## 2026-10-13 — Low-battery playback rule
 
 New Playback rule `When the battery is low` (Keep running, Pause or Stop at 10, 20 or 30 percent; internal battery only). It joins SystemConditionMonitor's actions, reads IOKit's power-source notification only while an action is chosen, and is hidden on Macs without a battery. No bridge or Rust change.
@@ -115,11 +124,3 @@ SceneRuntimeContext rotated a non-centre layer about its centre and slid its anc
 - `python3 scripts/check_renderer.py`: exit 0; 12/12 generated scenes pixel-equal pooled vs isolated; reload cycles 0. Skipped: 2 local-asset text tests, local video import, local-project Metal (run by hand above).
 - `python3 scripts/test.py`: Python suites OK; native 1334 passed, 0 failed, 14 skipped of 1348.
 - Gap: Wallpaper Engine's offset for a script-set alignment (full size*scale vs this renderer's scale delta) is unconfirmed; 8-unit bars differ by 4 units, too little for a preview. Not rebuilt as a Release app.
-
-## 2026-10-11 — Custom playlist interval: review fixes and first native gate
-
-- Review follow-up for the custom rotation interval: abandoned or refused minutes keep or drop drafts correctly; draft keys come from one helper; the hint follows the native range; the minutes field reuses the display number helper; docs note older builds' fallback and backup refusal.
-- First full gate on macOS: python3 scripts/test.py, first run failed 2 stale tests (PlaylistPlannerTests and WallpaperBackupTests still expected a 7-minute interval to be refused); both now use 0. Rerun: 1,321 passed, 0 failed, 14 skipped of 1,335.
-- Run in a detached worktree of the PR branch, linked against main's libwallpaper_bridge.a (no App/Bridge differences between the trees).
-- Headless Chromium harness over renderSettings with a stub snapshot: Custom sends nothing and starts from the saved interval; leaving after an invalid 0 restores the saved preset; switching apps keeps a typed value; a valid value committed on leave is saved; a refused send keeps the field and value next to the error; a typed preset snaps the menu back.
-- Not checked: real WKWebView panel appearance and focus events (focusout was dispatched by hand in a hidden tab); no Release build, the branch is behind main.

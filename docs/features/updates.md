@@ -33,12 +33,14 @@ or other windows cover it, while the What's New window is open and while the app
 quits. The signals are the ones [Playback](performance.md#playback) describes:
 with **When windows cover the desktop** on **Keep running**, only a display
 fully hidden by a full-screen app holds it, and with **Pause** a maximized window
-does too. When the control panel is the key window the alert is allowed even
-while wallpapers are paused, since the person is already in the app. A held alert
-does not count as offered: it appears once, with no new network check, when
-wallpapers present again, when What's New closes or when the control panel
-becomes key, and the log notes `update prompt deferred: <reason>` when it starts
-waiting. Nothing else changes while it waits: the status menu entry is already
+does too. A display paused only because **Only play on the display I’m using** is on
+and the pointer is elsewhere does not hold it; a full-screen app or covering windows on
+that display still do. When the control panel is the key
+window the alert is allowed even while wallpapers are paused, since the person is
+already in the app. A held alert does not count as offered: it appears once, with no
+new network check, when wallpapers present again, when What's New closes or when the
+control panel becomes key, and the log notes `update prompt deferred: <reason>` when
+it starts waiting. Nothing else changes while it waits: the status menu entry is already
 there, and **Check for Updates…** is never held.
 
 ### What a check reads

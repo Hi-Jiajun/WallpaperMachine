@@ -78,7 +78,7 @@ next-change stores remain the source of active playback state.
 ## When a change happens
 
 A change the timer brings only happens while its display is playing and
-presenting. One that falls due while the user paused playback, that display is covered, the screen is locked
+presenting. One that falls due while the user paused playback, that display is covered or is not the one in use ([Playback](performance.md#playback)), the screen is locked
 or the displays sleep waits, and happens once when it can play again; missed intervals are not caught up
 one by one. The timer sleeps on the continuous clock, so a change that fell due
 while the Mac slept happens on wake. Nothing is polled: `PlaylistScheduler` arms

@@ -83,13 +83,14 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         var maximumBackoff: Duration = .seconds(30)
     }
 
-    /// How long a user-paused page keeps running after its document finishes
-    /// loading before the host detaches it. `didFinish` fires before the first
-    /// meaningful paint, the renderer defers a battery pause until the host
-    /// reports startup, and a wallpaper can be applied while paused. Detaching
-    /// at once would snapshot a blank view and may stop WebKit finishing the
-    /// load, so the page gets this long to draw one frame first. The default
-    /// matches the first settle capture of `DesktopWallpaperSync`.
+    /// How long a paused page keeps running after its document finishes loading
+    /// before the host detaches it, whether the user paused it or it is paused
+    /// only because they are working on another display. `didFinish` fires
+    /// before the first meaningful paint, the renderer defers a battery pause
+    /// until the host reports startup, and a wallpaper can be applied while
+    /// paused. Detaching at once would snapshot a blank view and may stop WebKit
+    /// finishing the load, so the page gets this long to draw one frame first.
+    /// The default matches the first settle capture of `DesktopWallpaperSync`.
     struct Timing {
         var firstFrameGrace: Duration = .seconds(3)
     }
@@ -111,6 +112,10 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         /// per-display suspension all arrive through `BridgeWebWallpaper.paused`.
         var userPaused = false
         var presentationSuspended = false
+        /// The presentation suspension leaves the display in the user's sight, as
+        /// when they chose to play only where they are working: nothing covers or
+        /// sleeps the display, so the page still owes it a first frame.
+        var suspendedInPlainSight = false
 
         /// The page pauses when the user paused playback or the presentation
         /// policy suspended rendering; either alone is sufficient.
@@ -143,10 +148,11 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
     private var restartHistory: [ContinuousClock.Instant] = []
     private var restartTask: Task<Void, Never>?
     /// Whether the current document has had its first-frame grace since it
-    /// finished loading. Only a user pause waits for it; presentation
-    /// suspension is immediate, as a surface that is already hidden never
-    /// attaches. The grace counts only time the view is in the window: a page
-    /// that finished loading while covered has drawn nothing yet.
+    /// finished loading. A user pause waits for it, and so does a suspension of
+    /// a display still in the user's sight; any other presentation suspension is
+    /// immediate, as a surface that is already hidden never attaches. The grace
+    /// counts only time the view is in the window: a page that finished loading
+    /// while covered has drawn nothing yet.
     private var firstFrameSettled = false
     private var firstFrameTask: Task<Void, Never>?
     /// When the current document finished loading, so a crash can tell a page
@@ -573,8 +579,14 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         container.addSubview(webView)
     }
 
-    func setPresentationSuspended(_ suspended: Bool) {
+    /// `stillVisible` says the suspension does not hide the display: the user can
+    /// see it and it is paused only because they are working on another one. Such
+    /// a page draws its first frame before it is detached, as a paused page does,
+    /// so a wallpaper set on that display is not left black. A hidden display
+    /// needs no frame and its page is detached at once.
+    func setPresentationSuspended(_ suspended: Bool, stillVisible: Bool = false) {
         committed.presentationSuspended = suspended
+        committed.suspendedInPlainSight = suspended && stillVisible
         deliverPaused()
         reconcileHostSuspension()
     }
@@ -585,8 +597,16 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
     /// regardless; the two reasons compose, and clearing one leaves the other
     /// in force.
     private func reconcileHostSuspension() {
-        applyHostSuspension(committed.presentationSuspended || (committed.userPaused && firstFrameSettled))
+        applyHostSuspension(presentationHolds || userPauseHolds)
         runFirstFrameWindow()
+    }
+
+    private var userPauseHolds: Bool { committed.userPaused && firstFrameSettled }
+
+    /// A presentation suspension holds at once unless the display is in the
+    /// user's sight, when it waits for the first frame like a user pause.
+    private var presentationHolds: Bool {
+        committed.presentationSuspended && (!committed.suspendedInPlainSight || firstFrameSettled)
     }
 
     private func resetFirstFrameWindow() {
@@ -662,7 +682,7 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
     }
 
     private var suspensionReason: String {
-        switch (committed.userPaused && firstFrameSettled, committed.presentationSuspended) {
+        switch (userPauseHolds, presentationHolds) {
         case (true, true): "both"
         case (true, false): "user pause"
         default: "presentation"

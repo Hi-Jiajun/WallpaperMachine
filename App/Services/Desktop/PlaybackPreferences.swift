@@ -54,7 +54,8 @@ struct AppRule: Codable, Equatable, Identifiable, Sendable {
 }
 
 /// UserDefaults-backed playback rules for display sleep, other-app audio, a
-/// covered desktop, Low Power Mode, a hot Mac, a low battery and per-app pause, mute and stop.
+/// covered desktop, Low Power Mode, a hot Mac, a low battery, playing only on the display in use
+/// and per-app pause, mute and stop.
 /// Mutations post `didChangeNotification` once.
 @MainActor
 final class PlaybackPreferences {
@@ -76,6 +77,7 @@ final class PlaybackPreferences {
     private static let lowBatteryActionKey = "WallpaperMachine.lowBatteryAction"
     private static let lowBatteryThresholdKey = "WallpaperMachine.lowBatteryThreshold"
     private static let periodicDesktopPictureKey = "WallpaperMachine.refreshDesktopPicturePeriodically"
+    private static let playOnlyOnActiveDisplayKey = "WallpaperMachine.playOnlyOnActiveDisplay"
 
     /// The charge levels the user can pick for the low-battery rule, in percent.
     nonisolated static let lowBatteryThresholds = [10, 20, 30]
@@ -133,6 +135,16 @@ final class PlaybackPreferences {
         set {
             guard Self.lowBatteryThresholds.contains(newValue) else { return }
             defaults.set(newValue, forKey: Self.lowBatteryThresholdKey)
+            postChange()
+        }
+    }
+
+    /// Off by default. With two or more displays, only the one the pointer is on plays; the others
+    /// pause a few seconds after the pointer leaves them. Never touches the user's own Play/Pause.
+    var playsOnlyOnActiveDisplay: Bool {
+        get { defaults.bool(forKey: Self.playOnlyOnActiveDisplayKey) }
+        set {
+            defaults.set(newValue, forKey: Self.playOnlyOnActiveDisplayKey)
             postChange()
         }
     }

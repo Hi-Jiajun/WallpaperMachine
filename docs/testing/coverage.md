@@ -115,7 +115,10 @@ on the desktop ([manual-smoke.md](manual-smoke.md)).
   working area suspending after the settle delay, per-display independence,
   reconnect handling, retried failed suspends and resumes, `stop()` resuming
   every suspended surface, and the resume announcement (`onResumed`) after a global
-  or per-display resume, but not after a suspend, a refused delivery or teardown.
+  or per-display resume, but not after a suspend, a refused delivery or teardown. A
+  display the user is not using is one more hidden reason: suspended after the settle
+  delay, resumed at once, joined to coverage, never darkening every display, untouched
+  by a sleep and wake, and not counted as hidden for the update alert's gate.
 - `SystemWakeRevalidatorTests` — against a private notification center and
   injected delays, idle wait and bridge call: a wake's two notifications are one
   check, a check waits for the command queue, a wake at the lock screen is checked
@@ -159,6 +162,15 @@ on the desktop ([manual-smoke.md](manual-smoke.md)).
   half with a fake reader: a changed source is delivered once, a delivery the
   actor rejected is offered again, an unreadable source is left alone, and the
   battery policy is applied through the bridge from a change nobody reported.
+- `ActiveDisplayTrackerTests` drive the tracker through injected screens, pointer, monitor and
+  a sleep the test releases: the display under the pointer plays at once and the one it left
+  after the dwell, a return within the dwell pauses nothing and a cancelled wait that ends
+  late cannot cut a later one short, events inside one display change nothing, a pointer on a
+  screen the app does not manage or between screens pauses nothing, no monitor exists with one
+  display or with the option off, an unplugged or rearranged display is re-resolved, a pointer
+  that moves while this app is active is found by the timer with no event, becoming or
+  resigning active reads it once, and the timer and the activity observers end with tracking.
+  One case runs the real policy from the tracker's changes.
 - `DisplayRefreshCoalescerTests` — a burst during a refresh is answered by one
   more; screen changes that leave the displays as they were refresh nothing; a
   failed refresh is retried. `DisplayTitleResolverTests` — localized display
@@ -178,9 +190,12 @@ Not covered: the real Focus Settings pane and a real Low Power Mode; a real plug
 unplug during sleep, including whether `IOKit` answers correctly the moment the Mac
 wakes; a real discharge crossing the low-battery level, how often IOKit posts the
 power-source notification on this Mac, and how the two rows lay out in the live
-panel; real wallpaper windows on another Space and the effect of either repair step;
-whether a scene surface stops producing frames across a real sleep and wake, and
-whether the wake check's repair restores it (needs a desktop run).
+panel; real global and local pointer events across two physical displays, the real
+activation notifications that start and stop the timer, the display-ID mapping with
+mixed scaling, and how the dwell feels; real wallpaper windows on another Space and
+the effect of either repair step; whether a scene surface stops producing frames
+across a real sleep and wake, and whether the wake check's repair restores it (needs
+a desktop run).
 
 ### Spaces
 

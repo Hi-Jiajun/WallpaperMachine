@@ -104,6 +104,7 @@ struct WallpaperBackupPreferences: Sendable {
         "WallpaperMachine.desktopCoveredAction", "WallpaperMachine.appRules",
         "WallpaperMachine.lowPowerModeAction", "WallpaperMachine.thermalAction",
         "WallpaperMachine.lowBatteryAction", "WallpaperMachine.lowBatteryThreshold",
+        "WallpaperMachine.playOnlyOnActiveDisplay",
         "WallpaperMachine.hideAfterActivating", "WallpaperMachine.concurrentDownloads",
         "WallpaperMachine.workshopUpdateChecks", "WallpaperMachineAssetsPath",
         "WallpaperMachine.workshopFiltersCollapsed", "WallpaperMachine.installedFiltersCollapsed",

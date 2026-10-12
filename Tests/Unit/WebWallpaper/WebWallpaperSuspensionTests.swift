@@ -351,6 +351,85 @@ final class WebWallpaperSuspensionTests: XCTestCase {
     XCTAssertEqual(started, 1)
   }
 
+  // MARK: - suspension of a display that is still in sight
+
+  /// "Only play on the display I'm using" suspends a display the user can see. A
+  /// page created there has painted nothing, so detaching it at once would leave
+  /// the display black and the desktop picture of its Space blank.
+  func testADisplaySuspendedWhileStillInSightGivesItsPageTheFirstFrameBeforeDetaching() async throws {
+    let gate = Gate()
+    let (page, container) = hostedPage(
+      timing: WebWallpaperPage.Timing(firstFrameGrace: .seconds(3)), wait: { _ in await gate.pass() })
+    defer { withExtendedLifetime(container) {} }  // the page holds its container weakly
+    // As the host applies a wallpaper to a display that is already paused: the
+    // suspension first, then the bridge's composed pause, then the load.
+    page.setPresentationSuspended(true, stillVisible: true)
+    page.setPaused(true)
+    XCTAssertFalse(page.hostSuspended, "a display in sight is not hidden, so the page is not detached unloaded")
+    XCTAssertTrue(page.isInWindowTree)
+
+    page.load()
+    try await waitUntilLoaded(page)
+    XCTAssertFalse(page.hostSuspended, "didFinish precedes the first paint")
+    XCTAssertTrue(page.isInWindowTree)
+
+    await gate.open()
+    try await poll { page.hostSuspended }
+    XCTAssertTrue(page.hostSuspended, "and the page is suspended once it has drawn")
+    XCTAssertTrue(page.isLoaded)
+    try await poll { !page.isInWindowTree && page.suspensionPoster != nil }
+    XCTAssertFalse(page.isInWindowTree)
+    XCTAssertNotNil(page.suspensionPoster, "the frame it drew stays on the display and answers the poster sync")
+  }
+
+  /// A hidden display needs no frame: its page is detached at once, grace or not.
+  func testASuspensionThatHidesTheDisplayDetachesTheUnsettledPageAtOnce() async throws {
+    let gate = Gate()
+    let (page, container) = hostedPage(
+      timing: WebWallpaperPage.Timing(firstFrameGrace: .seconds(3)), wait: { _ in await gate.pass() })
+    defer { withExtendedLifetime(container) {} }  // the page holds its container weakly
+    page.load()
+    try await waitUntilLoaded(page)
+
+    page.setPresentationSuspended(true, stillVisible: false)
+    XCTAssertTrue(page.hostSuspended, "nothing can reach the display, so the grace has nothing to wait for")
+    try await poll { !page.isInWindowTree }
+    XCTAssertFalse(page.isInWindowTree)
+  }
+
+  /// Walking back to the display during its grace finds a page that never left.
+  func testResumingADisplayInSightDuringTheGraceNeverDetachesItsPage() async throws {
+    let gate = Gate()
+    let counters = RuntimeCounters()
+    counters.startSession(duration: .seconds(60))
+    let (page, container) = hostedPage(
+      counters: counters, timing: WebWallpaperPage.Timing(firstFrameGrace: .seconds(3)),
+      wait: { _ in await gate.pass() })
+    defer { withExtendedLifetime(container) {} }  // the page holds its container weakly
+    page.setPresentationSuspended(true, stillVisible: true)
+    page.setPaused(true)
+    page.load()
+    try await waitUntilLoaded(page)
+
+    page.setPresentationSuspended(false)
+    page.setPaused(false)
+    XCTAssertFalse(page.hostSuspended)
+    XCTAssertTrue(page.isInWindowTree)
+
+    await gate.open()
+    // The grace has expired once a fresh suspension takes hold at once; polling
+    // asks again until it does.
+    try await poll {
+      page.setPresentationSuspended(true, stillVisible: true)
+      return page.hostSuspended
+    }
+    XCTAssertTrue(page.hostSuspended)
+    let surface = RuntimeSurfaceKey(kind: .desktopWeb, displayID: 4)
+    XCTAssertEqual(
+      counters.snapshot().value(.webMediaSuspended, for: surface), 1,
+      "only the suspension after the grace took hold; the earlier one ended first")
+  }
+
   // MARK: - changes shown while paused
 
   /// The first grace ends once the test opens `first`; the one a change starts

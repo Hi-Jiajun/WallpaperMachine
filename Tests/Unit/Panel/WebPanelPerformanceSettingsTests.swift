@@ -83,6 +83,33 @@ final class WebPanelPerformanceSettingsTests: XCTestCase {
     XCTAssertEqual(context.playback.lowBatteryThreshold, 10, "Refused levels leave the saved one alone")
   }
 
+  func testPlayOnlyOnTheActiveDisplayAcceptsABooleanAndRefusesAnythingElse() async throws {
+    let context = try Context()
+    defer { context.tearDown() }
+
+    try await context.controller.perform(
+      "setting", body: ["key": "playOnlyOnActiveDisplay", "value": true])
+    XCTAssertTrue(context.playback.playsOnlyOnActiveDisplay)
+
+    for bad: Any in ["true", "on", 1, NSNull()] {
+      do {
+        try await context.controller.perform(
+          "setting", body: ["key": "playOnlyOnActiveDisplay", "value": bad])
+        XCTFail("\(bad) is not a boolean")
+      } catch {}
+    }
+    XCTAssertTrue(context.playback.playsOnlyOnActiveDisplay, "A refused value leaves the saved one alone")
+
+    let settings = try XCTUnwrap(context.controller.snapshot()["settings"] as? [String: Any])
+    XCTAssertEqual(settings["playOnlyOnActiveDisplay"] as? Bool, true)
+
+    try await context.controller.perform(
+      "setting", body: ["key": "playOnlyOnActiveDisplay", "value": false])
+    XCTAssertFalse(context.playback.playsOnlyOnActiveDisplay)
+    let after = try XCTUnwrap(context.controller.snapshot()["settings"] as? [String: Any])
+    XCTAssertEqual(after["playOnlyOnActiveDisplay"] as? Bool, false)
+  }
+
   func testSnapshotPublishesTheLowBatteryChoicesAndAChargeOnlyWhenThereIsABattery() throws {
     let context = try Context()
     defer { context.tearDown() }

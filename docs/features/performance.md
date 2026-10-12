@@ -122,7 +122,8 @@ delegate and reachable from the panel as `BridgeStore.wallpaperEnergyRatings`:
   app rule, other-audio, Low Power Mode, heat, low-battery, Focus-filter or battery pause), the
   control panel is not on screen, no live preview window is open, no download is
   running SteamCMD or fetching a pixiv original, exactly one wallpaper is assigned
-  across the displays that are not suspended by occlusion, and none of those
+  across the displays that are not suspended (hidden, covered, or not the one in
+  use), and none of those
   displays plays a video on the native player
   (`NativeVideoWallpaperHost.activeDisplayIDs`), whose cost macOS does not charge
   to the app. Stable `primary` and `identity:` selectors are resolved to connected
@@ -253,6 +254,7 @@ control for that part.
 | When windows cover the desktop | **Pause**, **Keep running** | Pause |
 | When another app plays sound | **Keep running**, **Mute**, **Pause** | Keep running |
 | When displays sleep | **Pause**, **Stop (free memory)** | Pause |
+| Only play on the display I’m using | On, Off; shown with two or more displays | Off |
 | On battery | **Keep running**, **Reduced quality**, **Pause** | Keep running |
 | When the battery is low | **Keep running**, **Pause**, **Stop (free memory)**; the level is **10%**, **20%** or **30%** | Keep running, 20% |
 | In Low Power Mode | **Keep running**, **Pause**, **Stop (free memory)** | Keep running |
@@ -270,6 +272,39 @@ window does not cover, because macOS decides what covers what. **Keep running**
 leaves the wallpaper animating in the gaps. `WallpaperCoverageProbes` measures this
 with one fully transparent, mouse-transparent window per display just above the
 wallpaper; see [architecture](../architecture.md#desktop-wallpaper-windows-and-private-api-handling).
+
+**Only play on the display I’m using** is for a Mac with two or more displays. The
+display the pointer is on keeps playing; every other display pauses once the pointer
+has been away from it for 3 seconds, and resumes the moment the pointer returns, so
+skimming across a display, or going back to it, never pauses it. It is one more
+reason a display counts as hidden in `WallpaperPresentationPolicy`, beside occlusion
+and a covered working area: it never changes **Play** and **Pause**, nothing has to be
+restored when it ends, and the usual one-second settle applies before a display
+pauses. The policy never darkens every display for it, and a pointer on a screen the
+app has no wallpaper on pauses nothing. `ActiveDisplayTracker` follows the pointer
+with one global and one local event monitor, installed only while the option is on and
+two displays are connected; the global monitor needs no Accessibility or Input
+Monitoring grant, and a pointer event that stays on one display costs one rectangle
+test. While this app is the active one, such as after you click its control panel,
+AppKit sends pointer events to the app: the global monitor sees none of them and the
+local one sees only motion over this app's own windows. So for as long as the app is
+active the tracker also reads the pointer four times a second on a timer that
+tolerates coalescing, and reads it once when the app becomes or stops being active,
+so moving onto another display's desktop is noticed without a click. The row appears
+once two displays are enabled, and stays while the option is on so it can be turned
+off. Turning it off, or unplugging down to one display, resumes everything.
+
+A display that is paused this way is treated like a covered one: an automatic
+wallpaper change, a playlist step and a scheduled rule for it wait until it plays
+again, and its energy counts as not playing. The settle and periodic captures of its
+Mission Control picture skip it while it is paused; a new wallpaper still asks it for
+a frame, and so does a Space change or a wake when its picture is not fresh
+([Desktop picture](desktop-picture.md)). A web wallpaper set on such a display, or
+rebuilt there, loads and draws its first frame before it is paused, as one paused with
+**Pause** does ([Web wallpapers](web-wallpapers.md#runtime-shape)); a covered display
+needs no frame and its page stops at once. Turn the option off if you watch one display
+while working on another. The display is judged only by the pointer, so a video
+playing on a display the pointer is not on pauses too.
 
 **Mute** affects scene and video wallpapers and, where WebKit exposes its native
 output channel, Web wallpapers. Availability is shown in the wallpaper's details;

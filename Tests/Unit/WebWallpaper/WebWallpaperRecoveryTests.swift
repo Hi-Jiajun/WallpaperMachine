@@ -144,6 +144,48 @@ final class WebWallpaperRecoveryTests: XCTestCase {
     XCTAssertFalse(host.isPointerMonitorActive)
   }
 
+  /// A wallpaper set on a display that "Only play on the display I'm using" has
+  /// already paused is still on screen. Its page must not be detached before it has
+  /// loaded, which would leave the display black until the pointer comes back.
+  func testAPageCreatedOnADisplayPausedInPlainSightIsNotDetachedUnloaded() async {
+    let host = makeHost(
+      fetch: { [] }, screens: { [(id: UInt32(7), frame: NSRect(x: 0, y: 0, width: 320, height: 200))] })
+    host.setPresentationSuspended(true, forDisplay: 7, stillVisible: true)
+    await host.apply([descriptor(entryFile: "index.html")])
+    let page = madeSurfaces.last?.page
+    XCTAssertEqual(page?.hostSuspended, false)
+
+    host.setPresentationSuspended(true)
+    XCTAssertEqual(page?.hostSuspended, true, "sleep, a lock or an app rule hides every display")
+    host.setPresentationSuspended(false)
+    XCTAssertEqual(page?.hostSuspended, false, "and the display is in sight again when they end")
+    host.shutdown()
+  }
+
+  func testAPageCreatedOnAHiddenDisplayIsDetachedAtOnce() async {
+    let host = makeHost(
+      fetch: { [] }, screens: { [(id: UInt32(7), frame: NSRect(x: 0, y: 0, width: 320, height: 200))] })
+    host.setPresentationSuspended(true, forDisplay: 7)
+    await host.apply([descriptor(entryFile: "index.html")])
+    XCTAssertEqual(madeSurfaces.last?.page.hostSuspended, true, "a covered display needs no frame")
+
+    host.setPresentationSuspended(false, forDisplay: 7)
+    XCTAssertEqual(madeSurfaces.last?.page.hostSuspended, false)
+    host.shutdown()
+  }
+
+  func testTheInSightMarkEndsWithTheDisplaySuspension() async {
+    let host = makeHost(
+      fetch: { [] }, screens: { [(id: UInt32(7), frame: NSRect(x: 0, y: 0, width: 320, height: 200))] })
+    host.setPresentationSuspended(true, forDisplay: 7, stillVisible: true)
+    host.setPresentationSuspended(false, forDisplay: 7)
+    // Covered later: the earlier mark must not outlive the suspension it described.
+    host.setPresentationSuspended(true, forDisplay: 7)
+    await host.apply([descriptor(entryFile: "index.html")])
+    XCTAssertEqual(madeSurfaces.last?.page.hostSuspended, true)
+    host.shutdown()
+  }
+
   func testChangingTheEntryFileReplacesThePage() async {
     let counters = RuntimeCounters()
     counters.startSession(duration: .seconds(60))

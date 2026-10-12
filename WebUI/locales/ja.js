@@ -1087,6 +1087,10 @@ export default {
   'Low battery level': 'バッテリー残量の基準',
   'Applies only while the Mac runs on battery. It ends 5 points above the level you choose, or when you plug in. The battery is at {percent}% now.': 'Macがバッテリー駆動の間だけ有効です。選んだ残量より5ポイント上がるか、電源に接続すると終了します。現在のバッテリー残量は{percent}%です。',
   'When the battery is low, wallpapers pause or stop once the charge falls to the level you chose, and resume when you plug in or the charge recovers.': 'バッテリー残量が少ないときは、残量が選んだレベルまで下がると壁紙が一時停止または停止し、電源に接続するか残量が回復すると再開します。',
+  // Play only on the display in use
+  'Only play on the display I’m using': '使用中のディスプレイでのみ再生',
+  'The display your pointer is on keeps playing. The others pause a few seconds after you leave them and resume the moment you return. Your own Play and Pause are not changed.': 'ポインタがあるディスプレイは再生を続けます。ほかのディスプレイは、ポインタが離れて数秒後に一時停止し、戻るとすぐに再開します。手動での再生と一時停止は変更されません。',
+  'With two or more displays, Only play on the display I’m using pauses the others a few seconds after your pointer leaves them.': 'ディスプレイが2台以上あるとき、「使用中のディスプレイでのみ再生」をオンにすると、ポインタが離れてから数秒後にほかのディスプレイが一時停止します。',
   // Low Power Mode, heat and Focus
   'In Low Power Mode': '低電力モード時',
   'Low Power Mode is on now.': '低電力モードは現在オンです。',

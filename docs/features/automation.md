@@ -34,7 +34,7 @@ and catch up when eligible again.
 Time rules use the Mac's time zone. The latest due rule wins; equal timestamps
 choose the later rule in the list. A daylight-saving gap moves a nonexistent time
 to the next valid clock time; a repeated time fires at its first occurrence only.
-After sleep, lock, pause or a covered display, only the latest due choice is applied
+After sleep, lock, pause, a covered display or a display that is not in use, only the latest due choice is applied
 when playback can run again. Manual wallpaper and playlist choices mark the current
 event handled, including across relaunch. A rule that comes due while your own
 Apply is waiting on that display, or running there, gives way to it and is not
