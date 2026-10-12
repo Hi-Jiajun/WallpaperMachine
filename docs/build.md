@@ -87,6 +87,7 @@ python3 scripts/build.py --swift-only             # skip the renderer
 python3 scripts/build.py --renderer-only          # renderer + bindings only
 python3 scripts/build.py --compile-app-icon DIR   # only compile AppIcon.icon + Assets.xcassets into DIR
 python3 scripts/build.py --app-icon DIR           # build with that output instead of compiling the icon
+python3 scripts/build.py --xcode-setting N=V      # also pass build setting N=V to xcodebuild (repeatable)
 ```
 
 `--configuration` accepts `Debug` (default) or `Release`.

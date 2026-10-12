@@ -141,10 +141,15 @@ def main():
         help="Only compile the app icon and asset catalog into DIR.")
     parser.add_argument("--app-icon", type=Path, metavar="DIR",
         help="Build with the icon --compile-app-icon wrote to DIR instead of compiling it.")
+    parser.add_argument("--xcode-setting", action="append", default=[], metavar="NAME=VALUE",
+        help="Pass a build setting to xcodebuild; repeatable (CodeQL's traced Swift build uses it).")
     parser.add_argument("--verbose", action="store_true", help="Echo every tool line instead of only errors.")
     args = parser.parse_args()
     global VERBOSE
     VERBOSE = args.verbose
+    for setting in args.xcode_setting:
+        if "=" not in setting:
+            parser.error(f"--xcode-setting expects NAME=VALUE, got {setting!r}")
     if args.compile_app_icon:
         compile_app_icon(args.compile_app_icon.resolve())
         print(f"{MARK.ok} Compiled the app icon into {args.compile_app_icon}")
@@ -166,6 +171,7 @@ def main():
         # The asset catalog is still compiled; only the .icon is left out, and with it
         # the app-icon name actool would otherwise look for in the catalog.
         settings = [f"EXCLUDED_SOURCE_FILE_NAMES={APP_ICON.name}", "ASSETCATALOG_COMPILER_APPICON_NAME="]
+    settings += args.xcode_setting
     run(["xcodebuild", "-project", XCODEPROJ.name, "-scheme", "WallpaperMachine", "-configuration", args.configuration, "-derivedDataPath", BUILD, "build", *settings], env=env, stage=f"xcodebuild-{args.configuration}")
     if compiled_icon:
         install_app_icon(app_bundle(args.configuration), compiled_icon)

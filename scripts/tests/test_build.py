@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[1]
@@ -36,6 +37,26 @@ class RepositoryCommitTests(unittest.TestCase):
             renderer = commit_repository(root / "upstream/renderer", "pinned upstream revision")
             self.assertNotEqual(application, renderer)
             self.assertEqual(build.repository_commit(root), application)
+
+
+class XcodeSettingTests(unittest.TestCase):
+    def xcodebuild_arguments(self, *arguments):
+        calls = []
+        with mock.patch.object(sys, "argv", ["build.py", "--swift-only", *arguments]), \
+                mock.patch.object(build, "build_environment", return_value={}), \
+                mock.patch.object(build, "run", side_effect=lambda command, *_, **__: calls.append(command)), \
+                mock.patch("builtins.print"):
+            build.main()
+        return next(command for command in calls if command[0] == "xcodebuild")
+
+    def test_passes_each_setting_to_xcodebuild(self):
+        command = self.xcodebuild_arguments(
+            "--xcode-setting", "SWIFT_USE_INTEGRATED_DRIVER=NO", "--xcode-setting", "CODE_SIGNING_ALLOWED=NO")
+        self.assertEqual(command[-2:], ["SWIFT_USE_INTEGRATED_DRIVER=NO", "CODE_SIGNING_ALLOWED=NO"])
+
+    def test_rejects_a_setting_without_a_value(self):
+        with mock.patch("sys.stderr"), self.assertRaises(SystemExit):
+            self.xcodebuild_arguments("--xcode-setting", "SWIFT_USE_INTEGRATED_DRIVER")
 
 
 if __name__ == "__main__":

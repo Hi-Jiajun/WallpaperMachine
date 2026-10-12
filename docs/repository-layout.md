@@ -91,7 +91,7 @@ build/                             Git-ignored: Xcode derived data and built pro
                                    blank issues stay on for the app's prefilled "Report on GitHub" link
 .github/pull_request_template.md   the pull-request description outline and checklist
 .github/workflows/                 CI: build.yml, release.yml, version.yml, warm-caches.yml, supporters.yml,
-                                   claude.yml and claude-code-review.yml
+                                   codeql.yml, claude.yml and claude-code-review.yml
 .github/actions/prepare-build/     composite action: Xcode, Homebrew packages, LGPL FFmpeg and the build caches
 ```
 

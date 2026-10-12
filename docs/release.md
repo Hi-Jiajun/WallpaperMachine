@@ -234,7 +234,8 @@ against a fake gateway and the publish path, and runs as part of
 Version, Build, Release, Warm caches and Supporters are the release workflows in
 `.github/workflows/`; Supporters shares only `main` with the others.
 `claude.yml` and `claude-code-review.yml` are pull-request automation, described
-in [CONTRIBUTING.md](../CONTRIBUTING.md#automated-review).
+in [CONTRIBUTING.md](../CONTRIBUTING.md#automated-review). `codeql.yml` is code
+scanning, described [below](#codeql-codeqlyml).
 
 Version, Build and Release grant `contents: write`; Build's publish job also needs
 `id-token: write` and `attestations: write` for its provenance attestation, and
@@ -451,6 +452,21 @@ the new `main` if that moved. It skips the hour while a Version run is queued or
 running, because Version's push of its bump commit does not retry. A wall that
 can't be read, or a README without its block, fails the run and leaves both READMEs
 as they were.
+
+### CodeQL (`codeql.yml`)
+
+Code scanning on every push to `main`, every pull request into it, weekly, and on
+demand. It replaces GitHub's default setup, which can only autobuild Swift and
+fails at the extension's link because the renderer library and the Homebrew
+libraries do not exist yet. Actions, JavaScript/TypeScript, Python and Rust are
+analyzed without a build on Linux. Swift runs on `macos-26`: `prepare-build` and
+`python3 scripts/build.py --renderer-only` first, untraced, then CodeQL traces
+`scripts/build.py --swift-only` with the `--xcode-setting` overrides CodeQL's own
+Swift autobuild uses (no signing, no compilation cache, no integrated driver), so
+the extractor sees every Swift compile. C/C++ (only vendored third-party code is
+visible to it) and Ruby (only the FFmpeg formula) are deliberately not analyzed.
+Default setup must stay off under **Settings -> Code security -> CodeQL
+analysis**; while it is on, GitHub rejects this workflow's results.
 
 ### Release (`release.yml`)
 

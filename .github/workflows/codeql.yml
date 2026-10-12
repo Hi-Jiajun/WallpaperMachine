@@ -1,0 +1,91 @@
+# CodeQL code scanning, in place of GitHub's default setup.
+#
+# Default setup can only autobuild Swift, and autobuild cannot build this app: the
+# extension links the renderer's `libwallpaper_bridge.a` and Homebrew libraries that
+# only `prepare-build` and `scripts/build.py --renderer-only` produce, so its Swift
+# analysis failed at the link. Here the Swift job builds the renderer first, outside
+# the trace, and CodeQL traces only the Xcode build. The settings it passes are the
+# ones CodeQL's own Swift autobuild uses: the extractor has to see every
+# swift-frontend call, which Xcode's integrated driver and compilation cache hide.
+#
+# The other languages need no build. C/C++ is left out on purpose: the only C/C++
+# CodeQL can see is vendored third-party code under upstream/renderer/external/,
+# and CodeQL does not analyze Objective-C. Ruby is left out because its only file
+# is the FFmpeg Homebrew formula.
+#
+# Default setup must be off (Settings -> Code security -> CodeQL analysis), or
+# GitHub rejects this workflow's uploads (docs/release.md).
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "41 4 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { language: actions, build-mode: none, runner: ubuntu-latest }
+          - { language: javascript-typescript, build-mode: none, runner: ubuntu-latest }
+          - { language: python, build-mode: none, runner: ubuntu-latest }
+          - { language: rust, build-mode: none, runner: ubuntu-latest }
+          # macOS 26 for the same reason as Build's test job: actool compiles the
+          # Debug app's icon there.
+          - { language: swift, build-mode: manual, runner: macos-26 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - if: matrix.language == 'swift'
+        uses: ./.github/actions/prepare-build
+
+      - name: Build the renderer and bridge
+        # Before init, so CodeQL neither traces nor slows the Rust and C++ build.
+        if: matrix.language == 'swift'
+        run: python3 scripts/build.py --renderer-only
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      - name: Build the app
+        if: matrix.language == 'swift'
+        run: |
+          python3 scripts/build.py --swift-only \
+            --xcode-setting CODE_SIGNING_ALLOWED=NO \
+            --xcode-setting COMPILATION_CACHE_ENABLE_CACHING=NO \
+            --xcode-setting SWIFT_ENABLE_COMPILE_CACHE=NO \
+            --xcode-setting SWIFT_USE_INTEGRATED_DRIVER=NO
+
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
+
+      - name: Keep the build logs of a failed Swift build
+        if: failure() && matrix.language == 'swift'
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeql-swift-build-logs
+          path: artifacts/build/
+          if-no-files-found: ignore
+          retention-days: 14
