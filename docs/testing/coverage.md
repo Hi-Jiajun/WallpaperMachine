@@ -421,9 +421,9 @@ and a presented prompt never returns. `Support/` also holds the shared fixtures
 
 `AdapterSystemMediaProviderTests`, `SystemMediaTransportTests`,
 `FallbackSystemMediaProviderTests`, `AppleScriptMediaProviderTests`,
-`MediaRemoteMediaProviderTests`, `MediaArtworkTests`, `SceneMediaSinkTests` and
-`SystemMediaEventCodecTests` run against fake streams, injected script results and
-a fake MediaRemote loader. They cover fragmented messages and timeline
+`MediaArtworkTests`, `SceneMediaSinkTests` and `SystemMediaEventCodecTests` run
+against fake streams, injected script results and a manual timer scheduler. They
+cover fragmented messages and timeline
 interpolation, consumer lifetime and late callbacks, unexpected exit without a
 restart loop, the adapter-to-AppleScript fallback, artwork caching and
 downscaling, the cleared cover reaching scenes before metadata, and the wire

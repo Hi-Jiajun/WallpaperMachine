@@ -10,6 +10,25 @@ enum SystemMediaAvailability: Equatable {
     case unavailable(reason: String)
 }
 
+/// Why the system cannot say what is playing.
+struct MediaRemoteUnavailable: LocalizedError, Equatable {
+    enum Code: Equatable {
+        case notStarted
+        case noReply
+    }
+
+    let code: Code
+
+    var errorDescription: String? {
+        switch code {
+        case .notStarted:
+            String(localized: "Media integration has not been started.")
+        case .noReply:
+            String(localized: "macOS did not let this app read what is playing. Since macOS 15.4 only Apple-signed apps may.")
+        }
+    }
+}
+
 /// Playback states of the Wallpaper Engine media protocol. The raw values are the
 /// `wallpaperMediaIntegration.PLAYBACK_*` constants handed to author pages.
 enum SystemMediaPlaybackState: Int, Sendable {

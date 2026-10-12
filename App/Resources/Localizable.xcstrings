@@ -2320,14 +2320,8 @@
     "Media integration has not been started." : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Media integration has not been started."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "メディア連携は開始されていません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "媒体集成尚未启动。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "媒體整合尚未啟動。"}}}
     },
-    "This system has no service for reporting what is playing." : {
-      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "This system has no service for reporting what is playing."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このシステムには再生中の項目を報告するサービスがありません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "此系统未提供用于报告正在播放内容的服务。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "此系統沒有可回報正在播放內容的服務。"}}}
-    },
     "The system media service is unavailable." : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "The system media service is unavailable."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "システムのメディアサービスを利用できません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "系统媒体服务不可用。请关闭再开启媒体集成重试。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "無法使用系統媒體服務。"}}}
-    },
-    "The system media service on this machine does not provide %@." : {
-      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "The system media service on this machine does not provide %@."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このMacのシステムメディアサービスは%@を提供していません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "此设备上的系统媒体服务未提供 %@。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "這部機器上的系統媒體服務未提供 %@。"}}}
     },
     "macOS did not let this app read what is playing. Since macOS 15.4 only Apple-signed apps may." : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "macOS did not let this app read what is playing. Since macOS 15.4 only Apple-signed apps may."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "macOSにより、このAppは再生中の項目の読み取りを許可されませんでした。macOS 15.4以降、読み取りが許可されるのはAppleが署名したAppのみです。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "macOS 不允许本应用读取正在播放的内容。从 macOS 15.4 起，只有 Apple 签名的应用可以读取。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "macOS 不允許此 App 讀取正在播放的內容。自 macOS 15.4 起，只有 Apple 簽署的 App 才能讀取。"}}}

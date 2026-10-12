@@ -6,58 +6,6 @@ import XCTest
 
 @testable import WallpaperMachine
 
-/// Stands in for the private framework. No test in this directory loads MediaRemote, calls
-/// it, or reads what the machine is actually playing: every answer here is written by the
-/// test that asked for it.
-@MainActor
-final class FakeMediaRemoteSymbols: MediaRemoteSymbols {
-    let notificationNames = MediaRemoteNotificationNames(
-        infoDidChange: Notification.Name("FakeMediaRemote.infoDidChange"),
-        isPlayingDidChange: Notification.Name("FakeMediaRemote.isPlayingDidChange"),
-        applicationDidChange: Notification.Name("FakeMediaRemote.applicationDidChange"))
-
-    /// What the framework reports. Nil is the framework answering with nothing.
-    var information: [String: Any]? = [:]
-    var playing = false
-    /// False models a system that never calls the completion back at all, which is what an
-    /// entitlement-gated macOS looks like from this side.
-    var answers = true
-
-    private(set) var infoRequests = 0
-    private(set) var playingRequests = 0
-    private(set) var registrations = 0
-    private(set) var unregistrations = 0
-
-    func nowPlayingInfo(_ completion: @escaping ([String: Any]?) -> Void) {
-        infoRequests += 1
-        guard answers else { return }
-        completion(information)
-    }
-
-    func isPlaying(_ completion: @escaping (Bool) -> Void) {
-        playingRequests += 1
-        guard answers else { return }
-        completion(playing)
-    }
-
-    func registerForNotifications() { registrations += 1 }
-
-    func unregisterForNotifications() { unregistrations += 1 }
-}
-
-@MainActor
-final class FakeMediaRemoteLoader: MediaRemoteLoading {
-    private let result: Result<any MediaRemoteSymbols, Error>
-    private(set) var loads = 0
-
-    init(_ result: Result<any MediaRemoteSymbols, Error>) { self.result = result }
-
-    func load() throws -> any MediaRemoteSymbols {
-        loads += 1
-        return try result.get()
-    }
-}
-
 /// Scheduled work that only runs when a test says so, so the 1 Hz timeline push and the
 /// probe timeout are deterministic instead of timed.
 @MainActor
