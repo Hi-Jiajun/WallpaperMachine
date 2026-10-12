@@ -339,7 +339,11 @@ function draw(view) {
   const disclosure = (key, title, content, style = '', note = '') => `<details class="settings-disclosure${style ? ` ${style}` : ''}" data-key="${e(key)}"><summary><span class="settings-disclosure-indicator" aria-hidden="true">${helpers.icon('chevronRight', 16)}</span><span class="settings-disclosure-title">${e(title)}${note ? `<span class="settings-note">${e(note)}</span>` : ''}</span></summary><div class="settings-disclosure-body">${content}</div></details>`;
   const group = (key, title, content) => `<section class="settings-group" data-key="${e(key)}"${title ? ` aria-labelledby="settings-group-${e(key)}"` : ''}>${title ? `<h3 id="settings-group-${e(key)}">${e(title)}</h3>` : ''}${content}</section>`;
   const section = (id, title, content, action = '') => `<section class="settings-page" id="settings-${id}" role="tabpanel" aria-labelledby="settings-tab-${id}" tabindex="0" data-key="page-${id}"${view.section === id ? '' : ' hidden'}><header class="settings-heading"><h2>${e(title)}</h2>${action}</header>${content}</section>`;
-  const settingToggle = (key, label, off = false, note = '') => row(key, t(label), toggle(key, t(label), draft(key, settings[key]), `data-setting="${key}"${note ? ` aria-describedby="settings-note-${key}"` : ''}`, off || busy || unavailable), note, '', key);
+  const settingToggle = (key, label, off = false, note = '', extra = '') => row(key, t(label), toggle(key, t(label), draft(key, settings[key]), `data-setting="${key}"${note ? ` aria-describedby="settings-note-${key}"` : ''}`, off || busy || unavailable) + extra, note, '', key);
+  // The login item is registered but switched off in System Settings; only the user can allow it there.
+  const loginNote = !settings.launchAtLoginAvailable ? t('Move the app to Applications to enable.')
+    : settings.launchAtLoginNeedsApproval ? t('Allow WallpaperMachine in System Settings → General → Login Items to launch it at login.') : '';
+  const loginAction = settings.launchAtLoginAvailable && settings.launchAtLoginNeedsApproval ? button(t('Open Login Items…'), 'openLoginItemsSettings', {}, busy) : '';
   const paragraphs = (...texts) => texts.map(text => `<p>${e(text)}</p>`).join('');
   // The helpers the saved-playlist and backup modules draw with, so their rows match these.
   const ctx = { state, view, e, row, select, button, toggle, group, disclosure, error, draft, busy, unavailable };
@@ -351,7 +355,7 @@ function draw(view) {
   const languageOptions = [['system', t('System (Auto)')], ...(languageState.options || []).map(option => [option.id, option.name])];
   const languageValue = draft('language', languageState.preference || 'system');
   const general = group('general-language', t('Interface'), row('language', t('Language'), select('language', t('Language'), languageValue, languageOptions, 'data-language-setting', view.pending.has('language')), t('The interface and import picker switch at once. Quit and reopen the app to switch menus and other dialogs.')))
-    + group('general-behavior', t('Startup & desktop'), settingToggle('launchAtLogin', 'Launch at login', !settings.launchAtLoginAvailable, !settings.launchAtLoginAvailable ? t('Move the app to Applications to enable.') : '')
+    + group('general-behavior', t('Startup & desktop'), settingToggle('launchAtLogin', 'Launch at login', !settings.launchAtLoginAvailable, loginNote, loginAction)
       + settingToggle('hideAfterActivating', 'Hide window after applying a wallpaper')
       + settingToggle('keepWindowsOnWallpaperClick', 'Keep windows in place when clicking the wallpaper', false, t('Turns off macOS’s “Click wallpaper to reveal desktop” so clicks reach interactive wallpapers.'))
       + settingToggle('refreshDesktopPicture', 'Update the Mission Control picture every 5 minutes', false, t('Mission Control shows a still picture of the wallpaper, retaken when it starts, changes or resumes. This also retakes it while it plays. Not used while the lock screen is animated.')))

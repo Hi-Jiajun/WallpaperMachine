@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Observation
+import ServiceManagement
 import SwiftUI
 import UniformTypeIdentifiers
 import WebKit
@@ -82,6 +83,9 @@ final class WebPanelController: NSObject, WKNavigationDelegate {
   var signInToSteamWeb: (@MainActor () async -> String?)?
   /// Support links open only on a deliberate choice; tests capture their destinations.
   var openSupportURL: @MainActor (URL) -> Bool = { NSWorkspace.shared.open($0) }
+  /// Shows System Settings › General › Login Items, where the user allows a launch at login
+  /// they switched off there. Tests capture the call so no Settings window opens.
+  var openLoginItemsSettings: @MainActor () -> Void = { SMAppService.openSystemSettingsLoginItems() }
   let displayTitles: DisplayTitleResolver
   weak var webView: WKWebView?
   let assets: WebPanelAssets
@@ -93,6 +97,9 @@ final class WebPanelController: NSObject, WKNavigationDelegate {
   var stopped = false
   var updateTask: Task<Void, Never>?
   var updatePending = false
+  /// The status read that follows the user's return to the panel while a Login Items note
+  /// is showing; one at a time, so repeated focus changes do not stack bridge round trips.
+  var loginItemRefresh: Task<Void, Never>?
   var pageGeneration: UInt64 = 0
   var librarySectionCache: LibrarySection?
   var pixivInstalledIndex: (revision: UInt64, pages: [String: [Int]])?
@@ -263,12 +270,7 @@ final class WebPanelController: NSObject, WKNavigationDelegate {
             guard let self, let window = note.object as? NSWindow,
               window === self.webView?.window
             else { return }
-            // Assets Steam installed or someone removed while the panel was away show up
-            // when the user comes back to it.
-            if note.name == NSWindow.didBecomeKeyNotification {
-              self.workshop.refreshSceneAssetsReadiness()
-            }
-            self.scheduleUpdate()
+            self.windowStateChanged(note.name)
           }
         }
         .store(in: &subscriptions)
@@ -375,6 +377,8 @@ final class WebPanelController: NSObject, WKNavigationDelegate {
     pageGeneration &+= 1
     updateTask?.cancel()
     updateTask = nil
+    loginItemRefresh?.cancel()
+    loginItemRefresh = nil
     updatePending = false
     cancelDisplayOptions()
     subscriptions.removeAll()
@@ -449,6 +453,31 @@ final class WebPanelController: NSObject, WKNavigationDelegate {
       state.removeValue(forKey: "wallpapers")
     }
     return state
+  }
+
+  /// The panel's window changed how it is presented (key, minimized, occluded, full screen).
+  /// Coming back to the panel also rereads what changes outside the app while the user is
+  /// away, and every change delivers any snapshot that was waiting.
+  func windowStateChanged(_ name: Notification.Name) {
+    if name == NSWindow.didBecomeKeyNotification {
+      // Assets Steam installed or someone removed while the panel was away show up
+      // when the user comes back to it.
+      workshop.refreshSceneAssetsReadiness()
+      refreshLoginItemApproval()
+    }
+    scheduleUpdate()
+  }
+
+  /// A login item waiting for approval is allowed in System Settings, which does not tell
+  /// the app. The bridge keeps its status for two seconds, so the read the user's return
+  /// triggers sees their change. Nothing is read while no approval is pending.
+  func refreshLoginItemApproval() {
+    guard !stopped, store.settingsSnapshot.launchAtLoginNeedsApproval, loginItemRefresh == nil
+    else { return }
+    loginItemRefresh = Task { @MainActor [weak self] in
+      try? await self?.store.refreshAllAsync()
+      self?.loginItemRefresh = nil
+    }
   }
 
   func scheduleUpdate() {

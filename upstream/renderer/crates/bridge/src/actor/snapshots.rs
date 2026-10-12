@@ -715,14 +715,12 @@ impl BridgeActorState {
             .collect();
         BridgeSettingsSnapshot {
             displays: rows,
-            launch_at_login_available: matches!(
+            launch_at_login_available: !matches!(launch_at_login, LaunchAtLoginStatus::Unavailable),
+            launch_at_login_enabled: matches!(
                 launch_at_login,
-                LaunchAtLoginStatus::Available { .. }
+                LaunchAtLoginStatus::Available { enabled: true }
             ),
-            launch_at_login_enabled: match launch_at_login {
-                LaunchAtLoginStatus::Available { enabled } => enabled,
-                LaunchAtLoginStatus::Unavailable => false,
-            },
+            launch_at_login_needs_approval: launch_at_login == LaunchAtLoginStatus::RequiresApproval,
             battery_mode: self.app_config.power.on_battery.into(),
             verbose_logging: self.app_config.diagnostics.verbose_logging,
             git_sha: match option_env!("GIT_SHORT_COMMIT").unwrap_or(crate::build::SHORT_COMMIT) {
@@ -817,6 +815,37 @@ mod tests {
         state.invalidate_shader_cache_size();
         assert_eq!(state.shader_cache_size_at(now + Duration::from_secs(2), measure), 0);
         assert_eq!(reads.get(), 3);
+    }
+
+    #[test]
+    fn settings_snapshot_asks_for_approval_only_when_the_login_item_awaits_it() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = BridgePaths::for_home(root.path());
+        let state = crate::actor::state::BridgeActorState::default();
+        // (status, available, enabled, needs approval)
+        for (status, expected) in [
+            (LaunchAtLoginStatus::Unavailable, (false, false, false)),
+            (LaunchAtLoginStatus::Available { enabled: false }, (true, false, false)),
+            (LaunchAtLoginStatus::Available { enabled: true }, (true, true, false)),
+            (LaunchAtLoginStatus::RequiresApproval, (true, false, true)),
+        ] {
+            let snapshot = state.settings(
+                &[],
+                status,
+                &paths,
+                crate::engine::RendererVideoPipelineState::default(),
+                &[],
+            );
+            assert_eq!(
+                (
+                    snapshot.launch_at_login_available,
+                    snapshot.launch_at_login_enabled,
+                    snapshot.launch_at_login_needs_approval,
+                ),
+                expected,
+                "{status:?}"
+            );
+        }
     }
 
     #[test]

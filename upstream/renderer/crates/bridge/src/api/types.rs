@@ -468,6 +468,10 @@ pub struct BridgeSettingsSnapshot {
     pub displays: Vec<BridgeDisplaySettingsRow>,
     pub launch_at_login_available: bool,
     pub launch_at_login_enabled: bool,
+    /// The user switched the login item off in System Settings > General >
+    /// Login Items. Launch at login is then available but not enabled, and
+    /// turning it on from the app cannot help: the user has to allow it there.
+    pub launch_at_login_needs_approval: bool,
     pub battery_mode: BridgeBatteryMode,
     /// Debug-level lines are recorded too; see `set_verbose_logging`.
     pub verbose_logging: bool,

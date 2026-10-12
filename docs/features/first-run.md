@@ -59,7 +59,10 @@ committed; later pages have **Back**, and decision pages have **Skip**:
    wallpaper are switches. **On battery** is a menu: Keep running, Reduced quality
    or Pause. They are drafts: **Continue** commits only the ones that changed
    (`setting` actions, including `batteryMode`), **Skip** discards them. Launch at
-   login is disabled with its reason while the app is outside Applications.
+   login is disabled with its reason while the app is outside Applications. When the
+   user has switched the app off in System Settings → General → Login Items, the row
+   keeps its switch and adds a note to allow it there; Settings → General also offers a
+   button that opens Login Items.
    Started at login, the app stays in the menu bar without opening the panel,
    unless this guide is unfinished or the renderer failed to start
    (`ControlPanelLaunch`). When renderer settings are unavailable the page says so

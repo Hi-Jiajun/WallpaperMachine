@@ -535,7 +535,9 @@ follows the developer's in-app language choice.
   `WebPanelAssetPropertiesTests`, `WebPanelCompatibilityTests`,
   `WebPanelDeliveryStatusTests`, `WebPanelEnergyUsageTests` (sampling only while
   Settings is visible), `WebPanelExternalLinkTests` (every fixed link in
-  `WebUI/*.js` passes the allowlist), `WebPanelGeneralSettingsTests`,
+  `WebUI/*.js` passes the allowlist), `WebPanelGeneralSettingsTests` (the Login
+  Items note and button, and that returning to the panel re-reads the status only
+  while approval is pending),
   `WebPanelPerformanceSettingsTests` and `WebPanelSceneSettingsTests` (unknown,
   non-boolean or non-numeric values are refused, out-of-range ones clamped; the
   Retry on a stopped scene refuses an id that names no enabled display, is

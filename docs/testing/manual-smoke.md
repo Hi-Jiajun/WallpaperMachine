@@ -27,6 +27,11 @@ was run.
       first shows its panel. Run a copy from another folder: an alert says another
       copy is using the library, and the running copy is untouched. After an in-app
       update the new version starts normally.
+- [ ] Switch WallpaperMachine off in System Settings → General → Login Items, then
+      turn **Launch at login** on in Settings → General: the switch returns to off, a
+      note says to allow it in Login Items, and **Open Login Items…** opens that pane.
+      Allow it there and come back to the panel: the switch is on and the note goes
+      away without any other action.
 
 ## Appearance
 

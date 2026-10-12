@@ -329,7 +329,10 @@ export function createWelcome(helpers) {
     const toggle = ([key, glyph, title, note]) => {
       const off = unavailable || pending.has('preferences') || (key === 'launchAtLogin' && !settings?.launchAtLoginAvailable);
       const value = prefs.has(key) ? prefs.get(key) : Boolean(settings?.[key]);
-      const extra = key === 'launchAtLogin' && settings && !settings.launchAtLoginAvailable ? ` ${t('Move the app to Applications to enable.')}` : '';
+      // Switched off in System Settings, the login item stays off until the user allows it there.
+      const extra = key !== 'launchAtLogin' || !settings ? ''
+        : !settings.launchAtLoginAvailable ? ` ${t('Move the app to Applications to enable.')}`
+        : settings.launchAtLoginNeedsApproval ? ` ${t('Allow WallpaperMachine in System Settings → General → Login Items to launch it at login.')}` : '';
       return `<label class="welcome-pref" data-key="pref-${key}"><span class="dialog-guide-icon">${icon(glyph, 18)}</span><span class="welcome-pref-body"><span class="welcome-pref-title">${e(t(title))}</span><span class="welcome-pref-note">${e(t(note))}${e(extra)}</span></span><span class="settings-switch"><input type="checkbox" role="switch" data-pref="${key}" aria-label="${e(t(title))}"${value ? ' checked' : ''}${off ? ' disabled' : ''}><span aria-hidden="true"></span></span></label>`;
     };
     const battery = prefs.has('batteryMode') ? prefs.get('batteryMode') : (settings?.batteryMode || 'keepRunning');

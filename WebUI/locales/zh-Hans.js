@@ -664,6 +664,8 @@ export default {
   'The interface and import picker switch at once. Quit and reopen the app to switch menus and other dialogs.': '界面和导入文件选择窗口会立即切换。菜单和其他对话框需要退出并重新打开应用后切换。',
   'Launch at login': '登录时启动',
   'Move the app to Applications to enable.': '将应用移到“应用程序”文件夹后即可启用。',
+  'Allow WallpaperMachine in System Settings → General → Login Items to launch it at login.': '要在登录时启动，请在“系统设置 → 通用 → 登录项”中允许 WallpaperMachine。',
+  'Open Login Items…': '打开登录项…',
   'Keep windows in place when clicking the wallpaper': '点击壁纸时保持窗口不动',
   'Hide window after applying a wallpaper': '应用壁纸后隐藏窗口',
   'Turns off macOS’s “Click wallpaper to reveal desktop” so clicks reach interactive wallpapers.': '关闭 macOS 的“点按墙纸以显示桌面”，让点击可以传到可交互的壁纸。',

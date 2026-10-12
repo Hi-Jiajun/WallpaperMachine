@@ -508,6 +508,7 @@ extension WebPanelController {
     let settingsSnapshot: [String: Any] = [
       "launchAtLogin": settings.launchAtLoginEnabled,
       "launchAtLoginAvailable": settings.launchAtLoginAvailable,
+      "launchAtLoginNeedsApproval": settings.launchAtLoginNeedsApproval,
       "verboseLogging": settings.verboseLogging,
       "videoBackend": settings.videoBackend, "videoBackends": videoBackends,
       "contentPacing": settings.contentPacingEnabled,

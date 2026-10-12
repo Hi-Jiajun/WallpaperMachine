@@ -139,6 +139,17 @@ the state as a disabled line. See [crash recovery](crash-recovery.md).
     see [architecture](../architecture.md#desktop-wallpaper-windows-and-private-api-handling)),
     keyboard shortcuts (see [automation](automation.md)) and lock-screen groups.
     Battery behavior is one choice on Performance, not a General toggle.
+    **Launch at login** is disabled with its reason while the app is outside
+    Applications. When the user has switched WallpaperMachine off in System Settings →
+    General → Login Items, macOS keeps it off however often the app registers it
+    again: the switch stays usable but off, a note says to allow it there, and
+    **Open Login Items…** opens that pane. Switching it on again while the note is
+    showing changes nothing, because only the user can allow the item there; turning
+    the switch off unregisters the item only while it is on. System Settings does not
+    tell the app when the user allows it, so while the note is showing the panel reads
+    the status again each time it becomes the key window: allowing the item there and
+    coming back clears the note and the button. The first-run Preferences page carries
+    the same note.
   - **Performance** opens with a live energy readout for the app, then quality
     (presets, frame-rate limit, render scale) directly beneath it, then playback
     (occlusion, other-app audio, display sleep, battery, Low Power Mode, heat,

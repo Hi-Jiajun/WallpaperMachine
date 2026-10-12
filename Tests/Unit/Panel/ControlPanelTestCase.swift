@@ -138,7 +138,11 @@ class LayoutSnapshotBridge: WallpaperBridge {
     pendingOptions.removeFirst().resume(returning: value)
   }
 
+  /// How many times the store re-read every snapshot from the bridge.
+  var snapshotReads = 0
+
   override func allSnapshots() async throws -> BridgeSnapshotBundle {
+    snapshotReads += 1
     guard let snapshot else { throw CancellationError() }
     return snapshot
   }
@@ -455,6 +459,14 @@ final class PanelFixture {
   }
 
   func quiet() async throws { try await Task.sleep(for: .milliseconds(120)) }
+
+  /// What the bridge answers the next time the store reads every snapshot: the store's own
+  /// snapshots with `settings` swapped in.
+  func reportFromBridge(_ settings: BridgeSettingsSnapshot) {
+    bridge.snapshot = BridgeSnapshotBundle(
+      app: store.appSnapshot, library: store.librarySnapshot, wallpaperOptions: nil,
+      monitorInformation: store.monitorInformationSnapshot, settings: settings)
+  }
 
   func configureDisplays() {
     store.settingsSnapshot.displays = ["primary", "secondary"].map { id in

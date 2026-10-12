@@ -1068,6 +1068,7 @@ final class BridgeStore {
                 displays: [],
                 launchAtLoginAvailable: false,
                 launchAtLoginEnabled: false,
+                launchAtLoginNeedsApproval: false,
                 batteryMode: .keepRunning,
                 verboseLogging: false,
                 gitSha: "",

@@ -6117,6 +6117,12 @@ public struct BridgeSettingsSnapshot {
     public var displays: [BridgeDisplaySettingsRow]
     public var launchAtLoginAvailable: Bool
     public var launchAtLoginEnabled: Bool
+    /**
+     * The user switched the login item off in System Settings > General >
+     * Login Items. Launch at login is then available but not enabled, and
+     * turning it on from the app cannot help: the user has to allow it there.
+     */
+    public var launchAtLoginNeedsApproval: Bool
     public var batteryMode: BridgeBatteryMode
     /**
      * Debug-level lines are recorded too; see `set_verbose_logging`.
@@ -6208,7 +6214,12 @@ public struct BridgeSettingsSnapshot {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(displays: [BridgeDisplaySettingsRow], launchAtLoginAvailable: Bool, launchAtLoginEnabled: Bool, batteryMode: BridgeBatteryMode, 
+    public init(displays: [BridgeDisplaySettingsRow], launchAtLoginAvailable: Bool, launchAtLoginEnabled: Bool, 
+        /**
+         * The user switched the login item off in System Settings > General >
+         * Login Items. Launch at login is then available but not enabled, and
+         * turning it on from the app cannot help: the user has to allow it there.
+         */launchAtLoginNeedsApproval: Bool, batteryMode: BridgeBatteryMode, 
         /**
          * Debug-level lines are recorded too; see `set_verbose_logging`.
          */verboseLogging: Bool, gitSha: String, bridgeVersion: String, coreVersion: String, shaderPipelineVersion: String, storage: BridgeStorageStatus, 
@@ -6273,6 +6284,7 @@ public struct BridgeSettingsSnapshot {
         self.displays = displays
         self.launchAtLoginAvailable = launchAtLoginAvailable
         self.launchAtLoginEnabled = launchAtLoginEnabled
+        self.launchAtLoginNeedsApproval = launchAtLoginNeedsApproval
         self.batteryMode = batteryMode
         self.verboseLogging = verboseLogging
         self.gitSha = gitSha
@@ -6314,6 +6326,9 @@ extension BridgeSettingsSnapshot: Equatable, Hashable {
             return false
         }
         if lhs.launchAtLoginEnabled != rhs.launchAtLoginEnabled {
+            return false
+        }
+        if lhs.launchAtLoginNeedsApproval != rhs.launchAtLoginNeedsApproval {
             return false
         }
         if lhs.batteryMode != rhs.batteryMode {
@@ -6404,6 +6419,7 @@ extension BridgeSettingsSnapshot: Equatable, Hashable {
         hasher.combine(displays)
         hasher.combine(launchAtLoginAvailable)
         hasher.combine(launchAtLoginEnabled)
+        hasher.combine(launchAtLoginNeedsApproval)
         hasher.combine(batteryMode)
         hasher.combine(verboseLogging)
         hasher.combine(gitSha)
@@ -6445,6 +6461,7 @@ public struct FfiConverterTypeBridgeSettingsSnapshot: FfiConverterRustBuffer {
                 displays: FfiConverterSequenceTypeBridgeDisplaySettingsRow.read(from: &buf), 
                 launchAtLoginAvailable: FfiConverterBool.read(from: &buf), 
                 launchAtLoginEnabled: FfiConverterBool.read(from: &buf), 
+                launchAtLoginNeedsApproval: FfiConverterBool.read(from: &buf), 
                 batteryMode: FfiConverterTypeBridgeBatteryMode.read(from: &buf), 
                 verboseLogging: FfiConverterBool.read(from: &buf), 
                 gitSha: FfiConverterString.read(from: &buf), 
@@ -6479,6 +6496,7 @@ public struct FfiConverterTypeBridgeSettingsSnapshot: FfiConverterRustBuffer {
         FfiConverterSequenceTypeBridgeDisplaySettingsRow.write(value.displays, into: &buf)
         FfiConverterBool.write(value.launchAtLoginAvailable, into: &buf)
         FfiConverterBool.write(value.launchAtLoginEnabled, into: &buf)
+        FfiConverterBool.write(value.launchAtLoginNeedsApproval, into: &buf)
         FfiConverterTypeBridgeBatteryMode.write(value.batteryMode, into: &buf)
         FfiConverterBool.write(value.verboseLogging, into: &buf)
         FfiConverterString.write(value.gitSha, into: &buf)

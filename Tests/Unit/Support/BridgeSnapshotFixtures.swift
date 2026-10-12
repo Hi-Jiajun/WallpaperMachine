@@ -80,6 +80,7 @@ enum BridgeSnapshotFixtures {
       displays: displays,
       launchAtLoginAvailable: false,
       launchAtLoginEnabled: false,
+      launchAtLoginNeedsApproval: false,
       batteryMode: batteryMode,
       verboseLogging: false,
       gitSha: "",

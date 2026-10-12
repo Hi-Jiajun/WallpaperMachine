@@ -664,6 +664,8 @@ export default {
   'The interface and import picker switch at once. Quit and reopen the app to switch menus and other dialogs.': '画面と読み込み用のファイル選択ウインドウはすぐに切り替わります。メニューとその他のダイアログを切り替えるには、Appを終了して開き直してください。',
   'Launch at login': 'ログイン時に起動',
   'Move the app to Applications to enable.': '有効にするには、Appを「アプリケーション」フォルダに移動してください。',
+  'Allow WallpaperMachine in System Settings → General → Login Items to launch it at login.': 'ログイン時に起動するには、「システム設定」→「一般」→「ログイン項目」でWallpaperMachineを許可してください。',
+  'Open Login Items…': 'ログイン項目を開く…',
   'Keep windows in place when clicking the wallpaper': '壁紙をクリックしたときにウインドウを移動しない',
   'Hide window after applying a wallpaper': '壁紙を適用したあとにウインドウを隠す',
   'Turns off macOS’s “Click wallpaper to reveal desktop” so clicks reach interactive wallpapers.': 'macOSの「壁紙をクリックしてデスクトップを表示」をオフにして、クリックがインタラクティブな壁紙に届くようにします。',

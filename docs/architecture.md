@@ -334,7 +334,14 @@ the never-edit rule are in [conventions.md](conventions.md#swift) and [build.md]
 
 Every snapshot the bridge returns carries the launch-at-login status, which the bridge's
 `LaunchAtLoginController` reads from `SMAppService` (a round trip to the system's service
-manager) and keeps for two seconds.
+manager) and keeps for two seconds. A login item the user switched off in System Settings
+reads `RequiresApproval`: the snapshot reports launch at login as available but not enabled,
+with `launch_at_login_needs_approval` set. Asking to enable it then does not call `register`,
+which leaves that choice in place; only the user can allow it. The panel's
+`openLoginItemsSettings` action calls `SMAppService.openSystemSettingsLoginItems()` through an
+injected closure, so tests never open System Settings. System Settings does not tell the app
+when the user allows the item, so while the approval is pending the panel reads every snapshot
+again each time its window becomes key (`WebPanelController.windowStateChanged`).
 
 ### Rust crates and the C++ scene engine
 
