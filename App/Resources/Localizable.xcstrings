@@ -2616,6 +2616,15 @@
     "Downloaded, but the library could not refresh: %@. Refresh the library before applying it." : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Downloaded, but the library could not refresh: %@. Refresh the library before applying it."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ダウンロードしましたが、ライブラリを更新できませんでした：%@。適用する前にライブラリを更新してください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "已下载，但壁纸库未能刷新：%@。请先刷新壁纸库再应用。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "已下載，但桌布庫無法重新整理：%@。請先重新整理桌布庫再套用。"}}}
     },
+    "Downloaded, but not applied because you chose another wallpaper." : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Downloaded, but not applied because you chose another wallpaper."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ダウンロードしましたが、ほかの壁紙を選んだため適用しませんでした。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "已下载，但你选择了其他壁纸，因此没有应用。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "已下載，但你選擇了其他桌布，因此沒有套用。"}}}
+    },
+    "Downloaded, but not applied because the download took more than an hour." : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Downloaded, but not applied because the download took more than an hour."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ダウンロードしましたが、完了まで1時間以上かかったため適用しませんでした。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "已下载，但下载用时超过一小时，因此没有应用。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "已下載，但下載耗時超過一小時，因此沒有套用。"}}}
+    },
+    "Downloaded, but it could not be applied: %@" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Downloaded, but it could not be applied: %@"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ダウンロードしましたが、適用できませんでした：%@"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "已下载，但无法应用：%@"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "已下載，但無法套用：%@"}}}
+    },
     "Enter your Steam account login name (not your display name). An account that owns Wallpaper Engine is required." : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Enter your Steam account login name (not your display name). An account that owns Wallpaper Engine is required."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "Steamアカウントのログイン名（表示名ではありません）を入力してください。Wallpaper Engineを所有するアカウントが必要です。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "请输入 Steam 账户的登录名（不是昵称）。需要拥有 Wallpaper Engine 的账户。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "請輸入你的 Steam 帳號登入名稱（不是顯示名稱）。需要使用擁有 Wallpaper Engine 的帳號。"}}}
     },

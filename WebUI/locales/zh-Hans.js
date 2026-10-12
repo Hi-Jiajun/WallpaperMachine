@@ -335,6 +335,8 @@ export default {
   'Cancel': '取消',
   'Download again': '重新下载',
   'Download': '下载',
+  'Download and apply': '下载并应用',
+  'Will apply when the download finishes.': '下载完成后将自动应用。',
   'Scene renderer is experimental.': '场景渲染器仍处于实验阶段。',
   'Playback depends on the video codec.': '能否播放取决于视频编码。',
   'Runs in a built-in web view. Mouse input and audio response reach the page; keyboard input does not.': '在内置网页视图中运行。支持鼠标和音频响应，不支持键盘输入。',

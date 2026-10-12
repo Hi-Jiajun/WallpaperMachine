@@ -335,6 +335,8 @@ export default {
   'Cancel': '取消',
   'Download again': '重新下載',
   'Download': '下載',
+  'Download and apply': '下載並套用',
+  'Will apply when the download finishes.': '下載完成後將自動套用。',
   'Scene renderer is experimental.': '場景渲染器仍屬實驗性功能。',
   'Playback depends on the video codec.': '能否播放取決於視訊編解碼器。',
   'Runs in a built-in web view. Mouse input and audio response reach the page; keyboard input does not.': '在內建的網頁檢視中執行。網頁可接收滑鼠輸入與音訊回應，但無法接收鍵盤輸入。',

@@ -43,7 +43,11 @@ Copy, swap and layout application each hold one user-command queue turn. The
 operation validates all targets and rejects pending edits on involved wallpapers,
 then checks the assignments again after preparation and between changes. A later
 manual wallpaper command waits for this operation, including any recovery, and
-then wins on its own display.
+then wins on its own display. The operation has no display slot of its own, so
+it counts as your choice for every display it gives a wallpaper to (both for a
+swap, the destination for a copy) from the moment it is asked for: a
+[Download and apply](workshop-downloads.md#download-and-apply) waiting on one of
+them is withdrawn and does not override the result when its download arrives.
 
 If a switch fails or is cancelled midway, recovery restores the affected original
 assignments, including an originally empty destination. Recovery does not overwrite

@@ -90,9 +90,10 @@ that waited behind a command switching its display leaves the switch alone, one 
 arrives while the user's switch runs there gives way at once, and a newer
 choice replaces a retry still waiting; reloading everywhere after an update still
 reloads every display. `UserCommandQueueTests` — commands run in arrival order, a
-newer command in the same slot replaces a waiting one, and a playlist, rule or
+newer command in the same slot replaces a waiting one, a playlist, rule or
 update reload never replaces a user command waiting in its slot (it returns at
-once and leaves the slot revision alone).
+once and leaves the slot revision alone), and a choice noted without a command
+counts once in each slot named and replaces nothing that waits.
 `WallpaperReapplyTests` and `WallpaperReapplyPanelTests` — the inspector's
 **Reapply wallpaper** takes the wallpaper off its display once and applies it
 again from an empty display, as the user's choice but not as a first apply
@@ -165,7 +166,9 @@ Not covered: real Space transitions and installed desktop behavior; see
 `WallpaperDisplayTransferTests` and `WallpaperDisplayTransferIntegrationTests`
 cover capture of stable display identity, complete validation before any write,
 copy and swap, rollback and recovery (including cancellation and empty
-destinations), one history entry per display and newer manual commands.
+destinations), one history entry per display, newer manual commands and a
+transfer counting as the user's choice for each display it gives a wallpaper
+to, from the moment it is asked for.
 `WallpaperDisplayLayoutStoreTests` (Library) covers bounded persistence, and
 offscreen `ControlPanelDisplayLayoutTests` covers save, rename, apply, delete,
 copy/swap failure feedback, keyboard focus, missing screens and compact locales.
@@ -706,6 +709,25 @@ and `WorkshopDownloadPersistenceTests`:
   an item Steam no longer serves (the installed folder untouched), an Application,
   the current version queued through the ordinary queue, and a repeat while a
   download runs or waits for setup doing nothing.
+- `WorkshopApplyOnArrivalTests` — Download and apply with the two-display test
+  bridge and `finishInstall` standing in for the arrival: the wallpaper applied once
+  and only on the asked display; the person's own choice for that display, made
+  before or while the apply waits its turn, withdrawing it with a note, while a
+  playlist change or a choice for the other display does not; two asks for one
+  display, where the later one is applied whichever wallpaper arrives first and
+  asks for different displays leave each other alone; copying to, swapping or
+  applying a layout naming the display withdrawing it, while a copy from it or a
+  layout for the other display does not; the hour; a failed
+  apply or a display that went away leaving the display alone and saying why; a
+  failed library rescan; an Application, a collection or an unusable display
+  getting a plain download; a scene waiting for its shared assets and being
+  dropped with a note when their job ends without them; cancel and dismiss; a
+  failed download; and a relaunch restoring the downloads but not the choice.
+  `WorkshopDownloadAndApplyPanelTests` covers what the panel accepts, and
+  `ControlPanelDiscoverTests` where the inspector offers the button and what it
+  says. Not covered: a real download followed by the apply (needs a Steam
+  sign-in and a display), and the assets job's completion calling the same
+  settle step (needs a finished SteamCMD job).
 
 ### Updates
 

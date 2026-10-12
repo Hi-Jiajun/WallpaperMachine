@@ -36,6 +36,16 @@ final class WallpaperDisplayTransferTests: XCTestCase {
         XCTAssertEqual(values.map(\.wallpaperID), ["a", "b"])
     }
 
+    func testARequestIsAChoiceForEveryDisplayItGivesAWallpaperTo() {
+        let layout = [WallpaperDisplayAssignment(displayID: "primary", displayTitle: "Main", wallpaperID: "c"),
+                      WallpaperDisplayAssignment(displayID: "identity:secondary", displayTitle: "Second", wallpaperID: "a")]
+        XCTAssertEqual(WallpaperDisplayTransfer.Request.layout(layout).displayIDs, ["primary", "identity:secondary"])
+        XCTAssertEqual(WallpaperDisplayTransfer.Request.copy(from: "primary", to: "identity:secondary").displayIDs,
+                       ["identity:secondary"], "A copy leaves its source as it was")
+        XCTAssertEqual(WallpaperDisplayTransfer.Request.swap("primary", "identity:secondary").displayIDs,
+                       ["primary", "identity:secondary"])
+    }
+
     func testCopyChangesOnlyTheDestinationAndSwapUsesTheOriginalAssignments() async throws {
         try await run(.copy(from: "primary", to: "identity:secondary"))
         XCTAssertEqual(assignments, ["a", "a"])

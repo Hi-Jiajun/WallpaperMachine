@@ -41,6 +41,20 @@ struct WorkshopDownloadRequest: Identifiable, Codable, Sendable {
   var isPaused = false
 }
 
+/// The choice behind **Download and apply**: apply the wallpaper to this display once it has
+/// arrived, if the user has not chosen anything else for that display in the meantime. It lives
+/// in memory only, so a relaunch never applies anything the user did not see arrive.
+struct ApplyOnArrival: Equatable, Sendable {
+  let displayID: String
+  /// The display's count of the user's own choices when the click was made, the click included;
+  /// any later choice of theirs for that display, another click on **Download and apply**
+  /// among them, changes it and withdraws this one.
+  let userRevision: UInt64
+  let created: Date
+  /// The files are installed and only the shared scene assets they need are still downloading.
+  var awaitsAssets = false
+}
+
 @MainActor
 @Observable
 final class WorkshopStore {
@@ -107,6 +121,17 @@ final class WorkshopStore {
   var showsDownloadDetails = false
   private(set) var downloadRequests: [WorkshopDownloadRequest] = []
   private(set) var downloadPersistenceError: String?
+  /// Wallpapers whose download was started with **Download and apply**, by item id. Never
+  /// written to disk: a relaunch restores jobs paused and unapplied.
+  private(set) var applyIntents: [String: ApplyOnArrival] = [:]
+  /// Why a wallpaper that arrived was not applied after all, by item id, in words for the
+  /// person. Kept until the item is requested again or the finished downloads are cleared.
+  private(set) var applyNotes: [String: String] = [:]
+  /// How long a click on **Download and apply** stays good. A download that takes longer than
+  /// this has outlived whatever the person had in mind.
+  static let applyIntentLifetime: TimeInterval = 3600
+  @ObservationIgnored private let now: @MainActor () -> Date
+  @ObservationIgnored private var applyTasks: [String: Task<Void, Never>] = [:]
   @ObservationIgnored private let requestFile: URL
   @ObservationIgnored private weak var downloadBridge: BridgeStore?
   @ObservationIgnored private var observingDownloads = false
@@ -148,9 +173,11 @@ final class WorkshopStore {
     runtimeProvider: any SteamCMDRuntimeProviding = SteamCMDRuntimeService(),
     updates: WorkshopUpdateStore? = nil,
     sceneAssetsLocation: @escaping @MainActor () -> URL = { ClientPaths.assetsURL },
-    sceneAssetsAvailable: @escaping @MainActor (URL) -> Bool = { ClientPaths.hasSceneAssets(at: $0) }
+    sceneAssetsAvailable: @escaping @MainActor (URL) -> Bool = { ClientPaths.hasSceneAssets(at: $0) },
+    now: @escaping @MainActor () -> Date = Date.init
   ) {
     self.service = service
+    self.now = now
     requestFile = supportDirectory.appendingPathComponent("Downloads/workshop-requests.json")
     self.downloader = downloader
     self.updates = updates ?? WorkshopUpdateStore(defaults: defaults)
@@ -194,7 +221,14 @@ final class WorkshopStore {
 
   /// The entry point for a single click: start immediately when every prerequisite is met,
   /// otherwise retain the intent and report which prerequisite it is waiting on.
-  func requestDownload(item: WorkshopItem?, rememberSession: Bool, bridge: BridgeStore) {
+  ///
+  /// With `displayID` the wallpaper is applied to that display once it has arrived, unless the
+  /// person chooses something else for the display first ([ApplyOnArrival]). Only a wallpaper
+  /// that can be applied there gets that: an Application or a collection, or a display that is
+  /// gone, disabled or mirroring, is downloaded like any other item.
+  func requestDownload(
+    item: WorkshopItem?, rememberSession: Bool, bridge: BridgeStore, applyTo displayID: String? = nil
+  ) {
     startDownloadLifecycle(bridge: bridge)
     let id = item?.id ?? Self.sceneAssetsRequestID
     if let job = downloader.download(for: item?.id), job.isPending {
@@ -202,6 +236,20 @@ final class WorkshopStore {
       return
     }
     let existing = downloadRequests.first { $0.id == id }
+    if let item, let displayID, canApply(item, to: displayID, bridge: bridge) {
+      // Asking is choosing for the display, and the latest ask wins: an earlier Download and
+      // apply for it is withdrawn, whichever of the two arrives first, and no two asks share a
+      // revision for the first apply to arrive to move out from under the other.
+      let slot = BridgeStore.activationSlot(displayId: displayID)
+      bridge.commands.noteUserChoice(in: [slot])
+      applyIntents[id] = ApplyOnArrival(
+        displayID: displayID, userRevision: bridge.commands.userRevision(for: slot), created: now())
+      if applyNotes[id] != nil { applyNotes[id] = nil }
+    } else if existing == nil {
+      // A plain download asks for no apply, whatever an earlier attempt asked. A request that
+      // is retained keeps the choice it was made with.
+      dropApplyChoice(id)
+    }
     let retained = existing?.account ?? ""
     resolve(
       WorkshopDownloadRequest(
@@ -285,12 +333,14 @@ final class WorkshopStore {
 
   func removeDownloadRequest(id: String) {
     guard downloadRequests.contains(where: { $0.id == id }) else { return }
+    dropApplyChoice(id)
     downloadRequests.removeAll { $0.id == id }
     downloader.discardRetainedCheckpoint(id: id)
     persistDownloadRequests()
   }
 
   func cancelDownload(id: String) {
+    dropApplyChoice(id)
     removeDownloadRequest(id: id)
     if let job = downloader.downloads.first(where: { $0.id == id }) { downloader.cancel(job) }
   }
@@ -334,6 +384,7 @@ final class WorkshopStore {
       Task { @MainActor [weak self] in
         guard let self, let bridge = self.downloadBridge else { return }
         self.resumeDownloadRequests(bridge: bridge)
+        self.settleApplyIntentsAwaitingAssets(bridge: bridge)
         self.observeDownloadPrerequisites()
       }
     }
@@ -461,17 +512,8 @@ final class WorkshopStore {
       downloader.start(
         item: item, username: request.account, executable: runtime.executableURL,
         library: ClientPaths.libraryURL, rememberSession: request.rememberSession
-      ) { [updates] in
-        // The files are already in the library, so the install counts even if the refresh fails.
-        updates.recordInstalled(item.id)
-        if !replacing { bridge.supportPrompt?.recordDownload(wallpaperID: item.id) }
-        try await bridge.refreshLibraryAsync()
-        guard replacing else { return }
-        do {
-          try await bridge.reloadWallpaperAsync(id: item.id)
-        } catch {
-          AppLog.warn("Workshop item \(item.id) was updated but could not be reloaded: \(error.localizedDescription)")
-        }
+      ) { [weak self] in
+        try await self?.finishInstall(item: item, replacing: replacing, bridge: bridge)
       }
     } else {
       installAssets(request, runtime: runtime)
@@ -498,11 +540,125 @@ final class WorkshopStore {
     ) {
       try ClientPaths.configureAssetsFolder(at: destination)
       self.refreshSceneAssetsReadiness()
+      if let bridge = self.downloadBridge { self.settleApplyIntentsAwaitingAssets(bridge: bridge) }
     }
+  }
+
+  /// What follows a Workshop item arriving in the library: record it, rescan, load a replaced
+  /// wallpaper's new files on the displays showing it, and apply it if that is what was asked.
+  func finishInstall(item: WorkshopItem, replacing: Bool, bridge: BridgeStore) async throws {
+    // The files are already in the library, so the install counts even if the refresh fails.
+    updates.recordInstalled(item.id)
+    if !replacing { bridge.supportPrompt?.recordDownload(wallpaperID: item.id) }
+    do {
+      try await bridge.refreshLibraryAsync()
+    } catch {
+      // The download reports that the library did not refresh, and what is not in the library
+      // cannot be applied.
+      applyIntents[item.id] = nil
+      throw error
+    }
+    if replacing {
+      do {
+        try await bridge.reloadWallpaperAsync(id: item.id)
+      } catch {
+        AppLog.warn("Workshop item \(item.id) was updated but could not be reloaded: \(error.localizedDescription)")
+      }
+    }
+    scheduleApplyOnArrival(item, bridge: bridge)
+  }
+
+  private func canApply(_ item: WorkshopItem, to displayID: String, bridge: BridgeStore) -> Bool {
+    guard item.kind != .application, item.collectionSize == nil else { return false }
+    return (try? bridge.validateActivationTarget(displayID)) != nil
+  }
+
+  private func dropApplyChoice(_ id: String) {
+    if applyIntents[id] != nil { applyIntents[id] = nil }
+    if applyNotes[id] != nil { applyNotes[id] = nil }
+  }
+
+  /// Whether `id` is to be applied when its download finishes, for the panel to say so.
+  func appliesOnArrival(_ id: String) -> Bool { applyIntents[id] != nil }
+
+  /// The apply in flight for `id`, which a test awaits instead of sleeping.
+  func applyInFlight(_ id: String) -> Task<Void, Never>? { applyTasks[id] }
+
+  /// A scene needs Wallpaper Engine's shared assets to play: when they are still downloading
+  /// the apply waits for them, and otherwise it goes ahead and says why it cannot.
+  private func scheduleApplyOnArrival(_ item: WorkshopItem, bridge: BridgeStore) {
+    guard var intent = applyIntents[item.id] else { return }
+    if item.kind == .scene {
+      refreshSceneAssetsReadiness()
+      if !sceneAssetsReady, sharedAssetsPending {
+        intent.awaitsAssets = true
+        applyIntents[item.id] = intent
+        return
+      }
+    }
+    startApply(item.id, bridge: bridge)
+  }
+
+  /// Settles the applies that were waiting for the shared scene assets: they go ahead once the
+  /// assets are there, and are withdrawn, with a note, when the job that was to install them
+  /// is over without having done so.
+  func settleApplyIntentsAwaitingAssets(bridge: BridgeStore) {
+    for (id, intent) in applyIntents where intent.awaitsAssets {
+      if sceneAssetsReady {
+        var released = intent
+        released.awaitsAssets = false
+        applyIntents[id] = released
+        startApply(id, bridge: bridge)
+      } else if !sharedAssetsPending {
+        applyIntents[id] = nil
+        let reason = sceneAssetsFailure
+          ?? String(localized: "Shared scene assets were not installed, so scene wallpapers cannot play yet.")
+        applyNotes[id] = String(localized: "Downloaded, but it could not be applied: \(reason)")
+      }
+    }
+  }
+
+  /// Applies from a task of its own, so a slow activation never holds a download slot.
+  private func startApply(_ id: String, bridge: BridgeStore) {
+    applyTasks[id] = Task { @MainActor [weak self] in
+      await self?.applyOnArrival(id, bridge: bridge)
+      self?.applyTasks[id] = nil
+    }
+  }
+
+  /// Applies `id` as the person's own choice, unless they have chosen something else for the
+  /// display since they asked. The choice is checked in the same step that joins the display's
+  /// command line, so nothing can slip in between the two.
+  private func applyOnArrival(_ id: String, bridge: BridgeStore) async {
+    guard let intent = applyIntents.removeValue(forKey: id) else { return }
+    let slot = BridgeStore.activationSlot(displayId: intent.displayID)
+    guard bridge.commands.userRevision(for: slot) == intent.userRevision else {
+      applyNotes[id] = Self.choseAnotherNote
+      return
+    }
+    guard now().timeIntervalSince(intent.created) <= Self.applyIntentLifetime else {
+      applyNotes[id] = String(localized: "Downloaded, but not applied because the download took more than an hour.")
+      return
+    }
+    do {
+      try bridge.validateActivationTarget(intent.displayID)
+      let ran = try await bridge.commands.run(slot: slot, subject: id) {
+        try await bridge.activateWallpaperAsync(id: id, displayId: intent.displayID, origin: .user)
+      }
+      // A newer choice of theirs took the display's turn while this one waited.
+      if !ran { applyNotes[id] = Self.choseAnotherNote }
+    } catch {
+      applyNotes[id] = String(localized: "Downloaded, but it could not be applied: \(error.localizedDescription)")
+    }
+  }
+
+  private static var choseAnotherNote: String {
+    String(localized: "Downloaded, but not applied because you chose another wallpaper.")
   }
 
   func clearDownloadActivity() {
     downloader.clearCompleted()
+    if !applyNotes.isEmpty { applyNotes = [:] }
     if !downloader.downloads.contains(where: { $0.id == selectedDownloadID }) {
       selectedDownloadID = nil
     }

@@ -273,8 +273,60 @@ measured network speed; the last percent is claimed only by Steam's own success
 line, then validation and import follow. An item Steam lists without a size keeps
 the spinning arc and the speed; if `nettop` is unavailable the tree alone is used.
 
-Downloads never subscribe on Steam and never apply automatically. Use **Show in
+Downloads never subscribe on Steam, and a download applies nothing unless you
+chose [Download and apply](#download-and-apply). Otherwise use **Show in
 library**, then Apply — see [Control panel](control-panel.md#selection-versus-apply).
+
+### Download and apply
+
+Under **Download**, the inspector of a Discover wallpaper offers **Download and
+apply**: one click that downloads the wallpaper and then applies it to the
+display the panel targets when you click. It is offered only where it can work:
+not for a collection, an Application, a wallpaper already in the library or
+with a download or waiting request, and not while the target display is
+disabled or mirroring another. The panel action takes the target from the
+panel and refuses such a display with the usual "selected display is
+unavailable" message before anything is queued. SteamCMD setup, the account and
+consent for shared scene resources come first, exactly as for **Download**.
+
+Applying a wallpaper you did not see arrive would be a surprise, so the choice
+is narrow:
+
+- It lives in memory only (`WorkshopStore.applyIntents`), never in
+  `workshop-requests.json` or `queue.json`: after a relaunch the downloads are
+  restored paused and apply nothing.
+- It is bound to the display, to that display's count of **your own** choices
+  (`UserCommandQueue.userRevision`, which a playlist, an automatic rule or an
+  update reload does not advance) and to an hour (`applyIntentLifetime`).
+  Choosing anything else for that display meanwhile, even while the apply waits
+  its turn behind another command, withdraws it; a choice for another display
+  does not. So do copying, swapping and applying a saved layout, for each
+  display they give a wallpaper to ([display layouts](display-layouts.md#missing-resources-and-failure-recovery)),
+  and clicking **Download and apply** itself (`UserCommandQueue.noteUserChoice`):
+  with two on one display the later click wins whichever wallpaper arrives
+  first, and the earlier one stays in the library with the note that you chose
+  another wallpaper.
+- It survives what a download goes through (waiting for setup, the sign-in, **Change
+  account**, **Try again**) and ends on **Cancel**, on dismissing the request,
+  or when a plain **Download** of the same wallpaper is asked for later.
+
+When the files are in the library (`WorkshopStore.finishInstall`: record the
+install, rescan the library, reload the displays of a replaced wallpaper) the
+apply runs from its own task, so a slow activation never holds a download slot.
+It is your own Apply: origin `user`, in the display's command slot, counted as
+your choice like any Apply. A scene whose shared assets are still downloading
+waits for that job and applies when it finishes; if the job ends without
+installing them, nothing is applied.
+
+While the choice stands the inspector reads **Will apply when the download
+finishes.** When the wallpaper arrives and is not applied, the inspector says why
+in a note, and the wallpaper stays in the library: you chose another wallpaper
+for the display, the download took more than an hour, or the apply was refused
+or failed (a display that went away, a type that cannot be played, a scene
+without its shared assets), with the reason. A note stays until the wallpaper is
+requested again, **Clear finished** in Downloads clears it, or the target
+display shows the wallpaper. The apply is logged like any other
+([diagnostics](diagnostics.md#wallpaper-activations)).
 
 ## SteamCMD setup
 

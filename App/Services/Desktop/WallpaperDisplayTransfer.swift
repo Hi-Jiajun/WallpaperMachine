@@ -18,6 +18,16 @@ enum WallpaperDisplayTransfer {
         case layout([WallpaperDisplayAssignment])
         case copy(from: String, to: String)
         case swap(String, String)
+
+        /// The displays the request gives a wallpaper to, which is what it is a choice for: a
+        /// copy leaves its source as it was.
+        var displayIDs: [String] {
+            switch self {
+            case .layout(let values): values.map(\.displayID)
+            case .copy(_, let target): [target]
+            case .swap(let first, let second): [first, second]
+            }
+        }
     }
     typealias Apply = @MainActor (String, String) async throws -> Void
     typealias Clear = @MainActor (String, String) async throws -> Void

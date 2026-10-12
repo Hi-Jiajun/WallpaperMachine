@@ -801,6 +801,82 @@ final class ControlPanelDiscoverTests: ControlPanelTestCase {
     await workshop.steamCMDSetup.shutdown()
   }
 
+  /// **Download and apply** sits under Download for a wallpaper that can run and a target display
+  /// that can show it, says what is pending while the choice stands, and explains a wallpaper that
+  /// arrived and was left alone. One click asks Swift to apply it on arrival.
+  func testDownloadAndApplyIsOfferedOnlyWhereItCanApplyAndTheInspectorSaysWhatIsPending() async throws {
+    try await withPanel { panel in
+      try await panel.finishWelcome()
+      panel.workshop.selectedItem = WorkshopItem(
+        id: "111", title: "W111", creator: "Test", summary: "", previewURL: nil, tags: ["Video"],
+        size: 2048, subscriptions: 0)
+      panel.show()
+      try await panel.waitJS("powerProbe.received.length >= 1")
+      let result = try await panel.js("""
+        const base = window.powerProbe.received.at(-1);
+        const item = (id, kind = 'Video', extra = {}) => Object.assign({ id, title: 'W' + id, creator: 'Test', summary: '', preview: null, thumbnail: null, animated: null, tags: [kind], approved: false, size: 2048, subscriptions: 0, kind, creatorID: null, collection: false, collectionSize: 0 }, extra);
+        const items = [item('111'), item('222', 'Application'), item('333', 'Video', { collection: true, collectionSize: 4 }), item('444'), item('555'), item('666')];
+        const installed = [{ id: '444', title: 'W444', kind: 'Video', size: 100, preview: null, active: false, supported: true, tags: [] }];
+        const job = (id, extra = {}) => Object.assign({ id, wallpaperID: id, title: 'W' + id, status: '', preview: null, thumbnail: null, account: '', phase: null, progress: null, pending: true, queued: true, paused: false, cancelled: false, error: null, applyOnArrival: false }, extra);
+        const request = (id, extra = {}) => Object.assign({ id, wallpaperID: id, title: 'W' + id, preview: null, thumbnail: null, account: '', rememberSession: true, stage: 'setup', paused: false, applyOnArrival: false }, extra);
+        const show = (id, extra = {}) => {
+          window.wallpaperUI.receive(Object.assign({}, base, { page: 'discover', targetDisplayID: 'primary',
+            workshop: Object.assign({}, base.workshop, { items, loaded: true, selectedID: id }),
+            wallpapers: [], downloads: [], downloadRequests: [], applyNotes: {} }, extra));
+          const inspector = document.getElementById('inspector');
+          return { apply: !!inspector.querySelector('[data-action="requestDownloadAndApply"][data-id="' + id + '"]'),
+                   plain: !!inspector.querySelector('[data-action="requestDownload"][data-id="' + id + '"]'),
+                   pending: inspector.querySelector('.inspector-apply-intent')?.textContent.trim() || '',
+                   note: inspector.querySelector('.inspector-apply-note')?.textContent.trim() || '' };
+        };
+        const mirrored = base.displays.map(display => Object.assign({}, display, { mode: 'mirror', mirrorTarget: 'other' }));
+        const showing = base.displays.map(display => Object.assign({}, display, { wallpaperID: '111' }));
+        const note = 'Downloaded, but not applied because you chose another wallpaper.';
+        const facts = {
+          video: show('111'), application: show('222'), collection: show('333'),
+          installed: show('444', { wallpapers: installed }),
+          downloading: show('555', { downloads: [job('555')] }),
+          downloadingToApply: show('555', { downloads: [job('555', { applyOnArrival: true })] }),
+          waitingToApply: show('666', { downloadRequests: [request('666', { applyOnArrival: true })] }),
+          mirrorTarget: show('111', { displays: mirrored }),
+          withNote: show('111', { applyNotes: { '111': note } }),
+          noteOnceShown: show('111', { applyNotes: { '111': note }, displays: showing }),
+        };
+        // Choosing it asks native to apply it on arrival; the plain button asks for nothing more.
+        window.sent = [];
+        const native = window.webkit.messageHandlers.native;
+        const original = native.postMessage.bind(native);
+        native.postMessage = message => { window.sent.push(message); return original(message); };
+        show('111');
+        document.querySelector('#inspector [data-action="requestDownloadAndApply"]').click();
+        return { facts, note };
+        """) as? [String: Any]
+      let facts = try XCTUnwrap(result?["facts"] as? [String: [String: Any]])
+      func offered(_ key: String) -> Bool? { facts[key]?["apply"] as? Bool }
+      XCTAssertEqual(offered("video"), true)
+      XCTAssertEqual(facts["video"]?["plain"] as? Bool, true, "Download stays as it was beside it")
+      XCTAssertEqual(offered("application"), false, "An Application cannot run on macOS")
+      XCTAssertEqual(offered("collection"), false, "A collection is opened, not downloaded")
+      XCTAssertEqual(offered("installed"), false, "An installed wallpaper is applied, not downloaded")
+      XCTAssertEqual(offered("downloading"), false, "A download under way is where the person looks")
+      XCTAssertEqual(offered("waitingToApply"), false)
+      XCTAssertEqual(offered("mirrorTarget"), false, "A display mirroring another shows no wallpaper of its own")
+
+      XCTAssertEqual(facts["downloading"]?["pending"] as? String, "", "A plain download promises no apply")
+      XCTAssertNotEqual(facts["downloadingToApply"]?["pending"] as? String, "", "A running download says it will apply")
+      XCTAssertNotEqual(facts["waitingToApply"]?["pending"] as? String, "", "So does one waiting for setup")
+      XCTAssertEqual(facts["withNote"]?["note"] as? String, result?["note"] as? String, "A wallpaper left alone says why")
+      XCTAssertEqual(facts["noteOnceShown"]?["note"] as? String, "", "The reason is moot once the display shows it")
+
+      try await panel.waitUntil { panel.workshop.appliesOnArrival("111") }
+      let sent = try await panel.js("return window.sent.map(message => ({ action: message.action, id: message.id, apply: message.apply }))")
+        as? [[String: Any]]
+      let request = sent?.first { $0["action"] as? String == "requestDownload" }
+      XCTAssertEqual(request?["id"] as? String, "111")
+      XCTAssertEqual(request?["apply"] as? Bool, true)
+    }
+  }
+
   /// `closing`, when given, is the brightness of a last frame shown for a fiftieth of a second
   /// between seconds-long frames of `brightness`.
 }

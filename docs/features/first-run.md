@@ -106,7 +106,9 @@ The download must have finished installing, and applying must have succeeded and
 reported a new active display assignment. Downloads alone, local imports, failed
 applies, startup restoration, playlist changes, automatic update reloads and
 reapplying an already active wallpaper do not qualify. **Apply changes** also
-qualifies when it first enables the downloaded wallpaper on a display.
+qualifies when it first enables the downloaded wallpaper on a display, and so does
+[Download and apply](workshop-downloads.md#download-and-apply) once its wallpaper
+has arrived, because it applies as the user's own choice.
 
 Eligibility survives quitting between download and apply. If the panel is hidden,
 the [welcome guide](#first-run) or sign-in is open, another dialog is active, or a

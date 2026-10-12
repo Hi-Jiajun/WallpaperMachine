@@ -457,7 +457,8 @@ final class BridgeStore {
         }
     }
 
-    private func validateActivationTarget(_ displayId: String) throws {
+    /// Refuses a display that cannot show its own wallpaper: gone, disabled or mirroring another.
+    func validateActivationTarget(_ displayId: String) throws {
         guard let target = settingsSnapshot.displays.first(where: { $0.displayId == displayId }),
               target.enabled, target.mode == .standalone else {
             throw WallpaperActionError(message: String(localized: "The selected display is unavailable, disabled, or mirroring another display. Choose an enabled independent display in Settings."))

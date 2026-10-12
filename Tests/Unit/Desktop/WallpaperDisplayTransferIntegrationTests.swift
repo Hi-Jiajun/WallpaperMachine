@@ -50,6 +50,48 @@ final class WallpaperDisplayTransferIntegrationTests: XCTestCase {
         XCTAssertEqual(bridge.assignments, ["primary": "a", "secondary": "b"])
     }
 
+    /// Work that outlives a command (a Download and apply) stands down for a choice of the user's
+    /// in its display's slot; a transfer has no slot of its own, so it has to be counted per display.
+    func testATransferCountsAsTheUsersChoiceForTheDisplaysItGivesAWallpaperTo() async throws {
+        func revisions() -> [Int] {
+            ["primary", "secondary"].map { Int(store.commands.userRevision(for: BridgeStore.activationSlot(displayId: $0))) }
+        }
+        XCTAssertEqual(revisions(), [0, 0])
+
+        try await store.applyDisplayTransferAsync(.copy(from: "primary", to: "secondary"))
+        XCTAssertEqual(revisions(), [0, 1], "A copy is a choice for the destination only")
+
+        try await store.applyDisplayTransferAsync(.layout([
+            WallpaperDisplayAssignment(displayID: "primary", displayTitle: "primary", wallpaperID: "c")]))
+        XCTAssertEqual(revisions(), [1, 1], "A layout is a choice for the displays it names")
+
+        try await store.applyDisplayTransferAsync(.swap("primary", "secondary"))
+        XCTAssertEqual(revisions(), [2, 2])
+    }
+
+    func testATransferThatCannotRunStillCountsAsTheChoiceItWas() async throws {
+        bridge.dirtyWallpapers.insert("b")
+        do { try await store.applyDisplayTransferAsync(.swap("primary", "secondary")); XCTFail("applied dirty options") } catch {}
+        XCTAssertEqual(store.commands.userRevision(for: BridgeStore.activationSlot(displayId: "primary")), 1,
+                       "Failing to carry a choice out does not unmake it, as for any command")
+    }
+
+    func testTheChoiceIsCountedWhenTheTransferIsAskedForNotWhenItGetsItsTurn() async throws {
+        var release: CheckedContinuation<Void, Never>?
+        let busy = Task { try await store.commands.run(slot: "other") { await withCheckedContinuation { release = $0 } } }
+        while release == nil { await Task.yield() }
+
+        let transfer = Task { try await store.applyDisplayTransferAsync(.copy(from: "primary", to: "secondary")) }
+        while store.commands.waiting.isEmpty { await Task.yield() }
+        XCTAssertEqual(store.commands.userRevision(for: BridgeStore.activationSlot(displayId: "secondary")), 1)
+        XCTAssertTrue(bridge.applications.isEmpty, "It has not run yet")
+
+        release?.resume()
+        try await busy.value
+        try await transfer.value
+        XCTAssertEqual(bridge.assignments["secondary"], "a")
+    }
+
     func testLaterIndividualChoiceWaitsForTheLayoutThenWins() async throws {
         var release: CheckedContinuation<Void, Never>?
         bridge.beforeApply = {

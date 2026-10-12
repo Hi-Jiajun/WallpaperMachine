@@ -627,6 +627,10 @@ function renderInspector(discover) {
   const download = state.downloads.find(download => download.id === item.id);
   const request = requestByID(item.id);
   const percent = Number.isFinite(download?.progress) ? Math.round(clamp(download.progress) * 100) : null;
+  // Download and apply needs a wallpaper that can run and a target display that can show one of its own.
+  // Why a downloaded wallpaper was not applied is moot once the target display shows it.
+  const applyNote = target?.wallpaperID === item.id ? '' : state.applyNotes?.[item.id] || '';
+  const canDownloadAndApply = discover && !item.collection && item.kind !== 'Application' && target?.enabled && target.mode !== 'mirror';
   const downloadAction = discover && item.collection
     ? button(t('Open collection'), 'workshopCollection', { id: item.id, title: item.title }, { icon: 'layers', className: 'primary' })
     : request
@@ -635,7 +639,7 @@ function renderInspector(discover) {
       ? button(t('Resume download'), 'downloadResume', { id: item.id }, { icon: 'play', className: 'primary' })
     : download?.pending
       ? `${download.prompt || download.challenge ? button(t('Finish sign-in'), 'continueSetup', { id: item.id }, { icon: 'shield', className: 'primary' }) : button(download.queued ? t('Waiting to download') : percent === null ? t('Downloading') : t('Downloading {percent}%', { percent }), 'openDownloads', {}, { icon: 'download', className: 'primary' })}${button(download.queued ? t('Remove from queue') : t('Cancel'), 'downloadCancel', { id: item.id }, { className: 'quiet' })}`
-      : button(download?.error ? t('Download again') : t('Download'), 'requestDownload', { id: item.id }, { icon: 'download', className: 'primary' });
+      : `${button(download?.error ? t('Download again') : t('Download'), 'requestDownload', { id: item.id }, { icon: 'download', className: 'primary' })}${canDownloadAndApply ? button(t('Download and apply'), 'requestDownloadAndApply', { id: item.id }, { icon: 'play', className: 'wide inspector-apply-download' }) : ''}`;
   const options = !discover && state.options?.id === item.id ? state.options : null;
   // An illustration saved from the pixiv tab is a web wallpaper only in how it is shown; its id names the artwork.
   const pixivArtwork = !discover && /^pixiv-(\d+)-p\d+$/.exec(item.id)?.[1];
@@ -674,6 +678,8 @@ function renderInspector(discover) {
     <div class="actions inspector-actions">${!isInstalled ? downloadAction : ''}${previewAction}${secondary}</div>${tags(item.tags)}
     ${!isInstalled && download?.pending && !download.queued ? `<progress class="inspector-progress" max="1"${Number.isFinite(download.progress) ? ` value="${clamp(download.progress)}"` : ''} aria-label="${escapeHTML(t('{title} download progress', { title: item.title }))}"></progress><p class="muted"><small>${escapeHTML(download.status)}${transfer(download, { includePercent: false }) ? ` · ${transfer(download, { includePercent: false })}` : ''}</small></p>` : ''}
     ${request ? `<p class="muted"><small>${escapeHTML(stageHint(request.stage))}</small></p>` : ''}
+    ${(request || download?.pending) && (request || download).applyOnArrival ? `<p class="muted inspector-apply-intent"><small>${escapeHTML(t('Will apply when the download finishes.'))}</small></p>` : ''}
+    ${applyNote ? `<div class="notice inspector-apply-note" role="status"><p>${escapeHTML(applyNote)}</p></div>` : ''}
     ${updateNotice}
     ${failureNotice}
     ${!discover ? hostStatusMarkup(item.id) : ''}
@@ -1177,8 +1183,9 @@ async function commitProperty(element) {
   render();
 }
 // One click keeps the intent: the native side retains the request and the dialog only collects what is still missing.
-async function requestDownload(id, element) {
-  await send('requestDownload', { id });
+// With `apply`, native applies the wallpaper to the target display once it has arrived, unless the person chooses another meanwhile.
+async function requestDownload(id, element, apply = false) {
+  await send('requestDownload', apply ? { id, apply: true } : { id });
   const target = id === null ? 'scene-assets' : id;
   const request = requestByID(target);
   const job = jobByID(target);
@@ -1221,6 +1228,7 @@ async function handleAction(action, data, element) {
     case 'closePopover': closePopover(true); return;
     case 'toggleQueueHistory': queueExpanded = !queueExpanded; renderPopover(); return;
     case 'requestDownload': await requestDownload(id, element); return;
+    case 'requestDownloadAndApply': await requestDownload(id, element, true); return;
     case 'requestAssets': await requestDownload(null, element); return;
     case 'continueSetup': openDialog(id, element); return;
     case 'dismissDialog': closeDialog(); return;

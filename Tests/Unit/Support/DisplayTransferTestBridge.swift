@@ -73,6 +73,12 @@ final class DisplayTransferTestBridge: LayoutSnapshotBridge {
     }
     override func selectWallpaper(id: String) async throws -> BridgeSnapshotBundle { selected = id; return currentBundle }
     override func allSnapshots() async throws -> BridgeSnapshotBundle { currentBundle }
+    /// Set to make the next rescans of the library fail, as a folder that cannot be read does.
+    var libraryRefreshFailure: Error?
+    override func refreshLibrary() async throws -> BridgeSnapshotBundle {
+        if let libraryRefreshFailure { throw libraryRefreshFailure }
+        return currentBundle
+    }
     override func wallpaperOptionsSnapshot(wallpaperId: String) async throws -> BridgeWallpaperOptionsSnapshot { currentOptions(wallpaperId) }
     override func setDisplayConfigEnabled(wallpaperId: String, displayId: String, enabled: Bool) async throws -> BridgeWallpaperMutationBundle {
         selected = wallpaperId

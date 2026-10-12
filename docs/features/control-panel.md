@@ -232,6 +232,11 @@ screen. Activation is explicit.
   still replaces an older one that is waiting. The log notes each time one gives
   way (`activation yielded to a waiting user choice`), and every activation and
   reload logs who asked and how it ended ([diagnostics](diagnostics.md#wallpaper-activations)).
+- **Download and apply** (a Discover wallpaper's inspector) is the one place a
+  download applies on its own: it applies the wallpaper to the display targeted
+  at the click once it has arrived, unless you chose another wallpaper for that
+  display meanwhile, and says so in the inspector when it did not. See
+  [Download and apply](workshop-downloads.md#download-and-apply).
 - Double-clicking a tile on the Installed tab activates it as well and does not
   close the window. On Discover, double-click downloads the tile (or applies it
   once it is in the library); see

@@ -530,6 +530,7 @@ details[open] > summary svg { transform: rotate(90deg); }
 .inspector-actions { margin-top: 4px; gap: 6px; }
 .actions.inspector-actions > .primary { flex: 1 1 100%; min-height: var(--control-height); }
 .inspector-actions > .wide { flex: 1; min-width: 0; }
+.actions.inspector-actions > .wide.inspector-apply-download { flex: 1 1 100%; }
 .inspector-actions > :not(.primary) { font-size: 12px; min-height: var(--control-height-compact); padding: 4px 6px; }
 .inspector-actions > .wide .button-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .inspector-section { border-top: 1px solid var(--divider); display: grid; gap: 12px; padding-top: 12px; padding-bottom: 12px; }

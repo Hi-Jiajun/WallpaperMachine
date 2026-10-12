@@ -701,7 +701,16 @@ extension WebPanelController {
       } else {
         item = nil
       }
-      workshop.requestDownload(item: item, rememberSession: remembersSession, bridge: store)
+      // **Download and apply** names no display: it is the one the panel targets when the
+      // wallpaper is asked for, and it has to be one that can show a wallpaper of its own.
+      var displayID: String?
+      if try body["apply"] == nil ? false : request.boolean("apply") {
+        guard item != nil else { throw WebPanelRequest.invalid }
+        try store.validateActivationTarget(navigation.targetDisplayID)
+        displayID = navigation.targetDisplayID
+      }
+      workshop.requestDownload(
+        item: item, rememberSession: remembersSession, bridge: store, applyTo: displayID)
       try checkDownloadError()
     // An update downloads through the same queue and prerequisites as any Workshop item, and
     // replaces the installed copy once it has arrived whole.

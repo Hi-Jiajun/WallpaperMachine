@@ -267,6 +267,27 @@ final class UserCommandQueueTests: XCTestCase {
         XCTAssertEqual(queue.userRevision(for: "activate:2"), 1)
     }
 
+    func testANotedChoiceCountsInEachNamedSlotOnceAndRunsNothing() async throws {
+        let queue = UserCommandQueue()
+        let gate = Gate()
+        let running = Task { try await queue.run(slot: "activate:1") { await gate.wait() } }
+        await until { queue.isBusy }
+        let waiting = Task { try await queue.run(slot: "activate:1", subject: "waiting") {} }
+        await until { queue.waiting.count == 1 }
+        let before = queue.userRevision(for: "activate:1")
+        let slotRevision = queue.revision(for: "activate:1")
+
+        queue.noteUserChoice(in: ["activate:1", "activate:2", "activate:2"])
+
+        XCTAssertEqual(queue.userRevision(for: "activate:1"), before + 1)
+        XCTAssertEqual(queue.userRevision(for: "activate:2"), 1, "A slot named twice is one choice")
+        XCTAssertEqual(queue.userRevision(for: "activate:3"), 0)
+        XCTAssertEqual(queue.revision(for: "activate:1"), slotRevision, "No command ran, so the slot's own count stays")
+        XCTAssertEqual(queue.waiting.map(\.subject), ["waiting"], "Noting a choice replaces nothing that waits")
+        gate.open()
+        _ = try await [running.value, waiting.value]
+    }
+
     func testFailedCommandStillHandsOverToTheNext() async throws {
         let queue = UserCommandQueue()
         let log = Log()

@@ -335,6 +335,8 @@ export default {
   'Cancel': 'キャンセル',
   'Download again': '再ダウンロード',
   'Download': 'ダウンロード',
+  'Download and apply': 'ダウンロードして適用',
+  'Will apply when the download finishes.': 'ダウンロードが完了したら適用します。',
   'Scene renderer is experimental.': 'シーンレンダラは試験運用中です。',
   'Playback depends on the video codec.': '再生できるかどうかはビデオコーデックによって異なります。',
   'Runs in a built-in web view. Mouse input and audio response reach the page; keyboard input does not.': '内蔵のWebビューで実行されます。マウス入力とオーディオ反応はページに届きますが、キーボード入力は届きません。',

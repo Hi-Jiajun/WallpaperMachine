@@ -60,10 +60,11 @@ the load.
 … WARN … activation: wallpaper 123456 display 1 origin user failed (refused) in 12 ms
 ```
 
-- **Origin** is who asked: `user` (the panel, menu bar, a hotkey, Shortcuts or a
-  link), `playlist`, `automation` (a rule), `layout` (a saved display layout) or
-  `updateReload` (an update loading new files, or Retry for a scene that stopped
-  drawing, which loads the same files again).
+- **Origin** is who asked: `user` (the panel, menu bar, a hotkey, Shortcuts, a
+  link, or a [Download and apply](workshop-downloads.md#download-and-apply) whose
+  wallpaper has arrived), `playlist`, `automation` (a rule), `layout` (a saved
+  display layout) or `updateReload` (an update loading new files, or Retry for a
+  scene that stopped drawing, which loads the same files again).
 - **Result** is `applied`, `noOp` (the display already showed it, so nothing was
   touched) or `failed` with a category: `cancelled`, `refused` (the app declined
   with a reason it shows in the panel) or `error` (anything else). Failures are

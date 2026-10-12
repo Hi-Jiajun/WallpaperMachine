@@ -14,6 +14,10 @@ extension BridgeStore {
     func applyDisplayTransferAsync(_ request: WallpaperDisplayTransfer.Request) async throws {
         // A layout is one user command. Later individual choices wait behind the whole
         // operation, including rollback; no screen receives half of a coalesced swap.
+        // It has no slot of its own, so it counts as the user's choice for each display it
+        // names as it is asked for, and work waiting on one of them (a Download and apply)
+        // stands down.
+        commands.noteUserChoice(in: request.displayIDs.map { Self.activationSlot(displayId: $0) })
         try await commands.run {
             let before = displayTransferSnapshot()
             var successful: [WallpaperDisplayAssignment] = []

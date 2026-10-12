@@ -165,7 +165,19 @@ was run.
       elsewhere: the request remains in Downloads and Continue setup resumes it.
       Removing it prevents later automatic continuation.
 - [ ] Completing setup, account and resource consent continues without another
-      Start download button. Downloads do not auto-apply.
+      Start download button. Downloads do not auto-apply unless Download and
+      apply was chosen.
+- [ ] With a saved sign-in, choose Download and apply on a Discover video that
+      is not installed: the inspector reads "Will apply when the download
+      finishes.", and when it arrives the target display shows it. Repeat and
+      apply a different wallpaper to that display while the download runs, or
+      swap it with another display or apply a saved layout that names it: the
+      display keeps your choice, the new wallpaper stays in the library, and the
+      inspector says it was not applied because you chose another wallpaper.
+      Click Download and apply on two wallpapers for one display: whichever
+      arrives first, the one you clicked last is applied.
+      Quit and reopen mid-download: the download comes back paused and applies
+      nothing when resumed.
 - [ ] Show in library reveals an item excluded by filters and returns to the
       original results; deleting it removes Discover's installed badge.
 

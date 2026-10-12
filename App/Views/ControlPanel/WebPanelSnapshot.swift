@@ -84,6 +84,8 @@ extension WebPanelController {
     _ = workshop.sceneAssetsURL
     _ = workshop.sceneAssetsFailure
     _ = workshop.downloadRequests
+    _ = workshop.applyIntents
+    _ = workshop.applyNotes
     _ = workshop.downloadPersistenceError
     _ = workshop.username
     _ = workshop.suggestedAccount
@@ -426,6 +428,7 @@ extension WebPanelController {
         "securePrompt": worker.prompt == .password, "challenge": challenge as Any? ?? null,
         "warning": worker.sessionWarning as Any? ?? null,
         "wallpaperEngineOwnership": worker.wallpaperEngineOwnership.rawValue,
+        "applyOnArrival": workshop.appliesOnArrival(job.id),
       ]
     }
     let downloadRequests: [[String: Any]] = workshop.downloadRequests.map { request in
@@ -436,6 +439,7 @@ extension WebPanelController {
         "thumbnail": request.item.flatMap(Self.thumbnailAddress) as Any? ?? null,
         "account": request.account, "rememberSession": request.rememberSession,
         "stage": workshop.stage(for: request).rawValue, "paused": request.isPaused,
+        "applyOnArrival": workshop.appliesOnArrival(request.id),
       ]
     }
     let loading: Bool
@@ -671,6 +675,8 @@ extension WebPanelController {
       "pixiv": pixivSnapshot(),
       "setup": setupSnapshot,
       "downloads": downloads, "downloadRequests": downloadRequests,
+      // Why a wallpaper that arrived through Download and apply was left alone, by item id.
+      "applyNotes": workshop.applyNotes,
       "downloadSlots": workshop.downloader.slotLimit,
       "account": workshop.suggestedAccount,
       "savedAccount": workshop.downloader.savedAccount as Any? ?? null,
