@@ -131,7 +131,7 @@ pub fn case_wallpaper_window_layer_swap_revert() {
         if display.scale_factor > 1.0 { 1.0 } else { 2.0 },
     );
     let swap = window
-        .begin_layer_swap(swapped)
+        .begin_layer_swap(swapped, crate::window::LayerInstall::Replace)
         .expect("layer swap should begin");
     assert_ne!(window.metal_layer_ptr(), original_layer);
     assert_eq!(swap.layer_ptr(), window.metal_layer_ptr());
@@ -176,7 +176,7 @@ pub fn case_wallpaper_window_layer_swap_finish() {
         .expect("native state should exist");
 
     let swap = window
-        .begin_layer_swap(display)
+        .begin_layer_swap(display, crate::window::LayerInstall::Replace)
         .expect("layer swap should begin");
     let new_layer = swap.layer_ptr();
     assert_ne!(new_layer, original_layer);
@@ -192,6 +192,103 @@ pub fn case_wallpaper_window_layer_swap_finish() {
         &original_state,
     );
     window.close();
+}
+
+/// Every window layer is announced once, in the order it is installed, with
+/// the layer as the notification's object. A reverted swap takes its layer out
+/// again without announcing anything.
+#[test]
+pub fn case_wallpaper_window_announces_layers() {
+    use std::sync::{Arc, Mutex};
+
+    use objc2::rc::Retained;
+    use objc2_foundation::{NSNotification, NSNotificationCenter, NSNumber, NSString, ns_string};
+
+    use crate::window::{LAYER_INSTALLED_NOTIFICATION, LayerInstall};
+
+    if !window_tests_enabled_or_skip("window layer announcement") {
+        return;
+    }
+    let Some(display) = primary_display_or_skip() else {
+        return;
+    };
+
+    let seen = Arc::new(Mutex::new(Vec::<(usize, u32, String)>::new()));
+    let sink = Arc::clone(&seen);
+    let block = block2::RcBlock::new(move |notification: std::ptr::NonNull<NSNotification>| {
+        // SAFETY: The center hands the block a live notification.
+        let notification = unsafe { notification.as_ref() };
+        let (Some(layer), Some(info)) = (notification.object(), notification.userInfo()) else {
+            return;
+        };
+        let display_id = info
+            .objectForKey(ns_string!("displayID"))
+            .and_then(|value| value.downcast::<NSNumber>().ok())
+            .map(|number| number.as_u32());
+        let reason = info
+            .objectForKey(ns_string!("reason"))
+            .and_then(|value| value.downcast::<NSString>().ok())
+            .map(|reason| reason.to_string());
+        if let (Some(display_id), Some(reason)) = (display_id, reason) {
+            sink.lock()
+                .unwrap()
+                .push((Retained::as_ptr(&layer) as usize, display_id, reason));
+        }
+    });
+    let center = NSNotificationCenter::defaultCenter();
+    let name = NSString::from_str(LAYER_INSTALLED_NOTIFICATION);
+    // SAFETY: The test runs on the main thread, so the block runs inline; the
+    // token is removed below.
+    let observer: Retained<objc2::runtime::AnyObject> = unsafe {
+        center.addObserverForName_object_queue_usingBlock(Some(&name), None, None, &block)
+    }
+    .into();
+
+    let mut window = crate::WallpaperWindow::builder(display.clone())
+        .placeholder_style(crate::PlaceholderStyle::default())
+        .open()
+        .expect("window should open");
+    let opened = window.metal_layer_ptr() as usize;
+
+    let swap = window
+        .begin_layer_swap(display.clone(), LayerInstall::Replace)
+        .expect("layer swap should begin");
+    let replaced = swap.layer_ptr() as usize;
+    swap.finish();
+
+    let reconfigured = window
+        .update_layer(display.clone())
+        .expect("layer update should succeed") as usize;
+
+    let swap = window
+        .begin_layer_swap(display.clone(), LayerInstall::Replace)
+        .expect("layer swap should begin");
+    let abandoned = swap.layer_ptr() as usize;
+    window
+        .revert_layer_swap(swap)
+        .expect("layer swap should revert");
+    window.close();
+
+    // SAFETY: The token came from the `addObserver` call above.
+    unsafe { center.removeObserver(&observer) };
+
+    // Other window cases may run beside this one; only this window's layers count.
+    let ours = [opened, replaced, reconfigured, abandoned];
+    let announced: Vec<_> = seen
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(layer, ..)| ours.contains(layer))
+        .cloned()
+        .collect();
+    let expected = [
+        (opened, "open"),
+        (replaced, "replace"),
+        (reconfigured, "reconfigure"),
+        (abandoned, "replace"),
+    ]
+    .map(|(layer, reason)| (layer, display.display_id, reason.to_string()));
+    assert_eq!(announced, expected);
 }
 
 fn assert_same_geometry(

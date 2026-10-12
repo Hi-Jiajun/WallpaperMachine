@@ -635,6 +635,17 @@ engine to redo, and when.
   original window, view and layer geometry (changed on purpose by the swap); a finished swap
   keeps the new layer. Nothing routine opens a window, so the revert on a forced `open_scene`
   failure is verified by reading only, and the gated cases have not been run.
+- **Every window layer is announced with its display and reason** —
+  `window::tests::announcement_carries_display_and_reason` and
+  `::install_reason_strings_are_the_swift_contract` (`wallpaper-core`, device-free: a private
+  `NSNotificationCenter` and plain `NSObject`s stand in for the window and its layers). The Swift
+  host puts content on a window's new layer from `WallpaperMachine.wallpaperLayerInstalled`, and
+  matches the name, the `displayID` and `reason` keys and the `open`, `replace` and `reconfigure`
+  strings literally, so a rename on one side silently disables the other. One announcement per
+  install, in order, the layer as the object, delivered on the posting thread and not on the
+  default center. `tests::general::platform::case_wallpaper_window_announces_layers` runs the
+  real window paths (open, swap, update, reverted swap) under the same gate as the layer-swap
+  cases above and has not been run.
 - **The lock screen ignores the covered desktop** — `apply_options::lock_screen_export_ignores_the_desktop_display_being_covered`:
   locking covers the desktop and suspends its display, and the exported
   lock-screen scene must stay unpaused unless the user or power policy paused

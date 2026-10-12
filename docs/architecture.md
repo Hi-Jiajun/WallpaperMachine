@@ -281,6 +281,23 @@ descriptor unchanged and rebuilds nothing. On success the previous layer is rele
 picture does not change. A display reconfigure swaps the layer with `update_layer`, which does
 not keep the previous one.
 
+Every content layer a Rust window gets is announced to the host before the window is composited
+with it. `window.rs` posts `WallpaperMachine.wallpaperLayerInstalled` on the default
+`NSNotificationCenter`, synchronously on the main thread (the center the C++ desktop-poster
+mailbox already listens on): once from `WallpaperWindowBuilder::open` just before the window is
+ordered front, and once from each layer swap right after the new layer is under the view and
+shaped, before any renderer exists. `object` is the new `CAMetalLayer`; `userInfo` carries
+`displayID` (an `NSNumber`, the CoreGraphics display id, `DisplayDesc.display_id`) and `reason`
+(an `NSString`): `open` for a new window, `replace` for a scene replacement
+(`rebuild_for_desc`), `reconfigure` for a display reconfigure (`update_layer`). A host observer
+matches the name, the keys and the three strings literally and nothing checks that at compile
+time, so `window::tests` pins them on the Rust side. The observer runs inside the window
+operation that posts it, which is inside a main-thread dispatch the engine actor is waiting on,
+so it must stay cheap and must not call back into the bridge. Nothing is posted when a swap is
+reverted, so a layer that was announced and then abandoned leaves the window without a second
+notification; whatever a host put on it goes with the layer. With no observer a layer costs one
+small dictionary and a no-op post. The first-frame callback thread never posts.
+
 Multi-display user commands are coordinated above these windows by `WallpaperDisplayTransfer`
 and `BridgeStoreDisplayLayouts`; `WallpaperDisplayLayoutStore` owns only saved wallpaper
 choices, while playlists, properties and display topology stay with their existing owners. See

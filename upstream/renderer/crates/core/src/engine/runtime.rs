@@ -24,7 +24,7 @@ use crate::{
     },
     project::{ScalingMode, SceneDesc, SceneHandle, SerdeValudeExt},
     render::RendererSurfaceCounters,
-    window::{LayerSwap, MouseButtonEdges, NormalizedMousePosition},
+    window::{LayerInstall, LayerSwap, MouseButtonEdges, NormalizedMousePosition},
 };
 
 /// The native looper only writes watch state; this task owns bounded delivery.
@@ -717,7 +717,7 @@ impl SceneRuntime {
         // new renderer exists, because a replacement that fails leaves the old
         // renderer in place, drawing on that layer: it has to be back under
         // the view then, or the display stays on the empty new layer.
-        let swap = window.begin_layer_swap(desc.display.clone())?;
+        let swap = window.begin_layer_swap(desc.display.clone(), LayerInstall::Replace)?;
 
         let mut renderer = match backend.open_scene(
             desc,
