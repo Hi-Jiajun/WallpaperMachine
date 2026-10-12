@@ -26,7 +26,7 @@ final class WebWallpaperPreviewSurface: NSObject, WallpaperPreviewSurface, WKUID
         view = content
         super.init()
         page.webView.uiDelegate = self
-        page.webView.configuration.userContentController.addUserScript(WKUserScript(
+        page.addUserScript(WKUserScript(
             source: Self.denyCaptureScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         page.attach(to: content)
         page.onLoaded = { [weak self] in

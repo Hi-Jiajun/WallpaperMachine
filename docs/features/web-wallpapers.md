@@ -46,10 +46,10 @@ from the entry page; subframes and network requests are unrestricted (macOS ATS
 applies, so plain `http://` requests fail).
 
 The host script (`Shared/WebWallpaperProtocol.swift`, installed at document start and
-shared with the screen-saver web surface) also closes one gap between WebKit and
-Chromium. WebKit answers a `fetch()` or `XMLHttpRequest` of a project file with
-status 0 and no headers, where Chromium answers 200 with a `Content-Type` taken from
-the extension. The script gives a found `file://` GET/HEAD response that status and
+shared with the screen-saver web surface; desktop and preview pages get a copy
+built for each document) also closes one gap between WebKit and Chromium. WebKit
+answers a `fetch()` or `XMLHttpRequest` of a project file with status 0 and no
+headers, where Chromium answers 200 with a `Content-Type` taken from the extension. The script gives a found `file://` GET/HEAD response that status and
 type, so loaders that check `ok`, and WebGL exports (Unity, Emscripten) that call
 `WebAssembly.instantiateStreaming`, start. Served `.wasm` responses are compiled from
 their bytes rather than by WebKit's streaming compiler, which was slower to boot a
@@ -59,7 +59,7 @@ bodies stay native: nothing is copied, retried or run per frame.
 | Call into the page | When |
 |---|---|
 | `wallpaperPropertyListener.applyUserProperties({ id: { value } })` | Once after load with every property, then after an Apply with only the properties whose values changed; colors are `"r g b"` floats in 0–1 as in `project.json` |
-| `wallpaperPropertyListener.applyGeneralProperties({ fps })` | Once after load, then when the display's target FPS changes |
+| `wallpaperPropertyListener.applyGeneralProperties({ fps })` | Once after load, then when the display's target FPS changes; below the rate the page draws at (60 by default) the host also [enforces the limit](#frame-rate-limit) |
 | `wallpaperPropertyListener.setPaused(bool)` | Play/Pause, battery Pause, presentation suspension; the page's cooperative half, the host suspends it as well ([Suspension](#runtime-shape)) |
 | `wallpaperPropertyListener.userDirectoryFilesAddedOrChanged(property, files)` / `userDirectoryFilesRemoved(property, files)` | A watched `fetchall` folder gained or lost files |
 
@@ -94,6 +94,41 @@ again. A page
 that rebuilt itself from the payload on every edit has to keep its earlier values,
 as it must under Wallpaper Engine. `setPaused` is not deduplicated.
 
+### Frame-rate limit
+
+WebKit gives a page no frame-rate control, and a page is free to ignore the `fps`
+it is told, so a limit below the rate the page draws at (60 unless noted below) is
+enforced on the page's own `requestAnimationFrame`
+(`Shared/WebWallpaperFramePacer.swift`, evaluated inside the host script). Callbacks
+are held to the limit and run on the first display frame at or after their slot,
+with that frame's own timestamp, so the page's time arithmetic is unchanged and
+only the number of callbacks falls. Slots advance by one interval from the previous
+slot, so a limit that does not divide the display cadence still averages its rate
+(40 on a 60 Hz cadence runs two callbacks in three frames), and a stall longer than
+one interval resumes at the limit instead of catching up in a burst. A callback
+that throws is reported as an error of the page and does not stop the others, one
+that requests again runs on a later frame, and cancelling inside a frame skips a
+callback that has not run yet. With no limit, or one that reaches the rate the
+page draws at, the page keeps WebKit's own function: native handles, native
+timestamps, native errors. That rate is near 60 by default, because WebKit prefers
+about 60 rendering updates per second even on a faster display; the display's own
+refresh on one that refreshes slower than 60 Hz; and the full refresh for a page
+`WebWallpaperHost` created to draw at it ([frame rate](#runtime-shape)), where the
+descriptor's `fps` has reached the refresh, so nothing is held. The pacer itself
+never works above 60. The host tells each page its display's refresh on every apply
+(`WebWallpaperPage.applyDisplayRefreshRate`, from the same reading that decides the
+full refresh), so a display moving to another refresh retunes the limit of a
+running page without a reload.
+
+The limit is the descriptor's `fps`, which already includes the Reduced-quality
+battery frame rate and the Performance cap ([frame-rate limit](performance.md#quality)).
+It is part of each document's script, so even the first `requestAnimationFrame`
+call of a page, a reload and a content-process restart are paced; a change on a
+running page (a Performance or power-source change) is sent together with
+`applyGeneralProperties` and applies from the next frame without reloading, and
+callbacks already waiting are kept. It is logged at debug level
+(`frame limit <n|none>`). The native screen-saver surface does not get the wrapper.
+
 The page may call `wallpaperRegisterAudioListener`, the five
 `wallpaperRegisterMedia*Listener` functions (status, properties, thumbnail,
 playback, timeline) and `wallpaperRequestRandomFileForProperty`.
@@ -125,8 +160,9 @@ separate web view with its own handler (see [architecture](../architecture.md#co
 - Swift (`App/Services/WebWallpaper/`): `WebWallpaperHost` re-reads
   `webWallpapers()` on every snapshot and diffs it against one `WebWallpaperWindow`
   (`MWEWebWallpaperDesktopWindow`, desktop level, all Spaces, mouse-transparent) per
-  display. `WebWallpaperPage` owns the `WKWebView`, the host script,
-  property/pause delivery, host-side suspension and content-process recovery.
+  display. `WebWallpaperPage` owns the `WKWebView`, the host script (installed again
+  with the committed frame-rate limit on every `load()`), property/pause delivery,
+  host-side suspension and content-process recovery.
 - **Suspension** does not rely on the page cooperating. `setPaused` is an optional
   listener callback, so a page can ignore it; alongside it the host suspends all
   media playback (suspend and unsuspend, so media the user had paused is not
@@ -315,6 +351,12 @@ never substitutes Pause for an unavailable mute.
   full refresh, WebKit's own cadence near 60 fps applies (60 on a 120 Hz display,
   whatever rate between 60 and 120 is chosen). A page that cannot keep up, such as
   a heavy WebGL scene on a slower GPU, slows its pointer with its frames.
+- The frame-rate limit is enforced on `requestAnimationFrame` of the main frame
+  only. `setInterval` and `setTimeout` loops, video frame callbacks, CSS and Web
+  Animations, workers and subframes run at their own pace, and a page that
+  interpolates by frame count rather than by time may judder at 30. The effective
+  cadence snaps to the display's: 30 on a 60 Hz cadence is exactly every second
+  frame, 40 averages 40 with uneven spacing.
 - Nonzero WebAudio gain is not controlled by the native media-volume interface;
   whole-page Mute still applies where WebKit exposes it.
 - A paused wallpaper's WebAudio is muted (`WebWallpaperAudioOwnership` gives a paused
@@ -328,12 +370,18 @@ The page host is tested against a real offscreen `WKWebView` with no desktop win
 (`Tests/Unit/WebWallpaper/`: module loading, late-listener replay, local request
 metadata, pause composition, suspension by presentation and by pause with its
 first-frame grace and edits shown while paused, navigation lockdown, forwarded pointer events, mouse routing
-policy, changed-only property delivery) and the bridge contract in
+policy, changed-only property delivery, frame pacing against a fake display
+cadence and in a real page with the rate a slow or full-refresh page draws at) and the bridge contract in
 `upstream/renderer/crates/bridge/src/tests/` (`apply_options.rs`,
 `web_audio_media.rs`); file and directory properties are covered under
 [user files](user-files.md#verification), and the domain inventory is in
 [coverage](../testing/coverage.md). Show Desktop and Space transition smoothness,
 real hover and window-server routing on a desktop, audible output and mirror audio
-handoff need an authorized manual run, as does a pass over real Workshop pages from
-the [local corpus](../testing/wallpaper-corpus.md) for any that assumed a full
-property object on every edit.
+handoff need an authorized manual run. So do judder on pages that interpolate by
+frame count at 30 fps, the real CPU and GPU change of a Low-preset web wallpaper
+(`scripts/power_benchmark.py`), and whether WebKit really caps `requestAnimationFrame`
+near 60 on a ProMotion display (measured for pointer moves and a page's own loop when
+full-refresh pages were added, not for the pacer on a limit set on such a page), as
+does a pass over real Workshop pages from the
+[local corpus](../testing/wallpaper-corpus.md) for any that assumed a full property
+object on every edit.

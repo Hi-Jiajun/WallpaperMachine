@@ -31,8 +31,10 @@ display's proportions, not its resolution: a page sees the stage's size in point
 The window has its own **Play/Pause**, sound toggle and reload control, and every
 new preview, including reload, starts muted. Scene and video rendering is capped
 at 30 FPS or the effective lower limit when its inputs are read. Web pages receive
-that FPS through the standard wallpaper host protocol; honoring it depends on the
-page, so it is not a WebKit frame-rate guarantee. Hiding, covering or minimizing
+that FPS through the standard wallpaper host protocol, and below 60 the host holds
+the page's `requestAnimationFrame` callbacks to it
+([frame-rate limit](web-wallpapers.md#frame-rate-limit)); timers, video and CSS
+animation are not limited. Hiding, covering or minimizing
 the window, locking the session or sleeping the displays suspends it, and resuming
 visibility preserves an explicit user pause. Closing the window cancels pending
 preparation, removes file watchers and releases its renderer or WebKit page. A

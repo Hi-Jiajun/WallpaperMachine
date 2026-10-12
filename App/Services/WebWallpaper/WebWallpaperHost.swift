@@ -392,10 +392,11 @@ final class WebWallpaperHost {
                 continue
             }
             guard !stopped, generation == applyGeneration else { return }
+            let displayRefreshRate = refreshRate(displayID)
             // Fixed when the web view is created, so a frame rate that crosses
             // the display's refresh rebuilds the page.
             let rendersAtDisplayRefresh = Self.rendersAtDisplayRefresh(
-                fps: wallpaper.fps, refreshRate: refreshRate(displayID))
+                fps: wallpaper.fps, refreshRate: displayRefreshRate)
             if let window = windows[displayID], window.page.canonicalEntryURL == canonicalEntry,
                loadedProjectRevisions[displayID] == projectRevision,
                window.page.rendersAtDisplayRefresh == rendersAtDisplayRefresh {
@@ -403,6 +404,7 @@ final class WebWallpaperHost {
                     window.setScreenFrame(frame)
                     changed = true
                 }
+                window.page.applyDisplayRefreshRate(displayRefreshRate)
                 await push(wallpaper, into: window.page, previous: descriptors[displayID])
                 guard !stopped, generation == applyGeneration else { return }
             } else {
@@ -473,6 +475,7 @@ final class WebWallpaperHost {
                 windows[displayID] = window
                 loadedProjectRevisions[displayID] = projectRevision
                 recordState(wallpaper, phase: .loading)
+                page.applyDisplayRefreshRate(displayRefreshRate)
                 await push(wallpaper, into: page, previous: nil)
                 guard !stopped, generation == applyGeneration, windows[displayID]?.page === page else { return }
                 page.applyAudioOutput(volume: wallpaper.volume, muted: true)

@@ -184,6 +184,15 @@ is in force. Saved per-wallpaper frame rates are never rewritten. When a
 Performance cap is below the saved rate, the inspector and **Settings → Displays**
 say so and offer **Open Performance**.
 
+For Web wallpapers a limit below the rate the page draws at (60, or the display's
+refresh when that is lower) is enforced on the page's `requestAnimationFrame`, so
+Low (30 fps), a lower cap, the battery frame rate and a per-wallpaper rate cut the
+page's drawing callbacks; a rate that reaches it is left to WebKit and a No limit
+page keeps its native frames. It applies to a running page without a reload, except
+where a fast display's refresh is crossed and the page is rebuilt (below). Timers,
+video and CSS animation are not limited, and the energy effect has not been
+measured ([limits](web-wallpapers.md#limits)).
+
 **Internal render scale** (100% / 75% / 50%) is the internal rasterization size
 only. Output size, placement and composition are unchanged; a lower scale
 rasterizes fewer pixels and draws the result into the same area, so detail softens

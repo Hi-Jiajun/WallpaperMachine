@@ -100,6 +100,8 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
     private struct CommittedState {
         var propertiesJSON: String?
         var fps: UInt32?
+        /// The refresh rate of the display the page is on, 0 while unknown.
+        var displayRefreshRate = 0
         var volume: Float = 1
         var muted = false
         /// The bridge's composed pause, not only the Play/Pause button: user
@@ -218,6 +220,10 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
     private static let maximumPendingRandomFileRequests = 32
     private static let maximumDeferredDirectoryChanges = 64
     private let messageProxy = ScriptMessageProxy()
+    /// Installing the host script replaces the controller's whole script list,
+    /// so the scripts the page's owner adds beside it (the preview denies
+    /// capture) are kept here and installed again after it.
+    private var extraUserScripts: [WKUserScript] = []
     /// Raised when the page's audio subscription actually changes, so the host
     /// can open and close the capture tap on real demand.
     var onAudioDemandChanged: (@MainActor (Bool) -> Void)?
@@ -315,15 +321,13 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
             Self.fullRefreshUnavailableLogged = true
             AppLog.warn("WebKit rendering-rate control unavailable; web wallpapers stay near 60 fps")
         }
-        let content = WKUserContentController()
-        content.addUserScript(WKUserScript(source: WebWallpaperProtocol.hostScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-        configuration.userContentController = content
         webView = WKWebView(frame: .zero, configuration: configuration)
         super.init()
         messageProxy.page = self
-        // Registered on the web view's own controller rather than the one built
-        // above: `WKWebView` copies the configuration it is given, so only this
-        // one is guaranteed to be the live object.
+        // Registered on the web view's own controller: `WKWebView` copies the
+        // configuration it is given, so only the one reached through the web
+        // view is guaranteed to be the live object. The host script is added
+        // per document, in `load()`.
         webView.configuration.userContentController.add(messageProxy, name: WebWallpaperProtocol.messageHandlerName)
         webView.navigationDelegate = self
         webView.underPageBackgroundColor = .black
@@ -349,6 +353,9 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
     }
 
     func load() {
+        // First, so the document about to start already carries the committed
+        // frame-rate limit: its very first `requestAnimationFrame` call is paced.
+        installUserScripts()
         restartTask?.cancel()
         restartTask = nil
         isLoaded = false
@@ -380,6 +387,40 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         webView.stopLoading()
         webView.navigationDelegate = nil
         webView.loadHTMLString("", baseURL: nil)
+    }
+
+    /// Adds a script to run at the start of every document, after the host script.
+    func addUserScript(_ script: WKUserScript) {
+        extraUserScripts.append(script)
+        installUserScripts()
+    }
+
+    /// Rebuilds the user scripts from the committed state. A script cannot be
+    /// replaced alone, and the frame-rate limit is baked into the host script so
+    /// a document sees it from its first line; the live path in
+    /// `deliverGeneralProperties` keeps a running document in step afterwards.
+    private func installUserScripts() {
+        let seed = WebWallpaperProtocol.Seed(framePacing: true, frameLimit: frameLimit)
+        let controller = webView.configuration.userContentController
+        controller.removeAllUserScripts()
+        controller.addUserScript(WKUserScript(
+            source: WebWallpaperProtocol.makeHostScript(seed: seed),
+            injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        for script in extraUserScripts { controller.addUserScript(script) }
+    }
+
+    /// Rendering updates per second this page gets from WebKit: near 60, the
+    /// display's refresh when that is lower, or the full refresh of a page created
+    /// to draw at it.
+    private var renderRate: Int {
+        WebWallpaperProtocol.renderRate(
+            displayRefreshRate: committed.displayRefreshRate, rendersAtDisplayRefresh: rendersAtDisplayRefresh)
+    }
+
+    /// Callbacks per second the page's `requestAnimationFrame` is held to, 0 for
+    /// none: a frame rate that reaches `renderRate` leaves the page alone.
+    private var frameLimit: Int {
+        committed.fps.map { WebWallpaperProtocol.frameLimit(forFPS: $0, renderRate: renderRate) } ?? 0
     }
 
     /// Drops everything that belonged to the document being replaced. The new
@@ -422,8 +463,31 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
     }
 
     func applyGeneralProperties(fps: UInt32) {
+        let before = frameLimit
         committed.fps = fps
+        logFrameLimit(changedFrom: before)
         deliverGeneralProperties()
+    }
+
+    /// The refresh rate of the display the page is on. It sets the rate the page
+    /// draws at, so a frame rate that reached the old rate may no longer reach the
+    /// new one (a display moved to a lower refresh), and a running document is
+    /// told when the limit that follows from it changes.
+    func applyDisplayRefreshRate(_ refreshRate: Int) {
+        guard refreshRate != committed.displayRefreshRate else { return }
+        let before = frameLimit
+        committed.displayRefreshRate = refreshRate
+        guard frameLimit != before else { return }
+        logFrameLimit(changedFrom: before)
+        deliverGeneralProperties()
+    }
+
+    private func logFrameLimit(changedFrom before: Int) {
+        guard frameLimit != before else { return }
+        AppLog.debug("""
+            web wallpaper \(projectURL.lastPathComponent): frame limit \
+            \(frameLimit == 0 ? "none" : String(frameLimit))
+            """, load: logLoad)
     }
 
     func applyAudioOutput(volume: Float, muted: Bool) {
@@ -629,8 +693,11 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
 
     private func deliverGeneralProperties() {
         guard isLoaded, let fps = committed.fps else { return }
-        run("window.__mweWallpaperHost.applyGeneralProperties(general)",
-            arguments: ["general": ["fps": Int(fps)]])
+        // One call, so the page's listener and its frame pacing change together.
+        run("""
+            window.__mweWallpaperHost.applyGeneralProperties(general);
+            window.__mweWallpaperHost.setFrameLimit(limit);
+            """, arguments: ["general": ["fps": Int(fps)], "limit": frameLimit])
     }
 
     private func deliverAudioOutput() {

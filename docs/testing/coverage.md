@@ -644,7 +644,10 @@ single-owner rules (`WebWallpaperAudioMediaTests`, `WebWallpaperAudioOutputTests
 recovery (`WebWallpaperHostLifecycleTests`, `WebWallpaperRecoveryTests`),
 suspension by presentation and by pause, with the first-frame grace (counted only
 while the view is in the window), edits drawn on a paused page, and a measured stop of
-frames, timers and CSS (`WebWallpaperSuspensionTests`), pointer routing
+frames, timers and CSS (`WebWallpaperSuspensionTests`), the frame-rate limit
+on `requestAnimationFrame` against a fake display cadence and in a real page with a
+measured live change, and the rate a slow or full-refresh page draws at
+(`WebWallpaperFramePacingTests`), pointer routing
 (`WebWallpaperMouseRoutingTests`) and the screen-saver surface
 (`ScreenSaverWebSurfaceTests`). Detail and limits:
 [web wallpapers](../features/web-wallpapers.md#verification).

@@ -26,9 +26,67 @@ enum WebWallpaperProtocol {
     /// tagged object, so there is exactly one place that has to distrust the page.
     static let messageHandlerName = "mweWallpaper"
 
-    static let hostScript = """
-    (() => {
+    /// What a page's document-start script needs to know before any page script
+    /// runs. The frame-rate limit has to be known by the page's very first
+    /// `requestAnimationFrame` call, so it is baked into the script of each
+    /// document instead of being delivered once the document has loaded.
+    struct Seed: Equatable {
+        /// Wraps `requestAnimationFrame` so the limit can be enforced (desktop
+        /// and preview pages). The screen saver keeps the native function.
+        var framePacing = false
+        /// Callbacks per second, or 0 for none; `frameLimit(forFPS:)` derives it.
+        var frameLimit = 0
+    }
+
+    /// The host script of one document. Only numbers and booleans are
+    /// interpolated into it.
+    static func makeHostScript(seed: Seed) -> String {
+        "\(hostScriptSource)({ framePacing: \(seed.framePacing), frameLimit: \(seed.frameLimit) })"
+    }
+
+    /// The script without a seed: no `requestAnimationFrame` wrapper, no limit.
+    /// The native screen-saver surface injects this one.
+    static let hostScript = makeHostScript(seed: Seed())
+
+    /// A function expression taking the seed; `makeHostScript` calls it.
+    private static let hostScriptSource = """
+    (seed => {
       if (window.__mweWallpaperHost) return;
+      // Frame-rate limit. WebKit gives a page no frame-rate control, so a limit
+      // below the ceiling is enforced on requestAnimationFrame itself: callbacks
+      // are held back to the limit and run on the native frame that follows, with
+      // that frame's timestamp. Only the main frame's requestAnimationFrame is
+      // paced; timers, video frame callbacks, CSS, workers and subframes are not.
+      // At the ceiling or above, or with no limit, the wrapper hands every call
+      // straight to the native function. The wrappers are in place before any page
+      // script runs, so a library that stores requestAnimationFrame at load holds
+      // the paced one.
+      const createFramePacer = \(framePacerSource);
+      let pacer = null;
+      if (seed.framePacing && typeof window.requestAnimationFrame === "function"
+          && typeof window.cancelAnimationFrame === "function") {
+        const nativeRequest = window.requestAnimationFrame.bind(window);
+        const nativeCancel = window.cancelAnimationFrame.bind(window);
+        pacer = createFramePacer(nativeRequest, nativeCancel, error => {
+          try { window.reportError(error); } catch (unavailable) { setTimeout(() => { throw error; }, 0); }
+        });
+        pacer.setLimit(seed.frameLimit);
+        const pacedRequest = function requestAnimationFrame(callback) {
+          return typeof callback === "function" && pacer.isPacing()
+            ? pacer.request(callback) : nativeRequest(...arguments);
+        };
+        // A handle is cancelled where it was issued: paced ids sit above every native one.
+        const pacedCancel = function cancelAnimationFrame(handle) {
+          const id = typeof handle === "number" || typeof handle === "string" ? Number(handle) : NaN;
+          if (pacer.owns(id)) { pacer.cancel(id); return; }
+          return nativeCancel(...arguments);
+        };
+        const replace = (names, wrapper) => {
+          for (const name of names) if (typeof window[name] === "function") window[name] = wrapper;
+        };
+        replace(["requestAnimationFrame", "webkitRequestAnimationFrame"], pacedRequest);
+        replace(["cancelAnimationFrame", "webkitCancelAnimationFrame", "webkitCancelRequestAnimationFrame"], pacedCancel);
+      }
       // WebKit resolves fetch() of a project file with status 0, ok === false and
       // no headers. Wallpaper Engine's Chromium host answers like a server: 200 OK
       // with a Content-Type from the extension. Loaders that check response.ok,
@@ -251,6 +309,8 @@ enum WebWallpaperProtocol {
       window.__mweWallpaperHost = Object.freeze({
         applyUserProperties(properties, restaged) { deliverProperties("applyUserProperties", properties, restaged); },
         applyGeneralProperties(properties) { deliverProperties("applyGeneralProperties", properties); },
+        // Takes effect on the next frame, and only where the seed asked for pacing.
+        setFrameLimit(limit) { if (pacer) pacer.setLimit(limit); },
         setPaused(paused) { lastPaused = !!paused; call("setPaused", lastPaused); },
         deliverAudio(bins) {
           if (!audioListener) return false;
@@ -286,6 +346,6 @@ enum WebWallpaperProtocol {
           call("userDirectoryFilesRemoved", property, files);
         },
       });
-    })();
+    })
     """
 }
