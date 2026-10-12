@@ -502,7 +502,10 @@ follows the developer's in-app language choice.
   focus isolation, Steam prompt focus, ownership notices and a revealed password
   that never reaches the HTML; settings keep drafts, disclosure and scroll across
   snapshots; the Downloads-at-once choice reaches the queue; tabs stay usable
-  after a render throws mid-send.
+  after a render throws mid-send; Installed's filters and scroll offset return in a
+  second page built over the same navigation, with a stale required tag dropped,
+  and the `viewState` report is stored without a snapshot reply or push and an
+  invalid one is ignored. `PanelViewStateTests` cover its limits.
 - `ControlPanelLibraryTests` — sorting, tile marks, filter sidebar, hold-and-drag
   selection, the inspector report link, download setup, a rejected download
   account staying visible, and error dismissal (library and download failures

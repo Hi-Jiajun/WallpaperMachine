@@ -71,7 +71,8 @@ automation schedulers, the web and native-video wallpaper hosts, system media).
   key window) and **Edit**. What the navigation actions do is owned by
   [playlists](features/playlists.md) and [automation](features/automation.md).
 - **Closing the panel.** `windowWillClose` releases the page and its WebKit processes; reopening
-  builds a fresh view around the existing stores and navigation.
+  builds a fresh view around the existing stores and navigation, which also keeps Installed's
+  filters and the grid's scroll offset in memory ([control panel](features/control-panel.md#reopening-the-panel)).
 - **Shutdown.** `applicationShouldTerminate` returns `.terminateLater` and hands an ordered
   asynchronous teardown to `QuitSupervisor`: lock-screen and desktop-poster restoration first,
   then the services, import, update, SteamCMD, Workshop and pixiv work, and the renderer bridge
@@ -126,7 +127,8 @@ rules for the page (CSP, escaping, icons, no bundler) are in [conventions.md](co
 
 | Piece | Responsibility |
 |---|---|
-| `App/Views/ControlPanel/ControlPanelView.swift` | SwiftUI container; `ControlPanelNavigation` (`SidebarSelection`, `targetDisplayID`, Settings section) shared with native menu commands |
+| `App/Views/ControlPanel/ControlPanelView.swift` | SwiftUI container; `ControlPanelNavigation` (`SidebarSelection`, `targetDisplayID`, Settings section, and the last `PanelViewState` the page reported) shared with native menu commands |
+| `App/Views/ControlPanel/PanelViewState.swift` | Validated copy of Installed's filters and the library grid's scroll offsets that the page reports with the `viewState` action; kept in memory on `ControlPanelNavigation` and handed to the next page in the reply to its first `ready` |
 | `App/Views/ControlPanel/ControlPanelWindow.swift` | Builds the window and owns its size floor |
 | `App/Views/ControlPanel/WebControlPanel.swift` | `NSViewRepresentable` over `WKWebView`; `WebPanelController` coordinator, `WebPanelAssets` scheme handler, message proxy |
 | `App/Views/ControlPanel/WebPanelSnapshot.swift` | Builds the `[String: Any]` state payload handed to the page |
@@ -160,13 +162,18 @@ Protocol, both directions:
   [per-wallpaper energy rating](features/performance.md#per-wallpaper-energy-rating).
 - **Page to Swift.** `panel.js` calls `window.webkit.messageHandlers.native` with an `action`
   string plus arguments. The handler is a `WKScriptMessageHandlerWithReply`, so every action is
-  answered with either a fresh snapshot or an error string. `WebPanelController.receive` rejects
-  any message that is not from the main frame of the `mwe-ui://app` origin. Post actions from
-  event handlers, never from a render path such as `settings.js` `draw()`. `send()` marks an
-  action pending under a key that covers every tab (and every value of one property), and a
-  repeated `navigate`, `property` or similar action waits on the one in flight; anything that
-  can throw between marking the key and posting belongs inside the `try` whose `finally`
-  releases it.
+  answered with either a fresh snapshot or an error string, except three that are acknowledged
+  with `nil` at once and build no snapshot: the title-bar gestures `dragWindow` and
+  `titleDoubleClick` (a drag must start on the mouse event that caused it) and `viewState`
+  (Installed's filters and scroll offsets, reported as they change). The reply to a page's first
+  `ready` can also carry `restoreViewState`, the last stored report
+  ([reopening the panel](features/control-panel.md#reopening-the-panel)).
+  `WebPanelController.receive` rejects any message that is not from the main frame of the
+  `mwe-ui://app` origin. Post actions from event handlers, never from a render path such as
+  `settings.js` `draw()`. `send()` marks an action pending under a key that covers every tab
+  (and every value of one property), and a repeated `navigate`, `property` or similar action
+  waits on the one in flight; anything that can throw between marking the key and posting
+  belongs inside the `try` whose `finally` releases it.
 - **Theme and language.** `theme.js` and `i18n.js` read `window.__appTheme` and
   `window.__appLanguage`, injected as the panel's only `WKUserScript` at document start so the
   first paint is already correct; `window.appTheme.apply(theme)` runs on every snapshot.

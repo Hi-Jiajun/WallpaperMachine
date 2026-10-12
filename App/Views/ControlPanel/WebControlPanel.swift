@@ -601,11 +601,24 @@ final class WebPanelController: NSObject, WKNavigationDelegate {
       reply(nil, nil)
       return
     }
+    // The page reports its view state while the person types and scrolls. It is stored and
+    // acknowledged without building or pushing a snapshot.
+    if action == "viewState" {
+      storeViewState(body)
+      reply(nil, nil)
+      return
+    }
     Task { @MainActor in
       do {
         try await perform(action, body: body)
         reconcileDismissedErrors()
-        reply(snapshot(), nil)
+        var state = snapshot()
+        // A page that has just loaded asks once with `ready`; the reply also carries what
+        // the previous page left, so a reopened panel resumes where it was closed.
+        if action == "ready", let viewState = navigation.viewState {
+          state["restoreViewState"] = viewState.payload
+        }
+        reply(state, nil)
       } catch {
         actionError = error.localizedDescription
         reply(nil, error.localizedDescription)

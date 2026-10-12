@@ -228,11 +228,13 @@ function receive(snapshot) {
   const shown = language();
   if (snapshot.language?.effective && setLanguage(snapshot.language.effective) !== shown) applyStaticText();
   if (!workshopDraft) workshopDraft = { text: snapshot.workshop?.text || '', sort: snapshot.workshop?.sort || 'trend-year', tags: [...(snapshot.workshop?.tags || [])], excludedTags: [...(snapshot.workshop?.excludedTags || defaultExcludedTags)] };
+  viewState.begin(snapshot);
   // The first-run guide opens from the first snapshot that reports it unseen and closes for
   // good once the user finishes or leaves it; a snapshot that arrives before native has
   // stored that choice cannot reopen it.
   if (snapshot.welcomeSeen === false) welcome.openIfUndecided();
   render();
+  viewState.applyScroll();
 }
 window.wallpaperUI = { receive, energy: showEnergyUsage };
 // A sentence for screen readers about something that changed without moving focus; the text is
@@ -283,6 +285,7 @@ function render() {
     }
   }
   renderActivity(); renderPopover(); renderDialog(); welcome.render(state); surfaceAuthRequests(); supportPrompt.render(state);
+  viewState.touch();
 }
 const filtersCollapsed = () => Boolean(state?.filtersCollapsed?.[state.page]);
 // Active filters on a page: every required tag plus every box that differs from the page's
@@ -393,6 +396,85 @@ function visibleWallpapers() {
   const target = (state.displays || []).find(display => display.id === state.targetDisplayID);
   return (state.wallpapers || []).filter(item => collections.matches(item) && (!installed.text || `${item.title} ${(item.tags || []).join(' ')}`.toLocaleLowerCase().includes(installed.text.toLocaleLowerCase())) && matchesInstalledFilters(item, target)).sort(compareInstalled);
 }
+// Installed's filters and each library page's scroll offset outlive the window. The page
+// reports them to native as they change (nothing comes back), and native hands them over with
+// the reply to a new page's first `ready`, so a reopened panel resumes where it was closed.
+// Native keeps them in memory only, so a fresh launch starts clean. Property drafts are left out:
+// one restored against a library that changed in between could be delivered stale.
+const viewState = (() => {
+  const pages = ['installed', 'discover', 'pixiv']; // The pages that draw into #wallpaper-grid.
+  const scroll = {};
+  let armed = false, dirty = false, timer = 0, dueAt = 0, pendingScroll = null, seenFilters = '', seenText = '';
+  const grid = () => $('wallpaper-grid');
+  const onLibrary = () => Boolean(state) && pages.includes(state.page) && !$('library-page').hidden;
+  // Native refuses text past 200 characters; no text is a more honest restore than a cut one.
+  const filters = () => ({ text: installed.text.length <= 200 ? installed.text : '', sort: installed.sort, descending: installed.descending, tags: installed.tags, excludedTags: installed.excludedTags });
+  function flush() {
+    clearTimeout(timer); timer = 0;
+    if (!dirty) return;
+    dirty = false;
+    if (onLibrary()) scroll[state.page] = Math.max(0, Math.round(grid().scrollTop));
+    const bridge = window.webkit?.messageHandlers?.native;
+    if (bridge) Promise.resolve(bridge.postMessage({ action: 'viewState', installed: filters(), scroll })).catch(() => {});
+  }
+  // The earliest deadline wins, so a burst of scrolling or typing reports at most once per delay.
+  function schedule(delay) {
+    if (!armed) return;
+    dirty = true;
+    const due = Date.now() + delay;
+    if (timer && due >= dueAt) return;
+    clearTimeout(timer); dueAt = due; timer = setTimeout(flush, delay);
+  }
+  // A required tag that nothing in the library carries any more would leave the grid empty.
+  // Excluded tags stay: they only hide, and a wallpaper imported later should stay hidden.
+  function dropStaleTags(snapshot) {
+    if (!installed.tags.length || snapshot.libraryLoading || !snapshot.wallpapers?.length) return;
+    const target = (snapshot.displays || []).find(display => display.id === snapshot.targetDisplayID);
+    const carried = new Set();
+    for (const item of snapshot.wallpapers) for (const tag of installedTags(item, target)) carried.add(tag);
+    installed.tags = installed.tags.filter(tag => carried.has(tag.toLowerCase()));
+  }
+  // Runs on the first full snapshot, with `state` already set: later snapshots, and a second
+  // `ready` from Reconnect, never overwrite what the person has done since.
+  function begin(snapshot) {
+    if (armed) return;
+    armed = true;
+    const saved = snapshot.restoreViewState;
+    if (saved?.installed) {
+      const filter = saved.installed;
+      installed.text = String(filter.text ?? '');
+      if (installedSorts.some(([key]) => key === filter.sort)) installed.sort = filter.sort;
+      installed.descending = Boolean(filter.descending);
+      installed.tags = uniqueTags((filter.tags || []).map(String));
+      installed.excludedTags = uniqueTags((filter.excludedTags || []).map(String));
+      dropStaleTags(snapshot);
+      Object.assign(scroll, saved.scroll);
+      pendingScroll = Number.isFinite(saved.scroll?.[snapshot.page]) ? saved.scroll[snapshot.page] : null;
+    }
+    seenFilters = JSON.stringify(filters()); seenText = installed.text;
+  }
+  // After the render that drew the restored grid; the offset is clamped to what the grid holds.
+  function applyScroll() {
+    if (pendingScroll === null) return;
+    const offset = pendingScroll; pendingScroll = null;
+    if (!onLibrary()) return;
+    const element = grid();
+    element.scrollTop = Math.min(offset, Math.max(0, element.scrollHeight - element.clientHeight));
+  }
+  // Typing reports once it pauses; a click on a box or the sort menu reports at once, so closing
+  // the window right after it keeps the choice.
+  function touch() {
+    if (!armed) return;
+    const key = JSON.stringify(filters());
+    if (key === seenFilters) return;
+    schedule(installed.text === seenText ? 0 : 400);
+    seenFilters = key; seenText = installed.text;
+  }
+  grid().addEventListener('scroll', () => schedule(400), { passive: true });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) flush(); });
+  window.addEventListener('pagehide', flush);
+  return { begin, applyScroll, touch };
+})();
 function emptyRecovery(discover) {
   // A source Steam does not search ignores the search text, so only filters can hide its items.
   const draft = discover && workshopSource().searchable === false ? { ...filterDraft(discover), text: '' } : filterDraft(discover);
@@ -1426,7 +1508,7 @@ document.addEventListener('input', event => {
   if (element.dataset.input === 'pixivSearch' && state?.page === 'pixiv') pixiv.handleInput(element);
   if (element.dataset.input === 'search') {
     if (state.page === 'discover') { workshopDraft.text = element.value; clearTimeout(searchTimer); searchTimer = setTimeout(() => run(searchWorkshop()), 450); }
-    else { installed.text = element.value; renderGrid(false); }
+    else { installed.text = element.value; renderGrid(false); viewState.touch(); }
   }
 });
 document.addEventListener('change', event => {

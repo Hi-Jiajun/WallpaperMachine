@@ -362,6 +362,7 @@
 		CC51C9C301A586CC09CDB7F8 /* SceneWallpaperPreviewSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4977FF68C6FA6232CB9B68B8 /* SceneWallpaperPreviewSurface.swift */; };
 		CDA35B9E20509CF6527CE312 /* SteamCMDLiveInstallTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE8B42C125E2BEB6A97903EF /* SteamCMDLiveInstallTests.swift */; };
 		CDC4D2E998E646EBE241DF3F /* WebWallpaperMoveThrottleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 361C2772BDF99B1B4ABD7269 /* WebWallpaperMoveThrottleTests.swift */; };
+		CFA48E16BA34C6DA8C54B8AF /* PanelViewState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49400CDF10C1E6E52F1B9EB0 /* PanelViewState.swift */; };
 		D205D125B93DAA16FF5C78FA /* WorkshopThumbnailCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43A63B42C998EB2C4433B286 /* WorkshopThumbnailCache.swift */; };
 		D4020D65C5575F4D9573947B /* WallpaperBackupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE49EAAA2B498195EFD582DC /* WallpaperBackupService.swift */; };
 		D43769C67B2B2EA06D5A8583 /* WallpaperSpaceMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FFEF27402C5E93DFE6F109D /* WallpaperSpaceMonitorTests.swift */; };
@@ -404,6 +405,7 @@
 		ED0D2CDA03552FBD3181229A /* repeat.m in Sources */ = {isa = PBXBuildFile; fileRef = B870733BCBDD61F25FF8AB2E /* repeat.m */; };
 		ED464B9B414BB8D62E48A622 /* WallpaperFocusFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76DF64ED81FA5B2AA602DB70 /* WallpaperFocusFilter.swift */; };
 		ED6B119604A4003E5F063DB3 /* WallpaperDisplayLayoutStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9634CF13F00DCFCEFB876FE3 /* WallpaperDisplayLayoutStoreTests.swift */; };
+		EE88E5CF198F07B4D4B738B1 /* PanelViewStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 768008A7AF11956F882F5575 /* PanelViewStateTests.swift */; };
 		EEF9C591AE30A377AFCFE40F /* LockScreenIdleExitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56534C81E185DAA1A7932E25 /* LockScreenIdleExitTests.swift */; };
 		EFEB2FCAD29F092EB043CDDF /* PixivTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = E347156459471DE3892D68F9 /* PixivTransport.swift */; };
 		F09F737652A1736EACC95071 /* WallpaperBackupStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C307C3E83F2ED8E86FE4F051 /* WallpaperBackupStore.swift */; };
@@ -622,6 +624,7 @@
 		4845AE6259EEB393BA86A4E4 /* ClientPreferencesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientPreferencesTests.swift; sourceTree = "<group>"; };
 		486470B831133175C97E5C33 /* ControlPanelAutomationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlPanelAutomationTests.swift; sourceTree = "<group>"; };
 		48A913E2D0D95E266A50FCBD /* LockScreenExtensionStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LockScreenExtensionStatus.swift; sourceTree = "<group>"; };
+		49400CDF10C1E6E52F1B9EB0 /* PanelViewState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelViewState.swift; sourceTree = "<group>"; };
 		4975887A54FBCE1B458FEF03 /* ControlPanelWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlPanelWindow.swift; sourceTree = "<group>"; };
 		4977FF68C6FA6232CB9B68B8 /* SceneWallpaperPreviewSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneWallpaperPreviewSurface.swift; sourceTree = "<group>"; };
 		49BC750DF18F6C33876E6B4C /* ImageImportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageImportTests.swift; sourceTree = "<group>"; };
@@ -693,6 +696,7 @@
 		7216DC23FF04B36E2A667A4D /* Debounce.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Debounce.h; sourceTree = "<group>"; };
 		7385CF6CE8122A02D3C44B90 /* HostWallpaperState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostWallpaperState.swift; sourceTree = "<group>"; };
 		739C82869FBAC0392BCD8562 /* AppLogRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogRouter.swift; sourceTree = "<group>"; };
+		768008A7AF11956F882F5575 /* PanelViewStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelViewStateTests.swift; sourceTree = "<group>"; };
 		76977B621C22266009DB1DBF /* WorkshopThumbnailCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkshopThumbnailCacheTests.swift; sourceTree = "<group>"; };
 		76DF64ED81FA5B2AA602DB70 /* WallpaperFocusFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperFocusFilter.swift; sourceTree = "<group>"; };
 		76F6F4E0822F9B7DA7F0C36C /* SteamCMDPackages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SteamCMDPackages.swift; sourceTree = "<group>"; };
@@ -1534,6 +1538,7 @@
 				A9C4998EAFA45412BDD063F2 /* ControlPanelSyncTests.swift */,
 				5B7BC1FE1F1B7162BDA6E469 /* ControlPanelTestCase.swift */,
 				C379BDC29C91D4F1DE26AAFC /* ControlPanelWindowSizingTests.swift */,
+				768008A7AF11956F882F5575 /* PanelViewStateTests.swift */,
 				38C5D6AA7C7A97F32DE552C2 /* PropertyImageCacheTests.swift */,
 				1DB4BE71ACE2675951C28DE2 /* WallpaperEditorStateTests.swift */,
 				993D8952E8B60B4EFFCB3E79 /* WebPanelAssetPropertiesTests.swift */,
@@ -1723,6 +1728,7 @@
 				E1F7C715A065AACB4253181C /* ControlPanelLaunch.swift */,
 				E75B1EEA3E317E359B742182 /* ControlPanelView.swift */,
 				4975887A54FBCE1B458FEF03 /* ControlPanelWindow.swift */,
+				49400CDF10C1E6E52F1B9EB0 /* PanelViewState.swift */,
 				A1CD884A1DDF1B8D3CAF137F /* WallpaperPreviewWindow.swift */,
 				3C777C5B0FFAA472EAEAE3CA /* WebControlPanel.swift */,
 				05805AC2C38AF2B41A590844 /* WebPanelActions.swift */,
@@ -2221,6 +2227,7 @@
 				CA2A11017E93881CFB4D119E /* NativeVideoWallpaperHostTests.swift in Sources */,
 				AAC9BD764B39DFEB037B5F36 /* NextWallpaperTests.swift in Sources */,
 				FCAEA57769AB2C255EA1E71E /* OtherAudioMonitorTests.swift in Sources */,
+				EE88E5CF198F07B4D4B738B1 /* PanelViewStateTests.swift in Sources */,
 				5C6A6E6EF3E2C8CA67827B67 /* PixivDownloadQueueTests.swift in Sources */,
 				A2CB21A97D56CEF16624C727 /* PixivServiceTests.swift in Sources */,
 				9F7ACCA42CA53D110295BD5A /* PixivStoreTests.swift in Sources */,
@@ -2409,6 +2416,7 @@
 				5D4364273A09AF1EE89637BE /* NativeVideoWallpaperHost.swift in Sources */,
 				5221131A70ABE74DEDE4FA3B /* NativeVideoWallpaperWindow.swift in Sources */,
 				4063F2E5F60718B824EA7906 /* OtherAudioMonitor.swift in Sources */,
+				CFA48E16BA34C6DA8C54B8AF /* PanelViewState.swift in Sources */,
 				62A1012679F02EDE983168F4 /* PixivDownloadQueue.swift in Sources */,
 				34A7B8C3B29EDE87C9CB79A7 /* PixivModels.swift in Sources */,
 				0C45266585B20F8F3609D20D /* PixivResumableTransfer.swift in Sources */,

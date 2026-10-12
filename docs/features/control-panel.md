@@ -187,7 +187,9 @@ a snapshot skipped while hidden is delivered when revealed. Closing the window
 (close button or Command-W) releases its hosting controller and web view instead
 of retaining a hidden page. Reopening, including from the Dock, rebuilds the page
 on the last native navigation section from the existing library, playback and
-download stores; page-local scrolling, filters, disclosures and uncommitted input
+download stores. Installed's search text, sort key and direction, Show only and
+exclude boxes, and the library grid's scroll offset come back too (see
+[Reopening the panel](#reopening-the-panel)); disclosures and uncommitted input
 start fresh. Imports and Workshop downloads run in app-owned stores, so releasing
 the page never cancels them.
 
@@ -196,6 +198,33 @@ last left on, and so do What's New, the wallpaper preview and the Steam and pixi
 windows. A minimized panel comes back from the Dock when it is opened from the status
 menu, the Dock icon or Command-comma, or when the app is activated; the green button still
 offers full screen. The wallpaper itself keeps playing on every Space as before.
+
+### Reopening the panel
+
+The page reports Installed's filters and the grid's scroll offset to native (the
+`viewState` action) as they change: a click on a box or the sort menu at once, typing
+and scrolling at most every 400 ms, and when the page is hidden. Native validates the
+report (`PanelViewState`: a known sort key, search text up to 200 characters, at most
+32 tags of 128 characters each for the required and the excluded list, scroll offsets
+of 0 to 1,000,000 for the Installed, Discover and pixiv grids, 8 KB encoded) and keeps
+the last valid one in memory on `ControlPanelNavigation`, which outlives the window.
+An invalid report is dropped and the previous one stays. The action is acknowledged
+without a snapshot, so scrolling never rebuilds or pushes one.
+
+A new page receives the stored report once, inside the reply to its first `ready`
+(`restoreViewState`), and applies it to the first full snapshot. The same happens when
+WebKit restarts a crashed page. The page then:
+
+- puts back the search text, sort key, direction and both tag lists;
+- drops a required tag that no wallpaper in the library carries any more, so a library
+  that changed in between shows its wallpapers instead of an empty grid. It keeps the
+  tag while the library is still loading, and keeps excluded tags, which only hide;
+- scrolls the grid to the stored offset for the page on show, limited to what the grid
+  holds. Another page's offset waits unused.
+
+Nothing is written to disk, so a fresh launch starts clean. Property drafts, the
+selection, disclosures and the Installed collection filter are not restored. A later
+`ready` from the page's Reconnect button never replaces what the person did since.
 
 ## Thumbnail corner marks
 

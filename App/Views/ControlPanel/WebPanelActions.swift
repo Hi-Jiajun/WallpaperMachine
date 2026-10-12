@@ -1363,6 +1363,16 @@ extension WebPanelController {
       "support.apple.com", "space.bilibili.com", "www.bilibili.com", "www.pixiv.net",
     ].contains(url.host ?? "")
   }
+
+  /// Keeps the page's last valid report of Installed's filters and library scroll offsets.
+  /// A report that does not validate is dropped and the previous one stays.
+  func storeViewState(_ body: [String: Any]) {
+    guard let viewState = PanelViewState(validating: body) else {
+      AppLog.debug("Panel view state ignored: the page sent a value outside its limits")
+      return
+    }
+    navigation.viewState = viewState
+  }
 }
 
 extension WallpaperImportService.DuplicatePolicy {

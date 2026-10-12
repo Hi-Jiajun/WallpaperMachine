@@ -29,6 +29,10 @@ was run.
       a wallpaper preview and a Steam or pixiv sign-in window.
 - [ ] Close the window with its close button and with Command-W, and reopen it
       each time, without quitting or crashing.
+- [ ] On Installed, type a search, change the sort and direction, untick a type box
+      and scroll down a long library, then close the panel and reopen it from the status
+      menu: the search, sort, boxes and scroll position are as left. Quit and relaunch:
+      Installed starts unfiltered at the top.
 - [ ] With the app running, `open -n` the same app: no second copy appears and the
       first shows its panel. Run a copy from another folder: an alert says another
       copy is using the library, and the running copy is untouched. After an in-app

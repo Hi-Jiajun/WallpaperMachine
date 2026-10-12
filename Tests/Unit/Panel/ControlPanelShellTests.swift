@@ -1172,6 +1172,161 @@ final class ControlPanelShellTests: ControlPanelTestCase {
     }
   }
 
+  /// Closing the panel releases its page, yet Installed's search, sort, boxes and scroll position
+  /// come back when it is reopened: the page reports them, native keeps the last valid report on
+  /// the navigation that outlives the window, and the next page restores them from the reply to
+  /// its first `ready`. A required tag that nothing in the library carries any more is dropped,
+  /// while a hidden type stays hidden.
+  func testInstalledFiltersAndScrollComeBackWhenThePanelIsReopened() async throws {
+    let fixture = makeStore()
+    let entries = (0..<80).map { index in
+      BridgeWallpaperEntry(
+        id: "wallpaper-\(index)", title: String(format: "Wallpaper %02d", index),
+        kind: index.isMultiple(of: 2) ? .projectScene : .video, supported: true, active: false,
+        selected: false, previewPath: nil)
+    }
+    fixture.store.librarySnapshot.wallpapers = entries
+    // A finished library load: the page keeps a restored tag while the library is loading.
+    fixture.bridge.snapshot = BridgeSnapshotBundle(
+      app: fixture.store.appSnapshot, library: fixture.store.librarySnapshot,
+      wallpaperOptions: nil, monitorInformation: fixture.store.monitorInformationSnapshot,
+      settings: fixture.store.settingsSnapshot)
+    try await fixture.store.refreshAllAsync()
+    let panel = try PanelFixture(
+      store: fixture.store, bridge: fixture.bridge, displayTitles: .renderer)
+    var reopened: WebPanelController?
+    do {
+      try await panel.start()
+      try await panel.finishWelcome()
+      // Every wallpaper is a favorite while the first page is open, so requiring Favorite
+      // keeps the whole library on show and leaves it tall enough to scroll.
+      panel.controller.favoriteIDs = Set(entries.map(\.id))
+      panel.show()
+      try await panel.waitJS("powerProbe.received.at(-1)?.favorites?.length === 80")
+      let before = try await panel.js("""
+        const change = (node, type) => node.dispatchEvent(new Event(type, { bubbles: true }));
+        const titles = () => [...document.querySelectorAll('.wallpaper-tile .tile-title')].map(node => node.textContent);
+        const initial = titles();
+        const sort = document.getElementById('browser-sort');
+        sort.value = 'type'; change(sort, 'change');
+        document.querySelector('[data-action="toggleSortDirection"]').click();
+        const sidebar = document.getElementById('filter-sidebar');
+        const favorite = sidebar.querySelector('input[value="Favorite"]'); favorite.checked = true; change(favorite, 'change');
+        const web = sidebar.querySelector('input[value="Web"]'); web.checked = false; change(web, 'change');
+        const search = document.getElementById('wallpaper-search'); search.value = 'wallpaper'; change(search, 'input');
+        const grid = document.getElementById('wallpaper-grid');
+        grid.scrollTop = 900;
+        grid.dispatchEvent(new Event('scroll'));
+        return { initial: initial.slice(0, 6), shown: titles().slice(0, 6), count: titles().length, scrollTop: grid.scrollTop };
+        """) as? [String: Any]
+      XCTAssertEqual(before?["count"] as? Int, 80, "Requiring Favorite keeps every favorite")
+      XCTAssertEqual(before?["scrollTop"] as? Double, 900, "The library is tall enough to scroll")
+      let initialOrder = try XCTUnwrap(before?["initial"] as? [String])
+      let order = try XCTUnwrap(before?["shown"] as? [String])
+      XCTAssertNotEqual(order, initialOrder, "Sorting by type, descending, changed the order")
+      let expected = PanelViewState(
+        installed: .init(
+          text: "wallpaper", sort: "type", descending: true, tags: ["Favorite"],
+          excludedTags: ["Web"]),
+        scroll: ["installed": 900])
+      try await panel.waitUntil(timeout: 5) { panel.navigation.viewState == expected }
+
+      // The window closes: its page and controller go, the navigation stays. The library has
+      // lost its favorites by the time the panel comes back.
+      panel.controller.stop()
+      let controller = WebPanelController(
+        store: panel.store, navigation: panel.navigation, workshop: panel.workshop,
+        pixiv: panel.pixiv, isPresentationVisible: { false }, theme: panel.theme,
+        defaults: panel.defaults, appLanguage: .english(),
+        playback: PlaybackPreferences(defaults: panel.defaults), playlists: panel.playlists,
+        hotKeys: HotKeyPreferences(defaults: panel.defaults), collections: panel.collections,
+        presets: panel.presets, backup: panel.backup, imagePlacement: panel.imagePlacement,
+        compatibility: panel.compatibility, automations: panel.automations, spaces: panel.spaces)
+      reopened = controller
+      XCTAssertTrue(controller.favoriteIDs.isEmpty)
+      panel.web = controller.makeWebView()
+      panel.web.setFrameSize(NSSize(width: 960, height: 640))
+      try await panel.waitUntil(timeout: 15) { controller.isReady }
+      // The sidebar is drawn by the render that follows the first snapshot, restore included.
+      try await panel.waitJS("document.querySelector('#filter-sidebar input[value=\"Favorite\"]')")
+      let after = try await panel.js("""
+        const sidebar = document.getElementById('filter-sidebar');
+        const grid = document.getElementById('wallpaper-grid');
+        return {
+          search: document.getElementById('wallpaper-search').value,
+          sort: document.getElementById('browser-sort').value,
+          favorite: sidebar.querySelector('input[value="Favorite"]').checked,
+          web: sidebar.querySelector('input[value="Web"]').checked,
+          mature: sidebar.querySelector('input[value="Mature"]').checked,
+          titles: [...document.querySelectorAll('.wallpaper-tile .tile-title')].map(node => node.textContent),
+          scrollTop: grid.scrollTop
+        };
+        """) as? [String: Any]
+      XCTAssertEqual(after?["search"] as? String, "wallpaper")
+      XCTAssertEqual(after?["sort"] as? String, "type")
+      XCTAssertEqual(after?["web"] as? Bool, false, "A hidden type stays hidden")
+      XCTAssertEqual(after?["mature"] as? Bool, true, "A box nobody touched stays ticked")
+      XCTAssertEqual(
+        after?["favorite"] as? Bool, false,
+        "No wallpaper is a favorite any more, so the stale required tag is dropped")
+      let titles = try XCTUnwrap(after?["titles"] as? [String])
+      XCTAssertEqual(titles.count, 80, "…and nothing is left hiding the library")
+      XCTAssertEqual(Array(titles.prefix(6)), order, "The descending type order returns")
+      XCTAssertEqual(try XCTUnwrap(after?["scrollTop"] as? Double), 900, accuracy: 1)
+
+      // A second `ready` (Reconnect) hands over the old report again; it must not undo what the
+      // person has done to the page since.
+      let later = try await panel.js("""
+        const search = document.getElementById('wallpaper-search');
+        search.value = 'newer search'; search.dispatchEvent(new Event('input', { bubbles: true }));
+        window.wallpaperUI.receive(await window.webkit.messageHandlers.native.postMessage({action:'ready'}));
+        return document.getElementById('wallpaper-search').value;
+        """) as? String
+      XCTAssertEqual(later, "newer search")
+      XCTAssertNil(controller.actionError)
+    } catch {
+      reopened?.stop()
+      await panel.shutdown()
+      throw error
+    }
+    reopened?.stop()
+    await panel.shutdown()
+  }
+
+  /// The page reports its view state while the person types and scrolls, so the reply carries
+  /// no snapshot and no push follows. A report outside the limits is dropped, and the one
+  /// before it stays.
+  func testViewStateReportsAreStoredSilentlyAndInvalidOnesAreIgnored() async throws {
+    try await withPanel { panel in
+      try await panel.finishWelcome()
+      panel.show()
+      try await panel.waitJS("powerProbe.received.length >= 1")
+      try await panel.quiet()
+      let pushes = try await panel.js("return powerProbe.received.length") as? Int
+      let replies = try await panel.js("""
+        const post = body => window.webkit.messageHandlers.native.postMessage({ action: 'viewState', ...body });
+        const filters = { text: 'night', sort: 'size', descending: true, tags: [], excludedTags: ['Mature'] };
+        const valid = await post({ installed: filters, scroll: { installed: 320 } });
+        const bogus = await post({ installed: { ...filters, sort: 'random' }, scroll: {} });
+        const negative = await post({ installed: filters, scroll: { installed: -5 } });
+        return { valid: valid ?? null, bogus: bogus ?? null, negative: negative ?? null };
+        """) as? [String: Any]
+      XCTAssertTrue(replies?["valid"] is NSNull, "The reply carries no snapshot")
+      XCTAssertTrue(replies?["bogus"] is NSNull)
+      XCTAssertTrue(replies?["negative"] is NSNull)
+      XCTAssertEqual(
+        panel.navigation.viewState,
+        PanelViewState(
+          installed: .init(
+            text: "night", sort: "size", descending: true, tags: [], excludedTags: ["Mature"]),
+          scroll: ["installed": 320]),
+        "Only the valid report was kept")
+      XCTAssertNil(panel.controller.actionError, "An invalid report is dropped without an error banner")
+      try await panel.quiet()
+      try await panel.expectJS("return powerProbe.received.length", equals: pushes ?? -1)
+    }
+  }
+
   /// Issue #30: a tab click whose busy render threw once left its request marked pending with
   /// nothing sent. Every later tab click then waited on it in an endless microtask loop, and
   /// the whole page, Dismiss included, stopped responding.
