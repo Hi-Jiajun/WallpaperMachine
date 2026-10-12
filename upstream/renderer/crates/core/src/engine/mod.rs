@@ -41,7 +41,7 @@ use crate::{
         AudioVolume, InterleavedStereoF32, MonoPcmF32,
     },
     owe::backend::{AudioSpectrum128, OweBackend},
-    project::{ScalingMode, SceneDesc, SceneHandle, SceneResult, SerdeValudeExt},
+    project::{ScalingMode, SceneDesc, SceneFraming, SceneHandle, SceneResult, SerdeValudeExt},
     window::{MouseButtonEdges, MouseButtonTracker, MouseButtons, NormalizedMousePosition},
 };
 
@@ -597,6 +597,30 @@ impl WallpaperEngine {
         }
 
         self.ask_actor(messages::SetScalingFactor { handle, factor })
+            .await
+    }
+
+    /// Sets where a scene's presented wallpaper sits inside the room its
+    /// display leaves around it.
+    ///
+    /// Applied live: the project is not reparsed, the renderer is not rebuilt
+    /// and video keeps playing. The scene keeps the position across a rebuild
+    /// of the same wallpaper, and a different wallpaper takes the position of
+    /// its own descriptor.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if either axis of `framing` is not a finite fraction
+    /// between 0 and 1, actor communication fails, or the renderer rejects the
+    /// update. Nothing is sent to the renderer for an invalid framing.
+    pub async fn set_framing(
+        &self,
+        handle: SceneHandle,
+        framing: SceneFraming,
+    ) -> Result<(), EngineError> {
+        framing.validate()?;
+
+        self.ask_actor(messages::SetFraming { handle, framing })
             .await
     }
 
@@ -1460,6 +1484,36 @@ mod tests {
             "expected scaling factor {} to be within f64::EPSILON of 1.25",
             state.scaling_factor
         );
+    }
+
+    #[test]
+    fn scene_runtime_state_initial_uses_descriptor_framing() {
+        let default_state = SceneRuntimeState::try_from(&crate::project::SceneDesc::new(
+            crate::DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0),
+            "/tmp/project.json",
+            "/tmp/assets",
+            60,
+            false,
+        ))
+        .expect("state should build");
+        assert_eq!(default_state.framing, SceneFraming::default());
+
+        let framing = SceneFraming {
+            pan_x: 0.1,
+            pan_y: 0.9,
+        };
+        let desc = crate::project::SceneDesc::builder(
+            crate::DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0),
+            "/tmp/project.json",
+        )
+        .assets_path("/tmp/assets")
+        .framing(framing)
+        .build()
+        .expect("scene should build");
+
+        let state = SceneRuntimeState::try_from(&desc).expect("state should build");
+
+        assert_eq!(state.framing, framing);
     }
 
     #[test]
@@ -2657,6 +2711,56 @@ mod tests {
             err,
             EngineError::InvalidInput(_) | EngineError::Platform(_)
         ));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn set_framing_refuses_a_position_off_the_display_before_asking_the_actor() {
+        let engine = engine_with_display_records(Vec::new());
+        let handle = SceneHandle::new(u64::MAX);
+
+        for (pan_x, pan_y) in [
+            (f64::NAN, 0.5),
+            (0.5, f64::NAN),
+            (f64::INFINITY, 0.5),
+            (0.5, f64::NEG_INFINITY),
+            (-0.1, 0.5),
+            (0.5, 1.5),
+        ] {
+            let err = engine
+                .set_framing(handle, SceneFraming { pan_x, pan_y })
+                .await
+                .expect_err("an invalid framing should be refused");
+            // The unknown handle would have produced a different message had the
+            // request reached the actor.
+            assert!(
+                matches!(&err, EngineError::InvalidInput(message)
+                    if message == "framing must be fractions between 0 and 1"),
+                "{pan_x}/{pan_y} gave {err:?}"
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn set_framing_forwards_a_valid_position_to_the_actor() {
+        let engine = engine_with_display_records(Vec::new());
+
+        for framing in [
+            SceneFraming::default(),
+            SceneFraming {
+                pan_x: 0.0,
+                pan_y: 1.0,
+            },
+        ] {
+            let err = engine
+                .set_framing(SceneHandle::new(u64::MAX), framing)
+                .await
+                .expect_err("unknown handle should fail");
+            assert!(
+                matches!(&err, EngineError::InvalidInput(message)
+                    if message.contains("unknown scene handle")),
+                "{framing:?} gave {err:?}"
+            );
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]

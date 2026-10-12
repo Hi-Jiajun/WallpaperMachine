@@ -36,7 +36,7 @@ use crate::{
     EngineError,
     media::audio::{AudioVolume, InterleavedStereoF32, MonoPcmF32},
     owe::{sys, unwind::UnwindSafeFFI},
-    project::{ScalingMode, SceneDesc, SerdeValudeExt},
+    project::{ScalingMode, SceneDesc, SceneFraming, SerdeValudeExt},
 };
 
 /// Private handle to the statically linked Open Wallpaper Engine renderer.
@@ -93,6 +93,7 @@ impl OweBackend {
         metal_layer: *mut c_void,
         scaling_mode: ScalingMode,
         scaling_factor: f64,
+        framing: SceneFraming,
         render_resolution: Option<(u32, u32)>,
         first_frame_callback: Option<FirstFrameCallback>,
         pointer_input_callback: Option<PointerInputCallback>,
@@ -106,13 +107,15 @@ impl OweBackend {
             std::path::Path::new(&desc.scene_path),
             format_args!(
                 "display {} {}x{} @{}x {}Hz, fps {}, scaling {scaling_mode} x{scaling_factor}, \
-                 render {}, paused {}",
+                 pan {},{}, render {}, paused {}",
                 display.display_id,
                 display.width,
                 display.height,
                 display.scale_factor,
                 display.refresh_rate_hz,
                 desc.fps,
+                framing.pan_x,
+                framing.pan_y,
                 render_resolution.map_or_else(|| "native".to_string(), |(w, h)| format!("{w}x{h}")),
                 desc.paused,
             ),
@@ -146,6 +149,7 @@ impl OweBackend {
         scene.apply_scene_config(desc)?;
         scene.set_scaling_mode(scaling_mode)?;
         scene.set_scaling_factor(scaling_factor)?;
+        scene.set_framing(framing)?;
         Ok(scene)
     }
 
@@ -646,6 +650,24 @@ impl OweScene {
     #[allow(clippy::cast_possible_truncation)]
     pub fn set_scaling_factor(&mut self, factor: f64) -> Result<(), EngineError> {
         self.set_property_float(Self::scaling_factor()?, factor as f32)
+    }
+
+    /// Sets where the presented wallpaper sits inside the room its display
+    /// leaves around it, live.
+    ///
+    /// The renderer applies it without a rebuild: nothing is reparsed and video
+    /// keeps playing. The caller validates the fractions first, so a value the
+    /// renderer would have to clamp never reaches it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EngineError`] if the scene is closed or OWE rejects the
+    /// update.
+    pub fn set_framing(&mut self, framing: SceneFraming) -> Result<(), EngineError> {
+        let raw = self.raw_ptr()?;
+        call_status("owe_scene_wallpaper_set_framing", || unsafe {
+            sys::owe_scene_wallpaper_set_framing(raw.as_ptr(), framing.pan_x, framing.pan_y)
+        })
     }
 
     /// Sets the target renderer frame rate.

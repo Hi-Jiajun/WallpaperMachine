@@ -4,7 +4,7 @@ use crate::{
     DisplayDesc, DisplaySelector, WallpaperAssignment,
     engine::surface_recovery::{RecoveryReason, RecoveryStep},
     media::audio::AudioVolume,
-    project::{ScalingMode, SceneDesc, SceneHandle, SceneResult},
+    project::{ScalingMode, SceneDesc, SceneFraming, SceneHandle, SceneResult},
 };
 
 pub(super) struct NativePointerInputChanged {
@@ -126,6 +126,11 @@ pub struct SetScalingMode {
 pub struct SetScalingFactor {
     pub handle: SceneHandle,
     pub factor: f64,
+}
+
+pub struct SetFraming {
+    pub handle: SceneHandle,
+    pub framing: SceneFraming,
 }
 
 pub struct SetFps {

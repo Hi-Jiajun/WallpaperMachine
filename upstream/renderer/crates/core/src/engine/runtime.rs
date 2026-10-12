@@ -22,7 +22,7 @@ use crate::{
         },
         scene_demand::SurfaceHealth,
     },
-    project::{ScalingMode, SceneDesc, SceneHandle, SerdeValudeExt},
+    project::{ScalingMode, SceneDesc, SceneFraming, SceneHandle, SerdeValudeExt},
     render::RendererSurfaceCounters,
     window::{LayerInstall, LayerSwap, MouseButtonEdges, NormalizedMousePosition},
 };
@@ -369,6 +369,8 @@ pub struct SceneRuntime {
     scaling_mode: ScalingMode,
     /// Runtime override applied after descriptor defaults.
     scaling_factor: f64,
+    /// Runtime override applied after descriptor defaults.
+    framing: SceneFraming,
     /// Renderer-surface override. Changing this rebuilds the renderer object.
     render_resolution: Option<(u32, u32)>,
     /// Internal rasterization scale, handed again to every renderer this
@@ -401,6 +403,7 @@ pub struct SceneRuntimeState {
     /// Mutable state that should survive replacing the scene descriptor.
     pub scaling_mode: ScalingMode,
     pub scaling_factor: f64,
+    pub framing: SceneFraming,
     pub render_resolution: Option<(u32, u32)>,
     pub audio_response_enabled: bool,
     pub media_integration_enabled: bool,
@@ -501,6 +504,7 @@ impl SceneRuntime {
             window.metal_layer_ptr(),
             state.scaling_mode,
             state.scaling_factor,
+            state.framing,
             state.render_resolution,
             Some(Arc::new({
                 let callback = first_frame_callback.clone();
@@ -528,6 +532,7 @@ impl SceneRuntime {
             actor,
             scaling_mode: state.scaling_mode,
             scaling_factor: state.scaling_factor,
+            framing: state.framing,
             render_resolution: state.render_resolution,
             render_scale: RenderScale(RenderScale::NATIVE),
             audio_response_enabled: state.audio_response_enabled,
@@ -578,6 +583,22 @@ impl SceneRuntime {
         self.renderer.set_scaling_factor(factor)?;
         self.scaling_factor = factor;
         self.desc.scaling_factor = factor;
+        Ok(())
+    }
+
+    /// Live-updates where the presented wallpaper sits inside the room its
+    /// display leaves around it.
+    ///
+    /// Like the scaling setters, and unlike [`Self::rebuild_for_desc`], nothing
+    /// is reparsed or reopened: the renderer moves the picture in place. The
+    /// pointer mapping changes with it, so queued pointer delivery restarts.
+    /// The runtime and its descriptor change only once the renderer accepted
+    /// the value, so a rejection leaves both as they were.
+    pub fn set_framing(&mut self, framing: SceneFraming) -> Result<(), EngineError> {
+        self.pointer_input.delivery.invalidate();
+        self.renderer.set_framing(framing)?;
+        self.framing = framing;
+        self.desc.framing = framing;
         Ok(())
     }
 
@@ -724,6 +745,7 @@ impl SceneRuntime {
             swap.layer_ptr(),
             state.scaling_mode,
             state.scaling_factor,
+            state.framing,
             render_resolution,
             Some(first_frame_callback),
             Some(pointer_callback),
@@ -770,6 +792,7 @@ impl SceneRuntime {
         self.desc = stored_desc;
         self.scaling_mode = state.scaling_mode;
         self.scaling_factor = state.scaling_factor;
+        self.framing = state.framing;
         self.render_resolution = render_resolution;
         self.audio_response_enabled = state.audio_response_enabled;
         self.media_integration_enabled = state.media_integration_enabled;
@@ -1026,6 +1049,7 @@ impl SceneRuntime {
         SceneRuntimeState {
             scaling_mode: self.scaling_mode,
             scaling_factor: self.scaling_factor,
+            framing: self.framing,
             render_resolution: self.render_resolution,
             audio_response_enabled: self.audio_response_enabled,
             media_integration_enabled: self.media_integration_enabled,
@@ -1154,6 +1178,7 @@ impl SceneRuntimeState {
         if inheritance == DescriptorInheritance::UseDescriptorDefaults {
             self.scaling_mode = next_descriptor_state.scaling_mode;
             self.scaling_factor = next_descriptor_state.scaling_factor;
+            self.framing = next_descriptor_state.framing;
             self.audio_response_enabled = next_descriptor_state.audio_response_enabled;
             self.media_integration_enabled = next_descriptor_state.media_integration_enabled;
             self.audio_volume = next_descriptor_state.audio_volume;
@@ -1171,6 +1196,7 @@ impl TryFrom<&SceneDesc> for SceneRuntimeState {
         Ok(Self {
             scaling_mode: desc.scaling_mode,
             scaling_factor: desc.scaling_factor,
+            framing: desc.framing,
             render_resolution: None,
             audio_response_enabled: desc.audio_response_enabled,
             media_integration_enabled: desc.media_integration_enabled,
@@ -1851,6 +1877,118 @@ mod tests {
         assert!(!state.audio_response_enabled);
     }
 
+    fn framed_scene(path: &str, framing: SceneFraming) -> SceneDesc {
+        SceneDesc::builder(crate::DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0), path)
+            .assets_path("/tmp/assets")
+            .framing(framing)
+            .build()
+            .expect("scene should build")
+    }
+
+    #[test]
+    fn same_wallpaper_transition_keeps_the_live_framing() {
+        let centred = SceneFraming::default();
+        let dragged = SceneFraming {
+            pan_x: 0.2,
+            pan_y: 0.8,
+        };
+        let current_desc = framed_scene("/tmp/current/project.json", centred);
+        let mut next_display = current_desc.clone();
+        next_display.display = crate::DisplayDesc::new(2, 1920, 0, 2560, 1440, 2.0);
+        next_display.paused = true;
+        let mut state =
+            SceneRuntimeState::try_from(&current_desc).expect("current state should build");
+        state.framing = dragged;
+
+        state
+            .inherit_descriptor_transition(&current_desc, &next_display)
+            .expect("transition should build");
+
+        assert_eq!(state.framing, dragged);
+    }
+
+    #[test]
+    fn different_wallpaper_transition_takes_the_next_descriptors_framing() {
+        let dragged = SceneFraming {
+            pan_x: 0.2,
+            pan_y: 0.8,
+        };
+        let next_framing = SceneFraming {
+            pan_x: 0.9,
+            pan_y: 0.1,
+        };
+        let current_desc = framed_scene("/tmp/current/project.json", SceneFraming::default());
+        let next_desc = framed_scene("/tmp/next/project.json", next_framing);
+        let mut state =
+            SceneRuntimeState::try_from(&current_desc).expect("current state should build");
+        state.framing = dragged;
+
+        state
+            .inherit_descriptor_transition(&current_desc, &next_desc)
+            .expect("transition should build");
+
+        assert_eq!(state.framing, next_framing);
+    }
+
+    #[test]
+    fn a_different_wallpaper_with_an_equal_framing_drops_the_dragged_position() {
+        let framing = SceneFraming {
+            pan_x: 0.3,
+            pan_y: 0.3,
+        };
+        let current_desc = framed_scene("/tmp/current/project.json", framing);
+        let next_desc = framed_scene("/tmp/next/project.json", framing);
+        let mut state =
+            SceneRuntimeState::try_from(&current_desc).expect("current state should build");
+        state.framing = SceneFraming {
+            pan_x: 0.9,
+            pan_y: 0.9,
+        };
+
+        state
+            .inherit_descriptor_transition(&current_desc, &next_desc)
+            .expect("transition should build");
+
+        assert_eq!(state.framing, framing);
+    }
+
+    #[test]
+    fn descriptor_framing_seeds_the_first_runtime_state() {
+        let framing = SceneFraming {
+            pan_x: 0.0,
+            pan_y: 1.0,
+        };
+        let state = SceneRuntimeState::try_from(&framed_scene("/tmp/p/project.json", framing))
+            .expect("state should build");
+
+        assert_eq!(state.framing, framing);
+    }
+
+    #[test]
+    fn a_differing_framing_rebuilds_until_the_live_setter_has_updated_the_descriptor() {
+        let live = framed_scene("/tmp/p/project.json", SceneFraming::default());
+        let wanted = framed_scene(
+            "/tmp/p/project.json",
+            SceneFraming {
+                pan_x: 0.25,
+                pan_y: 0.5,
+            },
+        );
+
+        assert_eq!(
+            RuntimeRefreshMode::from_transition(Some(&live), &wanted),
+            RuntimeRefreshMode::RebuildExistingRuntime
+        );
+
+        // `SceneRuntime::set_framing` stores the accepted value in `desc`.
+        let mut after_setter = live.clone();
+        after_setter.framing = wanted.framing;
+        assert_eq!(
+            RuntimeRefreshMode::from_transition(Some(&after_setter), &wanted),
+            RuntimeRefreshMode::Unchanged
+        );
+    }
+
     #[test]
     fn paused_runtime_requires_pause_restore_after_surface_reconfigure() {
         let mut state = runtime_state(None);
@@ -1938,6 +2076,7 @@ mod tests {
         SceneRuntimeState {
             scaling_mode: ScalingMode::Fit,
             scaling_factor: 1.0,
+            framing: SceneFraming::default(),
             render_resolution: None,
             audio_response_enabled: true,
             media_integration_enabled: false,

@@ -75,7 +75,10 @@ position existed. An axis with no room, such as Stretch at a factor of 1, does n
 move. The engine takes the position as a live setting
 (`owe_scene_wallpaper_set_framing`): nothing is rebuilt, a held video keeps its frame,
 the next frame is presented once, and the position survives a surface rebuild and a
-change of renderer. The app does not offer it yet.
+change of renderer. The Rust engine carries it with a scene's other settings
+(`SceneFraming`, refused unless both fractions are between 0 and 1): it stays with the
+same wallpaper across a rebuild, and a different wallpaper takes the position of its
+own descriptor. The app does not offer it yet.
 
 Compiled work is reused across launches where it can be. A scene's translated Metal
 shaders, their reflection and their binding plans are stored in that scene's shader

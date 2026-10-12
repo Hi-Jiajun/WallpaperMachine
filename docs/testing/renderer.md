@@ -342,6 +342,19 @@ cargo test -p shader --test pipeline -- --nocapture
   bridge's `tests::web_audio_media` replays web capture decisions through the
   production demand handler and real controller with a device-free backend:
   checking only the fake engine's suspension flag cannot prove capture starts.
+- `wallpaper-core` framing coverage (`cargo test --release -p wallpaper-core --lib
+  framing`): a scene's position (`SceneFraming`, two fractions from 0 to 1, centred
+  at 0.5 by default) is refused when an axis is NaN, infinite or outside 0..1 by
+  the descriptor and template builders, both `validate()` methods and
+  `WallpaperEngine::set_framing` (which refuses before it asks the actor, so
+  nothing reaches the renderer); it counts toward `SceneDesc::same_wallpaper`, so
+  only a different position forces a renderer rebuild and `paused` or `display`
+  alone do not; it survives the descriptor-template round trip and the stored direct
+  assignment the bridge compares; and it moves between wallpapers like the scaling
+  factor (the live position stays for the same wallpaper, the next descriptor's is
+  taken for a different one). These are pure state tests: none opens a renderer or a
+  window, so `SceneRuntime::set_framing` against a live renderer is covered only by
+  a desktop run.
 - `wallpaper_background`: renders unattached production Metal layers over a white
   bitmap with no drawable, before and after a resize and after recreation. Every
   pixel must be opaque black. Its harness runs on the process's main thread; no

@@ -286,6 +286,14 @@ impl EngineActor {
         self.with_scene_mut(handle, |scene| scene.set_scaling_factor(factor))
     }
 
+    pub fn set_framing(
+        &mut self,
+        handle: SceneHandle,
+        framing: crate::project::SceneFraming,
+    ) -> Result<(), EngineError> {
+        self.with_scene_mut(handle, |scene| scene.set_framing(framing))
+    }
+
     pub fn set_fps(&mut self, handle: SceneHandle, fps: u32) -> Result<(), EngineError> {
         self.with_scene_mut(handle, |scene| scene.set_fps(fps))
     }
@@ -1137,6 +1145,18 @@ impl Message<messages::SetScalingFactor> for EngineActor {
     }
 }
 
+impl Message<messages::SetFraming> for EngineActor {
+    type Reply = Result<(), EngineError>;
+
+    async fn handle(
+        &mut self,
+        msg: messages::SetFraming,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.with_snapshot_update(|actor| actor.set_framing(msg.handle, msg.framing))
+    }
+}
+
 impl Message<messages::SetFps> for EngineActor {
     type Reply = Result<(), EngineError>;
 
@@ -1591,7 +1611,7 @@ mod tests {
             snapshot::EngineSnapshotPublisher,
             state::{EngineState, StoredSceneRuntimeState},
         },
-        project::{ScalingMode, SceneDesc, SceneTemplate},
+        project::{ScalingMode, SceneDesc, SceneFraming, SceneTemplate},
     };
 
     #[test]
@@ -1668,5 +1688,61 @@ mod tests {
             "expected descriptor scaling factor 1.0, got {}",
             runtime_state.scaling_factor
         );
+    }
+
+    #[test]
+    fn runtime_refresh_job_for_new_wallpaper_uses_descriptor_framing() {
+        let display = DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0);
+        let previous_framing = SceneFraming {
+            pan_x: 0.1,
+            pan_y: 0.9,
+        };
+        let next_framing = SceneFraming {
+            pan_x: 0.8,
+            pan_y: 0.2,
+        };
+        let previous_desc = SceneDesc::builder(display.clone(), "/tmp/previous/project.json")
+            .assets_path("/tmp/assets")
+            .framing(previous_framing)
+            .build()
+            .expect("previous scene should build");
+        let next_template = SceneTemplate::builder("/tmp/next/project.json")
+            .assets_path("/tmp/assets")
+            .framing(next_framing)
+            .build()
+            .expect("next scene should build");
+        let mut state = EngineState::with_display_model(DisplayStateModel {
+            records: vec![DisplayRecord {
+                key: DisplayKey::Primary,
+                live_display: Some(display),
+                assignment: Some(WallpaperAssignment::Direct(next_template)),
+                window_active: true,
+                runtime_open: false,
+                primary_inheritance_consumed: false,
+            }],
+        });
+        // The user had moved the previous wallpaper at runtime, away from both
+        // descriptors' positions.
+        let mut previous_state =
+            SceneRuntimeState::try_from(&previous_desc).expect("previous state should build");
+        previous_state.framing = SceneFraming {
+            pan_x: 0.5,
+            pan_y: 0.5,
+        };
+        state.display_records[0].last_runtime_state = Some(StoredSceneRuntimeState::new(
+            previous_desc,
+            previous_state,
+        ));
+        let record = &state.display_records[0];
+        let next_desc = record
+            .scene_desc()
+            .expect("next scene should build")
+            .expect("assigned scene should exist");
+
+        let runtime_state = record
+            .runtime_state_for_desc(&next_desc)
+            .expect("runtime state should build");
+
+        assert_eq!(runtime_state.framing, next_framing);
     }
 }
