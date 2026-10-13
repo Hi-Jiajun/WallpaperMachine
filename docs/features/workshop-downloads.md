@@ -506,6 +506,22 @@ work.
 - **Activity bar.** It carries the running job's status, percentage, speed and
   time left, or the batch's count, mean percentage, summed speed and slowest time
   left while several run. The queue footer states the slot rule.
+- **Menu bar.** While downloads run, the menu bar menu has a line right under **Control
+  Panel**: **Downloads: 2 in progress, 40%**, or **Downloads: 2 in progress** when a figure
+  cannot be given. It counts the downloads that are moving or waiting for a slot or a
+  sign-in (`WorkshopDownloadManager.inProgressTransfers`): a paused job, a finished,
+  failed or cancelled one and the sign-in that downloads nothing are left out, and so is
+  a job that is pausing, which still holds its slot until its session closes. The percent
+  is the share of the bytes all of them expect that has arrived, so a large download
+  weighs more than a small one (the activity bar averages each job's own percentage
+  instead). It appears only when every counted job reports a size; a job that is queued,
+  signing in or listed without a size leaves the figure out rather than guessing it,
+  and it stops at 99% because only Steam's own success line claims the last percent.
+  The line is built each time the menu opens (`StatusMenuModel.DownloadActivity`), so it
+  is not live while the menu is open, and nothing runs while the menu is closed. It is
+  not offered while the app starts or quits. Choosing it opens Discover, where the
+  downloads button and its popover are; the menu has no per-download rows, cancel or
+  pause actions.
 - **Prompts.** Passwords and Steam Guard codes belong to that exact job; the
   dialog seeds the account per request, so switching requests cannot submit
   another one's sign-in. A submitted secret is cleared from the field immediately

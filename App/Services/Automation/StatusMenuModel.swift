@@ -5,12 +5,16 @@ import Foundation
 /// A Mac with one display (or one that can show its own wallpaper) keeps the flat menu:
 /// Previous, Next, Random Wallpaper and Recently used act on that display. With two or more, each
 /// display gets a submenu with its own commands, so any of them can be changed without opening the panel.
+/// While Workshop downloads run, a line under Control Panel says how many and how far they are,
+/// and opens Discover where the downloads list is.
 /// `AppDelegate` gathers the `Input` and turns the entries into `NSMenuItem`s; the update,
 /// error and Exit items stay there.
 enum StatusMenuModel {
     /// What choosing an item does. Every per-display command names its display.
     enum Command: Equatable {
         case openControlPanel
+        /// Opens Discover, where the downloads list is.
+        case openDownloads
         case playPause
         /// Mutes every wallpaper, or lets them play their own sound again; see `AutomationCommand.toggleMute`.
         case toggleMute
@@ -36,6 +40,38 @@ enum StatusMenuModel {
         var title: String
     }
 
+    /// Workshop downloads that are moving or waiting their turn, for the one line the menu gives them.
+    struct DownloadActivity: Equatable {
+        var count: Int
+        /// How much of the bytes all of them expect has arrived, or nil when any of them cannot say.
+        var percent: Int?
+
+        /// `jobs` are the downloads in progress (`WorkshopDownloadManager.inProgressTransfers`): not
+        /// paused ones, finished or failed ones, nor the sign-in that downloads nothing. A job
+        /// still waiting for a slot or signing in has no byte counts, and the percent is left
+        /// out instead of guessed. The last percent is Steam's own success line to claim, so a
+        /// job that is still in progress never reads as complete.
+        static func make(_ jobs: [(received: Int64?, expected: Int64?)]) -> DownloadActivity? {
+            guard !jobs.isEmpty else { return nil }
+            var received = 0.0
+            var expected = 0.0
+            for job in jobs {
+                guard let jobReceived = job.received, let jobExpected = job.expected, jobExpected > 0 else {
+                    return DownloadActivity(count: jobs.count, percent: nil)
+                }
+                received += Double(max(jobReceived, 0))
+                expected += Double(jobExpected)
+            }
+            let percent = Int((100 * received / expected).rounded())
+            return DownloadActivity(count: jobs.count, percent: min(max(percent, 0), 99))
+        }
+
+        var title: String {
+            if let percent { return String(localized: "Downloads: \(count) in progress, \(percent)%") }
+            return String(localized: "Downloads: \(count) in progress")
+        }
+    }
+
     struct Display: Equatable {
         var id: String
         var title: String
@@ -57,6 +93,8 @@ enum StatusMenuModel {
         var paused: Bool
         /// Whether the user has muted every wallpaper.
         var wallpapersMuted: Bool = false
+        /// The Workshop downloads in progress; nil when there are none.
+        var downloads: DownloadActivity? = nil
         /// The displays a command can act on, in menu order (`orderedDisplays`); empty while
         /// the app starts or quits.
         var displays: [Display]
@@ -78,6 +116,9 @@ enum StatusMenuModel {
 
     static func entries(for input: Input) -> [Entry] {
         var entries: [Entry] = [.command(.openControlPanel, title: String(localized: "Control Panel"), checked: false)]
+        if let downloads = input.downloads {
+            entries.append(.command(.openDownloads, title: downloads.title, checked: false))
+        }
         var actions: [Entry] = []
         if input.playbackIsCurrent, input.hasActiveWallpapers {
             let title = input.paused ? String(localized: "Play") : String(localized: "Pause")

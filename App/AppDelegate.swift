@@ -1552,11 +1552,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                     })
             }
         }
+        // Not while the app starts or quits, when opening Discover would not be wanted.
+        let downloads = store != nil && !shutdownInProgress && !shutdownComplete
+            ? StatusMenuModel.DownloadActivity.make(workshopStore.downloader.inProgressTransfers) : nil
         return StatusMenuModel.Input(
             playbackIsCurrent: playbackSnapshotCurrent,
             hasActiveWallpapers: !(store?.appSnapshot.activeWallpaperIds.isEmpty ?? true),
             paused: store?.appSnapshot.playbackState == .paused,
             wallpapersMuted: PlaybackPreferences.shared.wallpapersMuted,
+            downloads: downloads,
             displays: displays, canLockScreen: ScreenLock.isAvailable)
     }
 
@@ -1589,6 +1593,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         switch command {
         case .openControlPanel:
             openControlPanel()
+        case .openDownloads:
+            showDiscover()
         case .playPause:
             togglePlayback()
         case .toggleMute:
@@ -1621,6 +1627,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     @objc private func openControlPanel() {
         showControlPanel(selection: .wallpaper)
+    }
+
+    /// Discover, which lists the downloads; a first visit starts its search, as the link to it does.
+    private func showDiscover() {
+        if !workshopStore.hasLoaded && !workshopStore.isLoading { workshopStore.search() }
+        showControlPanel(selection: .workshop)
     }
 
     @objc func openSettings() {
@@ -2029,8 +2041,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         case .open(let page):
             switch page {
             case .discover?:
-                if !workshopStore.hasLoaded && !workshopStore.isLoading { workshopStore.search() }
-                showControlPanel(selection: .workshop)
+                showDiscover()
             case .pixiv?:
                 if !pixivStore.hasLoaded && !pixivStore.isLoading { pixivStore.apply(pixivStore.query) }
                 showControlPanel(selection: .pixiv)

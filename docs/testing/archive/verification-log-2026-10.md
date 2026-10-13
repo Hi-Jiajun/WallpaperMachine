@@ -9,6 +9,15 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-13 — Low-battery playback rule
+
+New Playback rule `When the battery is low` (Keep running, Pause or Stop at 10, 20 or 30 percent; internal battery only). It joins SystemConditionMonitor's actions, reads IOKit's power-source notification only while an action is chosen, and is hidden on Macs without a battery. No bridge or Rust change.
+
+- `python3 scripts/test.py --only LowBatteryTests --only SystemConditionMonitorTests --only PlaybackPreferencesTests --only WebPanelPerformanceSettingsTests --only WallpaperBackupTests` plus WebPanelGeneralSettingsTests, ControlPanelSnapshotDeliveryTests, WebPanelAssetsTests, WebPanelCompatibilityTests, ControlPanelPlaybackToolsTests, WallpaperPresentationPolicyTests, PlaybackPolicyCompositionTests — 122 passed of 122 (18 new).
+- Seven deliberate breaks (no release margin, parse accepting a UPS, observing while Keep running, a wake refresh that reads nothing, unchecked level in preferences, panel action and backup restore) each failed at least one new test; all were reverted.
+- `python3 -m unittest scripts.tests.test_panel_localization` — 5 passed (four new WebUI strings in ja, zh-Hans, zh-Hant).
+- Not run: the full gate, a real discharge crossing the level, IOKit's notification cadence on this Mac, the live panel row layout. The live battery read is never asserted.
+
 ## 2026-10-13 — Mission Control poster kept while fresh
 
 Commit `perf(desktop): stop retaking the Mission Control picture while the current one is fresh`: DesktopWallpaperSync retakes a surface's poster on a Space change, wake or resume only when it is older than 120 s or was taken before the wallpaper settled. Taken in a worktree; the full gate was not run here.

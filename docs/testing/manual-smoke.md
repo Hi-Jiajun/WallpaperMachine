@@ -170,6 +170,11 @@ was run.
 - [ ] If Steam ends a session with "logged in elsewhere", the ended item goes
       back in line, the footer reads "Downloads run one at a time", and it
       retries after the running item without a click.
+- [ ] With the panel closed and two or more downloads running, open the menu bar item: the
+      line right under **Control Panel** reads "Downloads: N in progress" with a percent
+      once every running download has a size (it stays out while one is still signing in
+      or waiting), and does not read 100%. Choosing it opens Discover. After the last
+      download finishes or is paused, the line is gone the next time the menu opens.
 - [ ] Remove queued work and confirm it never starts.
 - [ ] Complete one sign-in and check that the next job attempts saved-session
       reuse. Steam may still ask again.

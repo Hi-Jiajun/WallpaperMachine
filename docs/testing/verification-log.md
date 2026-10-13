@@ -25,6 +25,16 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-13 — Workshop downloads in the menu bar
+
+StatusMenuModel.DownloadActivity and WorkshopDownloadManager.inProgressTransfers: while Workshop downloads run, a line under Control Panel reads Downloads: N in progress with a byte-weighted percent that is left out when any counted job cannot report a size and stops at 99, and opens Discover. Built when the menu opens (no timer). Commit 10 of the desktop-menubar lane, checked in an isolated worktree on macOS 27.0.1; targeted runs only, not the full gate. No Rust, bridge or renderer change.
+
+- `python3 scripts/test.py --only StatusMenuModelTests --only DownloadQueueTests --only WorkshopDownloadPersistenceTests --only WorkshopStoreTests --only AppAutomationTests --only AutomationCommandTests --only ControlPanelAutomationTests --only DownloaderLifecycleTests` — exit 0; 116 passed, 0 failed, 0 skipped
+- Mutation check: counting a paused job, counting the sign-in job and letting the percent reach 100 each failed the test written for it (3 failures); all were reverted
+- Every scripts/tests/test_*.py module run directly — 316 passed (the native catalog key `Downloads: %lld in progress, %lld%%` was confirmed against what the Swift compiler extracts for the literal)
+- Not run: the full `python3 scripts/test.py` gate, `python3 scripts/check_rust.py`, `python3 scripts/check_renderer.py` (no Rust, bridge or renderer change), Release build, any desktop run
+- Not covered: how the line draws and reads in the real menu, that it appears while a real SteamCMD transfer reports bytes, and that choosing it brings Discover forward; see manual-smoke "Download queue"
+
 ## 2026-10-13 — Mute every wallpaper (menu bar, links, Shortcuts, shortcut key)
 
 PlaybackPreferences.wallpapersMuted, OR-ed into WallpaperPresentationPolicy's audio suppression (the bridge's audio_suppressed, which the engine ORs with each wallpaper's saved mute), reached from a ticked Mute Wallpapers menu item, wallpapermachine://mute, unmute and togglemute, three Shortcuts actions, a shortcut key and a Settings → Performance → Playback switch. Commit 9 of the desktop-menubar lane, checked in an isolated worktree on macOS 27.0.1; targeted runs only, not the full gate. No Rust, bridge or renderer change.
@@ -109,12 +119,3 @@ Commit `feat(playback): optionally play only on the display you are using`: opt-
 - Deliberate breaks (a wait that ignores cancellation, a pointer entry that leaves the old wait running, no never-darken-every-display guard) each failed the new tests; all were reverted.
 - `python3 -m unittest scripts.tests.test_panel_localization` — 5 passed (three new WebUI strings in ja, zh-Hans, zh-Hant).
 - Not run: the full gate; real global and local pointer events across two physical displays, whether the global monitor sees the pointer while this app is in front, the display-ID mapping with mixed scaling, how the 3 s dwell feels, and the live row layout. All need an authorized two-display desktop run.
-
-## 2026-10-13 — Low-battery playback rule
-
-New Playback rule `When the battery is low` (Keep running, Pause or Stop at 10, 20 or 30 percent; internal battery only). It joins SystemConditionMonitor's actions, reads IOKit's power-source notification only while an action is chosen, and is hidden on Macs without a battery. No bridge or Rust change.
-
-- `python3 scripts/test.py --only LowBatteryTests --only SystemConditionMonitorTests --only PlaybackPreferencesTests --only WebPanelPerformanceSettingsTests --only WallpaperBackupTests` plus WebPanelGeneralSettingsTests, ControlPanelSnapshotDeliveryTests, WebPanelAssetsTests, WebPanelCompatibilityTests, ControlPanelPlaybackToolsTests, WallpaperPresentationPolicyTests, PlaybackPolicyCompositionTests — 122 passed of 122 (18 new).
-- Seven deliberate breaks (no release margin, parse accepting a UPS, observing while Keep running, a wake refresh that reads nothing, unchecked level in preferences, panel action and backup restore) each failed at least one new test; all were reverted.
-- `python3 -m unittest scripts.tests.test_panel_localization` — 5 passed (four new WebUI strings in ja, zh-Hans, zh-Hant).
-- Not run: the full gate, a real discharge crossing the level, IOKit's notification cadence on this Mac, the live panel row layout. The live battery read is never asserted.

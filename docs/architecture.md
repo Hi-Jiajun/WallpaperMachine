@@ -69,7 +69,10 @@ automation schedulers, the web and native-video wallpaper hosts, system media).
   its own wallpaper keeps the flat Previous / Next / Recently used, and two or more get a
   submenu each (main display first, then left to right) holding that display's own commands
   (Previous, Next, **Random Wallpaper**, Recently used),
-  **Remove from Display** or **Start Again**, and **Open in Control Panel**. **Mute Wallpapers**
+  **Remove from Display** or **Start Again**, and **Open in Control Panel**. While Workshop
+  downloads run, one line under Control Panel counts them and gives their combined progress
+  (`StatusMenuModel.DownloadActivity`, read from `WorkshopDownloadManager.inProgressTransfers` when
+  the menu opens, so it needs no timer); choosing it opens Discover. **Mute Wallpapers**
   is one ticked item after Play/Pause in both layouts: it flips `PlaybackPreferences.wallpapersMuted`
   (`AutomationCommand.toggleMute`) and takes no queue turn, since the presentation policy
   hears the preference change and delivers it. Random Wallpaper

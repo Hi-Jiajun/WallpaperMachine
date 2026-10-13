@@ -3077,6 +3077,12 @@
     "Mute or Unmute" : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Mute or Unmute"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "消音／消音解除"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "静音或取消静音"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "靜音或取消靜音"}}}
     },
+    "Downloads: %lld in progress, %lld%%" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Downloads: %lld in progress, %lld%%"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ダウンロード：%lld件を実行中、%lld%%"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "下载：%lld 项进行中，%lld%%"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "下載：%lld 項進行中，%lld%%"}}}
+    },
+    "Downloads: %lld in progress" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Downloads: %lld in progress"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ダウンロード：%lld件を実行中"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "下载：%lld 项进行中"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "下載：%lld 項進行中"}}}
+    },
     "A collection can’t be downloaded as one. Open it to download its wallpapers." : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "A collection can’t be downloaded as one. Open it to download its wallpapers."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "コレクションはまとめてダウンロードできません。コレクションを開いて、含まれる壁紙をダウンロードしてください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "合集无法整体下载。请打开合集，下载其中的壁纸。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "收藏集無法整個下載。請打開收藏集以下載其中的桌布。"}}}
     },

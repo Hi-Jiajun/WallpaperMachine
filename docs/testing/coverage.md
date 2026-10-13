@@ -32,7 +32,9 @@ precedence, editor round trips and preference validation, and the menu bar menu'
 layout (flat for one display, a submenu per display with every command naming its
 display, ordering and titles, Remove or Start Again, Random Wallpaper where something else
 can be chosen, Mute Wallpapers after Play/Pause, ticked while muted and offered then with
-nothing playing, which displays are listed), the `random` link and its pools, the
+nothing playing, the Workshop downloads line right under Control Panel and absent when idle,
+its byte-weighted percent left out when a job cannot say and never reaching 100, which displays
+are listed), the `random` link and its pools, the
 `mute`, `unmute` and `togglemute` links (which take no query) and the shortcut keys for them.
 `WallpaperBackupTests` covers rule merging and local recovery-state rollback, and that the
 mute of every wallpaper is neither exported nor accepted from a package. What each covers, and what
@@ -1138,6 +1140,9 @@ and `WorkshopDownloadPersistenceTests`:
   account's credentials, stale credential rejections not erasing a newer session,
   ownership checks (owned, missing, unconfirmed, split output), and an anonymous
   account unable to start a download.
+- Menu bar line (`testMenuBarCountsOnlyTransfersThatAreMovingOrWaiting`): a running job and a
+  waiting one count, a pausing job (still holding its slot), a paused one and the sign-in
+  job do not.
 - Content: staging reclaim limited to directories nothing is writing to,
   partial content never published on cancel or incomplete download, scene-asset
   installation keeping only validated assets, pause and checkpoint recovery of

@@ -49,10 +49,10 @@ final class StatusMenuModelTests: XCTestCase {
 
     private func input(
         displays: [StatusMenuModel.Display], current: Bool = true, active: Bool = true, paused: Bool = false,
-        muted: Bool = false, canLock: Bool = true
+        muted: Bool = false, downloads: StatusMenuModel.DownloadActivity? = nil, canLock: Bool = true
     ) -> StatusMenuModel.Input {
         .init(playbackIsCurrent: current, hasActiveWallpapers: active, paused: paused, wallpapersMuted: muted,
-              displays: displays, canLockScreen: canLock)
+              downloads: downloads, displays: displays, canLockScreen: canLock)
     }
 
     private func titles(_ entries: [Entry]) -> [String] {
@@ -149,7 +149,7 @@ final class StatusMenuModelTests: XCTestCase {
             switch command {
             case .previous(let id), .next(let id), .random(let id), .remove(let id), .openInPanel(let id),
                  .apply(_, let id), .startAgain(_, let id): return id
-            case .openControlPanel, .playPause, .toggleMute, .lockScreen: return nil
+            case .openControlPanel, .openDownloads, .playPause, .toggleMute, .lockScreen: return nil
             }
         }
         func allCommands(_ entries: [Entry]) -> [Command] {
@@ -291,6 +291,80 @@ final class StatusMenuModelTests: XCTestCase {
         }
         XCTAssertNotNil(playPauseTitle(paused: true))
         XCTAssertNotEqual(playPauseTitle(paused: true), playPauseTitle(paused: false), "it says what it will do")
+    }
+
+    // MARK: Downloads
+
+    private typealias Activity = StatusMenuModel.DownloadActivity
+
+    func testDownloadActivityAveragesByBytesAndOmitsAPercentItCannotMeasure() {
+        XCTAssertNil(Activity.make([]), "no downloads, no line")
+
+        // Weighted by size: 1 of 4 and 3 of 4 is half of the bytes, whatever each job's own fraction.
+        XCTAssertEqual(Activity.make([(1, 4), (3, 4)]), Activity(count: 2, percent: 50))
+        XCTAssertEqual(Activity.make([(10, 100), (900, 900)]), Activity(count: 2, percent: 91),
+                       "a big job outweighs a small one")
+        XCTAssertEqual(Activity.make([(1, 3)]), Activity(count: 1, percent: 33), "rounded to the nearest percent")
+        XCTAssertEqual(Activity.make([(2, 3)]), Activity(count: 1, percent: 67))
+        XCTAssertEqual(Activity.make([(0, 500)]), Activity(count: 1, percent: 0))
+
+        // One job that cannot say how far it is leaves the figure out, but it still counts.
+        XCTAssertEqual(Activity.make([(1, 4), (nil, nil)]), Activity(count: 2, percent: nil), "queued or signing in")
+        XCTAssertEqual(Activity.make([(1, 4), (5, nil)]), Activity(count: 2, percent: nil), "no size listed")
+        XCTAssertEqual(Activity.make([(nil, 4)]), Activity(count: 1, percent: nil))
+        XCTAssertEqual(Activity.make([(1, 4), (0, 0)]), Activity(count: 2, percent: nil), "a size of zero says nothing")
+        XCTAssertEqual(Activity.make([(nil, nil)]), Activity(count: 1, percent: nil))
+    }
+
+    func testDownloadActivityNeverReadsAsCompleteWhileAJobIsStillInProgress() {
+        // Steam's own success line claims the last percent, and a finished job is no longer in progress.
+        XCTAssertEqual(Activity.make([(1000, 1000)]), Activity(count: 1, percent: 99))
+        XCTAssertEqual(Activity.make([(2000, 1000)]), Activity(count: 1, percent: 99), "more bytes than listed")
+        XCTAssertEqual(Activity.make([(499, 500)]), Activity(count: 1, percent: 99))
+        XCTAssertEqual(Activity.make([(-5, 100)]), Activity(count: 1, percent: 0), "a counter that went backwards")
+    }
+
+    func testTheDownloadsLineSitsRightUnderControlPanelAndIsAbsentWhenIdle() {
+        let busy = StatusMenuModel.entries(for: input(
+            displays: [display("primary", next: true)], downloads: Activity(count: 2, percent: 40)))
+        XCTAssertEqual(shape(busy), [
+            .command(.openControlPanel, checked: false),
+            .command(.openDownloads, checked: false),
+            .separator,
+            .command(.playPause, checked: false),
+            .command(.toggleMute, checked: false),
+            .command(.next(display: "primary"), checked: false),
+            .command(.lockScreen, checked: false),
+        ])
+
+        let idle = StatusMenuModel.entries(for: input(displays: [display("primary", next: true)]))
+        XCTAssertFalse(shape(idle).contains(.command(.openDownloads, checked: false)))
+        XCTAssertEqual(shape(idle).first, .command(.openControlPanel, checked: false))
+
+        // With nothing else to offer the line still shows, without a trailing separator.
+        let alone = StatusMenuModel.entries(for: input(
+            displays: [], active: false, downloads: Activity(count: 1, percent: nil), canLock: false))
+        XCTAssertEqual(shape(alone), [.command(.openControlPanel, checked: false), .command(.openDownloads, checked: false)])
+
+        // Several displays: the line is the same, above the display submenus.
+        let several = StatusMenuModel.entries(for: input(
+            displays: [display("primary"), display("7")], downloads: Activity(count: 1, percent: nil)))
+        XCTAssertEqual(Array(shape(several).prefix(2)),
+                       [.command(.openControlPanel, checked: false), .command(.openDownloads, checked: false)])
+    }
+
+    func testTheDownloadsLineSaysHowManyAndHowFar() {
+        func title(_ activity: Activity) -> String? {
+            StatusMenuModel.entries(for: input(displays: [], downloads: activity)).compactMap { entry -> String? in
+                if case .command(.openDownloads, let title, _) = entry { return title }
+                return nil
+            }.first
+        }
+        let measured = title(Activity(count: 3, percent: 42))
+        XCTAssertTrue(measured?.contains("3") == true && measured?.contains("42%") == true, "\(measured ?? "nil")")
+        let unmeasured = title(Activity(count: 3, percent: nil))
+        XCTAssertTrue(unmeasured?.contains("3") == true && unmeasured?.contains("%") == false, "\(unmeasured ?? "nil")")
+        XCTAssertNotEqual(measured, unmeasured)
     }
 
     func testRecentlyUsedMarksTheCurrentWallpaperAndCapsAtTen() {

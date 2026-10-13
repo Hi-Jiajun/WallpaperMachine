@@ -163,6 +163,12 @@ final class WorkshopDownloadManager: SteamCMDDownloadActivity {
   var activeCount: Int { downloads.lazy.filter { $0.occupiesSlot }.count }
   var queuedCount: Int { downloads.lazy.filter { $0.isQueued }.count }
   var isRunning: Bool { downloads.contains { $0.isPending } }
+  /// The bytes received and expected of each download that is moving or waiting its turn, for the
+  /// menu bar's one line about them. A job being paused is already out of it, while it still
+  /// holds its slot, and so is the sign-in that downloads nothing.
+  var inProgressTransfers: [(received: Int64?, expected: Int64?)] {
+    downloads.filter { $0.isPending && !$0.isPaused && !$0.isSignIn }.map { ($0.bytesReceived, $0.bytesExpected) }
+  }
   /// How many transfers may run side by side right now.
   var slotLimit: Int { sessionConflictDetected ? 1 : maximumConcurrentDownloads }
   var suggestedAccount: String? { downloads.last(where: { $0.isPending })?.account ?? savedAccount }

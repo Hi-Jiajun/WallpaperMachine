@@ -101,6 +101,59 @@ final class DownloadQueueTests: DownloaderTestCase {
     }
   }
 
+  /// The menu bar's line counts what is moving or waiting. A paused job stays pending until its
+  /// session has closed, and the sign-in downloads nothing, so neither may count.
+  func testMenuBarCountsOnlyTransfersThatAreMovingOrWaiting() async throws {
+    let root = try makeRuntime(
+      """
+      set -eu
+      printf 'password: '
+      IFS= read -r password
+      while :; do sleep 0.02; done
+      """)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let manager = WorkshopDownloadManager(
+      sessionDirectory: root.appendingPathComponent("SteamSession"),
+      runtimeProvider: ShellRuntimeProvider())
+    let executable = root.appendingPathComponent("runtime/steamcmd")
+    for id in ["1", "2"] {
+      manager.start(
+        item: WorkshopItem(
+          id: id, title: "Queued \(id)", creator: "Test", summary: "", previewURL: nil,
+          tags: ["Video"], size: 0, subscriptions: 0),
+        username: "localtest", executable: executable,
+        library: root.appendingPathComponent("Library"), rememberSession: false, onImported: {})
+    }
+    manager.signIn(username: "localtest", executable: executable, root: root, rememberSession: false)
+    do {
+      let first = try XCTUnwrap(manager.download(for: "1"))
+      let second = try XCTUnwrap(manager.download(for: "2"))
+      try await waitUntil { first.worker.prompt == .password }
+      XCTAssertTrue(second.isQueued)
+      XCTAssertNotNil(manager.signIn, "the sign-in job is waiting in line too")
+
+      XCTAssertEqual(manager.inProgressTransfers.count, 2, "the running job and the waiting one, not the sign-in")
+      XCTAssertEqual(StatusMenuModel.DownloadActivity.make(manager.inProgressTransfers),
+                     StatusMenuModel.DownloadActivity(count: 2, percent: nil),
+                     "neither has byte counts yet, so no percent is guessed")
+
+      manager.pause(second)
+      XCTAssertEqual(manager.inProgressTransfers.count, 1, "a paused job is out of the count")
+
+      manager.pause(first)
+      XCTAssertTrue(first.isPending, "a pausing job still holds its slot until its session has closed")
+      XCTAssertTrue(manager.inProgressTransfers.isEmpty)
+      XCTAssertNil(StatusMenuModel.DownloadActivity.make(manager.inProgressTransfers))
+
+      if let signIn = manager.signIn { manager.cancel(signIn) }
+      await manager.shutdown()
+      XCTAssertTrue(manager.inProgressTransfers.isEmpty)
+    } catch {
+      await manager.shutdown()
+      throw error
+    }
+  }
+
   func testQueuedDownloadReusesSignInSavedByPreviousJob() async throws {
     let root = try makeSessionRuntime()
     defer { try? FileManager.default.removeItem(at: root) }

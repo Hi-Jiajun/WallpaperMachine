@@ -369,7 +369,9 @@ none), then **Open in Control Panel**, which makes that display the panel's targ
 Removing is the same choice as Eject in Settings → Displays, so a playlist leaves the
 display empty ([a display you cleared](playlists.md#a-display-you-cleared)); it is a
 menu-only command and has no `wallpapermachine://` link. Choosing an item acts on the
-display named by its submenu, never on the panel's target display.
+display named by its submenu, never on the panel's target display. Whichever layout, while
+Workshop downloads run a line under **Control Panel** counts them and opens Discover
+([the download queue](workshop-downloads.md#the-download-queue)).
 
 `WallpaperHistoryStore` saves per-display history in the
 `WallpaperMachine.wallpaperHistory` preference. It survives relaunch, is pruned
