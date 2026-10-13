@@ -86,7 +86,15 @@ unchanged. A hand-edited value never costs the file its other settings: a fracti
 outside 0 to 1 is clamped, and anything that is not a number reads as the centre. A
 mirror display is always centred, because it has its own display settings and a live
 change to its source's position never reaches it. The native video player ignores the
-position. The app does not offer it yet.
+position. The bridge moves a wallpaper on one display (`set_display_position`, an axis
+passed as nothing keeps its saved value): it refuses a fraction outside 0 to 1 or not a
+number instead of clamping it, saves the position at once and moves the scene that runs
+on that display without rebuilding it. Like the scaling mode, and unlike the scale factor,
+a position is not part of the options draft, so Apply does not wait for it, Cancel does
+not undo it and Apply reopens no scene because of it. Saying the position it already has
+writes nothing and tells the renderer nothing, and a renderer that refuses the move
+leaves the position saved for the next time the scene is built. The app does not offer it
+yet.
 
 Compiled work is reused across launches where it can be. A scene's translated Metal
 shaders, their reflection and their binding plans are stored in that scene's shader

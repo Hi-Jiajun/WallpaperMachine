@@ -72,7 +72,7 @@ use crate::{
             RestorePropertyDefault,
             SelectWallpaper,
             SetAudioResponseEnabled, SetDisplayConfigEnabled, SetDisplayEnabled, SetDisplayMode,
-            SetDisplayPresentationSuspended,
+            SetDisplayPosition, SetDisplayPresentationSuspended,
             SetFilter, SetGlobalPlayback, SetLaunchAtLogin, SetMirrorMuted, SetMirrorScalingFactor,
             SetMirrorScalingMode, SetMirrorTarget, SetMirrorTargetFps, SetMirrorVolume, SetMuted,
             SetAudioSuppressed, SetBatteryMode, SetBatteryQualityProfile, SetContentPacingEnabled,
@@ -861,6 +861,14 @@ impl EngineFacade for ArcEngineFacade {
         self.0.set_scaling_factor(handle, factor)
     }
 
+    fn set_framing(
+        &self,
+        handle: SceneHandle,
+        framing: wallpaper_core::project::SceneFraming,
+    ) -> Pin<Box<dyn Future<Output = Result<(), wallpaper_core::EngineError>> + Send>> {
+        self.0.set_framing(handle, framing)
+    }
+
     fn set_fps(
         &self,
         handle: SceneHandle,
@@ -1345,6 +1353,37 @@ impl WallpaperBridge {
                 wallpaper_id,
                 display_id,
                 factor,
+            })
+            .await
+    }
+
+    /// Moves a wallpaper on one display: `pan_x` and `pan_y` are fractions from
+    /// 0 (left, top) to 1 (right, bottom) of the room the display leaves around
+    /// the wallpaper, and an axis passed as `None` keeps its saved value. The
+    /// running scene follows without being rebuilt and the position is saved at
+    /// once, like the scaling mode and unlike the scale factor, so it is not
+    /// part of the draft that Apply and Cancel decide on. Repeating a position
+    /// changes nothing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the wallpaper or display id is unknown, an axis is
+    /// not a finite fraction between 0 and 1, persistence fails, or the live
+    /// engine update fails. A failed engine update leaves the position saved,
+    /// and the next time the scene is reconciled it is applied.
+    pub async fn set_display_position(
+        &self,
+        wallpaper_id: String,
+        display_id: String,
+        pan_x: Option<f64>,
+        pan_y: Option<f64>,
+    ) -> Result<BridgeWallpaperMutationBundle, BridgeError> {
+        self.actor
+            .ask(SetDisplayPosition {
+                wallpaper_id,
+                display_id,
+                pan_x,
+                pan_y,
             })
             .await
     }

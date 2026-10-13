@@ -24,7 +24,7 @@ use wallpaper_core::{
         AudioCaptureBackend, AudioCaptureController, AudioVolume, PlatformAudioCaptureBackend,
         RESTART_RETRY_DELAYS, RestartOutcome, device_watch::OutputDeviceWatcher,
     },
-    project::{ScalingMode, SceneDesc, SceneHandle, SceneResult},
+    project::{ScalingMode, SceneDesc, SceneFraming, SceneHandle, SceneResult},
     render::RendererSurfaceCounters,
 };
 
@@ -106,6 +106,10 @@ pub trait EngineFacade: Send + Sync + 'static {
     fn set_audio_capture_enabled(&self, handle: SceneHandle, enabled: bool) -> EngineFuture<()>;
     fn set_scaling_mode(&self, handle: SceneHandle, mode: ScalingMode) -> EngineFuture<()>;
     fn set_scaling_factor(&self, handle: SceneHandle, factor: f64) -> EngineFuture<()>;
+    /// Live-moves the presented wallpaper inside the room its display leaves
+    /// around it. Nothing is rebuilt, and the engine refuses a position that
+    /// is not a fraction between 0 and 1.
+    fn set_framing(&self, handle: SceneHandle, framing: SceneFraming) -> EngineFuture<()>;
     fn set_fps(&self, handle: SceneHandle, fps: u32) -> EngineFuture<()>;
     /// Live-updates one scene's internal rasterization scale. Resizes render
     /// targets in place; it must not reparse the project or reopen video.
@@ -598,6 +602,11 @@ impl EngineFacade for RealEngineFacade {
     fn set_scaling_factor(&self, handle: SceneHandle, factor: f64) -> EngineFuture<()> {
         let engine = self.engine.clone();
         async move { engine.set_scaling_factor(handle, factor).await }.boxed()
+    }
+
+    fn set_framing(&self, handle: SceneHandle, framing: SceneFraming) -> EngineFuture<()> {
+        let engine = self.engine.clone();
+        async move { engine.set_framing(handle, framing).await }.boxed()
     }
 
     fn set_fps(&self, handle: SceneHandle, fps: u32) -> EngineFuture<()> {
@@ -1103,6 +1112,8 @@ pub struct FakeEngineFacade {
     audio_capture_failure: Arc<ArcSwap<Option<String>>>,
     scaling_mode_calls: Arc<ArcSwap<Vec<(SceneHandle, ScalingMode)>>>,
     scaling_factor_calls: Arc<ArcSwap<Vec<(SceneHandle, f64)>>>,
+    framing_calls: Arc<ArcSwap<Vec<(SceneHandle, SceneFraming)>>>,
+    framing_failure: Arc<ArcSwap<Option<String>>>,
     fps_calls: Arc<ArcSwap<Vec<(SceneHandle, u32)>>>,
     render_scale_calls: Arc<ArcSwap<Vec<(SceneHandle, f32)>>>,
     content_pacing_enabled: Arc<ArcSwap<bool>>,
@@ -1549,6 +1560,13 @@ impl FakeEngineFacade {
         load_log(&self.scaling_factor_calls)
     }
 
+    /// Every position the fake was asked to apply live, in order. A call that
+    /// was refused is in here too: it is what the bridge asked for.
+    #[must_use]
+    pub fn framing_calls(&self) -> Vec<(SceneHandle, SceneFraming)> {
+        load_log(&self.framing_calls)
+    }
+
     #[must_use]
     pub fn fps_calls(&self) -> Vec<(SceneHandle, u32)> {
         load_log(&self.fps_calls)
@@ -1616,6 +1634,13 @@ impl FakeEngineFacade {
     pub fn fail_next_disable_capture(&self) {
         self.disable_capture_failure
             .store(Arc::new(Some("audio disable failed".into())));
+    }
+
+    /// The next live position change is refused by the renderer and leaves the
+    /// running scene where it was.
+    pub fn fail_next_framing(&self) {
+        self.framing_failure
+            .store(Arc::new(Some("framing failed".into())));
     }
 
     pub fn fail_next_close(&self) {
@@ -2061,6 +2086,24 @@ impl EngineFacade for FakeEngineFacade {
             });
             fake.update_direct_assignment_after_refresh(handle, |template| {
                 template.scaling_factor = factor;
+            });
+            Ok(())
+        }
+        .boxed()
+    }
+
+    fn set_framing(&self, handle: SceneHandle, framing: SceneFraming) -> EngineFuture<()> {
+        let fake = self.clone();
+        async move {
+            push_log(&fake.framing_calls, (handle, framing));
+            if let Some(message) = fake.framing_failure.swap(Arc::new(None)).as_ref() {
+                return Err(EngineError::Platform(message.clone()));
+            }
+            fake.update_direct_assignment(handle, |template| {
+                template.framing = framing;
+            });
+            fake.update_direct_assignment_after_refresh(handle, |template| {
+                template.framing = framing;
             });
             Ok(())
         }

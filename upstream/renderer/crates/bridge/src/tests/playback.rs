@@ -11,7 +11,7 @@ use futures_util::future::{BoxFuture, FutureExt};
 use wallpaper_core::{
     DisplaySelector, DisplaySnapshotEntry, EngineError, FirstFrameCallback, WallpaperAssignment,
     media::audio::AudioVolume,
-    project::{ScalingMode, SceneDesc, SceneHandle, SceneResult},
+    project::{ScalingMode, SceneDesc, SceneFraming, SceneHandle, SceneResult},
 };
 
 use super::api_smoke::{
@@ -522,6 +522,14 @@ impl EngineFacade for FailingPlaybackEngine {
         async move { Ok::<(), EngineError>(()) }.boxed()
     }
 
+    fn set_framing(
+        &self,
+        _handle: SceneHandle,
+        _framing: SceneFraming,
+    ) -> BoxFuture<'static, Result<(), EngineError>> {
+        async move { Ok::<(), EngineError>(()) }.boxed()
+    }
+
     fn set_fps(
         &self,
         _handle: SceneHandle,
@@ -768,6 +776,14 @@ impl EngineFacade for ShutdownEngine {
         &self,
         _handle: SceneHandle,
         _factor: f64,
+    ) -> BoxFuture<'static, Result<(), EngineError>> {
+        async move { Ok::<(), EngineError>(()) }.boxed()
+    }
+
+    fn set_framing(
+        &self,
+        _handle: SceneHandle,
+        _framing: SceneFraming,
     ) -> BoxFuture<'static, Result<(), EngineError>> {
         async move { Ok::<(), EngineError>(()) }.boxed()
     }

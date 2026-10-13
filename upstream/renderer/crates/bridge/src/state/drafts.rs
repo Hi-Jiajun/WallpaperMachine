@@ -4,9 +4,23 @@ use wallpaper_core::project::ScalingMode;
 
 use crate::{
     api::BridgeError,
-    config::{MonitorRender, SerializedSelector, WallpaperConfig},
+    config::{FramingCfg, MonitorRender, SerializedSelector, WallpaperConfig},
     project::{ProjectModel, PropertyValue},
 };
+
+/// What moving a wallpaper on one display did to its committed config.
+#[derive(Clone, Debug)]
+pub struct PositionUpdate {
+    /// The committed config with the new position in it.
+    pub config: WallpaperConfig,
+    /// Where the wallpaper sits on that display now.
+    pub framing: FramingCfg,
+    /// Where it was saved before, for undoing the move if saving fails.
+    pub previous: FramingCfg,
+    /// Whether that differs from what was saved before. A position that did
+    /// not change needs neither a write nor a word with the renderer.
+    pub changed: bool,
+}
 
 #[derive(Clone, Debug)]
 pub struct WallpaperOptionsDraft {
@@ -60,6 +74,7 @@ impl WallpaperOptionsDraft {
                     current_render.scaling_factor = committed_render.scaling_factor;
                 } else if current_render.scaling_mode == MonitorRender::default().scaling_mode
                     && current_render.frame_rate == MonitorRender::default().frame_rate
+                    && current_render.framing == MonitorRender::default().framing
                 {
                     current_render.scaling_factor = MonitorRender::default().scaling_factor;
                     committed.monitors.push(current_render.clone());
@@ -293,6 +308,80 @@ impl WallpaperOptionsDraft {
         Ok(())
     }
 
+    /// Moves the wallpaper on one display and saves the move at once.
+    ///
+    /// A position is the drag editor's answer, and it has to still be there when
+    /// the pointer is released, so it is committed like the scaling mode and
+    /// not held behind Apply like the scale factor: both copies change, which
+    /// leaves nothing for Cancel to undo and nothing for Apply to reopen.
+    ///
+    /// An axis left as `None` keeps its saved value, so a horizontal drag never
+    /// disturbs the vertical position. A position equal to the saved one is not
+    /// a change, and a display nobody ever positioned gains no entry from being
+    /// told to stay centred.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when an axis is not a finite fraction between 0 and 1.
+    /// The wallpaper is left exactly as it was: a position outside the display
+    /// is a request this API refuses instead of quietly moving it to an edge.
+    pub fn set_position_immediate(
+        &mut self,
+        selector: SerializedSelector,
+        pan_x: Option<f64>,
+        pan_y: Option<f64>,
+    ) -> Result<PositionUpdate, BridgeError> {
+        if [pan_x, pan_y]
+            .into_iter()
+            .flatten()
+            .any(|pan| !(0.0..=1.0).contains(&pan))
+        {
+            return Err(BridgeError::invalid_input(
+                "position must be a fraction between 0 and 1",
+            ));
+        }
+
+        let saved = self
+            .committed
+            .monitors
+            .iter()
+            .find(|render| render.selector == selector)
+            .map_or_else(FramingCfg::default, |render| render.framing);
+        let framing = FramingCfg {
+            pan_x: pan_x.unwrap_or(saved.pan_x),
+            pan_y: pan_y.unwrap_or(saved.pan_y),
+        };
+        if framing == saved {
+            return Ok(PositionUpdate {
+                config: self.committed.clone(),
+                framing,
+                previous: saved,
+                changed: false,
+            });
+        }
+
+        self.ensure_monitor_render(selector.clone()).framing = framing;
+        match self
+            .committed
+            .monitors
+            .iter_mut()
+            .find(|render| render.selector == selector)
+        {
+            Some(render) => render.framing = framing,
+            None => self.committed.monitors.push(MonitorRender {
+                selector,
+                framing,
+                ..MonitorRender::default()
+            }),
+        }
+        Ok(PositionUpdate {
+            config: self.committed.clone(),
+            framing,
+            previous: saved,
+            changed: true,
+        })
+    }
+
     pub fn set_target_fps(&mut self, selector: SerializedSelector, fps: u32, max_fps: u32) {
         self.ensure_monitor_render(selector).frame_rate =
             crate::config::stored_frame_rate(fps, max_fps);
@@ -406,5 +495,27 @@ impl WallpaperOptionsDraft {
         selectors
             .iter()
             .any(|selector| self.display_dirty(selector, active_enabled_displays))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A display override that exists only in the draft and holds nothing but
+    /// defaults is not a change; one that holds a position is.
+    #[test]
+    fn a_position_only_the_draft_holds_still_needs_a_reconcile() {
+        let mut draft =
+            WallpaperOptionsDraft::from_committed(WallpaperConfig::new_for("100", "scene"));
+        draft.set_display_render_enabled(SerializedSelector::Primary, true);
+        assert!(!draft.requires_reconcile(&[]));
+
+        draft.current.monitors[0].framing = FramingCfg {
+            pan_x: 0.2,
+            pan_y: 0.8,
+        };
+
+        assert!(draft.requires_reconcile(&[]));
     }
 }

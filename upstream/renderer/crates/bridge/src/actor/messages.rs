@@ -183,6 +183,15 @@ pub struct SetScalingFactor {
     pub factor: f64,
 }
 
+/// Moves a wallpaper on one display. An axis left as `None` keeps its saved
+/// value.
+pub struct SetDisplayPosition {
+    pub wallpaper_id: String,
+    pub display_id: String,
+    pub pan_x: Option<f64>,
+    pub pan_y: Option<f64>,
+}
+
 pub struct SetTargetFps {
     pub wallpaper_id: String,
     pub display_id: String,

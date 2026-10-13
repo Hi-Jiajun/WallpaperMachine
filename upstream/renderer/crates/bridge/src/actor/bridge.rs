@@ -38,7 +38,7 @@ use crate::{
             ReplaceWallpaperConfigForTest, RestoreAllPropertyDefaults, RestorePropertyDefault,
             SelectWallpaper,
             SetAudioResponseEnabled, SetBatteryQualityProfile, SetContentPacingEnabled,
-            SetDisplayConfigEnabled, SetDisplayEnabled, SetDisplayMode,
+            SetDisplayConfigEnabled, SetDisplayEnabled, SetDisplayMode, SetDisplayPosition,
             SetDisplayPresentationSuspended,
             FanOutSystemMediaArtwork, FanOutSystemMediaEvent, GetSystemMediaConsentHandles,
             GetSystemMediaSceneHandles, SetFilter,
@@ -4628,6 +4628,63 @@ impl<E: EngineFacade + Clone> Message<SetScalingFactor> for BridgeActor<E> {
         if let Some(handle) = self.display_handle(&msg.wallpaper_id, &selector) {
             self.engine
                 .set_scaling_factor(handle, msg.factor)
+                .await
+                .map_err(|error| BridgeError::engine(error.to_string()))?;
+        }
+        self.bump_generation();
+        self.wallpaper_bundle(msg.wallpaper_id)
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<SetDisplayPosition> for BridgeActor<E> {
+    type Reply = messages::WallpaperMutationReply;
+
+    /// Moves a wallpaper on one display, live and for good.
+    ///
+    /// The position is saved before the engine hears of it, so a renderer that
+    /// refuses the update leaves the choice kept and the next reconcile builds
+    /// the scene at it. Repeating the saved position does neither, which keeps
+    /// a drag editor that reports on every pointer event from writing the file
+    /// again for a value it already holds.
+    async fn handle(
+        &mut self,
+        msg: SetDisplayPosition,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let displays = self.engine.display_snapshot();
+        let selector = self.selector_for(&msg.display_id, &displays)?;
+        let update = self
+            .state
+            .wallpaper_draft_mut(&msg.wallpaper_id)?
+            .set_position_immediate(selector.clone(), msg.pan_x, msg.pan_y)?;
+        if !update.changed {
+            return self.wallpaper_bundle(msg.wallpaper_id);
+        }
+
+        if let Err(error) = self.save_wallpaper(msg.wallpaper_id.clone(), update.config) {
+            // Nothing reached the disk, so the draft must not claim it did:
+            // the same position asked for again has to be saved, not skipped
+            // as already held.
+            let _ = self
+                .state
+                .wallpaper_draft_mut(&msg.wallpaper_id)?
+                .set_position_immediate(
+                    selector,
+                    Some(update.previous.pan_x),
+                    Some(update.previous.pan_y),
+                );
+            return Err(error);
+        }
+        log::debug!(
+            "wallpaper {} display {}: position {:.3},{:.3}",
+            msg.wallpaper_id,
+            msg.display_id,
+            update.framing.pan_x,
+            update.framing.pan_y,
+        );
+        if let Some(handle) = self.display_handle(&msg.wallpaper_id, &selector) {
+            self.engine
+                .set_framing(handle, update.framing.to_scene())
                 .await
                 .map_err(|error| BridgeError::engine(error.to_string()))?;
         }

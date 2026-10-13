@@ -6,6 +6,7 @@ mod crash_loop_guard;
 mod display_presentation;
 mod renderer_counters;
 mod display_identity;
+mod display_position;
 mod display_validation;
 mod file_properties;
 mod filter_snapshot;

@@ -1003,6 +1003,24 @@ public protocol WallpaperBridgeProtocol : AnyObject {
     func setDisplayMode(displayId: String, mode: BridgeDisplayMode) async throws  -> BridgeDisplayMutationBundle
     
     /**
+     * Moves a wallpaper on one display: `pan_x` and `pan_y` are fractions from
+     * 0 (left, top) to 1 (right, bottom) of the room the display leaves around
+     * the wallpaper, and an axis passed as `None` keeps its saved value. The
+     * running scene follows without being rebuilt and the position is saved at
+     * once, like the scaling mode and unlike the scale factor, so it is not
+     * part of the draft that Apply and Cancel decide on. Repeating a position
+     * changes nothing.
+     *
+     * # Errors
+     *
+     * Returns an error when the wallpaper or display id is unknown, an axis is
+     * not a finite fraction between 0 and 1, persistence fails, or the live
+     * engine update fails. A failed engine update leaves the position saved,
+     * and the next time the scene is reconciled it is applied.
+     */
+    func setDisplayPosition(wallpaperId: String, displayId: String, panX: Double?, panY: Double?) async throws  -> BridgeWallpaperMutationBundle
+    
+    /**
      * Suspends or resumes rendering for one display without touching the
      * others or the user-visible playback state. Used for conditions that are
      * specific to a screen, such as a window fully covering that wallpaper:
@@ -2540,6 +2558,39 @@ open func setDisplayMode(displayId: String, mode: BridgeDisplayMode)async throws
             completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
             freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeBridgeDisplayMutationBundle.lift,
+            errorHandler: FfiConverterTypeBridgeError.lift
+        )
+}
+    
+    /**
+     * Moves a wallpaper on one display: `pan_x` and `pan_y` are fractions from
+     * 0 (left, top) to 1 (right, bottom) of the room the display leaves around
+     * the wallpaper, and an axis passed as `None` keeps its saved value. The
+     * running scene follows without being rebuilt and the position is saved at
+     * once, like the scaling mode and unlike the scale factor, so it is not
+     * part of the draft that Apply and Cancel decide on. Repeating a position
+     * changes nothing.
+     *
+     * # Errors
+     *
+     * Returns an error when the wallpaper or display id is unknown, an axis is
+     * not a finite fraction between 0 and 1, persistence fails, or the live
+     * engine update fails. A failed engine update leaves the position saved,
+     * and the next time the scene is reconciled it is applied.
+     */
+open func setDisplayPosition(wallpaperId: String, displayId: String, panX: Double?, panY: Double?)async throws  -> BridgeWallpaperMutationBundle {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wallpaper_bridge_fn_method_wallpaperbridge_set_display_position(
+                    self.uniffiClonePointer(),
+                    FfiConverterString.lower(wallpaperId),FfiConverterString.lower(displayId),FfiConverterOptionDouble.lower(panX),FfiConverterOptionDouble.lower(panY)
+                )
+            },
+            pollFunc: ffi_wallpaper_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeBridgeWallpaperMutationBundle.lift,
             errorHandler: FfiConverterTypeBridgeError.lift
         )
 }
@@ -8945,6 +8996,30 @@ fileprivate struct FfiConverterOptionInt64: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionDouble: FfiConverterRustBuffer {
+    typealias SwiftType = Double?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterDouble.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterDouble.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionBool: FfiConverterRustBuffer {
     typealias SwiftType = Bool?
 
@@ -9765,6 +9840,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_display_mode() != 57230) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_display_position() != 23700) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_display_presentation_suspended() != 39147) {

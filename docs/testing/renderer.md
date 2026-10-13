@@ -365,6 +365,17 @@ cargo test -p shader --test pipeline -- --nocapture
   centred even when its source is positioned; and a position changes neither the
   native video descriptor nor its admission key, so moving a clip never restarts the
   native player.
+- `wallpaper-bridge` position setter (`cargo test --release -p wallpaper-bridge --lib
+  -- display_position wallpaper_options_draft drafts::`): `set_display_position`
+  tells the fake engine once with the display's live handle and never reopens the
+  scene; the position survives a restart; repeating it, naming neither axis or
+  centring a display nobody positioned neither writes the file nor calls the engine;
+  an axis left out keeps its value; NaN, infinite and out-of-range axes are refused
+  whole with nothing saved or sent; Cancel keeps the position and Apply reopens no
+  scene for it, yet a reopening Apply carries it; a refused engine update leaves the
+  position saved for the next reconcile, and a failed save leaves nothing saved so
+  asking again saves it; two displays keep their own positions.
+  The engine here is the fake one, so the move on a live renderer is a desktop check.
 - `wallpaper_background`: renders unattached production Metal layers over a white
   bitmap with no drawable, before and after a resize and after recreation. Every
   pixel must be opaque black. Its harness runs on the process's main thread; no
