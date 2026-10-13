@@ -413,6 +413,10 @@ private:
     void setPaused(bool paused);
     bool setProjectPropertyOverrideJson(std::string json);
     bool resetProjectPropertyOverride();
+    /// Hands a property document to the render thread to show on the running
+    /// scene (`PROPERTY_PROJECT_PROPERTY_PREVIEW_JSON`). Touches no state that a
+    /// later load reads, so the saved look is what the next load shows.
+    void previewProjectProperties(const std::string& json);
     void loadScene();
     bool loadNonSceneProject(const ProjectManifest& manifest, std::unique_ptr<fs::VFS> vfs);
 
@@ -477,6 +481,7 @@ public:
         CMD_SET_MEDIA_INTEGRATION_ENABLED,
         CMD_MEDIA_EVENT_JSON,
         CMD_SYSTEM_MEDIA_ARTWORK,
+        CMD_APPLY_PROJECT_PROPERTIES,
         CMD_SET_SPEED,
         CMD_STOP,
         CMD_DRAW,
@@ -534,6 +539,7 @@ public:
                 CASE_CMD(SET_MEDIA_INTEGRATION_ENABLED);
                 CASE_CMD(MEDIA_EVENT_JSON);
                 CASE_CMD(SYSTEM_MEDIA_ARTWORK);
+                CASE_CMD(APPLY_PROJECT_PROPERTIES);
                 CASE_CMD(SET_SCENE);
                 CASE_CMD(SET_SPEED);
                 CASE_CMD(INIT_VULKAN);
@@ -904,6 +910,20 @@ public:
     void setMouseInWindow(bool entered) {
         m_cursor_in_window.store(entered);
         wakeForPointer();
+    }
+
+    /// Stages the newest property document to show on the running scene
+    /// (`PROPERTY_PROJECT_PROPERTY_PREVIEW_JSON`). Latest wins: a document
+    /// staged before the render thread has taken the previous one replaces it,
+    /// so a burst of edits costs one update on this thread instead of one each.
+    /// Returns whether the slot was empty; only then is no
+    /// `CMD_APPLY_PROJECT_PROPERTIES` already on its way to take the document,
+    /// and the caller posts one. Callable from any thread.
+    [[nodiscard]] bool stageProjectPropertyPreview(ProjectProperties document) {
+        std::scoped_lock lock(m_property_preview_mutex);
+        const bool       was_empty = ! m_property_preview.has_value();
+        m_property_preview         = std::move(document);
+        return was_empty;
     }
 
 private:
@@ -1420,6 +1440,8 @@ private:
                 return;
             }
             m_rg.reset();
+            // What the last scene could not preview says nothing about this one.
+            m_logged_deferred_properties.clear();
             // The outgoing scene's own late marks must not reach the host; the
             // generation check drops any already in flight.
             if (m_scene != nullptr && m_scene->runtime != nullptr) {
@@ -1473,6 +1495,49 @@ private:
             // Speed maps the content's own timeline onto the wall clock, so the
             // tick rate a video needs changes with it.
             refreshFrameDemand();
+        }
+    }
+    /// Shows the newest staged property document on the scene that is running,
+    /// without loading it again. Runs here because this thread is the only one
+    /// that ticks the runtime, so the runtime needs no lock for it.
+    ///
+    /// Nothing is remembered for a later scene: a scene committed afterwards
+    /// shows its own loaded values until the host sends the next document, so a
+    /// document for one wallpaper can never reach another by sharing a property
+    /// name. A document that finds no scene, or a scene without a runtime (a
+    /// plain video), is dropped.
+    ///
+    /// What a changed property shows needs nothing more from here. The command
+    /// asks for a frame like every command but the draw, so an idle scene
+    /// takes one and a paused one shows it when it resumes; that frame's tick
+    /// applies the bindings, and a layer the document reveals that the graph
+    /// left out asks for one new graph there (`RequestGraphForShownLayers`).
+    MHANDLER_CMD(APPLY_PROJECT_PROPERTIES) {
+#ifdef WESCENE_BUILD_TESTS
+        m_property_preview_commands.fetch_add(1, std::memory_order_relaxed);
+#endif
+        std::optional<ProjectProperties> document;
+        {
+            std::scoped_lock lock(m_property_preview_mutex);
+            document = std::move(m_property_preview);
+            m_property_preview.reset();
+        }
+        if (! document.has_value()) return;
+        if (m_scene == nullptr || m_scene->runtime == nullptr) return;
+        const auto preview = m_scene->runtime->PreviewProjectPropertyOverride(*document);
+        // Said when the set of properties the scene could not apply changes, not
+        // on every edit: a drag sends many documents that all defer the same few.
+        if (preview.deferred != m_logged_deferred_properties) {
+            m_logged_deferred_properties = preview.deferred;
+            if (! preview.deferred.empty()) {
+                std::string names;
+                for (const auto& name : preview.deferred) {
+                    names += (names.empty() ? "" : ", ") + name;
+                }
+                LOG_INFO("property preview: held at the loaded value until the scene loads "
+                         "again: %s",
+                         names.c_str());
+            }
         }
     }
     /// Takes over a surface description. No GPU backend is created here.
@@ -1762,6 +1827,19 @@ private:
     /// pressed pause and play again. Latest-per-type, because a burst of
     /// timeline updates is one fact repeated, not a queue to drain.
     std::vector<std::pair<std::string, std::string>> m_pending_media_events {};
+    /// The newest property document waiting to be shown (see
+    /// `stageProjectPropertyPreview`). Not part of the scene: it is taken by the
+    /// command that was posted for it and never replayed.
+    std::mutex                       m_property_preview_mutex;
+    std::optional<ProjectProperties> m_property_preview {};
+    /// The deferred names the last preview reported, to log a change of them
+    /// once. Render thread only.
+    std::vector<std::string>         m_logged_deferred_properties {};
+#ifdef WESCENE_BUILD_TESTS
+    /// How many property-preview commands this thread has handled, so a test
+    /// can show that a burst of documents queues one command and not one each.
+    std::atomic<uint64_t>            m_property_preview_commands { 0 };
+#endif
 
     std::atomic<std::array<float, 2>> m_mouse_pos { std::array { 0.5f, 0.5f } };
     std::mutex                        m_mouse_buttons_mutex;
@@ -1819,6 +1897,11 @@ SceneWallpaperInputTestAccess::ConsumeMouseButtons(SceneWallpaper& wallpaper) {
     const auto snapshot =
         wallpaper.m_main_handler->renderHandler()->consumeMouseButtonSnapshot();
     return { snapshot.down, snapshot.pressed, snapshot.released };
+}
+
+uint64_t SceneWallpaperInputTestAccess::PropertyPreviewCommandsHandled(SceneWallpaper& wallpaper) {
+    return wallpaper.m_main_handler->renderHandler()->m_property_preview_commands.load(
+        std::memory_order_relaxed);
 }
 
 void SceneWallpaperInputTestAccess::InjectFrameFailure(SceneWallpaper& wallpaper) {
@@ -2190,6 +2273,11 @@ MHANDLER_CMD_IMPL(MainHandler, SET_PROPERTY) {
             if (reset && resetProjectPropertyOverride()) {
                 if (m_render_handler != nullptr) CALL_MHANDLER_CMD(LOAD_SCENE, msg);
             }
+        } else if (property == PROPERTY_PROJECT_PROPERTY_PREVIEW_JSON) {
+            std::string json;
+            if (msg->findString("value", &json) && m_render_handler != nullptr) {
+                previewProjectProperties(json);
+            }
         } else if (property == PROPERTY_FORCE_SHADER_REFRESH) {
             msg->findBool("value", &m_force_shader_refresh);
         } else if (property == PROPERTY_FIRST_FRAME_CALLBACK) {
@@ -2347,6 +2435,21 @@ bool MainHandler::resetProjectPropertyOverride() {
     if (m_project_property_override_json.empty()) return false;
     m_project_property_override_json.clear();
     return true;
+}
+
+void MainHandler::previewProjectProperties(const std::string& json) {
+    ProjectProperties document;
+    std::string       error;
+    if (! ParseFlatProjectPropertyOverrideJson(json, &document, &error)) {
+        LOG_ERROR("property preview ignored: %s", error.c_str());
+        return;
+    }
+    // The saved override above is deliberately left alone: a preview is not a
+    // choice, so a scene loaded again shows the saved look.
+    if (! m_render_handler->stageProjectPropertyPreview(std::move(document))) return;
+    // The slot was empty, so no command is on its way to take it; one is posted
+    // now, and the documents that follow before it runs only replace the slot.
+    CreateMsgWithCmd(m_render_handler, RenderHandler::CMD::CMD_APPLY_PROJECT_PROPERTIES)->post();
 }
 
 void MainHandler::loadScene() {

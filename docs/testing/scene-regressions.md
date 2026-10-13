@@ -467,6 +467,44 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   edit does not undo a volume a script set with `SetSoundLayerVolume`. A released
   stream is not touched, and the real `Parse` binds a user-bound volume and leaves
   a plain number alone. Audible output on real hardware is not checked.
+- **A property document on a running scene** — `project_property_preview_test`
+  (`ScenePropertyPreview.*`, CPU only, no surface or window),
+  `HiddenLayers.APropertyPreviewRevealsALayerWithOneGraphRebuildAndAGraphBuiltLaterLeavesTheHiddenOneOutAgain`
+  in `layer_texture_reference_test` (CPU) and
+  `MetalSceneDraw.APropertyPreviewChangesThePixelsAndAnEmptyDocumentRestoresThemByteForByte`
+  in `metal_scene_draw_smoke` (private textures, skips without a Metal device).
+  The wallpaper property `project_property_preview_json` carries a flat JSON
+  object; `MainHandler` parses it, never touches the saved override JSON and stages
+  it in `RenderHandler`'s latest-wins slot, and `CMD_APPLY_PROJECT_PROPERTIES`
+  (posted only when the slot was empty, and dispatched in `onMessageReceived`, where
+  a missing case silently drops a command) shows it on the render thread with
+  `PreviewProjectPropertyOverride`. The tests send documents through
+  `SceneWallpaper::setPropertyString` to scenes that have a runtime and nothing to
+  draw: a document reaches the runtime, a load-only property stays put and a name
+  left out is the project's own value; a burst of 500 documents queued while the
+  render thread is held inside the first (a listener that waits) runs the runtime
+  twice and handles two commands, the first and the last (the test-only
+  `PropertyPreviewCommandsHandled` counts them, so a command per document fails); a
+  document that is not a JSON object, or one that arrives before any scene exists,
+  changes nothing and is not kept for the scene that arrives next; a second scene
+  with the same property names shows its own loaded values and the first is not
+  touched again; a preview adds no time-advancing work. On the graph, a preview that
+  reveals a layer the graph left out makes one tick raise the mutation flag once, a
+  held property reveals nothing, hiding the layer again and showing it again on the
+  same graph raise nothing, a graph built while it is hidden leaves it out again and
+  showing it then raises the flag once more. On Metal, a slider-bound alpha changes
+  the picture with no new graph, a switch that shows a layer rebuilds the graph
+  exactly once and draws the picture a fresh load with the same values draws, and
+  the empty document brings the first frame back byte for byte, twice over, without
+  another graph. On a live surface (`unchanged_present_test`, the Compatibility
+  backend on a layer no window owns, timing-shaped and named in `REALTIME_TESTS`),
+  `UnchangedPresent.APropertyPreviewShowsOnAStillSceneAndWakesAnIdleOneForOneFrame`
+  sends a slider through the property: a still scene whose passes are all reused
+  submits exactly one frame, presents a different picture and goes back to
+  repeating, and with the on-demand clock the stopped scene draws exactly one frame
+  and goes back to sleep. A paused scene showing the change on resume comes from the
+  same per-command frame request and is not exercised; a preview on a real display,
+  and the hitch of a revealed layer compiling new pipelines, are not checked.
 - **Scene commits in headless tests** — `scene_schema_tests` helpers wait for
   posted work with a render-looper round trip (`beginSurfaceReconfigure`) and a
   main-looper one (installing a pointer callback replays from the main looper)
@@ -515,12 +553,13 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   script-driven visibility stays in the graph, and so does a hidden layer another
   layer samples, with its ancestors; a layer named only in its own
   `dependencies` is not one. A script writing `visible` takes the layer
-  over: showing a left-out layer, or a property applied in place showing one,
-  marks the graph mutated, the rebuilt graph draws it exactly as the property
-  would, and a layer a script has written is never left out again, so blinking
-  it rebuilds nothing. A left-out layer that was the scene output's first
-  writer leaves its load and clear to the first layer drawn: with clearing off
-  that layer still loads instead of discarding
+  over: showing a left-out layer, or a property applied or previewed in place
+  showing one, marks the graph mutated, the rebuilt graph draws it exactly as the
+  property would, and a layer a script has written is never left out again, so
+  blinking it rebuilds nothing. A layer only a preview showed has no such owner: a
+  graph built while it is hidden leaves it out again. A left-out layer that was
+  the scene output's first writer leaves its load and clear to the first layer
+  drawn: with clearing off that layer still loads instead of discarding
   (`RenderGraph.aHiddenFirstWriterLeftOutKeepsTheSceneOutputsLoadAndClear` in
   `rendergraph_smoke`). Customizable wallpapers ship every theme, language and
   format as a layer; keeping their hidden effect chains cost gigabytes of

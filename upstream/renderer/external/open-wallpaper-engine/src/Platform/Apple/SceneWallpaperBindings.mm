@@ -914,6 +914,11 @@ extern "C" const char* owe_property_project_property_reset(void)
     return property_name(wallpaper::PROPERTY_PROJECT_PROPERTY_RESET);
 }
 
+extern "C" const char* owe_property_project_property_preview_json(void)
+{
+    return property_name(wallpaper::PROPERTY_PROJECT_PROPERTY_PREVIEW_JSON);
+}
+
 extern "C" void owe_set_content_pacing_enabled(bool enabled)
 {
     wallpaper::video::SetContentPacingEnabled(enabled);

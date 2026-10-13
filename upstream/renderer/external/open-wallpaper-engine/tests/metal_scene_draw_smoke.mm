@@ -6681,6 +6681,197 @@ TEST_F(MetalSceneDraw, ALayerItsPropertiesHideHoldsNoImagesUntilAScriptShowsIt)
     EXPECT_EQ(bytes["revealed"], bytes["shown"]);
 }
 
+namespace
+{
+
+/// The layered fixture with a slider driving the left card's alpha, which the
+/// cards' shader reads, and an effect chain on the middle card, which is hidden
+/// by the `showmiddle` switch unless `show_middle` says otherwise. Written with
+/// the values a user would have saved, so a fresh load of it is the picture a
+/// property preview has to arrive at.
+std::filesystem::path WritePropertyPreviewFixture(const std::filesystem::path& directory,
+                                                  bool show_middle, float opacity)
+{
+    const auto project =
+        WriteLayeredFixture(directory, R"({"user":"showmiddle","value":false})", show_middle);
+    std::ofstream(project)
+        << R"({"title":"Metal preview smoke","type":"scene","file":"layout.json","general":)"
+        << R"({"properties":{"showmiddle":{"type":"bool","value":)"
+        << (show_middle ? "true" : "false")
+        << R"(},"opacity":{"type":"slider","value":)" << opacity << "}}}}";
+    std::filesystem::create_directories(directory / "effects");
+    std::ofstream(directory / "effects/identity.json")
+        << R"({"name":"identity","passes":[{"material":"materials/identity.json"}]})";
+    std::ofstream(directory / "materials/identity.json")
+        << R"({"passes":[{"shader":"identity_effect","blending":"translucent","cullmode":"nocull",)"
+           R"("depthtest":"disabled","depthwrite":"disabled","textures":[null]}]})";
+    std::ofstream(directory / "shaders/identity_effect.vert")
+        << "uniform mat4 g_ModelViewProjectionMatrix;\n"
+           "attribute vec3 a_Position;\n"
+           "attribute vec2 a_TexCoord;\n"
+           "varying vec2 v_TexCoord;\n"
+           "void main() {\n"
+           "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+           "  v_TexCoord = a_TexCoord;\n"
+           "}\n";
+    std::ofstream(directory / "shaders/identity_effect.frag")
+        << "uniform sampler2D g_Texture0;\n"
+           "varying vec2 v_TexCoord;\n"
+           "void main() { gl_FragColor = texture(g_Texture0, v_TexCoord); }\n";
+    // Every card carries the alpha the slider writes; a card nothing binds keeps
+    // the full alpha the shader declares as its default.
+    std::ofstream(directory / "shaders/metal_probe.frag")
+        << "uniform float g_UserAlpha; // {\"material\":\"alpha\",\"default\":1.0}\n"
+           "varying vec2 v_TexCoord;\n"
+           "void main() {\n"
+           "  gl_FragColor = vec4(v_TexCoord.x, v_TexCoord.y, 0.25, g_UserAlpha);\n"
+           "}\n";
+    auto layout = nlohmann::json::parse(std::ifstream(directory / "layout.json"));
+    layout["objects"][0]["alpha"] = { { "user", "opacity" }, { "value", 1.0 } };
+    layout["objects"][1]["effects"] = nlohmann::json::array({
+        { { "file", "effects/identity.json" }, { "visible", true } },
+    });
+    std::ofstream(directory / "layout.json") << layout;
+    return project;
+}
+
+/// One frame the way the wallpaper's own draw runs it: the tick applies the
+/// bindings, a tick that showed a layer the graph left out asks for a new graph
+/// before anything is drawn, and then the frame is. Returns whether it rebuilt.
+bool AdvanceLikeTheWallpaper(MetalRender& render, Scene& scene,
+                             std::unique_ptr<rg::RenderGraph>& graph)
+{
+    scene.runtime->Tick(1.0 / 60.0);
+    scene.runtime->PumpTextLayerCache();
+    bool rebuilt = false;
+    if (scene.runtime->ConsumeSceneGraphMutationFlag()) {
+        EXPECT_TRUE(render.clearLastRenderGraph()) << render.lastError();
+        graph = sceneToRenderGraph(scene);
+        EXPECT_NE(graph, nullptr);
+        EXPECT_TRUE(render.compileRenderGraph(scene, *graph)) << render.lastError();
+        rebuilt = true;
+    }
+    EXPECT_TRUE(render.drawFrame(scene)) << render.lastError();
+    scene.PassFrameTime(1.0 / 60.0);
+    return rebuilt;
+}
+
+} // namespace
+
+TEST_F(MetalSceneDraw, APropertyPreviewChangesThePixelsAndAnEmptyDocumentRestoresThemByteForByte)
+{
+    // A property edit shown on the running scene, without loading it again: a
+    // slider moves what is drawn, a switch shows a layer the graph left out (one
+    // new graph, then it draws like any other), and the picture is the one a
+    // fresh load with the same values gives. The empty document is the project's
+    // own values again, and the first frame comes back exactly.
+    const ProjectProperties preview_document {
+        { "showmiddle", RuntimeScalarValue::Bool(true) },
+        { "opacity", RuntimeScalarValue::Float(0.5f) },
+    };
+
+    std::vector<uint8_t> reference;
+    {
+        SCOPED_TRACE("a fresh load with the previewed values");
+        const auto  project = WritePropertyPreviewFixture(root_ / "reference", true, 0.5f);
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, root_ / "reference-cache", loaded, error)) << error;
+        auto& scene = *loaded.scene;
+        ASSERT_EQ(SelectSceneBackend(scene).backend, SceneBackend::NativeMetal);
+        @autoreleasepool {
+            CAMetalLayer* layer   = [CAMetalLayer layer];
+            layer.device          = MTLCreateSystemDefaultDevice();
+            layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+            layer.drawableSize    = CGSizeMake(384, 256);
+            layer.framebufferOnly = NO;
+            MetalRender render;
+            ASSERT_TRUE(render.init(MetalRenderInitInfo {
+                .metal_layer = (__bridge void*)layer, .width = 384, .height = 256,
+                .render_width = 384, .render_height = 256, .display_scale_factor = 1.0,
+            })) << render.lastError();
+            auto graph = sceneToRenderGraph(scene);
+            ASSERT_NE(graph, nullptr);
+            ASSERT_TRUE(render.compileRenderGraph(scene, *graph)) << render.lastError();
+            render.UpdateCameraFillMode(scene, FillMode::ASPECTFIT);
+            for (int frame = 0; frame < 2; ++frame) AdvanceSceneFrame(render, scene);
+            reference = ReadOutput(render, scene);
+            render.destroy();
+        }
+    }
+    ASSERT_FALSE(reference.empty());
+
+    const auto  project = WritePropertyPreviewFixture(root_ / "preview", false, 1.0f);
+    LoadedScene loaded;
+    std::string error;
+    ASSERT_TRUE(LoadScene(project, root_ / "preview-cache", loaded, error)) << error;
+    auto& scene = *loaded.scene;
+    ASSERT_NE(scene.runtime, nullptr);
+    ASSERT_EQ(SelectSceneBackend(scene).backend, SceneBackend::NativeMetal);
+
+    @autoreleasepool {
+        CAMetalLayer* layer   = [CAMetalLayer layer];
+        layer.device          = MTLCreateSystemDefaultDevice();
+        layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+        layer.drawableSize    = CGSizeMake(384, 256);
+        layer.framebufferOnly = NO;
+        MetalRender render;
+        ASSERT_TRUE(render.init(MetalRenderInitInfo {
+            .metal_layer = (__bridge void*)layer, .width = 384, .height = 256,
+            .render_width = 384, .render_height = 256, .display_scale_factor = 1.0,
+        })) << render.lastError();
+        auto graph = sceneToRenderGraph(scene);
+        ASSERT_NE(graph, nullptr);
+        ASSERT_TRUE(render.compileRenderGraph(scene, *graph)) << render.lastError();
+        render.UpdateCameraFillMode(scene, FillMode::ASPECTFIT);
+        const auto frames = [&](int count) {
+            int rebuilds = 0;
+            for (int frame = 0; frame < count; ++frame) {
+                rebuilds += AdvanceLikeTheWallpaper(render, scene, graph) ? 1 : 0;
+            }
+            return rebuilds;
+        };
+
+        EXPECT_EQ(frames(2), 0);
+        const auto first = ReadOutput(render, scene);
+        ASSERT_FALSE(first.empty());
+        EXPECT_NE(first, reference) << "the previewed values draw the same picture as the saved ones";
+
+        // The slider alone moves what is drawn, in place.
+        scene.runtime->PreviewProjectPropertyOverride({ { "opacity", RuntimeScalarValue::Float(0.5f) } });
+        EXPECT_EQ(frames(2), 0) << "a slider asked for a new graph";
+        const auto faded = ReadOutput(render, scene);
+        EXPECT_NE(faded, first) << "the slider changed nothing that is drawn";
+        EXPECT_NE(faded, reference);
+
+        // The switch shows a layer the graph left out: one new graph, however many
+        // frames follow, and then the picture a fresh load of those values draws.
+        scene.runtime->PreviewProjectPropertyOverride(preview_document);
+        EXPECT_EQ(frames(1), 1) << "showing a layer the graph left out did not rebuild the graph";
+        EXPECT_EQ(frames(2), 0);
+        const auto previewed = ReadOutput(render, scene);
+        EXPECT_EQ(previewed, reference)
+            << "a previewed property draws something a fresh load with it does not";
+
+        // The empty document is the project's own values: the layer is hidden by
+        // its property again and the first frame is back, bit for bit, without
+        // another graph.
+        scene.runtime->PreviewProjectPropertyOverride({});
+        EXPECT_EQ(frames(3), 0);
+        const auto restored = ReadOutput(render, scene);
+        EXPECT_EQ(restored, first) << "the empty document did not restore the first frame";
+
+        // And a second round trip lands on the same pictures: nothing drifts.
+        scene.runtime->PreviewProjectPropertyOverride(preview_document);
+        EXPECT_EQ(frames(3), 0) << "the graph already draws the layer";
+        EXPECT_EQ(ReadOutput(render, scene), reference);
+        scene.runtime->PreviewProjectPropertyOverride({});
+        EXPECT_EQ(frames(2), 0);
+        EXPECT_EQ(ReadOutput(render, scene), first);
+        render.destroy();
+    }
+}
+
 TEST_F(MetalSceneDraw, AFeedbackCopyTradesTexturesAndDrawsTheSamePicture)
 {
     // Each lens reads the scene's own image, so the graph copies that image

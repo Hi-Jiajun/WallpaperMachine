@@ -555,7 +555,16 @@ pointer mapping follows the position.
 document means to a running scene: the project's declared defaults with exactly the
 given values over them, whatever the scene loaded with, which properties a
 scene reads only while it loads (a preview holds those at the loaded value), and
-that a sound layer's volume follows its slider. See
+that a sound layer's volume follows its slider. It also sends documents through the
+engine's `project_property_preview_json` command to a scene running on its render
+thread: the newest document of a burst wins at the cost of one queued command, a
+bad document or one with no scene yet changes nothing, and nothing is replayed to
+the next scene. `layer_texture_reference_test` pins the one graph rebuild a preview
+that reveals a hidden layer asks for, and `metal_scene_draw_smoke` the pixels: a
+preview draws what a fresh load with the same values draws and the empty document
+restores the first frame byte for byte; `unchanged_present_test` shows on a live
+surface that a previewed slider presents once and that an on-demand scene wakes for
+exactly one frame. See
 [scene regressions](scene-regressions.md#scene-scripts-and-property-bindings).
 
 `unchanged_present_test` exercises Compatibility frames that would repeat the

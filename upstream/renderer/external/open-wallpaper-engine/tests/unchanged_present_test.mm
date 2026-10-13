@@ -186,6 +186,31 @@ std::filesystem::path WriteStaticScene(const std::filesystem::path& root)
     return root / "project.json";
 }
 
+/// The static card with a slider on its alpha, which its shader reads. Still, so
+/// every pass is reusable from the second frame; only the slider moves it.
+std::filesystem::path WriteSliderScene(const std::filesystem::path& root)
+{
+    const auto project = WriteStaticScene(root);
+    WriteText(project,
+              R"({"title":"Slider card","type":"scene","file":"layout.json","general":)"
+              R"({"properties":{"opacity":{"type":"slider","value":1.0}}}})");
+    WriteText(root / "shaders/card.frag",
+              "uniform float g_UserAlpha; // {\"material\":\"alpha\",\"default\":1.0}\n"
+              "varying vec2 v_TexCoord;\n"
+              "void main() {\n"
+              "gl_FragColor = vec4(v_TexCoord, 0.4, g_UserAlpha);\n"
+              "}\n");
+    WriteText(root / "layout.json",
+              R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+              R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],)"
+              R"("clearcolor":[0.1,0.2,0.3],"cameraparallax":false,)"
+              R"("orthogonalprojection":{"width":384,"height":256}},)"
+              R"("objects":[{"id":1,"name":"card","image":"models/card.json",)"
+              R"("origin":[192,128,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true,)"
+              R"("alpha":{"user":"opacity","value":1.0}}]})");
+    return project;
+}
+
 /// The static card beside an echo card that shows the scene's previous frame
 /// through `_rt_MipMappedFrameBuffer`. The graph fills that buffer from the
 /// frame's output only after the echo has drawn, so every frame hands its
@@ -751,6 +776,72 @@ TEST_F(UnchangedPresent, AHistoryLoopKeepsTheClockRunningWithoutATimeUniform)
             EXPECT_EQ(running.wallpaper().sceneUpdateKind(),
                       SceneUpdateDemand::Kind::WaitingForEvent);
             EXPECT_LE(delta[OWE_RC_DRAWS_EXECUTED], 1u) << "the still card kept the clock";
+        }
+    }
+}
+
+// A property edit shown on the running scene, with nothing reloaded, reaches the
+// surface through the ordinary frame loop: a still scene whose passes are all
+// reused presents the new picture once and goes back to repeating, and a scene
+// the on-demand clock has stopped is woken for exactly the frame it needs and goes
+// back to sleep.
+TEST_F(UnchangedPresent, APropertyPreviewShowsOnAStillSceneAndWakesAnIdleOneForOneFrame)
+{
+    struct RestoreOnDemand
+    {
+        bool was { SceneOnDemandEnabled() };
+        ~RestoreOnDemand() { SetSceneOnDemandEnabled(was); }
+    } restore;
+    const auto project = WriteSliderScene(root_ / "slider");
+    vulkan::SetSceneOptimizationEnabled(true);
+
+    for (const bool on_demand : { false, true }) {
+        SCOPED_TRACE(on_demand ? "on-demand clock" : "fixed cadence");
+        SetSceneOnDemandEnabled(on_demand);
+        RunningWallpaper running(project, root_ / (on_demand ? "on-demand" : "fixed"));
+        ASSERT_TRUE(running.WaitForFirstFrame()) << "the scene never reached the surface";
+        std::this_thread::sleep_for(600ms);
+
+        // A poster is answered by a frame, which a stopped clock does not draw
+        // for a request nobody wakes it for; the picture is read back only while
+        // the clock runs, and the stopped one is judged by what it presented.
+        std::vector<uint8_t> before;
+        if (! on_demand) {
+            running.poster().Request();
+            ASSERT_TRUE(running.poster().WaitDelivered(1));
+            std::scoped_lock lock(running.poster().mutex);
+            before = running.poster().pixels;
+        }
+        std::this_thread::sleep_for(300ms);
+        const auto still = running.Read();
+
+        running.wallpaper().setPropertyString(PROPERTY_PROJECT_PROPERTY_PREVIEW_JSON,
+                                              R"({"opacity":0.5})");
+        std::this_thread::sleep_for(400ms);
+        const auto previewed = running.Read();
+        EXPECT_EQ(Delta(still, previewed)[OWE_RC_RENDER_SUBMISSIONS], 1u)
+            << "a previewed slider must present exactly once and then repeat again";
+        if (on_demand) {
+            EXPECT_EQ(Delta(still, previewed)[OWE_RC_DRAWS_EXECUTED], 1u)
+                << "a preview must wake an idle scene for one frame";
+        }
+
+        std::this_thread::sleep_for(400ms);
+        const auto settled = running.Read();
+        EXPECT_EQ(Delta(previewed, settled)[OWE_RC_RENDER_SUBMISSIONS], 0u)
+            << "the scene did not go back to repeating";
+        if (on_demand) {
+            EXPECT_EQ(Delta(previewed, settled)[OWE_RC_DRAWS_EXECUTED], 0u)
+                << "the scene did not go back to sleep";
+        }
+
+        if (! on_demand) {
+            running.poster().Request();
+            ASSERT_TRUE(running.poster().WaitDelivered(2));
+            std::scoped_lock lock(running.poster().mutex);
+            ASSERT_FALSE(before.empty());
+            EXPECT_NE(before, running.poster().pixels)
+                << "the previewed slider changed nothing that was presented";
         }
     }
 }

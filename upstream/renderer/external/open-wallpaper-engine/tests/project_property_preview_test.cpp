@@ -4,7 +4,8 @@
 // values over them, whatever the scene happened to load with, and a scene that
 // takes it ends up exactly where a fresh load with the same document would. The
 // few properties a scene reads only while it loads are noted, and a preview holds
-// them at the value they were read with.
+// them at the value they were read with. The last tests send the document through
+// the engine's own command, to a scene that is running on its render thread.
 
 #include <gtest/gtest.h>
 
@@ -23,15 +24,19 @@
 #include "Scene/include/Scene/SceneImageEffectLayer.h"
 #include "Scene/include/Scene/SceneMaterial.h"
 #include "Scene/include/Scene/SceneMesh.h"
+#include "SceneWallpaper.hpp"
 #include "WPSceneParser.hpp"
 #include "WPSoundParser.hpp"
 #include "wpscene/WPMaterial.h"
 #include "wpscene/WPSoundObject.h"
 
 #include <algorithm>
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -919,6 +924,244 @@ TEST(SoundLayerVolume, ALoadedSoundLayerFollowsItsSliderAndAPlainOneDoesNot) {
     runtime->ApplyProjectPropertyOverride({});
     EXPECT_EQ(runtime->SoundLayerVolume("music"), 0.625f);
     EXPECT_EQ(runtime->SoundLayerVolume("click"), 0.75f);
+}
+
+// ---- The engine's own command ------------------------------------------------
+//
+// A document reaches a running scene as a property of the wallpaper, is parsed on
+// the main looper and is shown on the render looper, the only thread that ticks a
+// runtime. The scenes below have a runtime and nothing to draw, so no surface,
+// window or device is involved: the command reaches the runtime either way.
+
+std::shared_ptr<Scene> RuntimeOnlyScene(const ProjectProperties& saved_choices) {
+    auto scene          = std::make_shared<Scene>();
+    scene->activeCamera = nullptr;
+    scene->sceneGraph.reset();
+    scene->runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {
+        .project_properties          = Loaded(saved_choices),
+        .authored_project_properties = kAuthored,
+    });
+    return scene;
+}
+
+// Returns once the main looper has handled everything posted before the call:
+// installing a pointer callback replays the current capability from that looper.
+// Bounded only so a broken looper fails the test instead of hanging it.
+bool MainLooperCaughtUp(SceneWallpaper& wallpaper) {
+    struct Replay {
+        std::mutex              mutex;
+        std::condition_variable changed;
+        bool                    seen { false };
+    };
+    auto replay = std::make_shared<Replay>();
+    wallpaper.setPropertyObject(PROPERTY_POINTER_INPUT_CALLBACK,
+                                std::make_shared<PointerInputCallback>([replay](bool) {
+                                    std::scoped_lock lock(replay->mutex);
+                                    replay->seen = true;
+                                    replay->changed.notify_all();
+                                }));
+    std::unique_lock lock(replay->mutex);
+    return replay->changed.wait_for(lock, std::chrono::seconds(5), [&] { return replay->seen; });
+}
+
+// Returns once both loopers have handled everything posted before the call: a
+// render round trip, a main round trip, and a render round trip again for whatever
+// the main looper forwarded.
+bool Settle(SceneWallpaper& wallpaper) {
+    return wallpaper.beginSurfaceReconfigure() && MainLooperCaughtUp(wallpaper) &&
+           wallpaper.beginSurfaceReconfigure();
+}
+
+void Preview(SceneWallpaper& wallpaper, const std::string& document) {
+    wallpaper.setPropertyString(PROPERTY_PROJECT_PROPERTY_PREVIEW_JSON, document);
+}
+
+TEST(ScenePropertyPreview, ADocumentReachesTheRunningSceneAndTheLoadOnlyPropertiesStayPut) {
+    SceneWallpaper wallpaper;
+    ASSERT_TRUE(wallpaper.init());
+    // `c` is read once, as a toggled effect's switch is, and was saved as "saved".
+    auto scene = RuntimeOnlyScene({ { "a", RuntimeScalarValue::Float(5.0f) },
+                                    { "c", RuntimeScalarValue::String("saved") } });
+    ASSERT_NE(scene->runtime, nullptr);
+    auto& runtime = *scene->runtime;
+    runtime.NoteLoadOnlyProperty("c");
+    SceneWallpaperInputTestAccess::PostScene(wallpaper, scene);
+    ASSERT_TRUE(Settle(wallpaper));
+    ASSERT_EQ(runtime.projectProperties().at("a").float_value, 5.0f);
+
+    // `a` is left out, so it is the project's own value again, not the saved 5;
+    // `b` is new; `c` cannot change on a running scene.
+    Preview(wallpaper, R"({"b":7,"c":"asked"})");
+    ASSERT_TRUE(Settle(wallpaper));
+    EXPECT_EQ(runtime.projectProperties().at("a").float_value, 1.0f);
+    EXPECT_EQ(runtime.projectProperties().at("b").float_value, 7.0f);
+    EXPECT_EQ(runtime.projectProperties().at("c").string_value, "saved");
+    ASSERT_NE(runtime.FindPropertyValue("b"), nullptr);
+    EXPECT_EQ(runtime.FindPropertyValue("b")->getFloat(), 7.0f);
+    EXPECT_EQ(runtime.FindPropertyValue("a")->getFloat(), 1.0f);
+
+    // A later document is the whole state again: the empty one is the project's
+    // defaults, with the one property that is held still where the scene read it.
+    Preview(wallpaper, "{}");
+    ASSERT_TRUE(Settle(wallpaper));
+    ProjectProperties expected = kAuthored;
+    expected["c"]              = RuntimeScalarValue::String("saved");
+    ExpectSameTable(runtime.projectProperties(), expected);
+    wallpaper.shutdown();
+}
+
+// Hundreds of documents arrive while the render thread is busy with the first one.
+// The newest wins and the rest cost nothing: the scene is told twice in all, once
+// for the document that held the thread and once for the last of the burst.
+TEST(ScenePropertyPreview, ABurstOfDocumentsCostsOneUpdateAndEndsOnTheLastOne) {
+    struct Gate {
+        std::mutex              mutex;
+        std::condition_variable changed;
+        bool                    armed { false };
+        bool                    entered { false };
+        bool                    release { false };
+        std::vector<float>      seen;
+    };
+    auto gate = std::make_shared<Gate>();
+
+    SceneWallpaper wallpaper;
+    ASSERT_TRUE(wallpaper.init());
+    auto scene = RuntimeOnlyScene({});
+    ASSERT_NE(scene->runtime, nullptr);
+    auto& runtime = *scene->runtime;
+    // Every document refreshes every property, so this runs once per document.
+    // The first one holds the render thread here until the burst is queued.
+    runtime.RegisterDynamicValueListener(
+        ResolveFloatSetting(runtime, { { "user", "a" }, { "value", 1.0 } }),
+        [gate](const DynamicValue& value) {
+            std::unique_lock lock(gate->mutex);
+            if (! gate->armed) return;
+            gate->seen.push_back(value.getFloat());
+            if (gate->seen.size() != 1) return;
+            gate->entered = true;
+            gate->changed.notify_all();
+            gate->changed.wait_for(lock, std::chrono::seconds(5), [&] { return gate->release; });
+        });
+    SceneWallpaperInputTestAccess::PostScene(wallpaper, scene);
+    ASSERT_TRUE(Settle(wallpaper));
+    {
+        std::scoped_lock lock(gate->mutex);
+        gate->armed = true;
+    }
+
+    Preview(wallpaper, R"({"a":1000})");
+    {
+        std::unique_lock lock(gate->mutex);
+        ASSERT_TRUE(gate->changed.wait_for(lock, std::chrono::seconds(5),
+                                           [&] { return gate->entered; }))
+            << "the first document never reached the render thread";
+    }
+    constexpr int kBurst = 500;
+    for (int index = 1; index <= kBurst; ++index) {
+        Preview(wallpaper, R"({"a":)" + std::to_string(index) + "}");
+    }
+    // The main looper has parsed and staged all of them; the render thread is
+    // still inside the first document.
+    ASSERT_TRUE(MainLooperCaughtUp(wallpaper));
+    {
+        std::scoped_lock lock(gate->mutex);
+        gate->release = true;
+        gate->changed.notify_all();
+    }
+    ASSERT_TRUE(Settle(wallpaper));
+
+    std::scoped_lock lock(gate->mutex);
+    EXPECT_EQ(gate->seen, (std::vector<float> { 1000.0f, static_cast<float>(kBurst) }))
+        << "a burst of documents was shown one by one";
+    // And it queued one command behind the first, not one each: every command an
+    // idle scene handles is a frame it draws.
+    EXPECT_EQ(SceneWallpaperInputTestAccess::PropertyPreviewCommandsHandled(wallpaper), 2u);
+    EXPECT_EQ(runtime.projectProperties().at("a").float_value, static_cast<float>(kBurst));
+    wallpaper.shutdown();
+}
+
+TEST(ScenePropertyPreview, ABadDocumentOrASceneThatIsNotThereYetChangesNothing) {
+    SceneWallpaper wallpaper;
+    ASSERT_TRUE(wallpaper.init());
+
+    // No scene yet: the document is dropped, and the scene that arrives next is
+    // not given it.
+    Preview(wallpaper, R"({"a":9})");
+    ASSERT_TRUE(Settle(wallpaper));
+    const ProjectProperties saved { { "a", RuntimeScalarValue::Float(5.0f) } };
+    auto                    scene = RuntimeOnlyScene(saved);
+    ASSERT_NE(scene->runtime, nullptr);
+    auto& runtime = *scene->runtime;
+    SceneWallpaperInputTestAccess::PostScene(wallpaper, scene);
+    ASSERT_TRUE(Settle(wallpaper));
+    ExpectSameTable(runtime.projectProperties(), Loaded(saved));
+
+    // Anything that is not a JSON object is refused whole.
+    for (const std::string bad : { std::string(), std::string("not json"), std::string("[1,2]"),
+                                   std::string("null"), std::string("7"),
+                                   std::string(R"({"a":)") }) {
+        SCOPED_TRACE("document: " + bad);
+        Preview(wallpaper, bad);
+        ASSERT_TRUE(Settle(wallpaper));
+        ExpectSameTable(runtime.projectProperties(), Loaded(saved));
+    }
+
+    // And the refusals left nothing behind that a good document trips over.
+    Preview(wallpaper, R"({"a":2})");
+    ASSERT_TRUE(Settle(wallpaper));
+    EXPECT_EQ(runtime.projectProperties().at("a").float_value, 2.0f);
+    wallpaper.shutdown();
+}
+
+// A document is for the scene that is running when it is shown. Nothing is kept
+// for the next one, so another wallpaper that happens to share a property name
+// shows its own loaded value, and the old scene is not touched again.
+TEST(ScenePropertyPreview, AReloadedSceneShowsItsOwnLoadedValuesAndNothingLeaksAcrossScenes) {
+    SceneWallpaper wallpaper;
+    ASSERT_TRUE(wallpaper.init());
+    auto first = RuntimeOnlyScene({ { "a", RuntimeScalarValue::Float(5.0f) } });
+    ASSERT_NE(first->runtime, nullptr);
+    SceneWallpaperInputTestAccess::PostScene(wallpaper, first);
+    ASSERT_TRUE(Settle(wallpaper));
+    Preview(wallpaper, R"({"a":9,"b":8})");
+    ASSERT_TRUE(Settle(wallpaper));
+    ASSERT_EQ(first->runtime->projectProperties().at("a").float_value, 9.0f);
+    ASSERT_EQ(first->runtime->projectProperties().at("b").float_value, 8.0f);
+
+    const ProjectProperties other_saved { { "a", RuntimeScalarValue::Float(3.0f) } };
+    auto                    second = RuntimeOnlyScene(other_saved);
+    ASSERT_NE(second->runtime, nullptr);
+    SceneWallpaperInputTestAccess::PostScene(wallpaper, second);
+    ASSERT_TRUE(Settle(wallpaper));
+    ExpectSameTable(second->runtime->projectProperties(), Loaded(other_saved));
+
+    // The next document is for the scene now running.
+    Preview(wallpaper, R"({"a":4})");
+    ASSERT_TRUE(Settle(wallpaper));
+    EXPECT_EQ(second->runtime->projectProperties().at("a").float_value, 4.0f);
+    EXPECT_EQ(first->runtime->projectProperties().at("a").float_value, 9.0f);
+    wallpaper.shutdown();
+}
+
+// A preview that holds load-only properties and moves live ones adds no work that
+// advances with time, so the on-demand idle analysis needs no change for it.
+TEST(ScenePropertyPreview, PreviewingAddsNoTimeAdvancingWork) {
+    const auto loaded = LoadOnly(false, {});
+    ASSERT_NE(loaded, nullptr);
+    auto& runtime = loaded->runtime();
+    runtime.Tick(1.0 / 60.0);
+    const auto before = runtime.DescribeTimeAdvancingWork();
+    EXPECT_EQ(before, 0u) << "the fixture is a still scene";
+
+    runtime.PreviewProjectPropertyOverride({ { "glow", RuntimeScalarValue::Bool(true) },
+                                             { "mode", RuntimeScalarValue::String("2") },
+                                             { "opacity", RuntimeScalarValue::Float(0.5f) } });
+    runtime.Tick(1.0 / 60.0);
+    EXPECT_EQ(runtime.DescribeTimeAdvancingWork(), before);
+
+    runtime.PreviewProjectPropertyOverride({});
+    runtime.Tick(1.0 / 60.0);
+    EXPECT_EQ(runtime.DescribeTimeAdvancingWork(), before);
 }
 
 } // namespace

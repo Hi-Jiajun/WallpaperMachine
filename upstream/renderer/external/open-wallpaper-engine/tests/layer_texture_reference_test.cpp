@@ -1234,6 +1234,108 @@ TEST(HiddenLayers, ALayerItsPropertiesHideStaysOutOfTheGraphUntilSomethingShowsI
     EXPECT_GT(passes_of(*graph, "unchosen"), 1u);
 }
 
+// A property shown on the running scene, rather than by loading it again, takes
+// the same path a script does: the tick that applies it sees a layer appear that
+// the graph left out and asks for one new graph. Nothing else moves the graph. A
+// layer the preview hides again keeps its passes until the next build, so a layer
+// that blinks costs nothing, and the next build leaves it out once more.
+TEST(HiddenLayers, APropertyPreviewRevealsALayerWithOneGraphRebuildAndAGraphBuiltLaterLeavesTheHiddenOneOutAgain) {
+    const ProjectProperties properties {
+        { "light", RuntimeScalarValue::Bool(true) },
+        { "dark", RuntimeScalarValue::Bool(false) },
+        { "glow", RuntimeScalarValue::Bool(false) },
+    };
+    fs::VFS vfs;
+    MountFiles(vfs, CopyEffectFiles());
+    audio::SoundManager sound { audio::SoundManager::OutputBackend::Null };
+    WPSceneParser       parser;
+    auto                parsed = parser.Parse(
+        SceneParseRequest { .scene_id = "preview-reveals", .project_properties = &properties },
+        SceneJson(R"([
+        {"id":1,"name":"chosen","image":"image.json","visible":{"user":"light","value":false},
+         "effects":[{"file":"effects/copy/effect.json","visible":true}]},
+        {"id":2,"name":"unchosen","image":"image.json","visible":{"user":"dark","value":true},
+         "effects":[{"file":"effects/copy/effect.json","visible":true}]},
+        {"id":3,"name":"held","image":"image.json","visible":{"user":"glow","value":true},
+         "effects":[{"file":"effects/copy/effect.json","visible":{"user":"glow","value":true}}]}
+      ])"),
+        vfs,
+        sound);
+    ASSERT_NE(parsed, nullptr);
+    ASSERT_NE(parsed->runtime, nullptr);
+    AddScreenTarget(*parsed);
+    auto& runtime = *parsed->runtime;
+
+    const auto passes_of = [](const rg::RenderGraph& graph, std::string_view name) {
+        std::size_t count = 0;
+        for (const auto id : graph.topologicalOrder()) {
+            auto* pass = dynamic_cast<const vulkan::CustomShaderPass*>(graph.getPass(id));
+            if (pass == nullptr) continue;
+            const auto* owner = pass->desc().visibility_node != nullptr
+                                    ? pass->desc().visibility_node
+                                    : pass->desc().node;
+            if (owner != nullptr && owner->Name() == name) ++count;
+        }
+        return count;
+    };
+    // One tick, as a frame runs it, and whether it asked for a new graph.
+    const auto tick = [&runtime] {
+        runtime.Tick(1.0 / 60.0);
+        return runtime.ConsumeSceneGraphMutationFlag();
+    };
+
+    auto graph = sceneToRenderGraph(*parsed);
+    ASSERT_NE(graph, nullptr);
+    const std::size_t chosen_passes = passes_of(*graph, "chosen");
+    ASSERT_GT(chosen_passes, 1u) << "the chosen layer lost its effect";
+    ASSERT_EQ(passes_of(*graph, "unchosen"), 0u);
+    ASSERT_EQ(passes_of(*graph, "held"), 0u);
+    EXPECT_FALSE(tick());
+
+    // A property that only changes what is already shown asks for no graph.
+    runtime.PreviewProjectPropertyOverride({ { "light", RuntimeScalarValue::Bool(true) } });
+    EXPECT_FALSE(tick());
+
+    // A property that only a load can apply reveals nothing: the layer and the
+    // effect that follow the same switch stay as the scene built them.
+    const auto held = runtime.PreviewProjectPropertyOverride({ { "glow", RuntimeScalarValue::Bool(true) } });
+    EXPECT_EQ(held.deferred, std::vector<std::string> { "glow" });
+    EXPECT_FALSE(tick());
+    EXPECT_FALSE(runtime.NodeVisible("held"));
+
+    // The preview shows the layer: one tick asks for one graph, and no tick after
+    // it asks again, whether the graph has been built yet or not.
+    runtime.PreviewProjectPropertyOverride({ { "dark", RuntimeScalarValue::Bool(true) } });
+    EXPECT_TRUE(tick()) << "a preview showed a layer the graph left out and asked for no new graph";
+    EXPECT_FALSE(tick());
+    graph = sceneToRenderGraph(*parsed);
+    EXPECT_EQ(passes_of(*graph, "unchosen"), chosen_passes);
+
+    // Hidden again and shown again on the graph that has its passes: nothing is
+    // rebuilt, and the passes are still there the whole time.
+    runtime.PreviewProjectPropertyOverride({});
+    EXPECT_FALSE(tick());
+    EXPECT_FALSE(runtime.NodeVisible("unchosen"));
+    EXPECT_EQ(passes_of(*graph, "unchosen"), chosen_passes);
+    runtime.PreviewProjectPropertyOverride({ { "dark", RuntimeScalarValue::Bool(true) } });
+    EXPECT_FALSE(tick()) << "a layer the graph still draws asked for a new graph";
+
+    // A graph built while it is hidden leaves it out again: its passes and the
+    // targets they would allocate are not kept for a layer only a property shows.
+    runtime.PreviewProjectPropertyOverride({});
+    EXPECT_FALSE(tick());
+    graph = sceneToRenderGraph(*parsed);
+    EXPECT_EQ(passes_of(*graph, "unchosen"), 0u);
+    EXPECT_EQ(passes_of(*graph, "chosen"), chosen_passes);
+
+    // And showing it then asks for a graph again, once.
+    runtime.PreviewProjectPropertyOverride({ { "dark", RuntimeScalarValue::Bool(true) } });
+    EXPECT_TRUE(tick());
+    EXPECT_FALSE(tick());
+    graph = sceneToRenderGraph(*parsed);
+    EXPECT_EQ(passes_of(*graph, "unchosen"), chosen_passes);
+}
+
 // A fullscreen layer post-processes the screen, so its result has to land on
 // all of it. Drawn through the scene camera, a camera layer's zoom shrank it to
 // a window on the canvas with the unprocessed scene around it.

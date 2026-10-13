@@ -193,6 +193,29 @@ reports it as deferred; only loading the scene applies it. A sound layer's volum
 is live too: a slider bound to it sets the stream's volume when the slider moves,
 and nothing else does, so a volume a script set stays until its own slider moves.
 
+A running scene takes the document through the wallpaper property
+`project_property_preview_json`, one flat JSON object holding the whole state. The
+main looper parses it (anything that is not a JSON object is logged and changes
+nothing) and stages it in a latest-wins slot; the render thread, the only thread that
+ticks the runtime, shows it with `PreviewProjectPropertyOverride`. A burst of
+documents therefore costs one update: while the render thread is busy only the
+newest is kept, and one command is queued behind the one it waits for. Like every
+command except the draw, it asks for a frame, so an idle scene draws one and a
+paused one shows the change when it resumes; it registers no time-advancing work, so
+the idle analysis is unchanged. A layer the document reveals that the render graph
+left out is shown by that frame's tick, which asks for one new graph before the frame
+is drawn, as a script showing the layer does (new pipelines may compile, so that
+frame can take longer); a layer it hides again keeps its passes until the next graph
+is built, which leaves it out once more.
+
+A preview is transient. It never reaches the saved override, so a scene that is
+loaded again for any reason (Apply, a display change, waking, a wallpaper switch)
+shows the saved look, and nothing is replayed to the scene that replaces it: a
+document is for the scene running when it is shown, and a document that arrives
+before the first scene exists is dropped. The lock-screen and Mission Control
+pictures are not involved. Properties held at their loaded value are logged once,
+as a set, when it changes.
+
 ### Scene render optimisation
 
 The only scene control that ships on. It reuses the result of scene subgraphs whose
@@ -478,13 +501,20 @@ not established.
 
 On both backends, a layer hidden by its authored visibility or by one of the
 wallpaper's own properties, itself or through a parent, is left out of the render
-graph. Changing a property reloads the scene, so until then only a script can show
-it. Customizable wallpapers ship every theme, language and date format as a layer,
-and those hidden layers no longer hold effect images, load textures or clear
-targets every frame. When a script shows one, a graph that draws it is built
-before that frame is drawn; this happens once per layer, because a layer whose
-visibility a script has written stays in the graph from then on. A hidden layer
-another layer samples keeps drawing into its composite.
+graph. Applying a property change reloads the scene, so until then only a script,
+or a property edit shown on the running scene ([live property
+edits](#live-property-edits)), can show it. Customizable wallpapers ship every
+theme, language and date format as a layer, and those hidden layers no longer hold
+effect images, load textures or clear targets every frame. When a script shows one,
+a graph that draws it is built before that frame is drawn; this happens once per
+layer, because a layer whose visibility a script has written stays in the graph from
+then on. A previewed property shows it the same way, but a preview owns nothing: a
+layer it hides again keeps its passes only until the next graph is built, and
+showing it afterwards asks for one more graph. The graph can therefore hold the
+layers a preview showed since it was last built, never more than the wallpaper
+ships, and is back to what a fresh load with the current values holds the next
+time one is built. A hidden layer another layer samples keeps drawing into its
+composite.
 
 Native Metal allocates render targets only when the compiled graph writes or samples
 them, plus the final output. Parser-provided shadow, mipmapped-frame and bloom

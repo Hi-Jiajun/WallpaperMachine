@@ -259,6 +259,12 @@ const char* owe_property_media_integration_enabled(void);
 const char* owe_property_force_shader_refresh(void);
 const char* owe_property_project_property_override_json(void);
 const char* owe_property_project_property_reset(void);
+/*
+ * String property taking a flat JSON object: the whole property state to show on
+ * the running scene without loading it again. It is never remembered, so any
+ * later load shows the saved look. Set it with owe_scene_wallpaper_set_property_string.
+ */
+const char* owe_property_project_property_preview_json(void);
 
 /*
  * Process-wide playback options, applied to every renderer scene.

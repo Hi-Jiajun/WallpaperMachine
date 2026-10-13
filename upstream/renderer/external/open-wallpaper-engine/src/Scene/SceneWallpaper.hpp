@@ -65,6 +65,16 @@ constexpr std::string_view PROPERTY_MEDIA_EVENT_JSON          = "media_event_jso
 constexpr std::string_view PROPERTY_PROJECT_PROPERTY_OVERRIDE_JSON =
     "project_property_override_json";
 constexpr std::string_view PROPERTY_PROJECT_PROPERTY_RESET = "project_property_reset";
+/// String property: a flat JSON object holding the whole property state to show
+/// on the scene that is running (the same shape as the override JSON above),
+/// without loading it again. Unlike the override it is never remembered: a
+/// scene that is loaded again, for any reason, shows the saved look until the
+/// next document arrives, and a document sent before any scene exists is
+/// dropped. The newest document wins, so a burst of them costs one update. A
+/// document that is not a JSON object changes nothing. Properties a scene reads
+/// only while it loads stay at the value the scene loaded with.
+constexpr std::string_view PROPERTY_PROJECT_PROPERTY_PREVIEW_JSON =
+    "project_property_preview_json";
 constexpr std::string_view PROPERTY_CACHE_PATH             = "cache_path";
 constexpr std::string_view PROPERTY_FORCE_SHADER_REFRESH   = "force_shader_refresh";
 constexpr std::string_view PROPERTY_FIRST_FRAME_CALLBACK   = "first_frame_callback";
@@ -214,6 +224,9 @@ struct SceneWallpaperInputTestAccess {
     };
     static void PostScene(SceneWallpaper&, std::shared_ptr<Scene>);
     static MouseButtonSnapshot ConsumeMouseButtons(SceneWallpaper&);
+    /// How many property-preview commands the render thread has handled. A burst
+    /// of documents is one pending command plus the one it was waiting behind.
+    static uint64_t PropertyPreviewCommandsHandled(SceneWallpaper&);
     /// The production plain-video project scene for `project_json`, built the
     /// way `loadScene` builds it, without needing a render surface.
     static std::shared_ptr<Scene> CreateVideoProjectScene(const std::string& project_json,

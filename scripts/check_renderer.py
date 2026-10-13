@@ -56,6 +56,7 @@ REALTIME_TESTS = {
         "UnchangedPresent.ARepeatedVideoFramePresentsAgainOnlyWhenSomethingChanges",
         "UnchangedPresent.AStaticSceneStopsPresentingOnceEveryPassIsReused",
         "UnchangedPresent.OutputChangesOnAHeldVideoFramePresentOnceEach",
+        "UnchangedPresent.APropertyPreviewShowsOnAStillSceneAndWakesAnIdleOneForOneFrame",
     ),
     "audio_tests": (
         "AudioResponseMonoTest.PartialSubmissionsExtendExpiryUntilACompleteBlockArrives",
