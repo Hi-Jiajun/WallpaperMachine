@@ -1952,6 +1952,72 @@ TEST_F(MetalSceneDraw, ADepthWritingDrawHidesLaterDrawsAsOnCompatibility)
     }
 }
 
+TEST_F(MetalSceneDraw, ADepthTestedDrawCullsTheSameFacesAsCompatibility)
+{
+    // The compatibility backend honours a material's `cullmode` for every
+    // pass into a depth-attached target -- models, skyboxes, a planet's ring --
+    // with counter-clockwise front faces, and culls nothing elsewhere. Drawing
+    // both faces of a ring here put its unlit back over its lit front. Each
+    // case is drawn by both renderers and must come out the same; the cases
+    // also have to differ from each other, or the comparison proves nothing.
+    struct Case
+    {
+        const char* name;
+        float       yaw;
+        CullMode    cull;
+        bool        depth;
+    };
+    constexpr float kTowards = 0.3f;
+    constexpr float kAway    = 3.14159265f - 0.3f;
+    const Case cases[] = {
+        { "towards-back", kTowards, CullMode::Back, true },
+        { "away-back", kAway, CullMode::Back, true },
+        { "towards-front", kTowards, CullMode::Front, true },
+        { "away-none", kAway, CullMode::None, true },
+        { "away-back-no-depth", kAway, CullMode::Back, false },
+    };
+    std::map<std::string, std::size_t> card_pixels;
+    for (const auto& c : cases) {
+        SCOPED_TRACE(c.name);
+        std::map<bool, RendererPicture> pictures;
+        for (const bool native : { false, true }) {
+            const std::string name = std::string(c.name) + (native ? "-native" : "-compat");
+            const auto  project = WriteFixture(root_ / ("cull-" + name), "0.30");
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / ("cull-cache-" + name), loaded, error)) << error;
+            auto* node = FirstDrawableNode(loaded.scene->sceneGraph.get());
+            ASSERT_NE(node, nullptr);
+            node->SetCamera("global_perspective");
+            node->SetRotation(Eigen::Vector3f { 0.0f, c.yaw, 0.0f });
+            auto* material        = node->Mesh()->Material();
+            material->depth_test  = true;
+            material->depth_write = true;
+            material->cull_mode   = c.cull;
+            loaded.scene->FindRenderTarget(std::string(SpecTex_Default))->withDepth = c.depth;
+            if (native) {
+                ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal);
+            }
+            pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
+            ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+        }
+        EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
+            << "the native renderer culled other faces than the compatibility renderer";
+        // The card's constant blue, 0.30.
+        std::size_t card = 0;
+        for (std::size_t i = 0; i + 2 < pictures[true].rgb.size(); i += 3) {
+            if (pictures[true].rgb[i + 2] >= 65 && pictures[true].rgb[i + 2] <= 90) ++card;
+        }
+        card_pixels[c.name] = card;
+    }
+    // One side of the card is culled and the other kept, by either cull mode,
+    // and nothing is culled without culling or without depth.
+    EXPECT_NE(card_pixels["towards-back"] == 0, card_pixels["away-back"] == 0);
+    EXPECT_NE(card_pixels["towards-back"] == 0, card_pixels["towards-front"] == 0);
+    EXPECT_GT(card_pixels["away-none"], 1000u);
+    EXPECT_GT(card_pixels["away-back-no-depth"], 1000u);
+}
+
 TEST_F(MetalSceneDraw, AnIntermediateTargetIsDrawnCopiedAndResampledInOneFrame)
 {
     // The shape an effect chain lowers to: the author's layer drawn into an

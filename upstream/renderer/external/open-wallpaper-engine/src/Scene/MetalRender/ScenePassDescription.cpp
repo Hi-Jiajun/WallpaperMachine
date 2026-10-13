@@ -218,6 +218,7 @@ bool BuildScenePassDescriptions(Scene& scene, const rg::RenderGraph& graph,
                 const auto  depth     = ResolveSceneDepthState(*material, has_depth);
                 desc.depth_test       = depth.test;
                 desc.depth_write      = depth.write;
+                desc.cull_mode        = SceneMetalCullMode(material->cull_mode, has_depth);
             }
             desc.load_action = ResolveLoadAction(src.preserve_target_contents,
                                                  src.clear_on_first_use);

@@ -4459,6 +4459,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
             // pass inherits it, so each draw sets what differs, nil included.
             id<MTLRenderPipelineState>  pipeline { nil };
             id<MTLDepthStencilState>    depth_stencil { nil };
+            MetalCullMode               cull_mode { kSceneCullMode };
         };
         OpenRenderPass open;
         const auto close_pass = [&open]() {
@@ -4594,13 +4595,13 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                 open.clear_color      = desc.clear_color;
                 ++impl.frame_encodes.render_passes;
                 if (target == impl.scene_output_target) ++impl.frame_encodes.scene_output_passes;
-                // Folding the clip-space transform into the projection also
-                // decides triangle winding, so the cull mode has to be the one
-                // the compatibility backend uses -- it renders with
-                // VK_CULL_MODE_NONE. Enabling back-face culling here would
-                // silently drop half of every scene the moment the fold stops
-                // being the identity.
+                // Culling follows the compatibility backend: none for a pass
+                // without depth, the material's for one with it, against the
+                // same front faces. Each draw sets the mode it needs below.
                 [open.encoder setCullMode:static_cast<MTLCullMode>(kSceneCullMode)];
+                [open.encoder setFrontFacingWinding:kSceneFrontFaceCounterClockwise
+                                                        ? MTLWindingCounterClockwise
+                                                        : MTLWindingClockwise];
                 if (opens_with_copy) {
                     [open.encoder setViewport:(MTLViewport) { 0.0, 0.0, (double)target.width,
                                                               (double)target.height, 0.0, 1.0 }];
@@ -4642,6 +4643,10 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                 if (pass.depth_stencil != open.depth_stencil) {
                     [encoder setDepthStencilState:pass.depth_stencil];
                     open.depth_stencil = pass.depth_stencil;
+                }
+                if (desc.cull_mode != open.cull_mode) {
+                    [encoder setCullMode:static_cast<MTLCullMode>(desc.cull_mode)];
+                    open.cull_mode = desc.cull_mode;
                 }
 
                 const std::size_t geometry_slot =

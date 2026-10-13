@@ -24,6 +24,14 @@ device.
   and only on the chain's last node. An unused perspective camera does not
   reject; a supported layer that names a perspective camera, or an active
   perspective camera with supported layers, is accepted.
+- **Face culling** — `MetalSceneDraw.ADepthTestedDrawCullsTheSameFacesAsCompatibility`:
+  a card under a perspective camera, turned towards and away, with back, front
+  and no culling and with and without a depth attachment, drawn by both
+  renderers through `SceneRendererHandle`; the pictures must be byte-identical,
+  and the cases must differ (one side culled, the other kept). A pass into a
+  depth-attached target takes its material's cull mode with counter-clockwise
+  front faces, as Compatibility does; every other pass culls nothing. Native
+  Metal culled nothing, so a planet's ring drew its unlit back over its front.
 - **The host's frame step** — `MetalSceneDraw.ThePointerSmoothingStepsOnceForEachFrameTheHostDraws`:
   `WPShaderValueUpdater::FrameBegin` (the parallax cursor's smoothing, puppet
   attachments) is the host's, once per frame before it draws, on either
