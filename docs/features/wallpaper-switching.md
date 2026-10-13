@@ -20,6 +20,9 @@ three hooks on `BridgeStore` that tell the hold when a switch starts, settles or
   previous picture is replaced at once when the new wallpaper has drawn.
 - The held picture is a still taken up to a quarter of a second before the switch. An
   animated wallpaper may therefore jump a little at the moment the new one appears.
+- With the experimental native video backend the same picture covers the new clip's window
+  until the clip shows its first frame, then fades out. That fade is the dissolve from the
+  old wallpaper to the clip, whether the old one was a clip or a scene.
 - When no still can be taken, the switch behaves as it always did.
 
 ## Which switches are held
@@ -28,8 +31,9 @@ Held: any activation that goes through `BridgeStore.activateWallpaperAsync` (a t
 menu choice, a hotkey, a link, a Shortcuts action, a playlist or rule, a rotation on unlock,
 **Back**, **Random Wallpaper**, a wallpaper applied to every display, a saved display layout,
 **Copy or swap**) on a display that is showing a wallpaper, when the new
-wallpaper is drawn by the scene engine: a scene, or a video on the Compatibility backend.
-A display mirroring the switched display is held with it.
+wallpaper is drawn by the scene engine (a scene, or a video on the Compatibility backend) or
+by a native video window (a video with **Native video preferred**). A display mirroring the
+switched display is held with it.
 
 Not held, because the old picture is not available or the successor is not a scene:
 
@@ -39,13 +43,21 @@ Not held, because the old picture is not available or the successor is not a sce
   may not).
 - **Reapply wallpaper**, Retry for a scene that stopped, and the reload after an update:
   all three take the wallpaper off the display first, so there is no picture left to hold.
-- A web page or a video on the native backend as the successor: their windows are
-  owned by `WebWallpaperHost` and `NativeVideoWallpaperHost`, which do not take the veil
-  yet (`WallpaperSwitchHold.adopt` and `contentReady` are the entry points they will
+- A web page as the successor: its window is owned by `WebWallpaperHost`, which does not take
+  the veil yet (`WallpaperSwitchHold.adopt` and `contentReady` are the entry points it will
   use). A held still that no host picks up is released 8 seconds after the engine has
   finished.
+- A clip whose file takes longer than that 8 seconds to read (a sleeping external drive or
+  a share that is slow to answer): the still is released before the clip's window exists,
+  and the window opens without it.
 - First launch, quit, display reconfigures and wake rebuilds, and the rebuild a host does
   when an admission or a setting changes.
+
+Known gap with the native backend: when the old wallpaper is a scene, the engine closes its
+window as soon as the switch is applied, and the clip's window opens only after the host has
+read the clip's metadata. The system picture can show between the two, for the read
+(milliseconds from the internal drive, seconds from a slow volume). A clip replacing another
+clip has no such gap, see below.
 
 ## Limits
 
@@ -105,6 +117,41 @@ A host window (web page, native clip) takes the veil with `adopt(into:displayID:
 refuses a veil that still covers a live window, and releases it with `contentReady`, with an
 optional wait for a page's first paint. `cancel` ends a hold the host abandoned.
 
+**A native-video successor.** `NativeVideoWallpaperHost` replaces a clip, or a scene, by
+building a new window, and it takes the hold as an optional dependency (`switchHold:`; the
+tests and a host without one behave as before):
+
+- *Order.* For a display whose wallpaper or admission key changed, the host first decides the
+  replacement's admission (the metadata read, cached by admission key so opening reuses the
+  verdict), then stops the old surface, builds the new window, gives it the veil and orders
+  it in, all in one main-actor turn that waits for no file. The old clip plays through the
+  read, and a pass that a newer apply or a shutdown overtakes meanwhile closes nothing. The
+  old player is still stopped before the new one exists, so a clip is never decoded or heard
+  twice.
+- *Adoption.* The veil goes onto the window's content layer (`posterLayer`) before
+  `present()`, so the window never reaches the screen without it. A second replacement
+  before the first clip has a frame moves the veil to the newest window, and a late callback
+  from the replaced window cannot release it.
+- *Release.* `AVPlayerLayer.isReadyForDisplay`, through the surface's `onReadyForDisplay`,
+  releases the veil with the usual 0.2 s fade (none under Reduce Motion). A layer that
+  already had its picture when the callback was installed releases it as soon as the window
+  is up. `isReadyForDisplay` says a frame can be shown, not that it has been drawn, so the
+  fade is what hides a frame or two of lag; if a desktop run shows a flash as the veil goes,
+  the knob is `contentReady(after:)`.
+- *Refusal.* A clip the backend cannot honour is handed to the scene engine before any
+  window exists. The still stays armed, the scene the engine opens takes it through the
+  renderer's layer announcement, and the host's `engineSettled` call, made once the bridge
+  has answered (the engine has then presented the scene or failed), releases it. If the
+  engine presents nothing, the 8 s grace ends it.
+- *Failure.* A clip that cannot be played after admission closes its window and hands the
+  wallpaper to the scene engine; the hold is cancelled, because the window it sat on is gone.
+- *Closing.* A window closed to be replaced hands its veil to the successor through `adopt`.
+  A window closed with no clip to follow, because the wallpaper was ejected, went to another
+  backend or its display was disconnected, calls `windowClosed`: a veil that sat on that
+  window goes with it, so a later switch cannot find it and show it again out of date. A veil
+  that still waits for a window, or sits on a scene, is not touched. Either host's reconcile
+  may run first, and the other host is the successor a waiting picture was kept for.
+
 ## Diagnostics
 
 The hold logs through `AppLog`, one line per step and always the display's CoreGraphics
@@ -130,6 +177,16 @@ off a scene that has not presented yet and does not restart the ceiling, the vei
 removed by the timer, Reduce Motion skips the fade, the ceiling and the
 host grace release a veil nothing ends, `cancel` and `stop` remove everything including a
 still still on its way, and displays are held independently.
+`NativeVideoWallpaperHostTests` drive the native host with a fake surface that logs what is
+done to it: the replacement window carries the veil when it is presented and keeps it through
+a repeated offer or a setting change, the first frame releases it (with the fade, and at once
+for a layer that was ready when built), a second replacement hands it on and ignores the
+replaced window, another display's still is left alone, a clip that fails to play cancels it,
+a window closed with no clip to follow (also when its display goes away) takes its own veil
+with it but leaves one that waits for another backend's window or sits on a scene, a
+refusal keeps it armed for the scene engine until the bridge has answered and then releases
+it (or lets the grace end it), the old clip keeps playing while the replacement's file is
+read, a pass overtaken meanwhile stops nothing, and a host without a hold opens as before.
 `WallpaperActivationRecoveryTests` pin the hook order around a real
 `BridgeStore.activateWallpaperAsync` (announce, apply, settle; abandon when the apply throws;
 nothing for a no-op) and which displays a switch holds. `DesktopWallpaperTests` pin the shared
@@ -138,5 +195,6 @@ poster frame conversion and that a held frame never becomes the poster.
 Not established by any test: that a sublayer above a `CAMetalLayer` composites over its
 drawables and hides the black placeholder; that scene, web and native surfaces answer the
 request quickly, including a paused renderer; how the still compares with the live frame it
-replaces; the fade, Reduce Motion, multi-display and mirror behavior on a real desktop. The
-checklist is in [manual smoke](../testing/manual-smoke.md#wallpaper-switching).
+replaces; whether `isReadyForDisplay` alone is late enough that the veil does not come off a
+frame early on a real clip; the fade, Reduce Motion, multi-display and mirror behavior on a
+real desktop. The checklist is in [manual smoke](../testing/manual-smoke.md#wallpaper-switching).

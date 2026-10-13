@@ -25,6 +25,16 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-13 — Native video host takes the switch hold
+
+A replacement clip's window opens with the picture it replaces over it and drops it on the clip's first frame; a replacement's admission is decided before the old surface stops. Targeted run only: the lane runs the full gate once, at its end.
+
+- `python3 scripts/test.py --only NativeVideoWallpaperHostTests` — exit 0; 98 passed (11 new)
+- `python3 scripts/test.py --only NativeVideoWallpaperHostTests --only WallpaperSwitchHoldTests --only WallpaperActivationRecoveryTests --only DesktopWallpaperTests` — exit 0; 225 passed
+- Mutation check — seven one-line breakages of `NativeVideoWallpaperHost` (no adopt, close before admission, no cancel on failure, no settle after hand-off, no release on first frame, no overtaken-pass guard, no release for a layer ready at birth) each failed between 1 and 5 of the host tests
+- Skipped: the full gate and `check_rust.py`/`check_renderer.py` (no Rust or renderer change in this commit), `NativeVideoPlayerMediaTests` (opt-in), any desktop run
+- Not established: that `isReadyForDisplay` alone is late enough that the veil does not come off a frame early on a real clip; the fade and the clip-to-clip, scene-to-clip and refusal switches on a real display ([manual smoke](manual-smoke.md#wallpaper-switching))
+
 ## 2026-10-13 — Wallpaper switch hold for scene successors
 
 Commit 3 of the seamless-switch lane, built and tested in an isolated worktree on top of the layer-swap revert and layer announcement commits. Web pages and native-backend clips take the veil in the lane's next commits; this one carries it for scenes.
@@ -110,12 +120,3 @@ A stalled native video pipeline is now kicked, rebuilt once and then handed to C
 - Mutation checks, each failing exactly the tests that defend it and then reverted: no absorb rule while repairing, no supersession of a wake settle, a rebuild that cancels its own check.
 - The lock-screen extension target compiled the two new `RuntimeCounter` cases in the same builds.
 - Not run: the full gate, a Release build, any desktop run. Unverified: that the system really reclaims a decoder across sleep, lock or a covered desktop, and that a kick or a rebuild brings one back; the `hev1` pipeline cannot be repaired, so only the failing ladder is shown. The 1 s wake settle and the cost of the check output on a 4K clip are untuned. See the sleep, lock and unlock rows in manual-smoke.md.
-
-## 2026-10-13 — Native video liveness detection after a long pause
-
-Observation only: the check logs and counts a stalled pipeline and acts on nothing. Commit `feat(native-video): detect a pipeline that stops delivering frames`, checked in an isolated worktree on macOS 27.0.1.
-
-- `python3 scripts/test.py --only NativeVideoLivenessTests --only NativeVideoHealthSupervisorTests --only NativeVideoWallpaperHostTests` — 100 passed, 0 failed, 0 skipped
-- `WALLPAPER_MACHINE_MEDIA_TESTS=1 python3 scripts/test.py --only NativeVideoPlayerMediaTests` — 31 passed, 0 skipped (the hev1 clip is frame-less on this OS, so its two cases ran); the other NativeVideo classes with media on: 182 passed, 0 failed, 0 skipped
-- The lock-screen extension target compiled the new `RuntimeCounter` case in the same builds.
-- Not run: the full gate, a Release build, any desktop run. Unverified: whether a real long suspension (covered desktop for hours, display sleep, Low Power Mode) ever costs a clip its decoder; no test reclaims one, so only the `nativeVideoPlaybackStalled` counter on a real Mac answers it. Cost of the check's video output on a 4K clip not measured.

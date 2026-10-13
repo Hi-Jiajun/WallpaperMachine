@@ -144,6 +144,18 @@ unattached `CALayer`s, a manual clock and timers fired by hand; nothing opens a 
 - Placement: the renderer's `open` and `replace` announcements move the veil onto the new
   layer, `reconfigure`, another display and an announcement without a display id do not;
   a host takes over a veil only when the window it sat on is gone.
+- Native video, in `NativeVideoWallpaperHostTests` with a fake surface that logs what is done
+  to it: the replacement window is presented with the veil already on its content layer and
+  keeps it through a repeated offer or a setting change; its first frame releases it (a layer
+  that was ready when built, too), and a replaced window's late report does not; a second
+  replacement takes the veil on, another display's veil stays where it is; a clip that fails
+  to play cancels it; a window closed with no clip to follow (ejected, or its display went
+  away) takes its own veil with it, while a veil that waits for another backend's window or
+  sits on a scene is left for its successor; a refused replacement leaves it armed for the
+  scene the engine opens
+  and releases it when the bridge has answered, or by the grace when no scene follows; the
+  old clip keeps playing while the replacement's file is read (probe, stop, make, present in
+  that order), and a pass overtaken in the read stops nothing.
 - Release: the scene's first frame (the engine settling) fades the veil, which is removed by
   its own timer; a host's content fades it after its settle; `cancel` and `stop` remove it,
   also while the still is on its way; Reduce Motion skips the fade; the 30 s ceiling and the
@@ -159,8 +171,9 @@ a switch covers the display and every display mirroring it.
 Not covered: whether a sublayer composites over a `CAMetalLayer`'s drawables, whether real
 surfaces answer the request within 250 ms (a paused renderer included), how the still compares
 with the live frame, and the fade, Reduce Motion, multi-display and mirror behavior on a desktop
-([manual-smoke.md](manual-smoke.md#wallpaper-switching)). No web page or native-video host takes
-the veil yet.
+([manual-smoke.md](manual-smoke.md#wallpaper-switching)), nor whether `isReadyForDisplay`
+alone is late enough for a real clip that the veil does not come off a frame early. No web
+page host takes the veil yet.
 
 ### Playback policy
 
@@ -680,8 +693,9 @@ need an authorized runtime check
   group's strictest target, hidden-display and user-pause handling, a clip stopped
   by a reading taken while the desktop (or one display) was covered playing again
   once `WallpaperHosts.reconcile` has the host read the bridge again (that
-  `AppDelegate` makes the call after each delivery is not run by any test), and
-  posters from replaced surfaces not published. `NativeVideoPlaybackFailureTests` — the
+  `AppDelegate` makes the call after each delivery is not run by any test),
+  posters from replaced surfaces not published, and the switch hold (see
+  [Wallpaper switching](#wallpaper-switching)). `NativeVideoPlaybackFailureTests` — the
   reported failure keeps the codes under the localized message and a clip with
   sound is rebuilt with its picture alone.
 - The metadata-read bound, in the host suite with a hand-fired clock

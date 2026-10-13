@@ -62,6 +62,13 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         var made: [String] = []
         /// When set, the bridge cannot be read.
         var fetchFailure: Error?
+        /// What happened, in order: a metadata read (`probe`), a window built (`make`), a surface
+        /// stopped (`stop`) and a window put on the desktop (`present`, with `+veil` when the held
+        /// picture was already over it).
+        var events: [String] = []
+        /// When set, a refusal's report to the bridge does not return until the gate opens: the
+        /// scene engine is still taking the wallpaper over.
+        var rejectGate: AsyncGate?
     }
 
     private struct BridgeUnreachable: Error {}
@@ -77,7 +84,11 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         private var suspended = false
         private(set) var isStopped = false
         var isReadyForDisplay = false
-        var onReadyForDisplay: (@MainActor () -> Void)?
+        /// Like the real player, reports a picture it already has the moment the callback is
+        /// installed.
+        var onReadyForDisplay: (@MainActor () -> Void)? {
+            didSet { if isReadyForDisplay, onReadyForDisplay != nil { onReadyForDisplay?() } }
+        }
         var volume: Float = 1
         var muted = false
         var posterLayer: CALayer? = CALayer()
@@ -147,10 +158,15 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
             if posterDelay != .zero { try? await Task.sleep(for: posterDelay) }
             return poster
         }
-        func present() { recorder.presented += 1 }
+        func present() {
+            recorder.presented += 1
+            let veiled = posterLayer?.sublayers?.contains { $0.name == SwitchHoldVeil.layerName } == true
+            recorder.events.append(veiled ? "present+veil" : "present")
+        }
         func stop() {
             isStopped = true
             recorder.stopped += 1
+            recorder.events.append("stop")
         }
     }
 
@@ -174,6 +190,8 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
     private var screenFrames: [(id: UInt32, frame: NSRect)] = []
     /// Makes every surface this factory builds fail as its callback is installed.
     private var surfaceFailureOnInstall: String?
+    /// Makes every surface this factory builds already have its picture when it is built.
+    private var surfaceReadyAtBirth = false
 
     private func makeHost(
         wallpapers: [BridgeNativeVideoWallpaper],
@@ -195,7 +213,8 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         /// Fires the metadata read limit by hand (`sleeper`). Tests that do not
         /// need it get the real clock, whose timer is cancelled as each read
         /// returns.
-        manualLimits: Bool = false
+        manualLimits: Bool = false,
+        switchHold: WallpaperSwitchHold? = nil
     ) -> NativeVideoWallpaperHost {
         recorder.refusalSequence = refusalSequence
         let limits: @Sendable (Duration) async throws -> Void
@@ -212,9 +231,11 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
             },
             reject: { id, key, reason in
                 recorder.rejected.append((id: id, key: key, reason: reason))
+                await recorder.rejectGate?.wait()
             },
             screens: { [weak self] in self?.screenFrames ?? [] },
             refusal: { url, fps in
+                recorder.events.append("probe")
                 // The injected decision stands in for the asset probe; the key
                 // is reconstructed from the target rate the host passed, which
                 // is the input the real rule reads.
@@ -231,9 +252,11 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
             },
             makeSurface: { [weak self] url, frame, key, paused in
                 recorder.made.append(url.path)
+                recorder.events.append("make")
                 let surface = FakeSurface(
                     recorder: recorder, paused: paused, generation: key.generation)
                 surface.setScreenFrame(frame)
+                surface.isReadyForDisplay = self?.surfaceReadyAtBirth ?? false
                 surface.failureOnInstall = self?.surfaceFailureOnInstall
                 self?.surfacesMade[key.displayID] = surface
                 return surface
@@ -245,7 +268,8 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
             storage: { url in
                 recorder.storageQueries.append(url.path)
                 return storage(url)
-            })
+            },
+            switchHold: switchHold)
     }
 
     func testStartupWaitsForSurfaceReadinessAndAcknowledgesNewRevisions() async throws {
@@ -303,6 +327,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
             (id: 9, frame: NSRect(x: 200, y: 0, width: 200, height: 100)),
         ]
         surfaceFailureOnInstall = nil
+        surfaceReadyAtBirth = false
         openedAtTeardown = []
     }
 
@@ -2415,6 +2440,448 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
             XCTAssertNil(NativeVideoWallpaperWindow.fittedPoster(
                 source, pixelSize: size, backingScale: 1, mode: .fill, factor: 1), "\(size)")
         }
+    }
+
+    // MARK: Switch hold
+
+    /// A switch hold on a notification center the test owns. The wallpaper on screen answers its
+    /// request for a still at once and its timers are fired by hand. Reduce Motion is on, so a
+    /// released picture is removed on the spot instead of being faded out by a timer.
+    @MainActor
+    private final class HoldHarness {
+        let center = NotificationCenter()
+        let timers = ManualSleeper()
+        /// Time stands still, so the length of a timer is exactly the limit it was set for.
+        private let instant = ContinuousClock.now
+        var reduceMotion = true
+        /// The layer each display's visible wallpaper has, as the hold looks for it.
+        var onScreen: [UInt32: CALayer] = [:]
+        private(set) var hold: WallpaperSwitchHold!
+        private var responder: NSObjectProtocol?
+
+        init() {
+            hold = WallpaperSwitchHold(
+                center: center,
+                layers: { [unowned self] display in self.onScreen[display].map { [$0] } ?? [] },
+                shouldHold: { _ in true },
+                reduceMotion: { [unowned self] in self.reduceMotion },
+                sleep: timers.closure,
+                now: { [unowned self] in self.instant })
+            responder = center.addObserver(
+                forName: DesktopPosterNotification.request, object: nil, queue: nil
+            ) { [unowned self] note in
+                MainActor.assumeIsolated {
+                    guard let layer = note.object as? CALayer else { return }
+                    let red = Data((0..<16).map { [255, 0, 0, 255][$0 % 4] })
+                    DesktopPosterFrame(pixels: red, width: 2, height: 2, bgra: false).publish(
+                        for: layer, to: self.center, context: note.userInfo?["context"] as? String)
+                }
+            }
+            hold.start()
+        }
+
+        func finish() {
+            hold.stop()
+            if let responder { center.removeObserver(responder) }
+        }
+
+        func state(_ display: UInt32 = 7) -> WallpaperSwitchHold.Phase? {
+            hold.stateForTest(display: display)
+        }
+
+        func veil(on layer: CALayer?) -> CALayer? {
+            layer?.sublayers?.first { $0.name == SwitchHoldVeil.layerName }
+        }
+
+        /// What the renderer's window code posts for a layer it gives a window.
+        func announce(
+            _ layer: CALayer, display: UInt32, reason: WallpaperSwitchHoldNotification.Reason
+        ) {
+            center.post(
+                name: WallpaperSwitchHoldNotification.layerInstalled, object: layer,
+                userInfo: [
+                    WallpaperSwitchHoldNotification.displayIDKey: NSNumber(value: display),
+                    WallpaperSwitchHoldNotification.reasonKey: reason.rawValue,
+                ])
+        }
+    }
+
+    /// Shows `descriptor` on its display, then lets the hold take a still of it, as a switch
+    /// away from it does.
+    private func showAndHold(
+        _ descriptor: BridgeNativeVideoWallpaper, on host: NativeVideoWallpaperHost,
+        _ harness: HoldHarness
+    ) async throws -> FakeSurface {
+        await host.apply([descriptor])
+        let surface = try XCTUnwrap(surfacesMade[descriptor.displayId])
+        harness.onScreen[descriptor.displayId] = surface.posterLayer
+        await harness.hold.begin(displays: [descriptor.displayId])
+        // The replacement closes this window, and a closed window is not listed any more.
+        harness.onScreen[descriptor.displayId] = nil
+        return surface
+    }
+
+    func testTheReplacementWindowOpensWithTheHeldPictureOverIt() async throws {
+        // The window is ordered in with the picture it replaces already over it, and the
+        // picture goes when the clip shows its first frame and not before.
+        let recorder = Recorder()
+        let harness = HoldHarness()
+        defer { harness.finish() }
+        let host = makeHost(wallpapers: [], recorder: recorder, switchHold: harness.hold)
+        defer { host.shutdown() }
+        let first = try await showAndHold(wallpaper(id: "300", admissionKey: 1), on: host, harness)
+        XCTAssertEqual(harness.state(), .armed)
+        recorder.events.removeAll()
+
+        await host.apply([wallpaper(id: "301", admissionKey: 2)])
+
+        let second = try XCTUnwrap(surfacesMade[7])
+        XCTAssertFalse(second === first)
+        XCTAssertEqual(
+            recorder.events, ["probe", "stop", "make", "present+veil"],
+            "the picture is on the window when it reaches the desktop")
+        XCTAssertNotNil(harness.veil(on: second.posterLayer))
+        XCTAssertNil(harness.veil(on: first.posterLayer))
+        XCTAssertEqual(harness.state(), .onHost)
+
+        // Offering the same wallpaper again, or a change of setting, shows no picture.
+        await host.apply([wallpaper(id: "301", volume: 0.5, admissionKey: 2)])
+        XCTAssertEqual(harness.state(), .onHost)
+        XCTAssertNotNil(harness.veil(on: second.posterLayer))
+
+        second.isReadyForDisplay = true
+        second.onReadyForDisplay?()
+
+        XCTAssertNil(harness.state(), "the clip has its picture")
+        XCTAssertNil(harness.veil(on: second.posterLayer))
+    }
+
+    func testTheHeldPictureFadesWhenMotionIsAllowed() async throws {
+        let recorder = Recorder()
+        let harness = HoldHarness()
+        harness.reduceMotion = false
+        defer { harness.finish() }
+        let host = makeHost(wallpapers: [], recorder: recorder, switchHold: harness.hold)
+        defer { host.shutdown() }
+        _ = try await showAndHold(wallpaper(id: "300", admissionKey: 1), on: host, harness)
+        await host.apply([wallpaper(id: "301", admissionKey: 2)])
+        let second = try XCTUnwrap(surfacesMade[7])
+
+        second.isReadyForDisplay = true
+        second.onReadyForDisplay?()
+
+        XCTAssertEqual(harness.state(), .dismissing)
+        XCTAssertNotNil(
+            harness.veil(on: second.posterLayer)?.animation(forKey: SwitchHoldVeil.fadeAnimationKey),
+            "the veil fades over the clip and does not vanish")
+        await harness.timers.waitUntilPending()
+        harness.timers.fireNext()
+        await settle { harness.state() == nil }
+        XCTAssertNil(harness.veil(on: second.posterLayer))
+    }
+
+    func testAClipThatAlreadyHasItsPictureReleasesTheHeldPictureOnceShown() async throws {
+        // A layer that reports a picture the moment the callback is installed does so before the
+        // window has taken the veil; the host lets it go after the window is up.
+        let recorder = Recorder()
+        let harness = HoldHarness()
+        defer { harness.finish() }
+        let host = makeHost(wallpapers: [], recorder: recorder, switchHold: harness.hold)
+        defer { host.shutdown() }
+        _ = try await showAndHold(wallpaper(id: "300", admissionKey: 1), on: host, harness)
+        surfaceReadyAtBirth = true
+        recorder.events.removeAll()
+
+        await host.apply([wallpaper(id: "301", admissionKey: 2)])
+
+        XCTAssertEqual(recorder.events, ["probe", "stop", "make", "present+veil"])
+        XCTAssertNil(harness.state(), "nothing is left covering a clip that is already showing")
+        XCTAssertNil(harness.veil(on: surfacesMade[7]?.posterLayer))
+    }
+
+    func testAReplacementThatIsReplacedBeforeItsFirstFrameHandsTheHeldPictureOn() async throws {
+        // A quick second switch: the picture is carried by the newest window, and a late report
+        // from the window that was replaced cannot take it away.
+        let recorder = Recorder()
+        let harness = HoldHarness()
+        defer { harness.finish() }
+        let host = makeHost(wallpapers: [], recorder: recorder, switchHold: harness.hold)
+        defer { host.shutdown() }
+        _ = try await showAndHold(wallpaper(id: "300", admissionKey: 1), on: host, harness)
+        await host.apply([wallpaper(id: "301", admissionKey: 2)])
+        let second = try XCTUnwrap(surfacesMade[7])
+        XCTAssertNotNil(harness.veil(on: second.posterLayer))
+
+        await host.apply([wallpaper(id: "302", admissionKey: 3)])
+
+        let third = try XCTUnwrap(surfacesMade[7])
+        XCTAssertTrue(second.isStopped)
+        XCTAssertNil(harness.veil(on: second.posterLayer))
+        XCTAssertNotNil(harness.veil(on: third.posterLayer))
+        XCTAssertEqual(harness.state(), .onHost)
+
+        second.isReadyForDisplay = true
+        second.onReadyForDisplay?()
+        XCTAssertEqual(harness.state(), .onHost, "the replaced window has no say")
+        XCTAssertNotNil(harness.veil(on: third.posterLayer))
+
+        third.isReadyForDisplay = true
+        third.onReadyForDisplay?()
+        XCTAssertNil(harness.state())
+        XCTAssertNil(harness.veil(on: third.posterLayer))
+    }
+
+    func testAHeldPictureIsOnlyGivenToItsOwnDisplay() async throws {
+        let recorder = Recorder()
+        let harness = HoldHarness()
+        defer { harness.finish() }
+        let host = makeHost(wallpapers: [], recorder: recorder, switchHold: harness.hold)
+        defer { host.shutdown() }
+        let on7 = wallpaper(displayID: 7, id: "300", admissionKey: 1)
+        let on9 = wallpaper(displayID: 9, id: "301", admissionKey: 2)
+        await host.apply([on7, on9])
+        let ninth = try XCTUnwrap(surfacesMade[9])
+        harness.onScreen[9] = ninth.posterLayer
+        await harness.hold.begin(displays: [9])
+        harness.onScreen[9] = nil
+        XCTAssertEqual(harness.state(9), .armed)
+
+        await host.apply([wallpaper(displayID: 7, id: "302", admissionKey: 3), on9])
+
+        XCTAssertNil(harness.veil(on: surfacesMade[7]?.posterLayer), "display 9's picture is not display 7's")
+        XCTAssertEqual(harness.state(9), .armed)
+        XCTAssertNil(harness.state(7))
+    }
+
+    func testAClipThatFailsToPlayReleasesTheHeldPicture() async throws {
+        // The window the picture sat on is closed and the scene engine takes the wallpaper over:
+        // the picture must not wait for a successor it was not made for.
+        let recorder = Recorder()
+        let harness = HoldHarness()
+        defer { harness.finish() }
+        let host = makeHost(wallpapers: [], recorder: recorder, switchHold: harness.hold)
+        defer { host.shutdown() }
+        _ = try await showAndHold(wallpaper(id: "300", admissionKey: 1), on: host, harness)
+        await host.apply([wallpaper(id: "301", admissionKey: 2)])
+        let second = try XCTUnwrap(surfacesMade[7])
+        XCTAssertEqual(harness.state(), .onHost)
+
+        second.failPreparation("synthetic decoder failure")
+        await settle { !recorder.rejected.isEmpty }
+
+        XCTAssertNil(harness.state())
+        XCTAssertNil(harness.veil(on: second.posterLayer))
+    }
+
+    func testAPictureOnAClipWindowThatClosesWithNoWallpaperToTakeItsPlaceIsReleased() async throws {
+        // The wallpaper was ejected while the replacement was loading: the window the picture
+        // sat on is gone, and a later switch must not find it and show it again.
+        let recorder = Recorder()
+        let harness = HoldHarness()
+        defer { harness.finish() }
+        let host = makeHost(wallpapers: [], recorder: recorder, switchHold: harness.hold)
+        defer { host.shutdown() }
+        _ = try await showAndHold(wallpaper(id: "300", admissionKey: 1), on: host, harness)
+        await host.apply([wallpaper(id: "301", admissionKey: 2)])
+        let second = try XCTUnwrap(surfacesMade[7])
+        XCTAssertEqual(harness.state(), .onHost)
+        XCTAssertNotNil(harness.veil(on: second.posterLayer))
+
+        await host.apply([])
+
+        XCTAssertTrue(second.isStopped)
+        XCTAssertNil(harness.state(), "no window is left for the picture to cover")
+        XCTAssertNil(harness.veil(on: second.posterLayer))
+    }
+
+    func testAPictureOnAClipWindowIsReleasedWhenItsDisplayGoesAway() async throws {
+        let recorder = Recorder()
+        let harness = HoldHarness()
+        defer { harness.finish() }
+        let host = makeHost(wallpapers: [], recorder: recorder, switchHold: harness.hold)
+        defer { host.shutdown() }
+        let both = screenFrames
+        _ = try await showAndHold(wallpaper(id: "300", admissionKey: 1), on: host, harness)
+        await host.apply([wallpaper(id: "301", admissionKey: 2)])
+        let second = try XCTUnwrap(surfacesMade[7])
+        XCTAssertEqual(harness.state(), .onHost)
+
+        screenFrames = both.filter { $0.id != 7 }
+        await host.apply([wallpaper(id: "301", admissionKey: 2)])
+
+        XCTAssertTrue(second.isStopped, "there is nothing to draw on")
+        XCTAssertNil(harness.state())
+        XCTAssertNil(harness.veil(on: second.posterLayer))
+    }
+
+    func testAClosedClipWindowLeavesAPictureThatWaitsForAnotherBackendsWindow() async throws {
+        // Switching from a clip to a web page: this host closes the clip's window on the same
+        // snapshot that makes the web host build the page's, perhaps first. The picture was
+        // kept for the page's window, so closing the clip's must not end it.
+        let recorder = Recorder()
+        let harness = HoldHarness()
+        defer { harness.finish() }
+        let host = makeHost(wallpapers: [], recorder: recorder, switchHold: harness.hold)
+        defer { host.shutdown() }
+        let first = try await showAndHold(wallpaper(id: "300", admissionKey: 1), on: host, harness)
+        XCTAssertEqual(harness.state(), .armed)
+
+        await host.apply([])
+
+        XCTAssertTrue(first.isStopped)
+        XCTAssertEqual(harness.state(), .armed)
+        let pageWindow = CALayer()
+        XCTAssertTrue(harness.hold.adopt(into: pageWindow, displayID: 7))
+        XCTAssertNotNil(harness.veil(on: pageWindow))
+    }
+
+    func testAClosedClipWindowLeavesAPictureThatSitsOnASceneLayer() async throws {
+        // A clip replaced by a scene: the renderer's layer already carries the picture when
+        // this host closes the clip's window, and the scene has not drawn yet.
+        let recorder = Recorder()
+        let harness = HoldHarness()
+        defer { harness.finish() }
+        let host = makeHost(wallpapers: [], recorder: recorder, switchHold: harness.hold)
+        defer { host.shutdown() }
+        let first = try await showAndHold(wallpaper(id: "300", admissionKey: 1), on: host, harness)
+        let scene = CALayer()
+        harness.announce(scene, display: 7, reason: .replace)
+        XCTAssertEqual(harness.state(), .onScene)
+
+        await host.apply([])
+
+        XCTAssertTrue(first.isStopped)
+        XCTAssertEqual(harness.state(), .onScene)
+        XCTAssertNotNil(harness.veil(on: scene))
+    }
+
+    func testARefusedReplacementKeepsTheHeldPictureForTheSceneEngine() async throws {
+        // A refusal comes before any window exists, so nothing here carries the picture. It waits
+        // for the scene the engine opens instead, and goes when the engine has presented it.
+        let recorder = Recorder()
+        let harness = HoldHarness()
+        defer { harness.finish() }
+        let gate = AsyncGate()
+        openedAtTeardown.append(gate)
+        recorder.rejectGate = gate
+        let host = makeHost(
+            wallpapers: [], refusalByKey: [30: .notPlayable("synthetic: no video track")],
+            recorder: recorder, switchHold: harness.hold)
+        defer { host.shutdown() }
+        let first = try await showAndHold(
+            wallpaper(id: "300", fps: 60, admissionKey: 1), on: host, harness)
+
+        let pass = Task { await host.apply([wallpaper(id: "301", fps: 30, admissionKey: 2)]) }
+        await gate.waitUntilWaiting()
+
+        // The bridge has the refusal and the engine is taking the wallpaper over.
+        XCTAssertEqual(recorder.rejected.map(\.id), ["301"])
+        XCTAssertTrue(first.isStopped)
+        XCTAssertEqual(recorder.made.count, 1, "no window for a clip the backend refused")
+        XCTAssertEqual(harness.state(), .armed, "neither handed to a window nor given up")
+
+        let scene = CALayer()
+        harness.announce(scene, display: 7, reason: .open)
+        XCTAssertEqual(harness.state(), .onScene)
+        XCTAssertNotNil(harness.veil(on: scene))
+
+        gate.open()
+        await pass.value
+
+        XCTAssertNil(harness.state(), "the engine presented its scene")
+        XCTAssertNil(harness.veil(on: scene))
+    }
+
+    func testARefusalThatNoSceneFollowsEndsTheHoldAfterTheGrace() async throws {
+        // The engine could not present it either: the picture is not kept for a window that is
+        // not coming.
+        let recorder = Recorder()
+        let harness = HoldHarness()
+        defer { harness.finish() }
+        let host = makeHost(
+            wallpapers: [], refusalByKey: [30: .notPlayable("synthetic: no video track")],
+            recorder: recorder, switchHold: harness.hold)
+        defer { host.shutdown() }
+        _ = try await showAndHold(wallpaper(id: "300", fps: 60, admissionKey: 1), on: host, harness)
+
+        await host.apply([wallpaper(id: "301", fps: 30, admissionKey: 2)])
+
+        XCTAssertEqual(recorder.rejected.count, 1)
+        XCTAssertEqual(harness.state(), .armed, "a window may still come")
+        await harness.timers.waitUntilPending()
+        XCTAssertEqual(harness.timers.requested.last, WallpaperSwitchHold.Configuration().hostGrace)
+        harness.timers.fireNext()
+        await settle { harness.state() == nil }
+    }
+
+    func testTheOldClipKeepsPlayingWhileTheReplacementsFileIsRead() async throws {
+        // Reading a file can take seconds. The clip on screen plays through them, and is
+        // stopped only once the replacement is decided, in the turn that builds its successor.
+        let recorder = Recorder()
+        let gate = stuckFile(recorder, path: Self.pathB)
+        let host = makeHost(wallpapers: [], recorder: recorder, manualLimits: true)
+        defer { host.shutdown() }
+        await host.apply([wallpaper(id: "300", admissionKey: 1, mediaPath: Self.pathA)])
+        let first = try XCTUnwrap(surfacesMade[7])
+        recorder.events.removeAll()
+
+        let pass = Task {
+            await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.pathB)])
+        }
+        await gate.waitUntilWaiting()
+
+        XCTAssertEqual(recorder.events, ["probe"], "nothing is stopped or built yet")
+        XCTAssertEqual(host.isPlaying(displayID: 7), true)
+        XCTAssertFalse(first.isStopped)
+
+        gate.open()
+        await pass.value
+
+        XCTAssertEqual(
+            recorder.events, ["probe", "stop", "make", "present"],
+            "the file is read once, before the old clip stops, and not again")
+        XCTAssertTrue(first.isStopped)
+        XCTAssertEqual(recorder.admissionProbes.count, 2, "one read per wallpaper")
+        XCTAssertEqual(host.activeDisplayIDs, [7])
+    }
+
+    func testAReplacementOvertakenWhileItsFileIsReadNeverStopsTheOldClip() async throws {
+        // The user switched back while the file of the wallpaper they left was read: the pass
+        // that was waiting has nothing to do, and the clip they came back to never stopped.
+        let recorder = Recorder()
+        let gate = stuckFile(recorder, path: Self.pathB)
+        let host = makeHost(wallpapers: [], recorder: recorder, manualLimits: true)
+        defer { host.shutdown() }
+        let original = wallpaper(id: "300", admissionKey: 1, mediaPath: Self.pathA)
+        await host.apply([original])
+        let first = try XCTUnwrap(surfacesMade[7])
+
+        let pass = Task {
+            await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.pathB)])
+        }
+        await gate.waitUntilWaiting()
+        await host.apply([original])
+        gate.open()
+        await pass.value
+
+        XCTAssertFalse(first.isStopped)
+        XCTAssertEqual(recorder.made, [Self.pathA], "the abandoned replacement built no window")
+        XCTAssertTrue(surfacesMade[7] === first)
+        XCTAssertEqual(host.isPlaying(displayID: 7), true)
+    }
+
+    func testWithoutASwitchHoldAReplacementOpensPlain() async throws {
+        let recorder = Recorder()
+        let host = makeHost(wallpapers: [], recorder: recorder)
+        defer { host.shutdown() }
+        await host.apply([wallpaper(id: "300", admissionKey: 1)])
+        recorder.events.removeAll()
+
+        await host.apply([wallpaper(id: "301", admissionKey: 2)])
+
+        let second = try XCTUnwrap(surfacesMade[7])
+        XCTAssertEqual(recorder.events, ["probe", "stop", "make", "present"])
+        XCTAssertNil(second.posterLayer?.sublayers)
     }
 
     private final class PosterWorkspace: DesktopPictureWorkspace {

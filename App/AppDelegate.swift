@@ -193,6 +193,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                     self.applyDesktopPicturePreference()
                 }
             }
+            // Created before the hosts, which take over the picture it keeps on screen once their
+            // window opens. Its policy is read when a switch starts, not now, so the policy that
+            // is set up further down is still found.
+            let hold = WallpaperSwitchHold(
+                layers: { Self.wallpaperLayers(on: $0) },
+                // The rule the poster sync's captures follow: a suspended display is not seen,
+                // and its surface may not answer a request for a frame.
+                shouldHold: { [weak self] display in
+                    guard let policy = self?.presentationPolicy else { return false }
+                    return !policy.isSuspended && !policy.suspendedDisplayIDs.contains(display)
+                },
+                reduceMotion: { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion })
+            switchHold = hold
+            hold.start()
+            store.willSwitchWallpaper = { [weak self] displays in await self?.switchHold?.begin(displays: displays) }
+            store.didSettleWallpaperSwitch = { [weak self] displays in self?.switchHold?.engineSettled(displays: displays) }
+            store.didAbandonWallpaperSwitch = { [weak self] displays in self?.switchHold?.cancel(displays: displays) }
+
             let mediaScheduler = FoundationMediaTimerScheduler()
             let mediaSession = DesktopMediaSession(
                 provider: FallbackSystemMediaProvider(
@@ -256,7 +274,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             // The experimental native video backend. The bridge returns nothing
             // for it unless the user turned it on, so this host opens no window
             // and starts no player by default.
-            let nativeVideo = NativeVideoWallpaperHost(bridge: store.bridge)
+            let nativeVideo = NativeVideoWallpaperHost(bridge: store.bridge, switchHold: hold)
             nativeVideoHost = nativeVideo
             nativeVideo.onStateChanged = { [weak store] state in store?.receiveHostState(state) }
             nativeVideo.onError = { [weak self] message in
@@ -452,20 +470,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                     }
                 })
             presentationPolicy = policy
-            let hold = WallpaperSwitchHold(
-                layers: { Self.wallpaperLayers(on: $0) },
-                // The rule the poster sync's captures follow: a suspended display is not seen,
-                // and its surface may not answer a request for a frame.
-                shouldHold: { [weak self] display in
-                    guard let policy = self?.presentationPolicy else { return false }
-                    return !policy.isSuspended && !policy.suspendedDisplayIDs.contains(display)
-                },
-                reduceMotion: { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion })
-            switchHold = hold
-            hold.start()
-            store.willSwitchWallpaper = { [weak self] displays in await self?.switchHold?.begin(displays: displays) }
-            store.didSettleWallpaperSwitch = { [weak self] displays in self?.switchHold?.engineSettled(displays: displays) }
-            store.didAbandonWallpaperSwitch = { [weak self] displays in self?.switchHold?.cancel(displays: displays) }
             syncPlaybackMonitors()
             conditions.start()
             let power = PowerSourceMonitor()

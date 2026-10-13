@@ -399,8 +399,13 @@ per-Space getter and setter through optional private CoreGraphics and HIServices
   announces with `WallpaperMachine.wallpaperLayerInstalled` (reasons `open` and `replace`; the
   observer is synchronous on the main thread, so it only moves a layer and never calls the
   bridge). The apply returning, which waits for the first presented frame, fades the veil out.
-  `adopt` and `contentReady` are the entry points for a host window; no host calls them yet, so
-  only a scene successor carries the veil. A 30 s ceiling and an 8 s grace for a host window
+  `adopt` and `contentReady` are the entry points for a host window; a host that closes one
+  with none to follow calls `windowClosed`. `AppDelegate` creates the
+  hold before the hosts and gives it to `NativeVideoWallpaperHost`, which decides a replacement
+  clip's admission before it stops the old surface, calls `adopt` just before it presents the
+  new window, `contentReady` on `isReadyForDisplay`, `cancel` when the clip fails to play and
+  `engineSettled` once the bridge has answered a refusal; `WebWallpaperHost` does not take the
+  veil yet, so a web successor carries none. A 30 s ceiling and an 8 s grace for a host window
   release a veil nothing ends, and `AppDelegate` stops the hold before the hosts shut down. See
   [wallpaper switching](features/wallpaper-switching.md).
 - **Window audit.** `WallpaperWindowAuditor` checks that every wallpaper window is ordered in on

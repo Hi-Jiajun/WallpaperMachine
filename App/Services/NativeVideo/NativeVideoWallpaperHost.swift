@@ -31,6 +31,9 @@ final class NativeVideoWallpaperHost {
     /// Where a wallpaper's file lives, which sets how long its metadata read
     /// may take. Injected so the limits can be tested without a slow volume.
     private let storage: @MainActor (URL) async -> NativeVideoStoragePolicy.Location
+    /// Keeps the picture of the wallpaper a switch replaces on screen until the new clip has
+    /// its first frame. `nil` for a host that never holds one, as in most of the tests.
+    private let switchHold: WallpaperSwitchHold?
 
     private var surfaces: [UInt32: NativeVideoSurface] = [:]
     private var descriptors: [UInt32: BridgeNativeVideoWallpaper] = [:]
@@ -116,7 +119,8 @@ final class NativeVideoWallpaperHost {
         workspaceCenter: NotificationCenter = NSWorkspace.shared.notificationCenter,
         counters: RuntimeCounters? = nil,
         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
-        storage: (@MainActor (URL) async -> NativeVideoStoragePolicy.Location)? = nil
+        storage: (@MainActor (URL) async -> NativeVideoStoragePolicy.Location)? = nil,
+        switchHold: WallpaperSwitchHold? = nil
     ) {
         self.fetch = fetch
         self.reject = reject
@@ -137,15 +141,17 @@ final class NativeVideoWallpaperHost {
         self.counters = counters ?? .shared
         self.sleep = sleep
         self.storage = storage ?? { url in await NativeVideoStoragePolicy.location(of: url) }
+        self.switchHold = switchHold
     }
 
-    convenience init(bridge: WallpaperBridge) {
+    convenience init(bridge: WallpaperBridge, switchHold: WallpaperSwitchHold? = nil) {
         self.init(
             fetch: { try await bridge.nativeVideoWallpapers() },
             reject: { id, admissionKey, reason in
                 try await bridge.rejectNativeVideo(
                     wallpaperId: id, admissionKey: admissionKey, reason: reason)
-            })
+            },
+            switchHold: switchHold)
     }
 
     var activeDisplayIDs: Set<UInt32> { Set(surfaces.keys) }
@@ -306,7 +312,7 @@ final class NativeVideoWallpaperHost {
         // display, must stop playing here before anything else starts, so the
         // clip is never decoded or heard twice.
         for (displayID, surface) in surfaces where wanted[displayID] == nil {
-            close(displayID: displayID, surface: surface)
+            closeVacated(displayID: displayID, surface: surface)
         }
         // A surface is bound to the admission key it was accepted under, not
         // just to a wallpaper id. When the key changes the decision that
@@ -316,15 +322,33 @@ final class NativeVideoWallpaperHost {
         // Keeping the player would be the silent rate change, or the stale
         // file, that admission exists to prevent — so the surface is torn down
         // and the new identity goes through admission from the start.
-        for (displayID, wallpaper) in wanted {
+        //
+        // The decision is taken first and the old surface closed after it. Reading
+        // the file can take seconds, and a surface closed before that read would
+        // leave the display without a picture for as long (the system picture
+        // shows through, or black). The verdict is cached by admission key, so
+        // `open` below reuses it, and the old player is still stopped before any
+        // new one exists: nothing is decoded or heard twice. Old stops and new
+        // surfaces then follow each other without waiting for a file, which is
+        // what lets a held picture bridge them.
+        var replaced: [(displayID: UInt32, surface: NativeVideoSurface)] = []
+        for (displayID, wallpaper) in wanted.sorted(by: { $0.key < $1.key }) {
             guard let existing = descriptors[displayID], let surface = surfaces[displayID] else {
                 continue
             }
             if existing.wallpaperId != wallpaper.wallpaperId
                 || existing.admissionKey != wallpaper.admissionKey
             {
-                close(displayID: displayID, surface: surface)
+                _ = await admission(
+                    for: URL(fileURLWithPath: wallpaper.mediaPath), wallpaper: wallpaper, load: nil)
+                // The read may have been long; a newer pass or a shutdown took over
+                // meanwhile, and what is left of this list is out of date.
+                guard !stopped, generation == applyGeneration else { return }
+                replaced.append((displayID, surface))
             }
+        }
+        for (displayID, surface) in replaced where surfaces[displayID] === surface {
+            close(displayID: displayID, surface: surface)
         }
 
         for (displayID, wallpaper) in wanted.sorted(by: { $0.key < $1.key }) {
@@ -497,6 +521,9 @@ final class NativeVideoWallpaperHost {
                   let current = self.descriptors[displayID] else { return }
             self.cancelFirstFrameWatch(displayID)
             self.recordState(current, phase: .ready)
+            // The clip has a picture: the held one, if this window carries it, goes. A window
+            // that carries none does not mind.
+            self.switchHold?.contentReady(displayID: displayID)
         }
         surface.onHealthEvent = { [weak self, weak surface] event in
             guard let self, let surface, self.surfaces[displayID] === surface else { return }
@@ -509,8 +536,21 @@ final class NativeVideoWallpaperHost {
         // nothing owns and nothing can close.
         guard surfaces[displayID] === surface else { return }
         update(surface: surface, with: wallpaper, displayID: displayID)
+        // The window opens with the picture it replaces over the clip, so that it never
+        // reaches the screen black. The veil is on before `present`, which orders it in.
+        let holding = adoptHeldPicture(into: surface, displayID: displayID)
         surface.present()
+        // A layer that already had its picture when the callback was installed reported it
+        // before the veil existed; the veil goes now.
+        if holding, surface.isReadyForDisplay { switchHold?.contentReady(displayID: displayID) }
         armFirstFrameWatch(displayID: displayID, surface: surface, url: url, restarted: false)
+    }
+
+    /// Puts the picture a switch held for this display over the window about to open. False
+    /// when the display holds none, or the window has no layer to carry it.
+    private func adoptHeldPicture(into surface: NativeVideoSurface, displayID: UInt32) -> Bool {
+        guard let switchHold, let layer = surface.posterLayer else { return false }
+        return switchHold.adopt(into: layer, displayID: displayID)
     }
 
     // MARK: First frame
@@ -707,6 +747,9 @@ final class NativeVideoWallpaperHost {
         // Stop before handing over, so the clip is never being decoded by both
         // backends at once.
         close(displayID: displayID, surface: surface)
+        // The window the held picture sat on is closed, and the scene engine that takes the
+        // wallpaper is not the successor the hold was made for.
+        switchHold?.cancel(displays: [displayID])
         recordState(wallpaper, phase: .failed, message: refusal.reason)
         if settled { admissionCache[wallpaper.admissionKey] = refusal }
         Task { @MainActor [weak self] in
@@ -872,6 +915,10 @@ final class NativeVideoWallpaperHost {
                     + error.localizedDescription, load: load)
             onError?(error.localizedDescription)
         }
+        // The bridge answered, and with it the scene engine has presented the wallpaper or
+        // failed to. A refusal comes before any surface exists, so the picture a switch held
+        // is still waiting and the engine's scene has carried it; this lets it go.
+        switchHold?.engineSettled(displays: [wallpaper.displayId])
     }
 
     private func update(
@@ -913,6 +960,20 @@ final class NativeVideoWallpaperHost {
         guard states[wallpaper.displayId] != state else { return }
         states[wallpaper.displayId] = state
         onStateChanged?(state)
+    }
+
+    /// Closes the window of a display that has no native clip to show any more, because its
+    /// wallpaper went to another backend, was ejected, or the display is gone.
+    ///
+    /// A held picture that sat on this very window goes with it: nothing here takes its place,
+    /// and kept for the rest of its ceiling it would be taken for what is on screen by the next
+    /// switch and shown again, out of date. A picture that still waits for a window, or sits on
+    /// a scene, is not this window's and stays for its successor. A window that is closed to be
+    /// replaced does not come through here: its successor takes the picture with `adopt`.
+    private func closeVacated(displayID: UInt32, surface: NativeVideoSurface) {
+        let layer = surface.posterLayer
+        close(displayID: displayID, surface: surface)
+        switchHold?.windowClosed(layer, displayID: displayID)
     }
 
     private func close(displayID: UInt32, surface: NativeVideoSurface) {

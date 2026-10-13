@@ -279,9 +279,26 @@ describes what should happen and the log lines to read afterwards.
 - [ ] Switch from a paused wallpaper (Pause all): the switch takes at most about a quarter
       of a second longer; the log says whether the paused renderer delivered a still or
       `poster not delivered within 250 ms`.
-- [ ] Switch a scene to a web page and to a native-backend clip: the system picture or black
-      may still show for a moment, since those windows do not take the veil yet; the log shows
-      the held still released after about 8 seconds with `no window took it`.
+- [ ] Switch a scene to a web page: the system picture or black may still show for a moment,
+      since web windows do not take the veil yet; the log shows the held still released after
+      about 8 seconds with `no window took it`.
+- [ ] Native video backend (**Video playback** set to **Native video preferred**, a plain
+      video that **In use now** lists as `native`): switch from one clip to another. The first
+      clip keeps playing until the second one's window is up, which opens with the held
+      picture over it and fades it out on the clip's first frame, with no black or system
+      picture in between. The log has `frame captured`, `adopted by host` and `released ...
+      (host ready)`. Look for a flash as the picture goes, which would mean
+      `isReadyForDisplay` alone is a frame early.
+- [ ] Switch from a scene to a native clip, and from a clip to a scene: the system picture may
+      show for as long as the clip's metadata read takes after a scene (the engine closes the
+      scene's window first); a clip to a scene behaves like any scene switch.
+- [ ] Apply a video the native backend refuses (no video track, or a frame rate above the
+      target rate): the held picture stays until the scene engine's fallback has drawn, the
+      log has `veil on scene layer` and `released ... (scene first frame)`, and no clip
+      window appears.
+- [ ] Apply a clip stored on a slow or sleeping external drive: the old clip keeps playing
+      through the read. If the read outlasts 8 seconds the clip's window opens without a
+      picture over it and the log says `no window took it`.
 - [ ] Reapply wallpaper, Retry and a wallpaper update reload still empty the display first,
       as before.
 

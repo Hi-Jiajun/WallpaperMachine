@@ -9,6 +9,15 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-13 — Native video liveness detection after a long pause
+
+Observation only: the check logs and counts a stalled pipeline and acts on nothing. Commit `feat(native-video): detect a pipeline that stops delivering frames`, checked in an isolated worktree on macOS 27.0.1.
+
+- `python3 scripts/test.py --only NativeVideoLivenessTests --only NativeVideoHealthSupervisorTests --only NativeVideoWallpaperHostTests` — 100 passed, 0 failed, 0 skipped
+- `WALLPAPER_MACHINE_MEDIA_TESTS=1 python3 scripts/test.py --only NativeVideoPlayerMediaTests` — 31 passed, 0 skipped (the hev1 clip is frame-less on this OS, so its two cases ran); the other NativeVideo classes with media on: 182 passed, 0 failed, 0 skipped
+- The lock-screen extension target compiled the new `RuntimeCounter` case in the same builds.
+- Not run: the full gate, a Release build, any desktop run. Unverified: whether a real long suspension (covered desktop for hours, display sleep, Low Power Mode) ever costs a clip its decoder; no test reclaims one, so only the `nativeVideoPlaybackStalled` counter on a real Mac answers it. Cost of the check's video output on a 4K clip not measured.
+
 ## 2026-10-13 — Play only on the display in use
 
 Commit `feat(playback): optionally play only on the display you are using`: opt-in Playback toggle `Only play on the display I’m using`. ActiveDisplayTracker follows the pointer through event monitors that exist only while the option is on and two displays are connected; WallpaperPresentationPolicy treats every other display as hidden after a 3 s dwell and resumes at once, never darkening every display. No bridge or Rust change. Taken in a worktree; the full gate was not run here.
