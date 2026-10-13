@@ -50,10 +50,11 @@ never reconciles the desktop.
 
 The inspector's compact **General configuration** section holds mute, volume,
 [Audio response](audio-response.md), and media integration. **Audio and media
-status** expands to show their explanations and delivery status. **Wallpaper
-properties** follows, with the wallpaper's authored controls in their original
-order. **Displays** is collapsed below them and holds per-display playback
-configuration. General, property and display disclosures retain their state across
+status** expands to show their explanations and delivery status. **Displays**
+follows, collapsed, with per-display playback configuration, then **Collections**.
+**Wallpaper properties** comes last, with the wallpaper's authored controls in their
+original order, so a long property list never pushes the shorter sections out of
+reach. General, display and property disclosures retain their state across
 snapshot updates.
 
 Property rows place the label on the left and the checkbox, slider/value, combo
