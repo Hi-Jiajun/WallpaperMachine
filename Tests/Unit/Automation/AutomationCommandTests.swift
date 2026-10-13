@@ -50,6 +50,9 @@ final class AutomationCommandTests: XCTestCase {
             "wallpapermachine://layout?id=", "wallpapermachine://layout?id=a&id=b", "wallpapermachine://layout?id=a&display=primary",
             "wallpapermachine://apply?display=all", "wallpapermachine://apply?id=1&display=all&x=1",
             "wallpapermachine://apply?id=1&display=all&display=primary", "wallpapermachine://apply?id=&display=all",
+            // Removing a wallpaper from a display is the menu bar's own command: no link blanks a display.
+            "wallpapermachine://remove", "wallpapermachine://remove?display=primary", "wallpapermachine://removewallpaper",
+            "wallpapermachine://eject?display=primary", "wallpapermachine://clear",
         ] {
             XCTAssertNil(command(link), link)
         }

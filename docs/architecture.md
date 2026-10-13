@@ -64,7 +64,14 @@ automation schedulers, the web and native-video wallpaper hosts, system media).
   before fronting it; `showControlPanel` (menu bar, Dock click, Command-comma) and
   `applicationDidBecomeActive` use it.
 - **Menus.** The status item (`rebuildMenu`) offers Control Panel, playback and
-  wallpaper-navigation actions, **Lock Screen** and Exit. Lock Screen calls the private
+  wallpaper-navigation actions, **Lock Screen** and Exit. `StatusMenuModel`
+  (`App/Services/Automation/`) decides the layout without AppKit: one display that can show
+  its own wallpaper keeps the flat Previous / Next / Recently used, and two or more get a
+  submenu each (main display first, then left to right) holding that display's own commands,
+  **Remove from Display** or **Start Again**, and **Open in Control Panel**. `AppDelegate`
+  gathers its input (`statusMenuInput`), renders the entries and runs the chosen command
+  through `AppAutomation`, so a menu choice shares the display's queue slot with the panel
+  and a failure shows at the foot of the menu. Lock Screen calls the private
   `SACLockScreenImmediate` in login.framework, resolved with `dlsym` and left out when missing
   (`App/Services/Desktop/ScreenLock.swift`). The application menu holds the app menu
   (Settings…, Check for Updates…, Quit), **File → Close** (Command-W sends `performClose` to the

@@ -28,7 +28,8 @@ App/                               WallpaperMachine application target sources o
   Services/<Domain>/               domain logic and stores, one folder per domain:
     Appearance/                    AppTheme.swift: theme preference model and store
     Automation/                    keyboard shortcuts, App Intents, links, weekday/solar/appearance selection rules,
-                                   and temporary Focus choices with restoration
+                                   temporary Focus choices with restoration, and the menu bar menu's layout
+                                   (StatusMenuModel: flat for one display, a submenu per display for more)
     Desktop/                       multi-display copy/swap and recovery, desktop picture APIs, original-wallpaper ledger,
                                    scoped poster sync, read-only Space topology, presentation policy, playback rules,
                                    system conditions, display refresh and the screen shape of a display id

@@ -16,6 +16,10 @@ enum AutomationCommand: Equatable, Sendable {
     /// Applies an installed wallpaper on every enabled independent display in one step: all of
     /// them change or none does.
     case applyEverywhere(wallpaperID: String)
+    /// Takes whatever `display` shows (or the target display, when nil) off it and leaves it
+    /// empty; a playlist waits until the user puts a wallpaper there again. Only the menu bar
+    /// sends it: it has no link, so a web page or a script cannot blank a display.
+    case removeWallpaper(display: String?)
     case applyPlaylist(planID: String, display: String?)
     case applyPreset(presetID: String)
     case applyDisplayLayout(layoutID: String)

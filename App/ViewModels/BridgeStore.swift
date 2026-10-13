@@ -1055,6 +1055,18 @@ final class BridgeStore {
         if shownWallpaperID(on: displayId) == nil { onUserWallpaperRemoved?(wallpaperId, displayId) }
     }
 
+    /// Removes whatever `displayId` shows, as **Remove from display** does, for a caller that
+    /// does not know the wallpaper (the menu bar). It takes the display's turn in the command
+    /// queue, so a switch asked for before it finishes first and the wallpaper removed is the
+    /// one on the display when the turn comes; a display that is empty by then stays as it is.
+    func removeShownWallpaperAsync(displayId: String) async throws {
+        try await commands.run(slot: Self.activationSlot(displayId: displayId)) {
+            try validateActivationTarget(displayId)
+            guard let id = shownWallpaperID(on: displayId) else { return }
+            try await removeWallpaperFromDisplayAsync(displayId: displayId, wallpaperId: id)
+        }
+    }
+
     /// The wallpaper `displayId` shows of its own, nil when it is empty or mirrors another display
     /// (a mirror holds no assignment of its own).
     func shownWallpaperID(on displayId: String) -> String? {

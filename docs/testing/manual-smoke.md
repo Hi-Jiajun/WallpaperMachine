@@ -405,6 +405,27 @@ harness for WindowServer's share
 occlusion decisions treat a non-opaque window. The window stays opaque
 until such a measurement says otherwise.
 
+### The menu bar with two displays
+
+Needs two displays that each show their own wallpaper. The layout and the commands are
+unit-tested; how the menu draws and reads on real screens is not.
+
+- [ ] Open the menu bar item: there is one submenu per display instead of the flat
+      Previous / Next / Recently used, the main display first and the others left to
+      right as the screens sit on the desk. Long display names stay readable, and
+      VoiceOver reads each submenu by the display's name.
+- [ ] In the second display's submenu choose **Next Wallpaper** and an entry under
+      **Recently used**: only that display changes, whichever display the panel targets,
+      and the entry for what it shows is ticked.
+- [ ] Choose **Remove from Display** on one display: it empties and the other keeps its
+      wallpaper. Its submenu now offers **Start Again**; choosing it brings back the
+      wallpaper that was removed. With a Rotate playlist on that display, wait past the
+      interval after the removal: it stays empty until Start Again, Resume playlist or
+      another wallpaper.
+- [ ] Choose **Open in Control Panel** in the second display's submenu: the panel opens on
+      Installed with that display as the target. Mirror the second display or disable it:
+      the menu returns to the flat list.
+
 ### Scaling and posters
 
 - [ ] With a landscape clip, set each **Scaling mode** (Fill, Fit, Stretch, Original size),

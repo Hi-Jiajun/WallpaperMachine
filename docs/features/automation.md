@@ -5,8 +5,10 @@ appearance or Focus. Global keyboard shortcuts, actions in the Shortcuts app
 (and so Siri and Spotlight), and `wallpapermachine://` links run explicit
 commands (`AutomationCommand`)
 through `AppAutomation` into `AppDelegate.performAutomation`, which the menu bar's
-**Previous Wallpaper** and **Next Wallpaper** use too. They only do what the menu
-bar and the panel already offer: play, pause, the previous or next wallpaper,
+Previous, Next, Recently used, Remove from Display and Start Again items use too (with
+two or more displays the menu has a submenu for each, see
+[the menu bar](control-panel.md#menu-bar-one-display-at-a-time)). They only do what the
+menu bar and the panel already offer: play, pause, the previous or next wallpaper,
 apply an installed wallpaper, copy a saved playlist to a display, apply a saved
 property preset, or open the window. Automatic selection uses the same serialized
 wallpaper commands and keeps manual choices until the next event.
@@ -88,6 +90,7 @@ and retained if restore rolls back.
 | Apply wallpaper property preset | Applies a saved preset to its owning wallpaper on every display using it; rejects unapplied editor drafts. |
 | Apply display layout | Restores the saved wallpaper arrangement across its named displays, with full preflight and verified failure recovery. |
 | Open | Brings up the control panel, on Installed, Discover, pixiv or Settings when named. |
+| Remove from display | Menu bar only, with no link: takes whatever the named display shows off it and leaves it empty, so its playlist waits ([a display you cleared](playlists.md#a-display-you-cleared)). It takes the display's turn in the command queue and removes what the display shows then; an empty display is left as it is. |
 
 Previous, Next, Apply Wallpaper and Apply Saved Playlist act on the panel's target display unless a display is named, and
 only an enabled display showing its own wallpaper can be switched. Switches share
@@ -180,7 +183,12 @@ display names; Shortcuts supplies name-based pickers without requiring these IDs
 
 ## Verification
 
-Link parsing and refusals (`AutomationCommandTests`), waiting for the app and failures
+Link parsing and refusals, including that removing a wallpaper has no link
+(`AutomationCommandTests`), the menu bar's layout (`StatusMenuModelTests`: the flat
+menu for one display, a submenu per display with every command naming its own display,
+main display first then left to right, distinct titles, Remove becoming Start Again on
+an empty display, ten recent entries with the current one ticked, and which displays
+count), waiting for the app and failures
 reaching the caller (`AppAutomationTests`), hotkey preferences and the key-code and
 modifier mapping (`HotKeyPreferencesTests`, `GlobalHotKeysTests`), the planner, store and
 scheduler (`WallpaperAutomationPlannerTests`, `WallpaperAutomationStoreTests`,
@@ -194,6 +202,6 @@ rule merging and rollback in backups (`WallpaperBackupTests`) each have their ow
 the Space tests are listed in [Spaces verification](spaces.md#storage-and-verification).
 The domain inventory is in [coverage](../testing/coverage.md).
 
-These tests do not verify a real press of a registered shortcut, the Shortcuts app, a
-link opened from a browser, actual Focus transitions, system appearance notifications,
+These tests do not verify how the menu draws with two or more real displays, a real press
+of a registered shortcut, the Shortcuts app, a link opened from a browser, actual Focus transitions, system appearance notifications,
 Siri/Spotlight registration, visible panel layout or desktop playback.

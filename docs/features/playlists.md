@@ -41,13 +41,14 @@ clock times, so a daylight-saving day still switches at the time on the clock.
 **Change now** moves a rotating display along at once and starts a fresh
 interval; the row's note says roughly when the next change is due, or, for a rotation that
 waits for the unlock, that it changes then. The menu bar's
-**Next Wallpaper** does the same for the panel's target display when that display
-rotates, and otherwise takes the next wallpaper in library order. Both are asked
-for, so they also change a display that is paused or covered; only the timer's own
-changes wait (see below). When the playlist has nothing else to change to (its
-only wallpaper is already on screen), Change now and a link, keyboard shortcut or
-Shortcuts action asking for the next wallpaper say so instead of succeeding
-without a change.
+**Next Wallpaper**, on the display it is shown for, and a link, Shortcuts action or
+shortcut key asking for the next wallpaper, on the panel's target display unless one is
+named, do the same for a display that rotates, and otherwise take the next wallpaper
+in library order. All of them are asked for, so they also change a display that is
+paused or covered; only the timer's own changes wait (see below). When the playlist has
+nothing else to change to (its only wallpaper is already on screen), Change now and a
+link, keyboard shortcut or Shortcuts action asking for the next wallpaper say so
+instead of succeeding without a change.
 
 This display's list is edited from Installed: the list button in a wallpaper's
 details adds it to, or removes it from, the list of the target display, and a
@@ -133,8 +134,9 @@ later visual defect in a wallpaper that was accepted successfully.
 
 ### A display you cleared
 
-Taking the wallpaper off a display (**Eject** in Settings → Displays, or **Remove from
-display** in a wallpaper's details) is a choice too: the playlist does not undo it by
+Taking the wallpaper off a display (**Eject** in Settings → Displays, **Remove from
+display** in a wallpaper's details, or **Remove from Display** in the menu bar's submenu
+for that display) is a choice too: the playlist does not undo it by
 filling the display again at the next change. `BridgeStore.removeWallpaperFromDisplayAsync`
 reports the removal, and the app delegate puts the display's playlist on hold
 (`PlaylistStore.holds`, the `removedWallpaper` reason) when the playlist is Rotate or
@@ -255,7 +257,8 @@ when the notification was missed, after a wake or a user switch, and never at st
 stop. `WallpaperBackupTests` checks that a backup carries the trigger and rejects an
 unknown one.
 `WallpaperDisplayTransferIntegrationTests` checks that only the user's removal reports
-one, not a delete or a reload. `ControlPanelPlaybackToolsTests` drives reorder buttons
+one, not a delete or a reload, and that the menu bar's removal clears only the named
+display, waits behind a switch asked for first and refuses a mirrored or disabled display. `ControlPanelPlaybackToolsTests` drives reorder buttons
 and drag/drop in an offscreen panel, including an edit made while a drag is in
 progress, the Resume row in English and Chinese, and the How often menu offering the
 unlock choice and storing it. Real switching on a desktop, and the order of the

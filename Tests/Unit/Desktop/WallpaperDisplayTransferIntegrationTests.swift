@@ -258,6 +258,68 @@ final class WallpaperDisplayTransferIntegrationTests: XCTestCase {
         XCTAssertNil(store.shownWallpaperID(on: "primary"))
     }
 
+    /// The menu bar removes whatever a display shows, in that display's turn of the queue.
+    func testRemovingTheShownWallpaperClearsOnlyTheNamedDisplay() async throws {
+        var removed: [String] = []
+        store.onUserWallpaperRemoved = { id, display in removed.append("\(display)=\(id)") }
+
+        try await store.removeShownWallpaperAsync(displayId: "secondary")
+
+        XCTAssertEqual(bridge.assignments, ["primary": "a"], "the other display keeps its wallpaper")
+        XCTAssertEqual(bridge.ejections.map { "\($0.0)=\($0.1)" }, ["secondary=b"])
+        XCTAssertEqual(removed, ["secondary=b"], "a playlist is told to leave the display empty")
+        XCTAssertNil(store.shownWallpaperID(on: "secondary"))
+        XCTAssertFalse(store.commands.isBusy)
+
+        try await store.removeShownWallpaperAsync(displayId: "secondary")
+        XCTAssertEqual(bridge.ejections.count, 1, "an empty display has nothing to remove")
+        XCTAssertEqual(removed, ["secondary=b"])
+    }
+
+    func testRemovingTheShownWallpaperTakesWhatTheDisplayShowsWhenItsTurnComes() async throws {
+        var removed: [String] = []
+        store.onUserWallpaperRemoved = { id, display in removed.append("\(display)=\(id)") }
+        var release: CheckedContinuation<Void, Never>?
+        bridge.beforeApply = {
+            self.bridge.beforeApply = nil
+            await withCheckedContinuation { release = $0 }
+        }
+        let switching = Task { try await store.commands.run(slot: BridgeStore.activationSlot(displayId: "primary")) {
+            try await store.activateWallpaperAsync(id: "c", displayId: "primary", origin: .user)
+        } }
+        while release == nil { await Task.yield() }
+
+        let removal = Task { try await store.removeShownWallpaperAsync(displayId: "primary") }
+        while store.commands.waiting.isEmpty { await Task.yield() }
+        XCTAssertTrue(bridge.ejections.isEmpty, "it waits behind the switch the user asked for first")
+
+        release?.resume()
+        try await switching.value
+        try await removal.value
+        XCTAssertEqual(bridge.ejections.map { "\($0.0)=\($0.1)" }, ["primary=c"], "the switch finished, so c is what comes off")
+        XCTAssertNil(bridge.assignments["primary"])
+        XCTAssertEqual(bridge.assignments["secondary"], "b")
+        XCTAssertEqual(removed, ["primary=c"])
+    }
+
+    func testRemovingFromAMirroredOrDisabledDisplayIsRefused() async throws {
+        bridge.mirrors = ["secondary": "primary"]
+        try await store.refreshAllAsync()
+        do {
+            try await store.removeShownWallpaperAsync(displayId: "secondary")
+            XCTFail("a mirror holds no wallpaper of its own")
+        } catch {}
+        bridge.mirrors = [:]
+        bridge.eligible = ["primary"]
+        try await store.refreshAllAsync()
+        do {
+            try await store.removeShownWallpaperAsync(displayId: "secondary")
+            XCTFail("a disabled display cannot be changed")
+        } catch {}
+        XCTAssertTrue(bridge.ejections.isEmpty)
+        XCTAssertEqual(bridge.assignments, ["primary": "a", "secondary": "b"])
+    }
+
     func testLaterIndividualChoiceWaitsForTheLayoutThenWins() async throws {
         var release: CheckedContinuation<Void, Never>?
         bridge.beforeApply = {

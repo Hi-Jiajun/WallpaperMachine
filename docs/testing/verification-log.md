@@ -25,6 +25,15 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-13 — Menu bar: control each display
+
+The menu bar menu gets a submenu per display when two or more displays can show their own wallpaper (StatusMenuModel), with Remove from Display, Start Again and Open in Control Panel; one display keeps the flat menu. Lane worktree, targeted run only, not the full gate.
+
+- `python3 scripts/test.py --only StatusMenuModelTests --only AutomationCommandTests --only WallpaperDisplayTransferIntegrationTests --only AppAutomationTests --only UserCommandQueueTests --only WallpaperActivationRecoveryTests --only WallpaperDisplayTransferTests --only HotKeyPreferencesTests --only GlobalHotKeysTests --only DisplayTitleResolverTests` — exit 0; 107 passed, 0 failed, 0 skipped
+- `python3 -m unittest discover -s scripts/tests -p test_panel_localization.py` — OK (6 tests); the three new native strings are in all four languages
+- Not run: the full `python3 scripts/test.py` gate, `python3 scripts/check_renderer.py` (no Rust, bridge or renderer change), Release build, any desktop run
+- Not covered: how the NSMenu draws, orders and reads (VoiceOver) with two or more real displays, and Remove then Start Again on real displays; see manual-smoke "The menu bar with two displays"
+
 ## 2026-10-13 — Apply a wallpaper to every display
 
 A new transfer request, WallpaperDisplayTransfer.Request.everywhere, expands over the eligible displays when it is planned (main display first), so it keeps copy and swap's preflight, re-plan after preparing and verified rollback. Entry points: the inspector's Apply to all displays, apply?id=…&display=all and Apply Wallpaper's On all displays. Commit 6 of the desktop-menubar lane, checked in an isolated worktree on macOS 27.0.1.
@@ -107,15 +116,3 @@ Commit `fix(power): read the power source again when the Mac wakes`: WallpaperBr
 - `python3 scripts/check_rust.py` — exit 0; bridge 401 passed, core 224 passed; local-corpus shader cases skipped.
 - `python3 scripts/check_renderer.py` — exit 0; skipped: 4 asset-dependent cases (text_object_runtime_test x2, playback_gpu_test, metal_scene_draw_smoke).
 - Gap: a real plug or unplug during sleep, and whether IOKit answers correctly at the instant of wake, were not exercised; headless tests prove the repair logic and idempotence only.
-
-## 2026-10-13 — Battery share of Energy use and the per-wallpaper rating
-
-Energy use's battery line was missing on macOS 27 (capacity keys moved into BatteryData, no CellVoltage); the per-wallpaper rating now carries the same share. M5 Pro MacBook Pro, macOS 27.0.1, on battery.
-
-- Coalition fields rechecked under a Metal load: field 41 summed over all coalitions 28.3 W against IOReport `GPU Energy` 29.5 W (4 %); field 11 tracks CPU energy
-- `BatteryCapacity.fullChargeWattHours()` on the live registry: nil before the fix, 98.5 Wh after (FullChargeCapacity 8,530 mAh × 3 × 3.85 V; rated 99.6 Wh)
-- `python3 scripts/test.py --only EnergyUsageMonitorTests` — failed on the new macOS 27 fixture before the fix, 13 passed after
-- `python3 scripts/test.py --only WallpaperEnergyRatingsTests` — 11 passed
-- Inspector sentence rendered with Node from `panel.js`'s `energyRating` and the real catalogs in en, zh-Hans, zh-Hant and ja, with and without a battery share
-- `python3 scripts/test.py` — 1342 passed, 0 failed, 14 skipped
-- Not checked: the rendered panel on screen (no desktop run requested); the rating line on a real rated wallpaper

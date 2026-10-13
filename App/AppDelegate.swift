@@ -1472,51 +1472,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
 
         menu.removeAllItems()
-        menu.addItem(menuItem("Control Panel", action: #selector(openControlPanel)))
-
-        var actions: [NSMenuItem] = []
-        if let store,
-           playbackSnapshotCurrent,
-           !store.appSnapshot.activeWallpaperIds.isEmpty
-        {
-            let playbackTitle: String.LocalizationValue = store.appSnapshot.playbackState == .paused ? "Play" : "Pause"
-            actions.append(menuItem(playbackTitle, action: #selector(togglePlayback)))
-        }
-        if let store, !shutdownInProgress, !shutdownComplete,
-           store.previousWallpaperID(displayId: controlPanelNavigation.targetDisplayID) != nil {
-            actions.append(menuItem("Previous Wallpaper", action: #selector(activatePreviousWallpaper)))
-        }
-        if let store, !shutdownInProgress, !shutdownComplete,
-           canActivateNextWallpaper(store: store, displayId: controlPanelNavigation.targetDisplayID)
-        {
-            actions.append(menuItem("Next Wallpaper", action: #selector(activateNextWallpaper)))
-        }
-        if let store, !shutdownInProgress, !shutdownComplete {
-            let display = controlPanelNavigation.targetDisplayID
-            let available = Dictionary(store.librarySnapshot.wallpapers.filter(\.supported).map { ($0.id, $0.title) },
-                                       uniquingKeysWith: { first, _ in first })
-            let recent = store.history.recent(on: display, available: Set(available.keys))
-            if !recent.isEmpty {
-                let parent = NSMenuItem(title: String(localized: "Recently used"), action: nil, keyEquivalent: "")
-                let submenu = NSMenu()
-                for id in recent.prefix(10) {
-                    let item = NSMenuItem(title: available[id] ?? id, action: #selector(activateRecentWallpaper(_:)), keyEquivalent: "")
-                    item.target = self
-                    item.representedObject = ["id": id, "display": display]
-                    item.state = store.isWallpaperActive(id: id, displayId: display) ? .on : .off
-                    submenu.addItem(item)
-                }
-                parent.submenu = submenu
-                actions.append(parent)
-            }
-        }
-        if ScreenLock.isAvailable {
-            actions.append(menuItem("Lock Screen", action: #selector(lockScreen)))
-        }
-        if !actions.isEmpty {
-            menu.addItem(.separator())
-            actions.forEach(menu.addItem)
-        }
+        statusMenuItems(for: StatusMenuModel.entries(for: statusMenuInput())).forEach(menu.addItem)
 
         if let item = updateMenuItem() {
             menu.addItem(.separator())
@@ -1557,6 +1513,96 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         item.isEnabled = false
         return item
+    }
+
+    /// What the status menu's layout depends on. While the app starts or quits no display is
+    /// offered, since a command on one could not run.
+    private func statusMenuInput() -> StatusMenuModel.Input {
+        var displays: [StatusMenuModel.Display] = []
+        if let store, !shutdownInProgress, !shutdownComplete {
+            let screens = WebWallpaperHost.systemScreens()
+            let rows = StatusMenuModel.eligibleDisplays(store.settingsSnapshot.displays, connected: Set(screens.map(\.id)))
+            let titles = DisplayTitleResolver.system.resolved()
+            let candidates = rows.map { row -> StatusMenuModel.Candidate in
+                let physicalID = ResolvedDisplayTitles.liveDisplayID(row.displayId, title: row.title)
+                let frame = screens.first { $0.id == physicalID }?.frame
+                return StatusMenuModel.Candidate(
+                    id: row.displayId, title: titles.title(row.title, displayId: row.displayId),
+                    physicalID: physicalID, minX: Double(frame?.minX ?? 0))
+            }
+            let wallpapers = Dictionary(store.librarySnapshot.wallpapers.filter(\.supported).map { ($0.id, $0.title) },
+                                        uniquingKeysWith: { first, _ in first })
+            let available = Set(wallpapers.keys)
+            displays = StatusMenuModel.orderedDisplays(candidates, mainDisplay: screens.first?.id).map { candidate in
+                StatusMenuModel.Display(
+                    id: candidate.id, title: candidate.title, wallpaperID: store.shownWallpaperID(on: candidate.id),
+                    canPrevious: store.previousWallpaperID(displayId: candidate.id) != nil,
+                    canNext: canActivateNextWallpaper(store: store, displayId: candidate.id),
+                    recent: store.history.recent(on: candidate.id, available: available).map {
+                        StatusMenuModel.Recent(id: $0, title: wallpapers[$0] ?? $0)
+                    })
+            }
+        }
+        return StatusMenuModel.Input(
+            playbackIsCurrent: playbackSnapshotCurrent,
+            hasActiveWallpapers: !(store?.appSnapshot.activeWallpaperIds.isEmpty ?? true),
+            paused: store?.appSnapshot.playbackState == .paused,
+            displays: displays, canLockScreen: ScreenLock.isAvailable)
+    }
+
+    private func statusMenuItems(for entries: [StatusMenuModel.Entry]) -> [NSMenuItem] {
+        entries.map { entry -> NSMenuItem in
+            switch entry {
+            case .separator:
+                return .separator()
+            case .command(let command, let title, let checked):
+                let item = NSMenuItem(title: title, action: #selector(statusMenuItemChosen(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = command
+                item.state = checked ? .on : .off
+                return item
+            case .submenu(let title, let entries):
+                let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+                let submenu = NSMenu()
+                statusMenuItems(for: entries).forEach(submenu.addItem)
+                item.submenu = submenu
+                return item
+            }
+        }
+    }
+
+    /// One action for every status menu item that runs a command: switching goes through the
+    /// same path as a link or a shortcut key, so it shares the display's queue slot and shows
+    /// a failure at the foot of the menu.
+    @objc private func statusMenuItemChosen(_ sender: NSMenuItem) {
+        guard let command = sender.representedObject as? StatusMenuModel.Command else { return }
+        switch command {
+        case .openControlPanel:
+            openControlPanel()
+        case .playPause:
+            togglePlayback()
+        case .previous(let display):
+            runAutomation(.previous(display: display))
+        case .next(let display):
+            guard let store, !shutdownInProgress, !shutdownComplete,
+                  canActivateNextWallpaper(store: store, displayId: display)
+            else { return }
+            runAutomation(.next(display: display))
+        case .apply(let id, let display), .startAgain(let id, let display):
+            runAutomation(.apply(wallpaperID: id, display: display))
+        case .remove(let display):
+            runAutomation(.removeWallpaper(display: display))
+        case .openInPanel(let display):
+            // The panel's own target check, since the display may have changed since the menu opened.
+            if let store, store.settingsSnapshot.displays.contains(where: {
+                $0.displayId == display && $0.enabled && $0.mode == .standalone
+            }) {
+                controlPanelNavigation.targetDisplayID = display
+            }
+            showControlPanel(selection: .wallpaper)
+        case .lockScreen:
+            lockScreen()
+        }
     }
 
     @objc private func openControlPanel() {
@@ -1859,26 +1905,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         return store.nextWallpaperID(displayId: displayId) != nil
     }
 
-    @objc private func activateNextWallpaper() {
-        let displayId = controlPanelNavigation.targetDisplayID
-        guard let store, !shutdownInProgress, !shutdownComplete,
-              canActivateNextWallpaper(store: store, displayId: displayId)
-        else {
-            return
-        }
-        runAutomation(.next(display: displayId))
-    }
-
-    @objc private func activatePreviousWallpaper() {
-        runAutomation(.previous(display: controlPanelNavigation.targetDisplayID))
-    }
-
-    @objc private func activateRecentWallpaper(_ sender: NSMenuItem) {
-        guard let value = sender.representedObject as? [String: String],
-              let id = value["id"], let display = value["display"] else { return }
-        runAutomation(.apply(wallpaperID: id, display: display))
-    }
-
     /// Runs a command from a link, a keyboard shortcut or the menu bar. A failure shows in the
     /// menu bar menu, as one from the menu itself does.
     private func runAutomation(_ command: AutomationCommand) {
@@ -1949,6 +1975,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             }
             // One command for the whole operation, which takes its own turn in the queue.
             try await store.activateWallpaperEverywhereAsync(id: id)
+        case .removeWallpaper(let display):
+            // Takes the display's turn in the queue, and leaves its playlist waiting.
+            try await store.removeShownWallpaperAsync(displayId: try automationDisplay(display, store: store))
         case .applyPlaylist(let id, let display):
             let displayID = try automationDisplay(display, store: store)
             try await store.commands.run(slot: BridgeStore.activationSlot(displayId: displayID)) {
@@ -1989,13 +2018,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     private static func availableAutomationDisplays(store: BridgeStore) -> [BridgeDisplaySettingsRow] {
-        let connected = Set(WebWallpaperHost.systemScreens().map(\.id))
-        return store.settingsSnapshot.displays.filter { display in
-            guard display.enabled, display.mode == .standalone,
-                let physicalID = ResolvedDisplayTitles.liveDisplayID(display.displayId, title: display.title)
-            else { return false }
-            return connected.contains(physicalID)
-        }
+        StatusMenuModel.eligibleDisplays(store.settingsSnapshot.displays,
+                                         connected: Set(WebWallpaperHost.systemScreens().map(\.id)))
     }
 
     /// The display a command names, or the panel's target display; only an enabled display
