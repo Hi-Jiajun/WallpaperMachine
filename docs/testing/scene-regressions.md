@@ -464,6 +464,16 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
     its card covers its whole target (`ABareComposeLayerAnotherSamplesIsDrawnOnlyIntoItsComposite`).
     A mask that paints that background back over later layers otherwise has
     nothing to sample, and native Metal falls back.
+  - A sampled layer inside a compose layer is drawn into its own composite as
+    well as into the compose layer's picture, so the compose layer's own effect
+    can sample its child (`AComposeLayersEffectCanSampleItsOwnChild`; pixels on
+    the native backend in `MetalSceneDraw.AComposeLayersEffectSamplesItsOwnChild`).
+    Drawn only into the compose target, the child had no composite: the graph
+    logged `link tex <id> not found` and native Metal fell back at prepare.
+    Hidden for good (authored or by a property) it is only its composite; hidden
+    by a script it keeps its draw into the picture, since nothing rebuilds the
+    graph when the script shows it again. The same rule decides whether a
+    sampled top-level layer keeps its on-screen draw.
   - A linked composite's size is never folded into the material as a zero at
     parse time (the card padding divides by it and every texture coordinate of
     the consumer's card becomes `NaN`), and nothing stale is folded in its place:

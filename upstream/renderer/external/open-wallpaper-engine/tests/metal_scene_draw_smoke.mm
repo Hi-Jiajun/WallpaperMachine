@@ -732,6 +732,125 @@ TEST_F(MetalSceneDraw, ParsedHdrMissingLayerSourceRetainsBackendRejection)
     EXPECT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::LegacyVulkan);
 }
 
+namespace
+{
+
+/// A compose layer covering the canvas over one child: a 64x32 card of one
+/// colour in its middle. The compose layer's effect samples that child as a
+/// layer texture and shows it with red and blue swapped wherever the child
+/// itself is not part of the compose layer's picture.
+std::filesystem::path WriteComposePaletteFixture(const std::filesystem::path& root)
+{
+    const auto project = WriteFixture(root);
+    const std::string vertex =
+        "uniform mat4 g_ModelViewProjectionMatrix;\n"
+        "attribute vec3 a_Position;\nattribute vec2 a_TexCoord;\n"
+        "varying vec2 v_TexCoord;\n"
+        "void main(){ gl_Position=g_ModelViewProjectionMatrix*vec4(a_Position,1.0);"
+        "v_TexCoord=a_TexCoord; }\n";
+    const std::map<std::string, std::string> files {
+        { "models/util/composelayer.json",
+          R"({"passthrough":true,"material":"materials/util/composelayer.json"})" },
+        { "materials/util/composelayer.json",
+          R"({"passes":[{"shader":"palette_sample","blending":"translucent","cullmode":"nocull",)"
+          R"("depthtest":"disabled","depthwrite":"disabled","textures":["_rt_FullFrameBuffer"]}]})" },
+        { "models/palette.json", R"({"width":64,"height":32,"material":"materials/palette.json"})" },
+        { "materials/palette.json",
+          R"({"passes":[{"shader":"palette_fill","blending":"translucent","cullmode":"nocull",)"
+          R"("depthtest":"disabled","depthwrite":"disabled"}]})" },
+        { "effects/swap/effect.json",
+          R"({"name":"swap","passes":[{"material":"materials/swap.json"}]})" },
+        { "materials/swap.json",
+          R"({"passes":[{"shader":"palette_swap","blending":"translucent","cullmode":"nocull",)"
+          R"("depthtest":"disabled","depthwrite":"disabled","textures":[null,null]}]})" },
+        { "shaders/palette_sample.vert", vertex },
+        { "shaders/palette_sample.frag",
+          "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\n"
+          "void main(){ gl_FragColor=texture(g_Texture0,v_TexCoord); }\n" },
+        { "shaders/palette_fill.vert", vertex },
+        { "shaders/palette_fill.frag",
+          "varying vec2 v_TexCoord;\n"
+          "void main(){ gl_FragColor=vec4(0.25,0.5,0.75,1.0); }\n" },
+        { "shaders/palette_swap.vert", vertex },
+        { "shaders/palette_swap.frag",
+          "uniform sampler2D g_Texture0;\nuniform sampler2D g_Texture1;\n"
+          "varying vec2 v_TexCoord;\nvoid main(){\n"
+          "vec4 picture=texture(g_Texture0,v_TexCoord);\n"
+          "vec3 palette=texture(g_Texture1,v_TexCoord).bgr;\n"
+          "gl_FragColor=vec4(mix(palette,picture.rgb,picture.a),1.0); }\n" },
+        { "layout.json",
+          R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+          R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0.0,0.0,0.0],)"
+          R"("cameraparallax":false,"orthogonalprojection":{"width":384,"height":256}},)"
+          R"("objects":[{"id":1,"name":"container","image":"models/util/composelayer.json",)"
+          R"("size":[384,256],"origin":[192,128,0],"copybackground":false,"dependencies":[2],)"
+          R"("effects":[{"file":"effects/swap/effect.json","visible":true,)"
+          R"("passes":[{"textures":[null,"_rt_imageLayerComposite_2_a"]}]}]},)"
+          R"({"id":2,"name":"palette","parent":1,"image":"models/palette.json",)"
+          R"("origin":[0,0,0],"visible":true}]})" },
+    };
+    for (const auto& [name, contents] : files) {
+        const auto path = root / name;
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream(path) << contents;
+    }
+    return project;
+}
+
+} // namespace
+
+// A compose layer's effect sampling the layer's own child found no composite
+// of it: the child was drawn only into the compose layer's target, so the
+// effect's input stayed empty and the native backend could not draw it.
+TEST_F(MetalSceneDraw, AComposeLayersEffectSamplesItsOwnChild)
+{
+    const auto  directory = root_ / "compose-palette";
+    const auto  project   = WriteComposePaletteFixture(directory);
+    LoadedScene loaded;
+    std::string error;
+    ASSERT_TRUE(LoadScene(project, directory / "cache", loaded, error)) << error;
+    auto& scene = *loaded.scene;
+    ASSERT_TRUE(scene.layer_texture_error.empty()) << scene.layer_texture_error;
+    const auto selection = SelectSceneBackend(scene);
+    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    const auto graph = sceneToRenderGraph(scene);
+    ASSERT_NE(graph, nullptr);
+
+    @autoreleasepool {
+        CAMetalLayer* layer = [CAMetalLayer layer];
+        layer.device        = MTLCreateSystemDefaultDevice();
+        layer.pixelFormat   = MTLPixelFormatBGRA8Unorm;
+        layer.drawableSize  = CGSizeMake(384, 256);
+        MetalRender render;
+        ASSERT_TRUE(render.init(MetalRenderInitInfo {
+            .metal_layer = (__bridge void*)layer, .width = 384, .height = 256,
+            .render_width = 384, .render_height = 256, .display_scale_factor = 1.0,
+        }));
+        ASSERT_TRUE(render.compileRenderGraph(scene, *graph)) << render.lastError();
+        ASSERT_TRUE(render.drawFrame(scene)) << render.lastError();
+        std::vector<uint8_t> bytes;
+        std::vector<float>   radiance;
+        uint32_t             width = 0, height = 0;
+        ASSERT_TRUE(render.ReadRenderTargetForTests(
+            scene.ResolveRenderTargetName(SpecTex_Default), bytes, width, height, &radiance));
+        ASSERT_EQ(width, 384u);
+        ASSERT_EQ(height, 256u);
+        const auto expect_color = [&](uint32_t x, uint32_t y, std::array<float, 3> expected) {
+            const size_t pixel = (y * width + x) * 4;
+            for (size_t channel = 0; channel < 3; ++channel) {
+                EXPECT_NEAR(radiance[pixel + channel], expected[channel], 0.01f)
+                    << "pixel " << x << "," << y << " channel " << channel;
+            }
+        };
+        // The child where it sits in the compose layer's picture...
+        expect_color(192, 128, { 0.25f, 0.5f, 0.75f });
+        // ...and, everywhere else, the effect's view of the child's own card.
+        expect_color(32, 32, { 0.75f, 0.5f, 0.25f });
+        expect_color(352, 224, { 0.75f, 0.5f, 0.25f });
+        render.destroy();
+    }
+}
+
 TEST_F(MetalSceneDraw, TranslatedAuthorShaderCompilesAndDrawsTheScene)
 {
     const auto project = WriteFixture(root_ / "project");

@@ -138,6 +138,15 @@ static bool ShouldDebugSkipGraphPass(const SceneNode* node, std::string_view mat
     return false;
 }
 
+/// Hidden by a visibility only a reload changes, its own or an ancestor's.
+static bool HiddenUntilReload(const SceneNode* node)
+{
+    for (const auto* current = node; current != nullptr; current = current->Parent()) {
+        if (! current->Visible() && current->VisibilitySettled()) return true;
+    }
+    return false;
+}
+
 struct ComposeTarget
 {
     std::string target;
@@ -416,6 +425,8 @@ static void ToGraphPass(
     if (mode == GraphPassMode::BaseOnly && IsComposeEffectNode(scene, node)) {
         camera_override = ActiveCameraName(scene);
     }
+    // Where the layer draws before a compose layer around it claims the draw.
+    const std::string scene_output = output;
     const bool route_effect_final_to_compose =
         IsResolvedImageEffectFinalNode(scene, node, visibility_node);
     if (!output.empty() && (output == SpecTex_Default || route_effect_final_to_compose)) {
@@ -431,8 +442,12 @@ static void ToGraphPass(
     if (mode != GraphPassMode::EffectsOnly && !node->SkipRenderPass()) {
         const bool resolved_final =
             IsResolvedImageEffectFinalNode(scene, node, visibility_node);
-        const auto draw_output = IsolateReferencedLayerOutput(
-            scene, extra, imgId, output, imgeff, resolved_final);
+        // Inside a compose layer a referenced layer is part of that layer's
+        // picture, and its own card besides: the compose layer's effects may
+        // sample it too.
+        const auto isolated_output = IsolateReferencedLayerOutput(
+            scene, extra, imgId, scene_output, imgeff, resolved_final);
+        const auto draw_output = isolated_output != scene_output ? isolated_output : output;
         const bool capture_link =
             extra.referenced_ids.count((size_t)imgId) != 0 &&
             draw_output != SpecTex_Default &&
@@ -499,9 +514,11 @@ static void ToGraphPass(
         if (! composite_only || sstart_with(draw_output, WE_IMAGE_LAYER_COMPOSITE_PREFIX)) {
             add_draws(draw_output, composite_camera, imgeff != nullptr, capture_link);
         }
-        if (draw_output != output && output == SpecTex_Default && ! composite_only) {
+        if (draw_output != output && ! composite_only) {
+            // Hidden now, a layer a script shows later still needs this draw:
+            // nothing asks for a new graph when it appears.
             auto* vis = visibility_node != nullptr ? visibility_node : node;
-            if (vis == nullptr || vis->EffectiveVisible()) {
+            if (vis == nullptr || ! HiddenUntilReload(vis)) {
                 add_draws(output, camera_override, false, false);
             }
         }
@@ -544,11 +561,7 @@ std::unique_ptr<rg::RenderGraph> wallpaper::sceneToRenderGraph(Scene& scene) {
     };
     if (scene.sceneGraph != nullptr) mark_producing(mark_producing, scene.sceneGraph.get());
     const auto left_out = [&producing](const SceneNode* node) {
-        if (producing.contains(node)) return false;
-        for (const auto* current = node; current != nullptr; current = current->Parent()) {
-            if (! current->Visible() && current->VisibilitySettled()) return true;
-        }
-        return false;
+        return ! producing.contains(node) && HiddenUntilReload(node);
     };
     scene.render_excluded_nodes.clear();
     const auto note_left_out = [&extra](SceneNode* node) {

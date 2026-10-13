@@ -92,12 +92,17 @@ void MountFiles(fs::VFS& vfs, std::map<std::string, std::string> extra = {}) {
     ASSERT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
 }
 
+/// With `properties`, parsed with a runtime as the wallpaper is, so a layer the
+/// scene file hides is hidden for good rather than until a script says otherwise.
 std::shared_ptr<Scene> ParseScene(fs::VFS& vfs, std::string_view objects,
-                                  std::map<std::string, std::string> extra = {}) {
+                                  std::map<std::string, std::string> extra = {},
+                                  const ProjectProperties* properties = nullptr) {
     MountFiles(vfs, std::move(extra));
     audio::SoundManager sound;
     WPSceneParser       parser;
-    return parser.Parse("layer-texture", SceneJson(objects), vfs, sound);
+    return parser.Parse(
+        SceneParseRequest { .scene_id = "layer-texture", .project_properties = properties },
+        SceneJson(objects), vfs, sound);
 }
 
 const vulkan::CustomShaderPass* FindPassByNode(
@@ -350,7 +355,8 @@ TEST(LayerTextureReference, CompositeAddressingFollowsTheSourceLayersClampUvs) {
 }
 
 TEST(LayerTextureReference, ExternalMaterialsKeepHiddenTransitiveProducers) {
-    fs::VFS vfs;
+    const ProjectProperties properties {};
+    fs::VFS                 vfs;
     auto parsed = ParseScene(vfs, R"([
         {"id":159,"name":"source","image":"image.json","visible":false},
         {"id":161,"name":"consumer","image":"outer.json"},
@@ -360,7 +366,8 @@ TEST(LayerTextureReference, ExternalMaterialsKeepHiddenTransitiveProducers) {
        { "/outer_mat.json",
          R"({"passes":[{"shader":"genericimage","textures":["_rt_imageLayerComposite_160_a"]}]})" },
        { "/linked_mat.json",
-         R"({"passes":[{"shader":"genericimage","textures":["_rt_imageLayerComposite_159_a"]}]})" }});
+         R"({"passes":[{"shader":"genericimage","textures":["_rt_imageLayerComposite_159_a"]}]})" }},
+      &properties);
     ASSERT_NE(parsed, nullptr);
     const auto graph = sceneToRenderGraph(*parsed);
     ASSERT_NE(graph, nullptr);
@@ -706,6 +713,99 @@ TEST(LayerTextureReference, ABareComposeLayerAnotherSamplesIsDrawnOnlyIntoItsCom
     const auto unused_graph = sceneToRenderGraph(*unused);
     ASSERT_NE(unused_graph, nullptr);
     EXPECT_EQ(FindPassByNode(*unused_graph, "behind"), nullptr);
+}
+
+// A compose layer's effect may sample one of the layer's own children -- a
+// solid card a script tints, kept as a palette -- while that child is also
+// part of what the compose layer shows. Inside a compose layer the child was
+// drawn only into the compose target, never into a composite of its own, so
+// the effect found nothing to sample and was skipped on both backends.
+TEST(LayerTextureReference, AComposeLayersEffectCanSampleItsOwnChild) {
+    constexpr std::string_view kTintFrag = R"(uniform sampler2D g_Texture0;
+uniform sampler2D g_Texture1;
+varying vec2 v_TexCoord;
+void main() {
+  gl_FragColor = texture(g_Texture0, v_TexCoord) * texture(g_Texture1, v_TexCoord);
+}
+)";
+    // A child hidden for good is only its composite; one a script hides may
+    // show again without a new graph, so it keeps its place in the picture.
+    const std::array<std::pair<std::string_view, bool>, 3> visibilities { {
+        { "true", true },
+        { "false", false },
+        { R"({"script":"export function update(value) { return value; }","value":false})", true },
+    } };
+    for (const auto& [visible, in_picture] : visibilities) {
+        SCOPED_TRACE(visible);
+        const ProjectProperties properties {};
+        fs::VFS                 vfs;
+        auto                    parsed = ParseScene(vfs, std::string(R"([
+            {"id":1,"name":"container","image":"models/util/composelayer.json",
+             "size":[64,32],"origin":[32,16,0],"dependencies":[2],
+             "effects":[{"file":"effects/tint/effect.json","visible":true,
+                         "passes":[{"textures":[null,"_rt_imageLayerComposite_2_a"]}]}]},
+            {"id":2,"name":"palette","parent":1,"image":"small.json","origin":[10,5,0],
+             "visible":)") + std::string(visible) + "}]",
+          {{ "/models/util/composelayer.json",
+             R"({"passthrough":true,"material":"materials/util/composelayer.json"})" },
+           { "/materials/util/composelayer.json",
+             R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":["_rt_FullFrameBuffer"]}]})" },
+           { "/small.json", R"({"width":16,"height":8,"material":"mat.json"})" },
+           { "/effects/tint/effect.json",
+             R"({"name":"tint","passes":[{"material":"materials/tint.json"}]})" },
+           { "/materials/tint.json",
+             R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"tint","textures":[null,null]}]})" },
+           { "/shaders/tint.vert", std::string(kVert) },
+           { "/shaders/tint.frag", std::string(kTintFrag) }},
+          &properties);
+        ASSERT_NE(parsed, nullptr);
+        EXPECT_TRUE(parsed->layer_texture_error.empty()) << parsed->layer_texture_error;
+        AddScreenTarget(*parsed);
+        SceneNode* container = nullptr;
+        for (auto& child : parsed->sceneGraph->GetChildren()) {
+            if (child->Name() == "container") container = child.get();
+        }
+        ASSERT_NE(container, nullptr);
+        const auto camera = parsed->cameras.find(container->Camera());
+        ASSERT_NE(camera, parsed->cameras.end());
+        ASSERT_TRUE(camera->second->HasImgEffect());
+        const auto compose_target =
+            parsed->ResolveRenderTargetName(camera->second->GetImgEffect()->FirstTarget());
+
+        const auto graph = sceneToRenderGraph(*parsed);
+        ASSERT_NE(graph, nullptr);
+        const vulkan::CustomShaderPass* tint = nullptr;
+        for (const auto id : graph->topologicalOrder()) {
+            auto* pass = dynamic_cast<const vulkan::CustomShaderPass*>(graph->getPass(id));
+            if (pass == nullptr) continue;
+            const auto& textures = pass->desc().textures;
+            if (std::find(textures.begin(), textures.end(), GenLinkTex(2)) != textures.end())
+                tint = pass;
+        }
+        ASSERT_NE(tint, nullptr) << "the effect was given nothing to sample";
+        const auto* link = FindLinkCopy(*graph, GenLinkTex(2));
+        ASSERT_NE(link, nullptr);
+        EXPECT_EQ(link->desc().src, LayerCompositeTargetKey(2));
+
+        // The palette is its own card in its composite, and still part of the
+        // compose layer's picture wherever it shows.
+        std::vector<std::string> outputs;
+        const vulkan::CustomShaderPass* composite = nullptr;
+        for (const auto id : graph->topologicalOrder()) {
+            auto* pass = dynamic_cast<const vulkan::CustomShaderPass*>(graph->getPass(id));
+            if (pass == nullptr || pass->desc().node == nullptr ||
+                pass->desc().node->Name() != "palette")
+                continue;
+            outputs.push_back(pass->desc().output);
+            if (pass->desc().output == LayerCompositeTargetKey(2)) composite = pass;
+        }
+        auto expected = std::vector<std::string> { LayerCompositeTargetKey(2) };
+        if (in_picture) expected.push_back(compose_target);
+        EXPECT_EQ(outputs, expected);
+        ASSERT_NE(composite, nullptr);
+        ExpectCardFillsItsTarget(*parsed, *composite, { 8.0, 4.0 });
+        EXPECT_TRUE(composite->desc().node->MustProduce());
+    }
 }
 
 // A wallpaper whose settings offer a choice -- a theme, a language, a date
