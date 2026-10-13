@@ -141,7 +141,7 @@ without opening the window.
 | **Swift shell** | The AppKit app. Its control panel is HTML in `WKWebView` ([`WebUI/`](WebUI)), and [web wallpapers](docs/features/web-wallpapers.md) run in web views of their own. |
 | **Rust core** | The vendored renderer ([`upstream/renderer`](upstream/renderer)): displays, wallpaper windows, video decode and audio capture, bridged to Swift with uniffi. |
 | **C++ scene engine** | Open Wallpaper Engine, statically linked into the Rust core, draws scene wallpapers. |
-| **Metal, via MoltenVK** | Scenes render through Vulkan on Metal. A native Metal scene renderer and AVFoundation video are opt-in under [Settings → Performance](docs/features/performance.md). |
+| **Metal** | Scenes render natively on Metal, and a scene the native renderer cannot draw falls back to Vulkan on Metal through MoltenVK. AVFoundation video is opt-in under [Settings → Performance](docs/features/performance.md), where the scene renderer can also be set to Compatibility. |
 | **Lock screen** | A sandboxed ExtensionKit extension ([`Extension/`](Extension)). |
 
 How the pieces talk to each other: [docs/architecture.md](docs/architecture.md).

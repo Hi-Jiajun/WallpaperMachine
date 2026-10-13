@@ -12,21 +12,33 @@ The three scene controls in **Advanced**:
 
 | Setting | Values | Default |
 | --- | --- | --- |
-| Scene renderer | Compatibility / Native Metal preferred | Compatibility |
+| Scene renderer | Compatibility / Native Metal preferred | Native Metal preferred |
 | Scene render optimisation | Off / On | **On** |
 | Update only when the scene changes | Off / On | Off |
 
 ### Scene renderer
 
-Which renderer scene wallpapers prefer. **Compatibility** is the
-Vulkan-through-MoltenVK path and the default. **Native Metal preferred** asks for
-the native Metal backend; a scene it cannot draw runs on Compatibility as a whole
-(an effect is never dropped to keep a scene native) and the status line says why.
-Lock-screen playback always uses Compatibility. No GPU backend is created until
-the scene has been parsed and a backend chosen, so the row reports one of three
-states per scene: **preparing** (no backend yet), the backend actually in use, or
-Compatibility with the reason native was not used. It never shows the preference in
-place of the outcome.
+Which renderer scene wallpapers prefer. **Native Metal preferred**, the default,
+asks for the native Metal backend; a scene it cannot draw runs on Compatibility as a
+whole (an effect is never dropped to keep a scene native) and the status line says
+why. **Compatibility** is the Vulkan-through-MoltenVK path for every scene.
+Lock-screen playback always uses Compatibility.
+
+Native Metal became the default once it drew every scene of the local test library
+the way Compatibility does (drawn by both renderers in one harness, the pictures
+were the same) and cost less to run. Over 12 of those scenes at 3840×2160 and 60
+FPS it took about 21% less process CPU time and 14% less GPU time in its own command
+buffers (one per frame instead of three), about 3% less memory footprint, and held
+60 FPS where Compatibility dropped frames; the commands are in the
+[verification log](../testing/verification-log.md). A configuration saved before
+then holds `compatibility` whether or not anyone chose it, so it moves to Native
+Metal preferred once, when this version first loads it, and records that it did
+(`native_metal_default_applied`); choosing Compatibility afterwards is kept.
+
+No GPU backend is created until the scene has been parsed and a backend chosen, so
+the row reports one of three states per scene: **preparing** (no backend yet), the
+backend actually in use, or Compatibility with the reason native was not used. It
+never shows the preference in place of the outcome.
 
 Native Metal draws image layers, text layers, sprite-sheet animation,
 two-dimensional puppets, two-dimensional sprite, sprite-trail, rope and rope-trail

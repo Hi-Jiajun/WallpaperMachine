@@ -1249,7 +1249,7 @@ final class BridgeStore {
                 sceneOptimizationEnabled: true,
                 sceneOnDemandEnabled: false,
                 sceneVideoPlaneSamplingEnabled: false,
-                sceneRenderer: "compatibility",
+                sceneRenderer: "native_metal_preferred",
                 sceneUpdateModes: [],
                 sceneRenderers: [],
                 userAssetsPath: "",

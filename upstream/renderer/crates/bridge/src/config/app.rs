@@ -33,6 +33,13 @@ pub struct AppConfig {
     /// `video_backend` it has no predecessor key to migrate from.
     #[serde(default)]
     pub scene_renderer: SceneRendererModeCfg,
+    /// Whether this config has been through the one-time move to Native Metal
+    /// preferred as the default scene renderer. Absent (false) in a config
+    /// written before that change, where `scene_renderer` holds the old default
+    /// more often than a choice; see [`AppConfig::migrate_legacy_keys`]. Older
+    /// builds ignore the key.
+    #[serde(default)]
+    pub native_metal_default_applied: bool,
     #[serde(default)]
     pub quality: QualityCfg,
     #[serde(default)]
@@ -53,6 +60,7 @@ impl Default for AppConfig {
             experimental: ExperimentalCfg::default(),
             video_backend: VideoBackendModeCfg::default(),
             scene_renderer: SceneRendererModeCfg::default(),
+            native_metal_default_applied: true,
             quality: QualityCfg::default(),
             monitors: Vec::new(),
             monitor_settings: Vec::new(),
@@ -82,16 +90,16 @@ pub enum VideoBackendModeCfg {
 
 /// Which renderer draws a scene wallpaper.
 ///
-/// `Compatibility` is the established Vulkan/MoltenVK path, which supports
-/// every scene. `NativeMetalPreferred` asks for the native Metal backend where
+/// `NativeMetalPreferred`, the default, asks for the native Metal backend where
 /// the whole scene falls inside the subset it can draw, and falls back to
 /// Compatibility as a whole scene otherwise, so the choice is a preference
-/// rather than a guarantee.
+/// rather than a guarantee. `Compatibility` is the Vulkan/MoltenVK path, which
+/// supports every scene, for every scene.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SceneRendererModeCfg {
-    #[default]
     Compatibility,
+    #[default]
     NativeMetalPreferred,
 }
 
@@ -518,7 +526,18 @@ impl AppConfig {
     /// Pause-on-battery and the battery quality-profile switch folded into
     /// [`PowerCfg::on_battery`]. Pause wins when both legacy flags are set.
     /// An explicit `on_battery`, including `keep_running`, wins over either.
+    ///
+    /// Native Metal preferred became the default scene renderer once it drew
+    /// every scene the compatibility renderer did. A config written before then
+    /// stores `compatibility` whether or not anyone chose it, so it moves to the
+    /// new default once; the marker it gains keeps any later choice, including
+    /// a return to Compatibility, from being moved again.
     pub fn migrate_legacy_keys(&mut self) {
+        if !self.native_metal_default_applied {
+            self.scene_renderer = SceneRendererModeCfg::NativeMetalPreferred;
+            self.native_metal_default_applied = true;
+        }
+
         let legacy_native = self.experimental.legacy_native_video_backend.take();
         if legacy_native == Some(true) && self.video_backend == VideoBackendModeCfg::Compatibility {
             self.video_backend = VideoBackendModeCfg::NativePreferred;
