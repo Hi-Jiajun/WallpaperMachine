@@ -257,6 +257,8 @@ public:
     /// never be refused a pipeline because a cache missed, so the renderer
     /// itself never asks this question.
     [[nodiscard]] static bool PipelineArchiveServesEverySeenPipelineForTests();
+    /// Returns once every pipeline-archive write already scheduled has run.
+    static void WaitForPipelineArchiveWritesForTests();
 #endif
 
 private:

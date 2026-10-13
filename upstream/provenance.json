@@ -309,7 +309,8 @@
         "upstream/renderer/external/open-wallpaper-engine/tests/script_runtime_compat_test.cpp": "33f4b4a627ca15bcff7f8d63ae3c19f89a962a1e6e04d124fada376d7739142f",
         "upstream/renderer/external/open-wallpaper-engine/tests/tex_schema_tests.cpp": "d73de480e88487552d115b688c8a8ed70d8f131732d98d44953856bb5ce96746"
       }
-    }
+    },
+    "metalArchiveScratchChanges": "2026-10-13: MetalProgramCache::writeArchive serialises the pipeline archive to a scratch file in NSTemporaryDirectory() (owe-pipelines-<pid>-<serial>.metallib-archive, the serial touched only on the archive queue) and moves it to <store>.tmp<pid> before the existing replace-or-move over the store; a failed move logs and removes the scratch file. -[MTLBinaryArchive serializeToURL:error:] writes a scratch .metallib beside its destination and, when that folder is deleted during the write, double-frees in its error path (EXC_BAD_ACCESS in objc_retain, or a libmalloc abort, on macOS 27; reproduced standalone). The store's folder is the scene shader cache, which Clear shader cache, a cache rebuild or a removed wallpaper delete at any time, and the write runs two seconds after a wallpaper's last new pipeline. Found when unchanged_present_test removed its temporary folder right after a native case. Test-only MetalRender::WaitForPipelineArchiveWritesForTests (MetalProgramCache::finishArchiveWrites). Test: MetalSceneDraw.AStoreFolderDeletedWhileItsArchiveIsWrittenCostsOnlyThatWrite (eight stores written while their folders are deleted and made again in a loop; crashed 4 of 4 runs with serialisation beside the store, passes 4 of 4 with the change). No per-frame work: one extra rename per archive write."
   },
   "applicationShell": {
     "derivedFrom": "upstream/renderer at revision 8c19c002ff37930c68117dd591dfe3f44792e25e, path app/WallpaperEngine",

@@ -105,6 +105,14 @@ device.
   pipelines are offered to the archive, published, reopened from disk and
   satisfied strictly, and a scene with no archive path still draws. A written
   archive that is never attached to a production descriptor proves nothing.
+- **A store folder deleted mid-write** — `MetalSceneDraw.AStoreFolderDeletedWhileItsArchiveIsWrittenCostsOnlyThatWrite`:
+  eight scenes, each with its own store, write while every store folder is deleted
+  and made again in a loop; the process survives and no scratch file is left in
+  the temporary folder. Metal's `serializeToURL:` writes a scratch file beside its
+  destination and corrupts the heap when that folder vanishes (a double free in its
+  error path): serialised beside the store, this test crashed every run, and
+  **Clear shader cache** could do the same to the app. The archive is serialised
+  in `NSTemporaryDirectory()`, moved beside the store, then over it.
 - **Who owns the first frame** — `MetalSceneDraw.ADrawnFrameIsReportedAsPresentedAndLeavesTheFirstFrameFlagAlone`:
   a backend reports presentation through `drawFrame`'s `presented` out-parameter
   and leaves `Scene::first_frame_ok` to the frame handler. A backend that sets the

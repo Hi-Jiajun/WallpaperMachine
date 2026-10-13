@@ -526,6 +526,9 @@ public:
         const std::lock_guard lock { m_mutex };
         forgetArchivesLocked();
     }
+
+    /// Lets every write already scheduled run, keeping the open archives.
+    void finishArchiveWrites() { waitForArchiveWrites(); }
 #endif
 
     [[nodiscard]] MetalPipelineArchiveStatus archiveStatus() const
@@ -1017,17 +1020,41 @@ private:
         }
         if (collector == nil || url == nil) return;
 
-        // Written beside the real file and moved over it. Another process
+        // Serialised in this process's own temporary folder, never beside the
+        // store. Metal writes a scratch file next to the destination and
+        // corrupts the heap when that folder is deleted under it (a double free
+        // in its error path), and the store lives in a regenerable cache that
+        // clearing the cache or removing a wallpaper deletes whenever it likes.
+        // Only plain file operations touch the store's folder, and those fail
+        // cleanly when it has gone.
+        NSFileManager* files   = [NSFileManager defaultManager];
+        NSURL*         scratch = [NSURL
+            fileURLWithPath:[NSTemporaryDirectory()
+                                stringByAppendingPathComponent:
+                                    [NSString stringWithFormat:@"owe-pipelines-%d-%llu.metallib-archive",
+                                                               getpid(),
+                                                               ++m_archive_scratch_serial]]];
+        NSError* failure = nil;
+        if (! [collector serializeToURL:scratch error:&failure]) {
+            LOG_INFO("metal pipeline archive could not be written: %s",
+                     failure != nil ? failure.localizedDescription.UTF8String : "unknown");
+            [files removeItemAtURL:scratch error:nil];
+            return;
+        }
+
+        // Then beside the real file and moved over it. Another process
         // writing the same store at the same moment replaces it whole rather
         // than interleaving with this one, and a reader never opens a file that
         // is half written.
         NSURL* staged = [NSURL
             fileURLWithPath:[[url path] stringByAppendingFormat:@".tmp%d", getpid()]];
-        NSError* failure = nil;
-        if (! [collector serializeToURL:staged error:&failure]) {
-            LOG_INFO("metal pipeline archive could not be written: %s",
-                     failure != nil ? failure.localizedDescription.UTF8String : "unknown");
-            [[NSFileManager defaultManager] removeItemAtURL:staged error:nil];
+        [files removeItemAtURL:staged error:nil];
+        NSError* stage_error = nil;
+        if (! [files moveItemAtURL:scratch toURL:staged error:&stage_error]) {
+            LOG_INFO("metal pipeline archive could not be published: %s",
+                     stage_error != nil ? stage_error.localizedDescription.UTF8String
+                                        : "unknown");
+            [files removeItemAtURL:scratch error:nil];
             return;
         }
         NSError* replace_error = nil;
@@ -1089,6 +1116,8 @@ private:
     std::atomic<uint64_t>                     m_archive_collected { 0 };
     std::atomic<uint64_t>                     m_archive_published { 0 };
     std::atomic<uint64_t>                     m_archive_writes_pending { 0 };
+    /// Names each write's scratch file. Touched only on `m_archive_queue`.
+    uint64_t                                  m_archive_scratch_serial { 0 };
 };
 
 bool FoldsOnLeft(std::string_view name)
@@ -4998,6 +5027,11 @@ uint64_t MetalRender::ProgramCompilesForTests() { return MetalProgramCache::shar
 bool MetalRender::PipelineArchiveServesEverySeenPipelineForTests()
 {
     return MetalProgramCache::shared().archiveServesEverySeenPipeline();
+}
+
+void MetalRender::WaitForPipelineArchiveWritesForTests()
+{
+    MetalProgramCache::shared().finishArchiveWrites();
 }
 #endif
 

@@ -4772,6 +4772,83 @@ TEST_F(MetalSceneDraw, PipelinesThisProcessBuildsAreArchivedAndServeTheProductio
     }
 }
 
+TEST_F(MetalSceneDraw, AStoreFolderDeletedWhileItsArchiveIsWrittenCostsOnlyThatWrite)
+{
+    // The pipeline store sits in a regenerable cache folder that clearing the
+    // cache or removing a wallpaper deletes whenever it likes, and its write
+    // runs two seconds after the last pipeline. Metal's archive serialiser
+    // writes a scratch file beside its destination and corrupts the heap when
+    // that folder disappears under it, so a write that raced a deletion took
+    // the whole process down. Here eight wallpapers each keep their own store,
+    // so eight writes run, and every store folder is deleted and made again
+    // without pause for as long as they take: a write may be lost, the process
+    // must not be, and no scratch file may be left behind.
+    std::vector<std::filesystem::path> archive_roots;
+    const auto collected_before = MetalPipelineArchiveStatusForDiagnostics().collected;
+
+    // Colours no other test draws, so every pipeline is new to the archive.
+    for (const char* blue : { "0.53125", "0.59375", "0.65625", "0.71875", "0.78125", "0.84375",
+                              "0.90625", "0.96875" }) {
+        SCOPED_TRACE(blue);
+        const auto archive_root = archive_roots.emplace_back(root_ / (std::string("archive-") + blue));
+        std::filesystem::create_directories(archive_root);
+        const auto  project = WriteFixture(root_ / (std::string("vanishing-") + blue), blue);
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, root_ / (std::string("vanishing-cache-") + blue), loaded,
+                              error))
+            << error;
+        @autoreleasepool {
+            CAMetalLayer* layer   = [CAMetalLayer layer];
+            layer.device          = MTLCreateSystemDefaultDevice();
+            layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+            layer.drawableSize    = CGSizeMake(384, 256);
+            layer.framebufferOnly = NO;
+
+            SceneRendererHandle render;
+            RenderInitInfo info {
+                .metal_layer          = (__bridge void*)layer,
+                .width                = 384,
+                .height               = 256,
+                .render_width         = 384,
+                .render_height        = 256,
+                .display_scale_factor = 1.0,
+            };
+            render.SetPipelineArchivePath(archive_root.string());
+            ASSERT_TRUE(render.createMetal(info, error)) << error;
+            auto graph = sceneToRenderGraph(*loaded.scene);
+            ASSERT_NE(graph, nullptr);
+            ASSERT_TRUE(render.compileRenderGraph(*loaded.scene, *graph)) << render.lastError();
+            loaded.scene->PassFrameTime(1.0 / 60.0);
+            ASSERT_TRUE(render.drawFrame(*loaded.scene)) << render.lastError();
+            render.destroy();
+        }
+    }
+    ASSERT_GT(MetalPipelineArchiveStatusForDiagnostics().collected, collected_before)
+        << "nothing new was offered to the archive, so no write was scheduled";
+
+    std::atomic<bool> churn { true };
+    std::thread       deleter([&] {
+        while (churn.load()) {
+            for (const auto& archive_root : archive_roots) {
+                std::error_code ignored;
+                std::filesystem::remove_all(archive_root, ignored);
+                std::filesystem::create_directories(archive_root, ignored);
+            }
+        }
+    });
+    MetalRender::WaitForPipelineArchiveWritesForTests();
+    churn = false;
+    deleter.join();
+
+    std::size_t scratch = 0;
+    const auto  prefix  = "owe-pipelines-" + std::to_string(::getpid()) + "-";
+    for (const auto& entry : std::filesystem::directory_iterator(NSTemporaryDirectory().UTF8String)) {
+        if (entry.path().filename().string().rfind(prefix, 0) == 0) ++scratch;
+    }
+    EXPECT_EQ(scratch, 0u) << "a write left its scratch file in the temporary folder";
+}
+
 TEST_F(MetalSceneDraw, ACaptionChangedWhileHiddenIsNotWorkInFlight)
 {
     // The trap in reporting "text is still being laid out" as a reason to keep

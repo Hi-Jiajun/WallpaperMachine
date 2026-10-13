@@ -131,7 +131,9 @@ program in a process still costs some compilation whatever is cached. An archive
 that cannot be read, is from another machine, or is missing is not a failure — the
 pipeline is compiled as before and the wallpaper loads. All of it is regenerable and
 is removed by **Clear shader cache** in Storage; nothing you imported is stored
-there.
+there. The archive is written in the app's temporary folder and moved into the cache
+only once it is complete, so clearing the cache while a write is due costs that
+write and nothing else.
 
 Compatibility keeps no compiled Metal code of its own. MoltenVK's pipeline cache
 (`vk-pipeline-cache.bin`, beside the same scene's shaders) stores the Metal source
