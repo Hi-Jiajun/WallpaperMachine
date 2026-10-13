@@ -9,6 +9,16 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-13 — Native video wake and resume repair
+
+A stalled native video pipeline is now kicked, rebuilt once and then handed to Compatibility, after a resume, a wake or an unlock. Commit `fix(native-video): repair a stalled pipeline after a resume, wake or unlock`, checked in an isolated worktree on macOS 27.0.1.
+
+- `python3 scripts/test.py --only NativeVideoHealthLadderTests --only NativeVideoHealthSupervisorTests --only NativeVideoWallpaperHostTests --only NativeVideoRecoveryBudgetTests --only NativeVideoLivenessTests` — 142 passed, 0 failed, 0 skipped
+- `WALLPAPER_MACHINE_MEDIA_TESTS=1 python3 scripts/test.py --only NativeVideoPlayerMediaTests` — 37 passed, 0 skipped, twice (the hev1 clip is frame-less on this OS, so the kick, rebuild and give-up cases ran); all NativeVideo classes plus RuntimeCountersTests and WallpaperPresentationPolicyTests with media on: 256 passed, 0 failed, 0 skipped
+- Mutation checks, each failing exactly the tests that defend it and then reverted: no absorb rule while repairing, no supersession of a wake settle, a rebuild that cancels its own check.
+- The lock-screen extension target compiled the two new `RuntimeCounter` cases in the same builds.
+- Not run: the full gate, a Release build, any desktop run. Unverified: that the system really reclaims a decoder across sleep, lock or a covered desktop, and that a kick or a rebuild brings one back; the `hev1` pipeline cannot be repaired, so only the failing ladder is shown. The 1 s wake settle and the cost of the check output on a 4K clip are untuned. See the sleep, lock and unlock rows in manual-smoke.md.
+
 ## 2026-10-13 — Native video liveness detection after a long pause
 
 Observation only: the check logs and counts a stalled pipeline and acts on nothing. Commit `feat(native-video): detect a pipeline that stops delivering frames`, checked in an isolated worktree on macOS 27.0.1.

@@ -29,8 +29,12 @@ final class WebWallpaperHostLifecycleTests: XCTestCase {
         posterLayer = container.layer
       }
     }
+    /// Whether the held picture was on the content layer at the moment the window was ordered
+    /// in; nil until it is. A window that reaches the screen without it shows black.
+    private(set) var veiledWhenPresented: Bool?
+    var hasVeil: Bool { posterLayer?.sublayers?.contains { $0.name == SwitchHoldVeil.layerName } == true }
     func setScreenFrame(_ frame: NSRect) { self.frame = frame }
-    func present() {}
+    func present() { veiledWhenPresented = hasVeil }
     func retire() {}
   }
 
@@ -55,11 +59,14 @@ final class WebWallpaperHostLifecycleTests: XCTestCase {
     let pump = WebWallpaperAudioPump(read: { nil })
     let defaults: UserDefaults
     let center = NotificationCenter()
-    init(attachedSurfaces: Bool = false, pageTiming: WebWallpaperPage.Timing = .init()) throws {
+    init(attachedSurfaces: Bool = false, pageTiming: WebWallpaperPage.Timing = .init(),
+         switchHold: WallpaperSwitchHold? = nil) throws {
       root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
       try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
       try "<!doctype html><script>window.contentVersion = 1</script>".write(
         to: root.appendingPathComponent("index.html"), atomically: true, encoding: .utf8)
+      try "<!doctype html><script>window.contentVersion = 1</script>".write(
+        to: root.appendingPathComponent("other.html"), atomically: true, encoding: .utf8)
       let defaults = TemporaryDefaults.makeForCurrentTest().defaults
       self.defaults = defaults
       let model = model
@@ -74,7 +81,7 @@ final class WebWallpaperHostLifecycleTests: XCTestCase {
         pointerMonitor: PointerMonitor(), pageTiming: pageTiming,
         inspectionEnabled: { WebWallpaperInspection.isEnabled(defaults: defaults) },
         audioClock: { model.clock },
-        contentRevision: { model.revision }, makeSurface: { frame, page in
+        contentRevision: { model.revision }, switchHold: switchHold, makeSurface: { frame, page in
           let surface = Surface(frame, page, attached: attachedSurfaces)
           model.surfaces.append(surface)
           return surface
@@ -88,6 +95,14 @@ final class WebWallpaperHostLifecycleTests: XCTestCase {
         wallpaperId: "wallpaper", title: "Test", projectPath: root.path, entryFile: "index.html",
         fps: 30, renderScale: 1, paused: false, volume: 1, muted: false, audioResponseEnabled: true,
         mediaIntegrationEnabled: false, propertiesJson: "{}")
+    }
+    /// Another page of the same project: a different entry file is a different page, so the
+    /// host builds a new window for it.
+    func replacement(entry: String = "other.html") -> BridgeWebWallpaper {
+      var replacement = descriptor
+      replacement.wallpaperId = "replacement"
+      replacement.entryFile = entry
+      return replacement
     }
     func close() {
       host.shutdown()
@@ -601,5 +616,230 @@ final class WebWallpaperHostLifecycleTests: XCTestCase {
     XCTAssertEqual(frames.first?.width, expected.width)
     XCTAssertEqual(frames.first?.height, expected.height)
     XCTAssertEqual(frames.first?.context, "space-change")
+  }
+
+  // MARK: Switch hold
+
+  /// A switch hold on a notification center the test owns. The wallpaper on screen answers its
+  /// request for a still at once. Its short timers (the first-paint settle) are fired by hand
+  /// through `timers`; the 30 s ceiling and the 8 s grace go to `limits`, which no test fires,
+  /// so that firing "the next timer" can only mean the settle. Reduce Motion is on, so a
+  /// released picture is removed on the spot instead of by a fade timer.
+  @MainActor private final class HoldHarness {
+    let center = NotificationCenter()
+    let timers = ManualSleeper()
+    let limits = ManualSleeper()
+    /// Time stands still, so a timer's length is exactly the limit it was set for.
+    private let instant = ContinuousClock.now
+    /// The layer each display's visible wallpaper has, as the hold looks for it.
+    var onScreen: [UInt32: CALayer] = [:]
+    private(set) var hold: WallpaperSwitchHold!
+    private var responder: NSObjectProtocol?
+
+    init() {
+      let (timers, limits) = (self.timers, self.limits)
+      hold = WallpaperSwitchHold(
+        center: center,
+        layers: { [unowned self] display in self.onScreen[display].map { [$0] } ?? [] },
+        shouldHold: { _ in true },
+        reduceMotion: { true },
+        sleep: { duration in
+          if duration >= .seconds(1) { try await limits.sleep(duration) }
+          else { try await timers.sleep(duration) }
+        },
+        now: { [unowned self] in self.instant })
+      responder = center.addObserver(
+        forName: DesktopPosterNotification.request, object: nil, queue: nil
+      ) { [unowned self] note in
+        MainActor.assumeIsolated {
+          guard let layer = note.object as? CALayer else { return }
+          let red = Data((0..<16).map { [255, 0, 0, 255][$0 % 4] })
+          DesktopPosterFrame(pixels: red, width: 2, height: 2, bgra: false).publish(
+            for: layer, to: self.center, context: note.userInfo?["context"] as? String)
+        }
+      }
+      hold.start()
+    }
+
+    func finish() {
+      hold.stop()
+      if let responder { center.removeObserver(responder) }
+    }
+
+    func state(_ display: UInt32 = 7) -> WallpaperSwitchHold.Phase? { hold.stateForTest(display: display) }
+  }
+
+  /// Shows `descriptor` on display 7, then lets the hold take a still of it, as a switch away
+  /// from it does.
+  private func showAndHold(
+    _ descriptor: BridgeWebWallpaper, on fixture: Fixture, _ harness: HoldHarness
+  ) async throws -> Surface {
+    await fixture.host.apply([descriptor])
+    let surface = try XCTUnwrap(fixture.model.surfaces.last)
+    harness.onScreen[7] = surface.posterLayer
+    await harness.hold.begin(displays: [7])
+    // The replacement closes this window, and a closed window is not listed any more.
+    harness.onScreen[7] = nil
+    return surface
+  }
+
+  func testReplacementWindowCarriesTheHeldPictureUntilThePageHasLoaded() async throws {
+    let harness = HoldHarness()
+    defer { harness.finish() }
+    let fixture = try Fixture(switchHold: harness.hold)
+    defer { fixture.close() }
+    let first = try await showAndHold(fixture.descriptor, on: fixture, harness)
+    XCTAssertEqual(harness.state(), .armed)
+    XCTAssertEqual(first.veiledWhenPresented, false, "a window opened with nothing held is plain")
+
+    await fixture.host.apply([fixture.replacement()])
+
+    let second = try XCTUnwrap(fixture.model.surfaces.last)
+    XCTAssertFalse(second === first)
+    XCTAssertEqual(
+      second.veiledWhenPresented, true,
+      "the picture is on the window when it reaches the desktop, not added after")
+    XCTAssertFalse(first.hasVeil)
+    XCTAssertEqual(harness.state(), .onHost)
+
+    // Loading is not enough: the page reports it has finished before it has painted.
+    try await wait { fixture.model.states.last?.phase == .ready }
+    try await wait { harness.timers.pendingCount == 1 }
+    XCTAssertEqual(harness.timers.requested.last, WebWallpaperHost.firstPaintSettle)
+    XCTAssertEqual(harness.state(), .onHost, "the page has loaded but not painted")
+    XCTAssertTrue(second.hasVeil)
+
+    harness.timers.fireNext()
+    try await wait { harness.state() == nil }
+    XCTAssertFalse(second.hasVeil, "the picture goes once the page has had time to paint")
+  }
+
+  func testAPageThatFailsToLoadReleasesTheHeldPicture() async throws {
+    let harness = HoldHarness()
+    defer { harness.finish() }
+    let fixture = try Fixture(switchHold: harness.hold)
+    defer { fixture.close() }
+    _ = try await showAndHold(fixture.descriptor, on: fixture, harness)
+
+    // An entry file that is not there: WebKit refuses it, as it does a broken page.
+    await fixture.host.apply([fixture.replacement(entry: "missing.html")])
+    let second = try XCTUnwrap(fixture.model.surfaces.last)
+    XCTAssertEqual(second.veiledWhenPresented, true)
+
+    try await wait { fixture.model.states.last?.phase == .failed }
+    XCTAssertNil(harness.state(), "the failure, and its retry, are not left behind the old picture")
+    XCTAssertFalse(second.hasVeil)
+    XCTAssertFalse(
+      harness.timers.requested.contains(WebWallpaperHost.firstPaintSettle),
+      "no wait for a page to paint when it did not load")
+  }
+
+  func testAPictureOnAWindowThatClosesWithNoPageToTakeItsPlaceIsReleased() async throws {
+    // The display lost its web wallpaper while the replacement was loading: the window the
+    // picture sat on is gone, and a later switch must not find it and show it again.
+    let harness = HoldHarness()
+    defer { harness.finish() }
+    let fixture = try Fixture(switchHold: harness.hold)
+    defer { fixture.close() }
+    _ = try await showAndHold(fixture.descriptor, on: fixture, harness)
+    await fixture.host.apply([fixture.replacement()])
+    let second = try XCTUnwrap(fixture.model.surfaces.last)
+    XCTAssertEqual(harness.state(), .onHost)
+
+    await fixture.host.apply([])
+
+    XCTAssertNil(harness.state())
+    XCTAssertFalse(second.hasVeil)
+  }
+
+  func testAnEntryFileOutsideTheProjectReleasesThePictureOnTheWindowItClosed() async throws {
+    let harness = HoldHarness()
+    defer { harness.finish() }
+    let fixture = try Fixture(switchHold: harness.hold)
+    defer { fixture.close() }
+    _ = try await showAndHold(fixture.descriptor, on: fixture, harness)
+    await fixture.host.apply([fixture.replacement()])
+    XCTAssertEqual(harness.state(), .onHost)
+
+    await fixture.host.apply([fixture.replacement(entry: "../outside.html")])
+
+    XCTAssertNil(harness.state())
+    XCTAssertEqual(fixture.model.states.last?.phase, .failed)
+    XCTAssertEqual(fixture.model.surfaces.count, 2, "no window for a page that cannot be loaded")
+  }
+
+  func testAClosedWindowLeavesAPictureThatWaitsForAnotherBackendsWindow() async throws {
+    // Switching from a web page to a clip: this host closes the page's window on the same
+    // snapshot that makes the native host build the clip's, usually first. The picture was
+    // kept for the clip's window, so closing the page's must not end it.
+    let harness = HoldHarness()
+    defer { harness.finish() }
+    let fixture = try Fixture(switchHold: harness.hold)
+    defer { fixture.close() }
+    _ = try await showAndHold(fixture.descriptor, on: fixture, harness)
+
+    await fixture.host.apply([])
+
+    XCTAssertFalse(try XCTUnwrap(fixture.model.surfaces.last).hasVeil)
+    XCTAssertEqual(harness.state(), .armed)
+    let clipWindow = CALayer()
+    XCTAssertTrue(harness.hold.adopt(into: clipWindow, displayID: 7))
+    XCTAssertNotNil(clipWindow.sublayers?.first { $0.name == SwitchHoldVeil.layerName })
+  }
+
+  func testAClosedWindowLeavesAPictureThatSitsOnASceneLayer() async throws {
+    // A page replaced by a scene: the renderer's layer already carries the picture when this
+    // host closes the page's window, and the scene has not drawn yet.
+    let harness = HoldHarness()
+    defer { harness.finish() }
+    let fixture = try Fixture(switchHold: harness.hold)
+    defer { fixture.close() }
+    _ = try await showAndHold(fixture.descriptor, on: fixture, harness)
+    let scene = CALayer()
+    harness.center.post(
+      name: WallpaperSwitchHoldNotification.layerInstalled, object: scene,
+      userInfo: [
+        WallpaperSwitchHoldNotification.displayIDKey: NSNumber(value: 7),
+        WallpaperSwitchHoldNotification.reasonKey: WallpaperSwitchHoldNotification.Reason.replace.rawValue,
+      ])
+    XCTAssertEqual(harness.state(), .onScene)
+
+    await fixture.host.apply([])
+
+    XCTAssertEqual(harness.state(), .onScene)
+    XCTAssertNotNil(scene.sublayers?.first { $0.name == SwitchHoldVeil.layerName })
+  }
+
+  func testAReconcileThatKeepsThePageCreatesNoVeil() async throws {
+    // A property push, a frame-rate change or an unchanged refresh keeps the page: nothing is
+    // switched, so a picture held for another reason is not put over the running page.
+    let harness = HoldHarness()
+    defer { harness.finish() }
+    let fixture = try Fixture(switchHold: harness.hold)
+    defer { fixture.close() }
+    let first = try await showAndHold(fixture.descriptor, on: fixture, harness)
+
+    var changed = fixture.descriptor
+    changed.fps = 15
+    changed.propertiesJson = #"{"speed":{"value":3}}"#
+    await fixture.host.apply([changed])
+    await fixture.host.apply([fixture.descriptor])
+
+    XCTAssertEqual(fixture.model.surfaces.count, 1, "the page was kept")
+    XCTAssertFalse(first.hasVeil)
+    XCTAssertEqual(harness.state(), .armed, "still waiting for a window that is actually replaced")
+  }
+
+  func testWithoutASwitchHoldAReplacementOpensPlain() async throws {
+    let fixture = try Fixture()
+    defer { fixture.close() }
+    await fixture.host.apply([fixture.descriptor])
+
+    await fixture.host.apply([fixture.replacement()])
+
+    let second = try XCTUnwrap(fixture.model.surfaces.last)
+    XCTAssertEqual(fixture.model.surfaces.count, 2)
+    XCTAssertEqual(second.veiledWhenPresented, false)
+    XCTAssertNil(second.posterLayer?.sublayers)
   }
 }

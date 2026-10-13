@@ -279,9 +279,25 @@ describes what should happen and the log lines to read afterwards.
 - [ ] Switch from a paused wallpaper (Pause all): the switch takes at most about a quarter
       of a second longer; the log says whether the paused renderer delivered a still or
       `poster not delivered within 250 ms`.
-- [ ] Switch a scene to a web page: the system picture or black may still show for a moment,
-      since web windows do not take the veil yet; the log shows the held still released after
-      about 8 seconds with `no window took it`.
+- [ ] Switch a web page to another web page (a project with a different entry page): the
+      previous picture stays until the new page has loaded and painted, then fades out, and
+      the new page is never seen empty or black behind it. The log has `frame captured`,
+      `adopted by host` and `released ... (host ready)`, half a second after the page finished
+      loading. Look for a flash of an empty page as the picture goes, which would mean 500 ms
+      after `didFinish` is not enough for that project's first paint, and for the system
+      picture between the old page closing and the new one opening, which the host cannot
+      cover.
+- [ ] Switch a web page to a scene: the page's snapshot answers the request for a still (the
+      log has `frame captured` and not `poster not delivered within 250 ms`), and the picture
+      is released with `(scene first frame)`.
+- [ ] Switch a scene to a web page, and a web page to a clip with the native backend: the
+      system picture may show for the time the second host needs before its window opens (the
+      project check and file staging for a page, the metadata read for a clip); the held
+      picture appears with the window and goes with the page's or the clip's first frame.
+- [ ] Apply a web wallpaper whose entry page is missing or fails to load: the picture goes
+      at once (`released ... (host ready)` without the half-second wait) and the failed page
+      and its Retry are what the display shows. Remove a display's web wallpaper while its
+      page is still loading: the log says `released ... (window closed)`.
 - [ ] Native video backend (**Video playback** set to **Native video preferred**, a plain
       video that **In use now** lists as `native`): switch from one clip to another. The first
       clip keeps playing until the second one's window is up, which opens with the held

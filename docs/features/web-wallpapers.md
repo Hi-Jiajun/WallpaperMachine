@@ -14,6 +14,10 @@ for them.
 - Web wallpapers import, download and apply like scene and video wallpapers, and
   their user properties (combos, sliders, colors, text, booleans) are edited in the
   same inspector. Apply pushes the committed values into the running page.
+- Switching to a web wallpaper does not show a black or empty page while it loads: the
+  picture of the wallpaper it replaces stays over the new page's window until the page has
+  loaded and had half a second to paint, then fades out (no fade under Reduce Motion). See
+  [wallpaper switching](wallpaper-switching.md).
 - Play/Pause, the presentation policy (occluded desktop, display sleep, session
   lock), display assignment, mirroring, and Space posters
   ([desktop picture](desktop-picture.md)) apply to web wallpapers
@@ -482,7 +486,11 @@ hand-moved clock, the inspection switch on running, new and preview pages) and t
 `upstream/renderer/crates/bridge/src/tests/` (`apply_options.rs`,
 `quality_settings.rs`, `web_audio_media.rs`); file and directory properties are
 covered under [user files](user-files.md#verification), and the domain inventory is in
-[coverage](../testing/coverage.md). Show Desktop and Space transition smoothness,
+[coverage](../testing/coverage.md). The held picture over a replacement page is covered
+there with a fake window; whether 500 ms after `didFinish` is enough for a real project's
+first paint, and how long the system picture shows while a page's window is replaced, need
+an authorized desktop run, listed in [manual smoke](../testing/manual-smoke.md#wallpaper-switching).
+Show Desktop and Space transition smoothness,
 real hover and window-server routing on a desktop, how flicks and parallax pages feel
 with a real high-rate mouse, that the hover exit still lands after the last move,
 audible output and mirror audio handoff need an authorized manual run. So do judder on pages that interpolate by

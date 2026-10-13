@@ -262,6 +262,21 @@ final class WallpaperSwitchHold {
         }
     }
 
+    /// A host closed `layer`'s window for good and has no window of its own to put in its place.
+    ///
+    /// A veil that sat on that window goes with it: it covers nothing anyone sees, and kept for
+    /// the rest of its ceiling it would be taken for the picture on screen by the next switch
+    /// and shown again, out of date. A veil that still waits for a window, or sits on a scene,
+    /// is not this window's and stays for its successor, which is often the other host, still
+    /// to reconcile. A window that is closed to be replaced does not call this: its successor
+    /// takes the veil with `adopt`.
+    func windowClosed(_ layer: CALayer?, displayID: UInt32) {
+        guard let layer, let ticket = tickets[displayID], ticket.phase != .dismissing,
+              ticket.veil.parent === layer else { return }
+        ticket.veil.detach()
+        dismiss(displayID, because: "window closed")
+    }
+
     /// The switch failed or was called off: the display shows its own wallpaper again, so the
     /// held picture goes.
     func cancel(displays: [UInt32]) {

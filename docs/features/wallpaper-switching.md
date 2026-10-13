@@ -23,6 +23,9 @@ three hooks on `BridgeStore` that tell the hold when a switch starts, settles or
 - With the experimental native video backend the same picture covers the new clip's window
   until the clip shows its first frame, then fades out. That fade is the dissolve from the
   old wallpaper to the clip, whether the old one was a clip or a scene.
+- With a web wallpaper the same picture covers the new page's window until the page has
+  loaded and had half a second to paint, then fades out; a page that fails to load lets the
+  picture go at once, so the error and its retry are not left behind it.
 - When no still can be taken, the switch behaves as it always did.
 
 ## Which switches are held
@@ -31,9 +34,9 @@ Held: any activation that goes through `BridgeStore.activateWallpaperAsync` (a t
 menu choice, a hotkey, a link, a Shortcuts action, a playlist or rule, a rotation on unlock,
 **Back**, **Random Wallpaper**, a wallpaper applied to every display, a saved display layout,
 **Copy or swap**) on a display that is showing a wallpaper, when the new
-wallpaper is drawn by the scene engine (a scene, or a video on the Compatibility backend) or
-by a native video window (a video with **Native video preferred**). A display mirroring the
-switched display is held with it.
+wallpaper is drawn by the scene engine (a scene, or a video on the Compatibility backend), by
+a native video window (a video with **Native video preferred**) or by a web page window (a
+web wallpaper). A display mirroring the switched display is held with it.
 
 Not held, because the old picture is not available or the successor is not a scene:
 
@@ -43,21 +46,27 @@ Not held, because the old picture is not available or the successor is not a sce
   may not).
 - **Reapply wallpaper**, Retry for a scene that stopped, and the reload after an update:
   all three take the wallpaper off the display first, so there is no picture left to hold.
-- A web page as the successor: its window is owned by `WebWallpaperHost`, which does not take
-  the veil yet (`WallpaperSwitchHold.adopt` and `contentReady` are the entry points it will
-  use). A held still that no host picks up is released 8 seconds after the engine has
-  finished.
-- A clip whose file takes longer than that 8 seconds to read (a sleeping external drive or
-  a share that is slow to answer): the still is released before the clip's window exists,
-  and the window opens without it.
+- A host window that does not come: a still that no host picks up is released 8 seconds after
+  the engine has finished. That is what happens to a clip whose file takes longer than 8
+  seconds to read (a sleeping external drive or a share that is slow to answer), and to a
+  web page whose project takes that long to check and stage; the window opens without the
+  picture.
+- A page with a bad entry file, a display that lost its web wallpaper to another backend and
+  a display that was disconnected while the page loaded: there is no web window to show the
+  picture on.
 - First launch, quit, display reconfigures and wake rebuilds, and the rebuild a host does
   when an admission or a setting changes.
 
-Known gap with the native backend: when the old wallpaper is a scene, the engine closes its
-window as soon as the switch is applied, and the clip's window opens only after the host has
-read the clip's metadata. The system picture can show between the two, for the read
-(milliseconds from the internal drive, seconds from a slow volume). A clip replacing another
-clip has no such gap, see below.
+Known gaps with host windows. When the old wallpaper is a scene, the engine closes its window
+as soon as the switch is applied, and the successor's window opens only after its host has
+done its own work: the clip's metadata read for the native backend (milliseconds from the
+internal drive, seconds from a slow volume), the bridge read, the project check and the asset
+staging for a web page. The system picture can show between the two. A clip replacing another
+clip has no such gap, see below. A web page replacing a web page has a short one: the host
+closes the old page's window before it stages the new page's files (the close reads the
+descriptor that staging then replaces, so it cannot move later), and the veil is only on the
+window that follows. The gap is the staging of a project's file properties, which is
+nothing for a page without any.
 
 ## Limits
 
@@ -152,6 +161,32 @@ tests and a host without one behave as before):
   that still waits for a window, or sits on a scene, is not touched. Either host's reconcile
   may run first, and the other host is the successor a waiting picture was kept for.
 
+**A web-page successor.** `WebWallpaperHost` takes the hold the same way (`switchHold:`, `nil`
+in a host without one):
+
+- *Adoption.* A new window is built when the entry page or the project's content changed.
+  Its veil goes onto the window's content layer (`posterLayer`) after `page.load()` and
+  before `present()`, so the window never reaches the screen without it. The veil is a
+  sibling of the web view in the container layer, above everything the window adds later
+  (the suspension placeholder included), so `WKWebView` snapshots, which the poster sync and
+  the Space posters take, show the page and never the picture. A reconcile that keeps the
+  page (the same entry file and an unchanged project revision: a property push, a frame-rate
+  or volume change, a refresh that found nothing new) builds no window and takes nothing.
+- *Release.* The page's `didFinish` calls `contentReady(after:)` with
+  `WebWallpaperHost.firstPaintSettle`, 500 ms: `didFinish` comes before the first meaningful
+  paint, which is also why the poster is read again two seconds later. The picture then fades
+  out over the page, and the fade hides what is left of the lag. A page that fails to load
+  calls `contentReady` at once.
+- *Closing.* A window closed to be replaced hands its veil to the successor through `adopt`
+  (a second switch before the first page loads moves the picture to the newest window). A
+  window closed with no web successor, because the display now shows another backend's
+  wallpaper, the display is gone or the entry file lies outside the project, calls
+  `windowClosed`: a veil that sat on that window goes with it, so a later switch cannot find
+  it and show it again out of date. A veil that still waits for a window, or sits on a scene,
+  is not touched. The web reconcile often runs just before the native video host's, which is
+  the successor a waiting picture was kept for, so ending it here would drop the clip's
+  continuity.
+
 ## Diagnostics
 
 The hold logs through `AppLog`, one line per step and always the display's CoreGraphics
@@ -161,7 +196,7 @@ id:
 - `switch hold: display N veil on scene layer`
 - `switch hold: display N veil followed a display reconfigure`
 - `switch hold: display N adopted by host`
-- `switch hold: display N released after S s (scene first frame | host ready | cancelled | no window took it | ceiling)`
+- `switch hold: display N released after S s (scene first frame | host ready | cancelled | window closed | no window took it | ceiling)`
 - warnings: `poster not delivered within 250 ms; not holding`, `poster frame WxH could not be
   used; not holding` and `ceiling reached after 30 s; releasing`
 
@@ -187,6 +222,13 @@ with it but leaves one that waits for another backend's window or sits on a scen
 refusal keeps it armed for the scene engine until the bridge has answered and then releases
 it (or lets the grace end it), the old clip keeps playing while the replacement's file is
 read, a pass overtaken meanwhile stops nothing, and a host without a hold opens as before.
+`WebWallpaperHostLifecycleTests` drive the web host against real offscreen pages with a fake
+window: the replacement window carries the veil when it is presented and keeps it after the
+page has loaded until the 500 ms settle has passed, a page that cannot load releases it at
+once, a window closed with no page to follow takes its own veil with it (also for an entry
+file outside the project) but leaves one that waits for another backend's window or sits on a
+scene, a reconcile that keeps the page creates no veil, and a host without a hold opens as
+before. `WallpaperSwitchHoldTests` pin `windowClosed` itself.
 `WallpaperActivationRecoveryTests` pin the hook order around a real
 `BridgeStore.activateWallpaperAsync` (announce, apply, settle; abandon when the apply throws;
 nothing for a no-op) and which displays a switch holds. `DesktopWallpaperTests` pin the shared
@@ -196,5 +238,7 @@ Not established by any test: that a sublayer above a `CAMetalLayer` composites o
 drawables and hides the black placeholder; that scene, web and native surfaces answer the
 request quickly, including a paused renderer; how the still compares with the live frame it
 replaces; whether `isReadyForDisplay` alone is late enough that the veil does not come off a
-frame early on a real clip; the fade, Reduce Motion, multi-display and mirror behavior on a
-real desktop. The checklist is in [manual smoke](../testing/manual-smoke.md#wallpaper-switching).
+frame early on a real clip; whether 500 ms after `didFinish` is enough for a typical web
+project's first paint; how long the system picture shows between a web window closing and the
+next one opening, and between a scene and the page that replaces it; the fade, Reduce Motion,
+multi-display and mirror behavior on a real desktop. The checklist is in [manual smoke](../testing/manual-smoke.md#wallpaper-switching).

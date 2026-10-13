@@ -451,6 +451,49 @@ final class WallpaperSwitchHoldTests: XCTestCase {
         XCTAssertEqual(rig.state(), .onHost)
     }
 
+    func testAHostWindowThatClosesTakesTheVeilItCarriesWithIt() async throws {
+        let rig = HoldRig()
+        defer { rig.finish() }
+        await rig.hold.begin(displays: [7])
+        let host = HoldRig.screenLayer()
+        rig.hold.adopt(into: host, displayID: 7)
+
+        rig.hold.windowClosed(host, displayID: 7)
+
+        XCTAssertNil(rig.veil(on: host), "the window is gone, so it is not faded on screen")
+        XCTAssertNil(rig.state())
+        XCTAssertTrue(rig.hold.activeDisplayIDs.isEmpty)
+        XCTAssertTrue(rig.timers.pending.isEmpty, "no ceiling is left running for a picture nobody has")
+    }
+
+    func testAWindowThatClosesLeavesAVeilThatIsNotOnItAlone() async throws {
+        let rig = HoldRig(displays: [7, 8])
+        defer { rig.finish() }
+        await rig.hold.begin(displays: [7, 8])
+        let closing = HoldRig.screenLayer(), other = HoldRig.screenLayer(), scene = HoldRig.screenLayer()
+
+        // Still waiting for a window: the closing one is not its successor.
+        rig.hold.windowClosed(closing, displayID: 7)
+        XCTAssertEqual(rig.state(7), .armed)
+
+        // On a scene: the scene's own first frame ends it.
+        rig.announce(scene, display: 7, reason: "replace")
+        rig.hold.windowClosed(closing, displayID: 7)
+        XCTAssertEqual(rig.state(7), .onScene)
+        XCTAssertNotNil(rig.veil(on: scene))
+
+        // On another host window, or on another display's window.
+        rig.hold.adopt(into: other, displayID: 8)
+        rig.hold.windowClosed(closing, displayID: 8)
+        rig.hold.windowClosed(nil, displayID: 8)
+        XCTAssertEqual(rig.state(8), .onHost)
+        XCTAssertNotNil(rig.veil(on: other))
+
+        // A display with no veil at all.
+        rig.hold.windowClosed(closing, displayID: 9)
+        XCTAssertNil(rig.state(9))
+    }
+
     func testTheCeilingReleasesAVeilNothingElseEnds() async throws {
         let rig = HoldRig()
         defer { rig.finish() }

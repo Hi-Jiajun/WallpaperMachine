@@ -219,7 +219,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                     scheduler: mediaScheduler))
             desktopMediaSession = mediaSession
             let webHost = WebWallpaperHost(bridge: store.bridge, mediaRelay: mediaSession.relay,
-                contentRevision: { [weak store] in store?.wallpaperContentRevision ?? 0 })
+                contentRevision: { [weak store] in store?.wallpaperContentRevision ?? 0 },
+                switchHold: hold)
             webWallpaperHost = webHost
             webHost.onStateChanged = { [weak store] state in store?.receiveHostState(state) }
             webHost.onDeliveryStateChanged = { [weak store] in store?.webWallpaperDeliveryRevision &+= 1 }

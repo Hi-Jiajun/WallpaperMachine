@@ -59,6 +59,14 @@ final class WebWallpaperHost {
     private var suspendedInPlainSight: Set<UInt32> = []
     private var stopped = false
     private let counters: RuntimeCounters
+    /// Keeps the picture of the wallpaper a switch replaces on screen until the new page has
+    /// loaded and painted. `nil` for a host that never holds one, as in most of the tests.
+    private let switchHold: WallpaperSwitchHold?
+    /// How long after a page reports it has loaded the held picture stays. `didFinish` comes
+    /// before the first meaningful paint (see `scheduleSurfaceChange`, which reads the poster
+    /// again two seconds later), so taking the picture away at once could show the empty page.
+    /// A fade over a page that has painted anyway hides what is left of the lag.
+    static let firstPaintSettle = Duration.milliseconds(500)
     /// Distinguishes surfaces that reused one display id across a wallpaper
     /// switch, so their counters are not merged.
     private var surfaceGeneration: UInt64 = 0
@@ -138,11 +146,13 @@ final class WebWallpaperHost {
         inspectionEnabled: @escaping @MainActor () -> Bool = { WebWallpaperInspection.isEnabled() },
         audioClock: @escaping @MainActor () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         contentRevision: @escaping @MainActor () -> UInt64 = { 0 },
+        switchHold: WallpaperSwitchHold? = nil,
         makeSurface: @escaping @MainActor (NSRect, WebWallpaperPage) -> any WebWallpaperSurface = {
             WebWallpaperWindow(frame: $0, page: $1)
         }
     ) {
         self.fetch = fetch
+        self.switchHold = switchHold
         self.makeSurface = makeSurface
         self.pointerMonitorOverride = pointerMonitor
         self.pageTiming = pageTiming
@@ -167,7 +177,8 @@ final class WebWallpaperHost {
     }
 
     convenience init(bridge: WallpaperBridge, mediaRelay: WebWallpaperMediaRelay? = nil,
-                     contentRevision: @escaping @MainActor () -> UInt64 = { 0 }) {
+                     contentRevision: @escaping @MainActor () -> UInt64 = { 0 },
+                     switchHold: WallpaperSwitchHold? = nil) {
         self.init(
             fetch: { try await bridge.webWallpapers() },
             audioPump: WebWallpaperAudioPump(read: { try bridge.webAudioSpectrum() }),
@@ -177,7 +188,8 @@ final class WebWallpaperHost {
             },
             mediaRelay: mediaRelay,
             mediaProvider: mediaRelay == nil ? AdapterSystemMediaProvider() : nil,
-            assetStore: { UserAssetStore(projectURL: $0, wallpaperId: $1) }, contentRevision: contentRevision)
+            assetStore: { UserAssetStore(projectURL: $0, wallpaperId: $1) }, contentRevision: contentRevision,
+            switchHold: switchHold)
     }
 
     static func systemScreens() -> [(id: UInt32, frame: NSRect)] {
@@ -372,9 +384,7 @@ final class WebWallpaperHost {
         }
         var changed = false
         for (displayID, window) in windows where next[displayID] == nil {
-            close(window)
-            windows[displayID] = nil
-            descriptors[displayID] = nil
+            closeVacated(window, displayID: displayID)
             changed = true
         }
         for (displayID, wallpaper) in next {
@@ -391,9 +401,7 @@ final class WebWallpaperHost {
                     """)
                 onError?(String(localized: "Web wallpaper “\(wallpaper.title)” could not load: its entry file is outside the project folder."))
                 if let window = windows[displayID] {
-                    close(window)
-                    windows[displayID] = nil
-                    descriptors[displayID] = nil
+                    closeVacated(window, displayID: displayID)
                     changed = true
                 }
                 recordState(wallpaper, phase: .failed,
@@ -453,11 +461,15 @@ final class WebWallpaperHost {
                     AppLog.error("web wallpaper \(wallpaper.wallpaperId) on display \(displayID): \(message)", load: load)
                     self.recordState(current, phase: .failed, message: message, canRetry: true)
                     self.onError?(String(localized: "Web wallpaper “\(wallpaper.title)” could not load: \(message)"))
+                    // Nothing is coming to replace the held picture with: the failed page, and
+                    // the retry that is offered, belong on screen and not behind it.
+                    self.switchHold?.contentReady(displayID: displayID)
                 }
                 page.onLoaded = { [weak self, weak page] in
                     guard let self, let page, self.windows[displayID]?.page === page,
                           let current = self.descriptors[displayID] else { return }
                     self.recordState(current, phase: .ready)
+                    self.switchHold?.contentReady(displayID: displayID, after: Self.firstPaintSettle)
                     self.replayDirectories(displayID: displayID)
                     self.scheduleSurfaceChange()
                     self.refreshAudioOutputs()
@@ -499,6 +511,9 @@ final class WebWallpaperHost {
                 guard !stopped, generation == applyGeneration, windows[displayID]?.page === page else { return }
                 page.applyAudioOutput(volume: wallpaper.volume, muted: true)
                 page.load()
+                // The window opens with the picture it replaces over the page, so that it never
+                // reaches the screen black. The veil is on before `present` orders it in.
+                adoptHeldPicture(into: window, displayID: displayID)
                 window.present()
                 AppLog.info("web wallpaper \(wallpaper.wallpaperId) opened on display \(displayID)", load: load)
                 changed = true
@@ -508,6 +523,27 @@ final class WebWallpaperHost {
         refreshPointerMonitor()
         refreshAudioOutputs()
         if changed { onSurfacesChanged?() }
+    }
+
+    /// Puts the picture a switch held for this display over the window about to open. A window
+    /// with no content layer to carry it, or a display that holds none, opens as it always did.
+    private func adoptHeldPicture(into window: any WebWallpaperSurface, displayID: UInt32) {
+        guard let switchHold, let layer = window.posterLayer else { return }
+        switchHold.adopt(into: layer, displayID: displayID)
+    }
+
+    /// Closes the window of a display that has no web wallpaper to show any more, because its
+    /// wallpaper went to another backend, the display is gone, or the entry file is unusable.
+    ///
+    /// A held picture waiting for the next window, such as a clip's, is left alone: this
+    /// reconcile often runs just before the other host's, and the other host is the successor
+    /// that picture was kept for. Only a picture that sat on this very window goes with it.
+    private func closeVacated(_ window: any WebWallpaperSurface, displayID: UInt32) {
+        let layer = window.posterLayer
+        close(window)
+        windows[displayID] = nil
+        descriptors[displayID] = nil
+        switchHold?.windowClosed(layer, displayID: displayID)
     }
 
     /// A page reports `didFinish` before its first meaningful paint, so the

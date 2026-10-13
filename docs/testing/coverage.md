@@ -156,6 +156,17 @@ unattached `CALayer`s, a manual clock and timers fired by hand; nothing opens a 
   and releases it when the bridge has answered, or by the grace when no scene follows; the
   old clip keeps playing while the replacement's file is read (probe, stop, make, present in
   that order), and a pass overtaken in the read stops nothing.
+- Web pages, in `WebWallpaperHostLifecycleTests` with real offscreen pages and a fake window
+  that records whether the veil was on its content layer when it was presented: the
+  replacement is presented with the veil, which stays after the page reports it has loaded
+  until the 500 ms settle timer fires; a page that fails to load (a missing entry file)
+  releases it with no settle; a window closed with no page to follow (the display lost its
+  web wallpaper, an entry file outside the project) takes its own veil with it, while a veil
+  that waits for another backend's window or sits on a scene is left for its successor; a
+  reconcile that keeps the page (property or frame-rate push) builds no window and takes no
+  veil; a host without a hold opens plain. `WallpaperSwitchHoldTests` pin `windowClosed` on
+  its own (the veil it sat on goes at once and leaves no timer; an armed, scene, other-window
+  or other-display veil stays).
 - Release: the scene's first frame (the engine settling) fades the veil, which is removed by
   its own timer; a host's content fades it after its settle; `cancel` and `stop` remove it,
   also while the still is on its way; Reduce Motion skips the fade; the 30 s ceiling and the
@@ -172,8 +183,9 @@ Not covered: whether a sublayer composites over a `CAMetalLayer`'s drawables, wh
 surfaces answer the request within 250 ms (a paused renderer included), how the still compares
 with the live frame, and the fade, Reduce Motion, multi-display and mirror behavior on a desktop
 ([manual-smoke.md](manual-smoke.md#wallpaper-switching)), nor whether `isReadyForDisplay`
-alone is late enough for a real clip that the veil does not come off a frame early. No web
-page host takes the veil yet.
+alone is late enough for a real clip that the veil does not come off a frame early, nor whether
+500 ms after a web page's `didFinish` is enough for its first paint, nor how long the system
+picture shows between a window closing and the web page's window opening.
 
 ### Playback policy
 
