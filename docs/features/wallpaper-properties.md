@@ -12,7 +12,9 @@ details. It opens one ordinary, resizable **Wallpaper Preview** window; choosing
 another preview replaces that window's content. A preview never applies to a
 display, changes the panel's selection, consumes a playback-history entry or saves
 options. It reads the current property draft, including text still being edited,
-and the target display's scaling options; **Reload preview** reads them again.
+and the target display's scaling options when it opens, and then follows the
+draft ([the preview follows your edits](#the-preview-follows-your-edits));
+**Reload preview** reads everything again.
 
 The wallpaper is shown on a stage with the proportions of the target display, so a
 portrait, ultrawide or 4:3 display previews with the layout and crop it will get
@@ -61,6 +63,44 @@ ratings exclude the interval while a preview is open.
 `WallpaperPreviewWindowController` exists only for an explicit preview action. The
 bridge's read-only `wallpaper_preview` export keeps Web property scalar types and
 never reconciles the desktop.
+
+### The preview follows your edits
+
+While the window is open, an edit to the wallpaper's properties shows in it without
+reloading: a slider, a colour, a switch, a choice, **Restore default**, **Restore
+all defaults**, **Revert** and a preset all change the draft, and the draft is what
+the preview shows. Text goes live when it is committed (Return, or leaving the field),
+not for each keystroke; text typed but not yet committed when the preview opened is
+in it, and the first edit afterwards shows the committed text instead. The edit never
+reaches the desktop, the saved options or the other previews.
+
+The preview waits until the edits pause for 150 ms and then reads the draft once, so
+a drag, a burst of edits and a preset each cost one update, and an edit that arrives
+while one is being read queues one more. Nothing is read or sent while the window is
+hidden, covered, minimized or the screen is locked: the draft is read once when the
+window shows again, and the same holds for an edit made while the preview is still
+loading, which is shown once the first frame has drawn. A paused preview takes the
+change too, so it resumes current. A failure to show an update is logged (once per
+distinct problem) and the preview keeps playing what it has; the next edit tries again.
+
+A scene takes the whole property state through the renderer's
+[live property edits](scene-rendering.md#live-property-edits), a Web page through
+`applyUserProperties`, which hands the page only the properties whose value changed.
+A video has no properties to follow. `PropertyPreviewScheduler` is the wait and
+`LivePropertyPayload` decides what is sent; `BridgeStore.onPropertyDraftChanged` is
+what tells the session that a wallpaper's draft changed (after an edit, a chosen file,
+a restore, a revert or an apply).
+
+What a preview reads only while it loads does not follow. A picture or file a
+property picks (a texture, a file, a folder) keeps the value the preview started with,
+and while the draft picks another the window's status line says **Reload preview to
+show the picture or files you chose.**; picking the original again clears it.
+**Reload preview** starts over from the draft, which is also how the scale factor,
+which the preview reads once, is shown. Two scene readers decide while the scene
+loads as well, an effect that a switch or choice builds or leaves out and a texture
+a property picks for a material: they stay as the scene loaded them and the window
+gives no note for them (the renderer logs the held names once), so **Reload preview**
+shows those. Apply changes is unchanged: it reloads the wallpaper from the saved options.
 
 ## Properties
 

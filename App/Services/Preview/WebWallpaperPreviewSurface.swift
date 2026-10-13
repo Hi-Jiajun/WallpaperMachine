@@ -11,6 +11,9 @@ final class WebWallpaperPreviewSurface: NSObject, WallpaperPreviewSurface, WKUID
     private let request: WallpaperPreviewRequest
     private let assets: UserAssetStore
     private var fetchAll = Set<String>()
+    /// The staged copies of the files the page was handed, by property id. A later delivery
+    /// names the user's own path again, so these are put back to keep the page's value.
+    private var replacements: [String: String] = [:]
     private var stopped = false
 
     /// `inspectable` is read once: a preview lives for a few minutes at most, and
@@ -57,7 +60,7 @@ final class WebWallpaperPreviewSurface: NSObject, WallpaperPreviewSurface, WKUID
         guard WebWallpaperAudioOutput.apply(volume: request.volume, muted: true, to: page.webView).pageMute else {
             throw WallpaperPreviewFailure(message: String(localized: "WebKit cannot provide muted playback for this preview."))
         }
-        var replacements: [String: String] = [:]
+        replacements = [:]
         for property in WebWallpaperHost.pathProperties(in: request.propertiesJSON) {
             try Task.checkCancellation()
             guard !property.source.isEmpty else { continue }
@@ -79,6 +82,12 @@ final class WebWallpaperPreviewSurface: NSObject, WallpaperPreviewSurface, WKUID
         page.setAudioResponseEnabled(false)
         page.setMediaIntegrationEnabled(false)
         page.load()
+    }
+
+    /// The page already hands its listener only the properties whose values changed.
+    func applyProperties(_ json: String) throws {
+        guard !stopped else { return }
+        page.applyUserProperties(json: WebWallpaperHost.substituting(replacements, in: json) ?? json)
     }
 
     func setPaused(_ paused: Bool) throws {

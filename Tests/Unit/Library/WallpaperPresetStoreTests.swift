@@ -598,8 +598,12 @@ final class WallpaperPresetStoreTests: XCTestCase {
         .init(id: "detail", kind: "textInput", value: .string("after"), usesDefault: false),
         .init(id: "mode", kind: "bool", value: .bool(true), usesDefault: false),
       ])
+      var followed: [String] = []
+      store.onPropertyDraftChanged = { followed.append($0) }
       if reachable {
         try await context.store.apply(preset, options: initial, bridge: store)
+        XCTAssertGreaterThanOrEqual(followed.count, 3, "each edit of the preset and its apply reach whatever follows the draft")
+        XCTAssertEqual(Set(followed), ["wallpaper"])
         let committed = try await bridge.wallpaperOptionsSnapshot(wallpaperId: "wallpaper")
         XCTAssertEqual(WallpaperPresetValue(committed.properties[0].value), .string("after"))
         XCTAssertTrue(committed.properties[0].enabled)

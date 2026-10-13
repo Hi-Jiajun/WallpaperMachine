@@ -245,6 +245,18 @@ reuse, or visual behavior, which is why these items are manual.
       dragging the window to other shapes keeps the proportions without
       stretching. Previewing again for a 16:9 display reshapes the stage without
       resizing the window.
+- [ ] Live property preview ([the preview follows your edits](../features/wallpaper-properties.md#the-preview-follows-your-edits)):
+      open the preview of a scene with a slider, a colour, a switch that shows a layer and a
+      choice, and of a Web wallpaper with a slider and a choice. Drag the slider: the preview
+      follows the thumb, smoothly enough to steer by, and the desktop and the saved options
+      do not change. Pick a colour, flip the switch (a layer that was hidden appears, with at
+      most one short hitch) and pick a choice; **Restore default** and **Revert** put the
+      preview back, and so does applying a preset. Type in a text field: nothing changes until
+      Return or leaving the field. Minimize the window, change a value and show it again: it
+      shows the new value once. Pause the preview, change a value and resume. Pick another
+      picture or file where the wallpaper has such a property: the preview keeps the old one and
+      its status line asks for a reload; **Reload preview** shows the new one and clears the
+      line. **Apply changes** still reloads the desktop wallpaper from the saved options.
 - [ ] Wallpaper position ([display position](../features/wallpaper-properties.md#display-position)):
       show a scene or video whose shape differs from the display with **Fill**, then drag
       **Horizontal position** and **Vertical position** across 0 to 100%. The visible part

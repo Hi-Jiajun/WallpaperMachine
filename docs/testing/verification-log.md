@@ -25,6 +25,15 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-13 — Live property preview in the preview window
+
+The Wallpaper Preview window follows the property draft (debounced, hidden-aware) for scenes and Web pages; pictures and files stay as the preview loaded them and the window offers a reload. Swift only; the renderer's hot path was verified in the earlier renderer commits of this package.
+
+- `python3 scripts/test.py --only` the touched preview, draft-hook, preset and panel-property classes (WallpaperPreviewLivePropertiesTests, LivePropertyPayloadTests, PropertyPreviewSchedulerTests, PropertyDraftHookTests, WallpaperPreviewSessionTests, WallpaperPreviewRequestTests, WebWallpaperPreviewSurfaceTests, WallpaperPreviewLayoutTests, WallpaperPresetStoreTests, ControlPanelPreviewTests, WebPanelAssetPropertiesTests, WebPanelHiddenPropertyTests, WebPanelPropertyLabelTests) — exit 0; 93 passed
+- `python3 -m unittest scripts/tests/test_panel_localization.py` — 6 passed (the new string is in all four native languages)
+- Not run: the full gate, `scripts/check_renderer.py` and `scripts/check_rust.py` (no Rust or C++ change in this commit), a Release build
+- Unverified without a desktop run: the visible follow of sliders, colours, combos and booleans in an open preview of a scene and of a Web wallpaper, hidden and paused behaviour, the status line, a real renderer taking the document inside the window (listed in manual-smoke.md)
+
 ## 2026-10-13 — Reduced quality for Low Power Mode, heat and a low battery
 
 The panel offers Reduced quality for the three system conditions and names the cause; the bridge, monitor and policy it drives were verified by the three commits before it. Targeted runs only: the full gate and a Release build were not part of this commit's verification.
@@ -126,12 +135,3 @@ A replacement clip's window opens with the picture it replaces over it and drops
 - Mutation check — seven one-line breakages of `NativeVideoWallpaperHost` (no adopt, close before admission, no cancel on failure, no settle after hand-off, no release on first frame, no overtaken-pass guard, no release for a layer ready at birth) each failed between 1 and 5 of the host tests
 - Skipped: the full gate and `check_rust.py`/`check_renderer.py` (no Rust or renderer change in this commit), `NativeVideoPlayerMediaTests` (opt-in), any desktop run
 - Not established: that `isReadyForDisplay` alone is late enough that the veil does not come off a frame early on a real clip; the fade and the clip-to-clip, scene-to-clip and refusal switches on a real display ([manual smoke](manual-smoke.md#wallpaper-switching))
-
-## 2026-10-13 — Wallpaper switch hold for scene successors
-
-Commit 3 of the seamless-switch lane, built and tested in an isolated worktree on top of the layer-swap revert and layer announcement commits. Web pages and native-backend clips take the veil in the lane's next commits; this one carries it for scenes.
-
-- `python3 scripts/test.py --only WallpaperSwitchHoldTests --only WallpaperActivationRecoveryTests --only DesktopWallpaperTests --only WallpaperPresentationPolicyTests --only WallpaperReapplyTests --only WallpaperDisplayTransferIntegrationTests --only WallpaperDisplayTransferTests --only UserCommandQueueTests --only ActivationLogTests --only WallpaperWindowAuditorTests` — exit 0; 234 passed, 0 failed, 0 skipped
-- Mutation check on `WallpaperSwitchHold` (a reconfigure takes the veil, the engine settling no longer fades a scene's veil, the host grace is never applied): 7 of the 26 `WallpaperSwitchHoldTests` failed; the file was restored
-- Not run: the full gate, `scripts/check_rust.py` and the renderer checks (no Rust, bridge or C++ change in this commit), and the gated window cases of the lane's first two commits (`case_wallpaper_window_layer_swap_revert`, `case_wallpaper_window_layer_swap_finish`, `case_wallpaper_window_announces_layers`)
-- Unverified, desktop only: a sublayer above the `CAMetalLayer` composites over its drawables and hides the black placeholder, scene surfaces answer the still request within 250 ms (a paused renderer included), the held still looks like the live frame it replaces, the 0.2 s fade, Reduce Motion, multi-display and mirror switches (checklist in manual-smoke.md)

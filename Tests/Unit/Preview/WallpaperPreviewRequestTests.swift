@@ -100,6 +100,24 @@ final class WallpaperPreviewRequestTests: XCTestCase {
         XCTAssertTrue(store.editorState.hasPendingEdits(wallpaperID: "preview"))
         do { _ = try await store.wallpaperPreviewRequestAsync(id: "preview", displayID: "primary", textOverrides: ["unknown": "x"]); XCTFail("undeclared preview property accepted") } catch {}
     }
+
+    func testPreviewNamesThePicturesAndFilesItCannotChangeInPlace() async throws {
+        func property(_ id: String, _ kind: BridgePropertyKind) -> BridgePropertyDescriptor {
+            BridgePropertyDescriptor(id: id, kind: kind, labelHtml: id, value: .string(value: ""), defaultValue: .string(value: ""),
+                slider: nil, comboOptions: [], fileFilter: nil, directoryMode: nil, dirty: false,
+                canRestoreDefaults: false, enabled: true, assetManaged: false, assetMissing: false, assetSourcePath: nil)
+        }
+        let bridge = PreviewInputsBridge(noPointer: .init())
+        bridge.preview = descriptor()
+        bridge.options = BridgeSnapshotFixtures.options(wallpaperId: "preview", kind: .webpage, properties: [
+            property("picture", .texture), property("file", .file), property("folder", .directory),
+            property("size", .slider), property("tint", .color), property("flag", .bool), property("mode", .combo),
+            property("message", .textInput), property("heading", .group), property("label", .text),
+        ])
+        let store = BridgeStore(bridge: bridge)
+        let request = try await store.wallpaperPreviewRequestAsync(id: "preview", displayID: "primary")
+        XCTAssertEqual(request.frozenPropertyIDs, ["picture", "file", "folder"])
+    }
 }
 
 private final class PreviewInputsBridge: WallpaperBridge {

@@ -1084,10 +1084,27 @@ What each covers: [playlists](../features/playlists.md#verification).
 `WallpaperPreviewSessionTests` — hidden-load deferral, pause composition,
 replacement and close generation guards, failure teardown, reload, readiness
 timeout and pointer conversion, using injected surfaces.
+`WallpaperPreviewLivePropertiesTests` — the preview following the property draft with
+an injected surface and a wait the test ends by hand: a burst costing one read and
+one push of the newest draft, an identical or picture-only change pushing nothing,
+the picture note appearing and clearing, a hidden, still loading or not yet ready
+preview taking the draft once when it can, a paused one taking it too, other
+wallpapers, a closed or replaced session and a late read being ignored, a failed push
+or unreadable draft logged once while the preview plays on, reload starting from the
+new baseline and dropping open-time text, videos left alone, Web entries kept whole,
+and the window's status line. `PropertyPreviewSchedulerTests` — trailing edge, one run
+in flight per key with the newest queued behind it, cancel, independent keys and a
+failing wait. `LivePropertyPayloadTests` — merging the draft over the started
+values for scene and Web payloads, frozen ids restored, key order not a change,
+invalid documents refused. `PropertyDraftHookTests` — every draft-changing call names
+its wallpaper after the change is stored, and a failed call announces nothing
+(`WallpaperPresetStoreTests` checks a preset's edits and apply do too).
 `WallpaperPreviewRequestTests` — installed-path bounds, symlink escape, stale
-manifests, resource checks, and copying unapplied values without changing bridge
-state. `WebWallpaperPreviewSurfaceTests` use real offscreen WebKit for typed
-properties, isolated temporary storage and mute. `ControlPanelPreviewTests` drive
+manifests, resource checks, copying unapplied values without changing bridge
+state, and naming the pictures and files a preview holds. `WebWallpaperPreviewSurfaceTests`
+use real offscreen WebKit for typed properties, a second delivery changing only the
+edited property, a staged file keeping its value, isolated temporary storage and
+mute. `ControlPanelPreviewTests` drive
 the inspector action without opening a window, and `WallpaperPreviewLayoutTests`
 check the 480-point content view in English, Chinese and Japanese, the window size
 for 16:9, ultrawide, 4:3 and portrait displays on ordinary and tiny screens, and
@@ -1095,7 +1112,10 @@ the stage (shape, centring, bars and the surface following it) without an
 `NSWindow`. Rust `wallpaper_preview` tests cover read-only draft export and Web
 combo types. Not covered: native window presentation, how the stage looks in a
 real window on a portrait or ultrawide display, scene or video first frames in
-that window and OS visibility events.
+that window, OS visibility events, and a real renderer taking the document in the
+preview window (the renderer's side is in
+[scene regressions](scene-regressions.md)); the visible follow is in the
+[manual smoke](manual-smoke.md).
 
 ## Steam
 

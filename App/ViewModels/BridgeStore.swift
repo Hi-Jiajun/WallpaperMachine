@@ -38,6 +38,10 @@ final class BridgeStore {
     /// display layout's recovery, a Focus restore), which the user did not ask for.
     @ObservationIgnored var onUserWallpaperRemoved: (@MainActor (_ wallpaperID: String, _ displayID: String) -> Void)?
     @ObservationIgnored var openPreview: (@MainActor (WallpaperPreviewSession.Selection) -> Void)?
+    /// A wallpaper's pending property edits changed: an edit, a restored default, a revert, an
+    /// apply or a preset. It runs once the change is stored and names the wallpaper, so whatever
+    /// shows a copy of the draft (the preview window) can follow it.
+    @ObservationIgnored var onPropertyDraftChanged: (@MainActor (_ wallpaperID: String) -> Void)?
     /// Runs after a wallpaper was moved on a display and the move is saved, so whatever
     /// shows a picture of the desktop can retake it. Not run when the bridge refused the move.
     @ObservationIgnored var onDisplayFramingChanged: (@MainActor (_ wallpaperID: String, _ displayID: String) -> Void)?
@@ -599,8 +603,8 @@ final class BridgeStore {
     /// any setter, saving a draft, changing selection or applying to a display.
     func wallpaperPreviewRequestAsync(id: String, displayID: String,
                                      textOverrides: [String: String] = [:]) async throws -> WallpaperPreviewRequest {
+        let options = try await wallpaperOptionsSnapshotAsync(wallpaperId: id)
         if !textOverrides.isEmpty {
-            let options = try await wallpaperOptionsSnapshotAsync(wallpaperId: id)
             let allowed = Set(options.properties.filter { $0.kind == .textInput && $0.enabled }.map(\.id))
             guard textOverrides.count <= 1_000, textOverrides.keys.allSatisfy(allowed.contains),
                   textOverrides.values.reduce(0, { $0 + $1.utf8.count }) <= 1024 * 1024 else {
@@ -610,6 +614,7 @@ final class BridgeStore {
         let descriptor = try await bridge.wallpaperPreview(wallpaperId: id, displayId: displayID)
         try Task.checkCancellation()
         var request = try WallpaperPreviewRequest(descriptor)
+        request.frozenPropertyIDs = Set(options.properties.filter { Self.previewHoldsAtLoadedValue($0.kind) }.map(\.id))
         if let draft = editorState.scalingDrafts[.init(wallpaperID: id, fieldID: displayID)] {
             guard let value = draft.value else {
                 throw WallpaperActionError(message: draft.errorMessage ?? String(localized: "Enter a valid scale before previewing."))
@@ -630,6 +635,15 @@ final class BridgeStore {
             request.propertiesJSON = String(decoding: try JSONSerialization.data(withJSONObject: properties, options: [.sortedKeys]), as: UTF8.self)
         }
         return request
+    }
+
+    /// A picture or file is read when a wallpaper loads, so a running preview keeps the one it
+    /// started with and offers a reload when the draft picks another.
+    nonisolated static func previewHoldsAtLoadedValue(_ kind: BridgePropertyKind) -> Bool {
+        switch kind {
+        case .texture, .file, .directory: true
+        default: false
+        }
     }
 
     func setFilterAsync(kind: BridgeWallpaperKind, enabled: Bool) async throws {
@@ -767,6 +781,7 @@ final class BridgeStore {
         defer { endWallpaperEdit(wallpaperId) }
         let bundle = try await bridge.editProperty(wallpaperId: wallpaperId, propertyId: propertyId, value: value)
         apply(bundle)
+        onPropertyDraftChanged?(wallpaperId)
     }
 
     /// The path a `file` or `directory` property points at. `nil` clears it; the engine
@@ -777,6 +792,7 @@ final class BridgeStore {
         let bundle = try await bridge.setPropertyPath(wallpaperId: wallpaperId, propertyId: propertyId, path: path)
         invalidateHostAsset?(wallpaperId, propertyId)
         apply(bundle)
+        onPropertyDraftChanged?(wallpaperId)
     }
 
     func restorePropertyDefaultAsync(wallpaperId: String, propertyId: String) async throws {
@@ -784,6 +800,7 @@ final class BridgeStore {
         defer { endWallpaperEdit(wallpaperId) }
         let bundle = try await bridge.restorePropertyDefault(wallpaperId: wallpaperId, propertyId: propertyId)
         apply(bundle)
+        onPropertyDraftChanged?(wallpaperId)
     }
 
     /// Stages the authored default for every property except the files and folders the user chose,
@@ -793,6 +810,7 @@ final class BridgeStore {
         defer { endWallpaperEdit(wallpaperId) }
         let bundle = try await bridge.restoreAllPropertyDefaults(wallpaperId: wallpaperId)
         apply(bundle)
+        onPropertyDraftChanged?(wallpaperId)
     }
 
     func setDisplayEnabledAsync(displayId: String, enabled: Bool) async throws {
@@ -975,6 +993,7 @@ final class BridgeStore {
             try await resyncAfterFailedApplyAsync(cause: error)
             throw error
         }
+        onPropertyDraftChanged?(wallpaperId)
         recordHistory(before: previousAssignments)
         reportSuccessfulApply(wallpaperID: wallpaperId)
         if userInitiated {
@@ -1079,6 +1098,7 @@ final class BridgeStore {
         let bundle = try await bridge.cancelWallpaperOptions(wallpaperId: wallpaperId)
         apply(bundle)
         editorState.discard(wallpaperID: wallpaperId)
+        onPropertyDraftChanged?(wallpaperId)
     }
 
     func pauseAllAsync() async throws {

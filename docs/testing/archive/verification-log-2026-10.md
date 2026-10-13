@@ -9,6 +9,15 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-13 — Wallpaper switch hold for scene successors
+
+Commit 3 of the seamless-switch lane, built and tested in an isolated worktree on top of the layer-swap revert and layer announcement commits. Web pages and native-backend clips take the veil in the lane's next commits; this one carries it for scenes.
+
+- `python3 scripts/test.py --only WallpaperSwitchHoldTests --only WallpaperActivationRecoveryTests --only DesktopWallpaperTests --only WallpaperPresentationPolicyTests --only WallpaperReapplyTests --only WallpaperDisplayTransferIntegrationTests --only WallpaperDisplayTransferTests --only UserCommandQueueTests --only ActivationLogTests --only WallpaperWindowAuditorTests` — exit 0; 234 passed, 0 failed, 0 skipped
+- Mutation check on `WallpaperSwitchHold` (a reconfigure takes the veil, the engine settling no longer fades a scene's veil, the host grace is never applied): 7 of the 26 `WallpaperSwitchHoldTests` failed; the file was restored
+- Not run: the full gate, `scripts/check_rust.py` and the renderer checks (no Rust, bridge or C++ change in this commit), and the gated window cases of the lane's first two commits (`case_wallpaper_window_layer_swap_revert`, `case_wallpaper_window_layer_swap_finish`, `case_wallpaper_window_announces_layers`)
+- Unverified, desktop only: a sublayer above the `CAMetalLayer` composites over its drawables and hides the black placeholder, scene surfaces answer the still request within 250 ms (a paused renderer included), the held still looks like the live frame it replaces, the 0.2 s fade, Reduce Motion, multi-display and mirror switches (checklist in manual-smoke.md)
+
 ## 2026-10-13 — Workshop downloads in the menu bar
 
 StatusMenuModel.DownloadActivity and WorkshopDownloadManager.inProgressTransfers: while Workshop downloads run, a line under Control Panel reads Downloads: N in progress with a byte-weighted percent that is left out when any counted job cannot report a size and stops at 99, and opens Discover. Built when the menu opens (no timer). Commit 10 of the desktop-menubar lane, checked in an isolated worktree on macOS 27.0.1; targeted runs only, not the full gate. No Rust, bridge or renderer change.

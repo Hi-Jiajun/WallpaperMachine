@@ -73,7 +73,7 @@
 | 功能 | 作用 |
 | --- | --- |
 | [**应用壁纸**](docs/features/control-panel.md#selection-versus-apply) | 场景、视频或[网页](docs/features/web-wallpapers.md)壁纸：按下播放，它就成为你的桌面。单击壁纸只是选中它。 |
-| [**预览**](docs/features/wallpaper-properties.md#live-preview) | 在单独的窗口中试看已安装的场景、视频或网页壁纸，使用当前选项和独立的播放控制，再决定是否更换桌面。 |
+| [**预览**](docs/features/wallpaper-properties.md#live-preview) | 在单独的窗口中试看已安装的场景、视频或网页壁纸，使用当前选项和独立的播放控制，再决定是否更换桌面。滑块、颜色和开关会随你的调整即时显示。 |
 | [**创意工坊**](docs/features/workshop-downloads.md) | 实时的 Steam 创意工坊，浏览无需登录，还有[合集、每位作者的壁纸和你的订阅](docs/features/workshop-downloads.md#collections-authors-and-subscriptions)。下载在应用内进行，可同时下载多个，需要拥有 Wallpaper Engine 的 Steam 账户。已有壁纸的[更新](docs/features/workshop-downloads.md#updates)每天检查一次，一键安装。 |
 | [**pixiv**](docs/features/pixiv.md) | pixiv 的插画排行榜和标签搜索。作品的任意一页都能保存为静态壁纸；登录 pixiv 后可查看仅限会员的作品，账户允许的话还能查看 R-18 作品。 |
 | [**壁纸选项**](docs/features/wallpaper-properties.md#properties) | 作者提供的每一个选项，在你应用修改时保存；[命名的属性预设](docs/features/wallpaper-properties.md#property-presets)可以保留多个版本，并能导出或导入。 |

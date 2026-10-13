@@ -125,6 +125,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             let created = try BridgeStore()
             store = created
             created.openPreview = { [weak self] selection in self?.showWallpaperPreview(selection) }
+            created.onPropertyDraftChanged = { [weak self] id in self?.previewWindow?.session.propertiesDidChange(wallpaperID: id) }
             AppLog.attach(created.bridge)
             // Reloading waits for a wallpaper being applied, so a page that lands meanwhile
             // appears once that finishes rather than failing.

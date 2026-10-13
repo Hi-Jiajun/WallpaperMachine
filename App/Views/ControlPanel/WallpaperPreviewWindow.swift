@@ -46,6 +46,10 @@ final class WallpaperPreviewWindowController: NSWindowController, NSWindowDelega
         updateVisibility()
     }
 
+    /// Shown in place of the playback status while the draft picks a picture or file that only
+    /// a fresh preview can show.
+    static var reloadNote: String { String(localized: "Reload preview to show the picture or files you chose.") }
+
     /// Height of the buttons, status and note under the stage.
     static let controlsHeight: CGFloat = 96
     /// The narrowest content that still holds the localized control row; a portrait stage gets
@@ -226,8 +230,8 @@ final class WallpaperPreviewWindowController: NSWindowController, NSWindowDelega
         switch session.phase {
         case .closed: status.stringValue = ""
         case .loading: status.stringValue = String(localized: "Loading preview…")
-        case .playing: status.stringValue = String(localized: "Playing preview")
-        case .paused: status.stringValue = String(localized: "Preview paused")
+        case .playing: status.stringValue = session.needsReload ? Self.reloadNote : String(localized: "Playing preview")
+        case .paused: status.stringValue = session.needsReload ? Self.reloadNote : String(localized: "Preview paused")
         case .failed(let message): status.stringValue = message
         }
         status.toolTip = status.stringValue
