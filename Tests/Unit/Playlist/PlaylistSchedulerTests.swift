@@ -338,6 +338,39 @@ final class PlaylistSchedulerTests: XCTestCase {
         XCTAssertEqual(applied, ["b", "c"])
     }
 
+    /// A relaunch carries on with the shuffle round it was halfway through: the wallpapers the
+    /// round already showed do not come round again before the others have.
+    func testARelaunchDoesNotRepeatWhatTheRoundAlreadyShowed() async {
+        let library = ["a", "b", "c", "d", "e", "f", "g", "h"]
+        store.update("primary") { $0.mode = .rotate; $0.order = .shuffle; $0.interval = 5 }
+        var scheduler = makeScheduler(library: library)
+        scheduler.start()
+        for _ in 0..<3 {
+            XCTAssertTrue(scheduler.skip("primary"))
+            await settle()
+        }
+        scheduler.stop()
+        let shownBefore = Set(applied)
+        XCTAssertEqual(applied.count, 3)
+        XCTAssertEqual(shownBefore.count, 3, "a round does not repeat a wallpaper")
+
+        // The app quits and starts again with the same wallpaper on screen.
+        store = PlaylistStore(defaults: defaults)
+        applied = []
+        scheduler = makeScheduler(library: library)
+        scheduler.start()
+        defer { scheduler.stop() }
+        for _ in 0..<5 {
+            XCTAssertTrue(scheduler.skip("primary"))
+            await settle()
+        }
+        XCTAssertEqual(applied.count, 5)
+        XCTAssertEqual(Set(applied), Set(library).subtracting(shownBefore),
+                       "the rest of the round shows exactly the wallpapers it had not shown yet")
+        XCTAssertEqual(store.recent["primary"], [], "the round is complete and the next starts fresh")
+        XCTAssertNil(PlaylistStore(defaults: defaults).recent["primary"])
+    }
+
     func testSkipChangesARotatingDisplayNowAndRestartsItsInterval() async {
         let scheduler = makeScheduler()
         scheduler.start()

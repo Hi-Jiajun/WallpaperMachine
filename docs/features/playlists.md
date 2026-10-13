@@ -30,7 +30,8 @@ All wallpapers and Favorites follow the library order; a list keeps the order it
 wallpapers were added in. Only wallpapers that can play count, so a wallpaper that
 left the library or cannot run on macOS is skipped. In order moves to the one
 after the wallpaper on screen and wraps; Shuffle shows every wallpaper once, in a
-new random order each round, and never picks the one on screen. A day that starts
+new random order each round, and never picks the one on screen, and a relaunch
+carries on with the round it was in (see [Storage](#storage)). A day that starts
 after its night (say day 22:00, night 06:00) wraps past midnight. Times are local
 clock times, so a daylight-saving day still switches at the time on the clock.
 
@@ -162,7 +163,18 @@ minutes falls back to 30) and each display's next change in
 `WallpaperMachine.playlistNextChange`, so a relaunch neither restarts a long interval
 nor skips a change that fell due while the app was closed. A display whose playlist is
 waiting after the user removed its wallpaper is kept in `WallpaperMachine.playlistHolds`,
-so a relaunch leaves it empty. Shuffle's round is kept for the running app only.
+so a relaunch leaves it empty.
+
+Shuffle's round, the wallpapers a display has shown since the round began, is kept in
+`WallpaperMachine.playlistRounds` for each display that rotates in Shuffle order, so a
+relaunch neither repeats a wallpaper it just showed nor starts the round over. It is
+saved with the source, collection and order it was drawn from and picked up again only
+when the display still has the same ones. Changing the source, collection or order,
+turning the playlist off or to Day and night, applying a saved playlist, ending a Focus,
+or restoring a backup that replaced the playlist starts a fresh round. Editing a list
+keeps the round, and deleting a wallpaper drops it from the round. A finished round is
+not saved, an in-order rotation saves nothing, and a round holds at most 2,048
+wallpapers (the newest). It is run state like the hold: it is not part of a backup.
 
 ## Code
 
@@ -182,7 +194,10 @@ so a relaunch leaves it empty. Shuffle's round is kept for the running app only.
 boundaries including a wrap past midnight and a daylight-saving day, decoding),
 `PlaylistStoreTests` (persistence, a fresh wait after a new rhythm, removal from
 every playlist, re-dating without a change, persisted reorder and stale-order
-rejection), `PlaylistSchedulerTests` (a waited interval, a change that fell due
+rejection, a shuffle round surviving a relaunch and being dropped when its source,
+collection, order or mode changes, when the playlist behind it is gone or was
+restored, and for an in-order rotation, pruned for deleted wallpapers, capped, and
+ignored when unreadable), `PlaylistSchedulerTests` (a waited interval, a change that fell due
 while paused happening once, day and night with
 a manual choice left alone, Change now, nothing playable, bounded failure skipping,
 cooldown expiry, cancellation, manual-command precedence and a rotation giving
@@ -190,7 +205,8 @@ way to a waiting Apply, rescheduled one interval later, a manual choice holding 
 due rotation for min(interval, 5 minutes) without ever shortening a later deadline
 or touching Off and Day and night, a display the user emptied staying empty at a due
 change or a day and night boundary until a wallpaper, Change now or Resume ends the
-wait, and a change waiting in the queue leaving it empty) and
+wait, and a change waiting in the queue leaving it empty, and a relaunch finishing
+the shuffle round it was in without repeating a wallpaper) and
 `WebPanelPlaylistTests` (the actions' validation and the paused state in the snapshot).
 `WallpaperDisplayTransferIntegrationTests` checks that only the user's removal reports
 one, not a delete or a reload. `ControlPanelPlaybackToolsTests` drives reorder buttons

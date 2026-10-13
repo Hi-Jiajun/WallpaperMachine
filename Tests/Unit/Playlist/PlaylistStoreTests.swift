@@ -235,6 +235,167 @@ final class PlaylistStoreTests: XCTestCase {
                        "a hold from a newer version leaves the display free instead of stuck")
     }
 
+    private static let roundsKey = "WallpaperMachine.playlistRounds"
+    private static let playlistsKey = "WallpaperMachine.playlists"
+    private let library = ["a", "b", "c", "d"]
+
+    /// Rewrites the saved playlists behind the store's back, as restoring a backup does.
+    private func rewriteSavedPlaylists(_ edit: (inout [String: DisplayPlaylist]) -> Void) throws {
+        let data = try XCTUnwrap(defaults.data(forKey: Self.playlistsKey))
+        var playlists = try JSONDecoder().decode([String: DisplayPlaylist].self, from: data)
+        edit(&playlists)
+        defaults.set(try JSONEncoder().encode(playlists), forKey: Self.playlistsKey)
+    }
+
+    func testTheShuffleRoundOutlivesTheApp() {
+        let store = PlaylistStore(defaults: defaults)
+        store.update("primary") { $0.mode = .rotate; $0.order = .shuffle }
+        store.recordPick("a", on: "primary", candidates: library)
+        store.recordPick("b", on: "primary", candidates: library)
+
+        let reloaded = PlaylistStore(defaults: defaults)
+        XCTAssertEqual(reloaded.recent["primary"], ["a", "b"])
+
+        reloaded.recordPick("c", on: "primary", candidates: library)
+        XCTAssertEqual(PlaylistStore(defaults: defaults).recent["primary"], ["a", "b", "c"],
+                       "the round carries on from where the last launch left it")
+    }
+
+    func testACompletedRoundIsNotKept() {
+        let store = PlaylistStore(defaults: defaults)
+        store.update("primary") { $0.mode = .rotate; $0.order = .shuffle }
+        for id in library { store.recordPick(id, on: "primary", candidates: library) }
+        XCTAssertEqual(store.recent["primary"], [], "the last wallpaper of a round ends it")
+        XCTAssertNil(defaults.object(forKey: Self.roundsKey), "a fresh round leaves nothing behind")
+        XCTAssertNil(PlaylistStore(defaults: defaults).recent["primary"])
+    }
+
+    func testARoundIsDroppedWhenTheSourceCollectionOrderOrModeChanges() {
+        let store = PlaylistStore(defaults: defaults)
+        let edits: [(display: String, edit: (inout DisplayPlaylist) -> Void)] = [
+            ("source", { $0.source = .favorites }),
+            ("collection", { $0.collectionID = "collection" }),
+            ("order", { $0.order = .sequential }),
+            ("mode", { $0.mode = .off }),
+        ]
+        for display in edits.map(\.display) + ["kept"] {
+            store.update(display) { $0.mode = .rotate; $0.order = .shuffle }
+            store.recordPick("a", on: display, candidates: library)
+        }
+        XCTAssertEqual(PlaylistStore(defaults: defaults).recent.count, 5)
+
+        for (display, edit) in edits { store.update(display, edit) }
+        store.update("kept") { $0.interval = 60 }
+        XCTAssertEqual(store.recent, ["kept": ["a"]], "the running app starts the round over too")
+        XCTAssertEqual(PlaylistStore(defaults: defaults).recent, ["kept": ["a"]],
+                       "only an edit of what the round is drawn from starts a new one")
+    }
+
+    func testEditingTheListLeavesTheRound() {
+        let store = PlaylistStore(defaults: defaults)
+        store.update("primary") { $0.mode = .rotate; $0.order = .shuffle; $0.source = .list; $0.wallpaperIDs = library }
+        for id in ["a", "b", "c"] { store.recordPick(id, on: "primary", candidates: library) }
+        store.add(["e"], to: "primary")
+        XCTAssertEqual(PlaylistStore(defaults: defaults).recent["primary"], ["a", "b", "c"])
+    }
+
+    func testDeletingAWallpaperPrunesTheRoundEvenWhenNoListHeldIt() {
+        let store = PlaylistStore(defaults: defaults)
+        store.update("everything") { $0.mode = .rotate; $0.order = .shuffle }
+        for id in ["a", "b", "c"] { store.recordPick(id, on: "everything", candidates: library) }
+        store.forget(["b"])
+        XCTAssertEqual(PlaylistStore(defaults: defaults).recent["everything"], ["a", "c"])
+
+        store.update("primary") { $0.mode = .rotate; $0.order = .shuffle; $0.source = .list; $0.wallpaperIDs = library }
+        for id in ["a", "c"] { store.recordPick(id, on: "primary", candidates: library) }
+        store.forget(["c"])
+        let reloaded = PlaylistStore(defaults: defaults)
+        XCTAssertEqual(reloaded.recent["primary"], ["a"])
+        XCTAssertEqual(reloaded.recent["everything"], ["a"])
+    }
+
+    func testARoundForADisplayWithoutAShufflePlaylistIsNotRestored() throws {
+        let store = PlaylistStore(defaults: defaults)
+        for display in ["shuffling", "ghost", "idle", "sequential", "dayNight"] {
+            store.update(display) { $0.mode = .rotate; $0.order = .shuffle }
+            store.recordPick("a", on: display, candidates: library)
+        }
+        XCTAssertEqual(PlaylistStore(defaults: defaults).recent.count, 5)
+
+        try rewriteSavedPlaylists {
+            $0["ghost"] = nil
+            $0["idle"]?.mode = .off
+            $0["sequential"]?.order = .sequential
+            $0["dayNight"]?.mode = .dayNight
+        }
+        XCTAssertEqual(PlaylistStore(defaults: defaults).recent, ["shuffling": ["a"]])
+    }
+
+    func testARestoredPlaylistFromAnotherSourceDoesNotInheritTheRound() throws {
+        let store = PlaylistStore(defaults: defaults)
+        store.update("primary") { $0.mode = .rotate; $0.order = .shuffle; $0.source = .favorites }
+        store.update("second") { $0.mode = .rotate; $0.order = .shuffle; $0.source = .favorites }
+        store.recordPick("a", on: "primary", candidates: library)
+        store.recordPick("a", on: "second", candidates: library)
+
+        try rewriteSavedPlaylists {
+            $0["primary"]?.source = .all
+            $0["second"]?.collectionID = "collection"
+        }
+        XCTAssertTrue(PlaylistStore(defaults: defaults).recent.isEmpty,
+                      "a round belongs to the wallpapers it was drawn from")
+    }
+
+    func testInOrderRotationWritesNoRound() {
+        let store = PlaylistStore(defaults: defaults)
+        store.update("primary") { $0.mode = .rotate; $0.order = .sequential }
+        store.recordPick("a", on: "primary", candidates: library)
+        store.schedule("primary", at: Date(timeIntervalSince1970: 1_800_000_000))
+        XCTAssertNil(defaults.object(forKey: Self.roundsKey))
+        XCTAssertNil(PlaylistStore(defaults: defaults).recent["primary"])
+    }
+
+    func testPickingWallpapersPostsNothingAndAnUnreadableRoundStartsFresh() throws {
+        let store = PlaylistStore(defaults: defaults)
+        store.update("primary") { $0.mode = .rotate; $0.order = .shuffle }
+        let posts = PostCount()
+        let token = NotificationCenter.default.addObserver(
+            forName: PlaylistStore.didChangeNotification, object: store, queue: nil
+        ) { _ in posts.value += 1 }
+        defer { NotificationCenter.default.removeObserver(token) }
+        store.recordPick("a", on: "primary", candidates: library)
+        XCTAssertEqual(posts.value, 0, "the panel does not redraw for a pick the scheduler dates anyway")
+
+        let saved = try XCTUnwrap(defaults.data(forKey: Self.roundsKey))
+        var future = try XCTUnwrap(JSONSerialization.jsonObject(with: saved) as? [String: Any])
+        future["random"] = ["pool": ["x"]]
+        defaults.set(try JSONSerialization.data(withJSONObject: future), forKey: Self.roundsKey)
+        XCTAssertEqual(PlaylistStore(defaults: defaults).recent["primary"], ["a"],
+                       "a field a newer build added does not cost the round")
+
+        for unreadable in [Data("not json".utf8), Data(#"{"playlists":5}"#.utf8), Data("{}".utf8)] {
+            defaults.set(unreadable, forKey: Self.roundsKey)
+            XCTAssertTrue(PlaylistStore(defaults: defaults).recent.isEmpty)
+        }
+    }
+
+    func testASavedRoundIsCappedToTheNewestPicks() throws {
+        let store = PlaylistStore(defaults: defaults)
+        store.update("primary") { $0.mode = .rotate; $0.order = .shuffle }
+        store.recordPick("a", on: "primary", candidates: library)
+        let saved = try XCTUnwrap(defaults.data(forKey: Self.roundsKey))
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: saved) as? [String: Any])
+        var playlists = try XCTUnwrap(object["playlists"] as? [String: [String: Any]])
+        playlists["primary"]?["ids"] = (0..<3000).map { "wallpaper-\($0)" }
+        object["playlists"] = playlists
+        defaults.set(try JSONSerialization.data(withJSONObject: object), forKey: Self.roundsKey)
+
+        let round = try XCTUnwrap(PlaylistStore(defaults: defaults).recent["primary"])
+        XCTAssertEqual(round.count, 2048)
+        XCTAssertEqual(round.first, "wallpaper-952")
+        XCTAssertEqual(round.last, "wallpaper-2999", "the newest picks are the ones kept")
+    }
+
     func testInvalidPlanNamesLeaveSavedPlanAndDisplayUnchanged() throws {
         let store = PlaylistStore(defaults: defaults)
         let plan = try store.savePlan(from: "primary", name: "Valid")

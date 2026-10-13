@@ -11,6 +11,10 @@ final class PlaylistStore {
     private static let nextChangeKey = "WallpaperMachine.playlistNextChange"
     static let plansKey = "WallpaperMachine.playlistPlans"
     private static let holdsKey = "WallpaperMachine.playlistHolds"
+    private static let roundsKey = "WallpaperMachine.playlistRounds"
+    /// The most wallpapers one saved round keeps. A round holds each wallpaper of the playlist
+    /// at most once, so only a very large library gets near it.
+    private static let roundLimit = 2048
 
     private let defaults: UserDefaults
     private(set) var playlists: [String: DisplayPlaylist]
@@ -27,7 +31,9 @@ final class PlaylistStore {
     }
     private(set) var holds: [String: Hold]
     /// What each display has shown this shuffle round, so every wallpaper comes round before one
-    /// repeats. Only for this run of the app.
+    /// repeats. A display that still shuffles the same source and collection keeps its round
+    /// across launches (`WallpaperMachine.playlistRounds`), so a relaunch neither repeats what it
+    /// just showed nor starts over halfway through. Run state, left out of backups.
     private(set) var recent: [String: [String]] = [:]
     private(set) var revisions: [String: UInt64] = [:]
     struct SkippedWallpaper: Equatable {
@@ -53,6 +59,7 @@ final class PlaylistStore {
         nextChange = stored.mapValues { Date(timeIntervalSince1970: $0) }
         let heldDisplays = defaults.dictionary(forKey: Self.holdsKey) as? [String: String] ?? [:]
         holds = heldDisplays.compactMapValues(Hold.init(rawValue:))
+        recent = Self.savedRounds(in: defaults, for: playlists)
     }
 
     func playlist(for display: String) -> DisplayPlaylist {
@@ -76,7 +83,10 @@ final class PlaylistStore {
         {
             nextChange[display] = nil
         }
-        if after.source != before.source || after.collectionID != before.collectionID || after.order != before.order {
+        // A round belongs to the wallpapers it was drawn from, and to a rotation that is running.
+        if after.source != before.source || after.collectionID != before.collectionID
+            || after.order != before.order || after.mode != before.mode
+        {
             recent[display] = nil
         }
         persist()
@@ -134,13 +144,20 @@ final class PlaylistStore {
             if let night = before.nightWallpaperID, gone.contains(night) { plans[index].playlist.nightWallpaperID = nil }
             changed = changed || plans[index].playlist != before
         }
+        var roundsChanged = false
         for display in recent.keys {
+            let before = recent[display]
             recent[display]?.removeAll(where: gone.contains)
+            roundsChanged = roundsChanged || recent[display] != before
         }
         for display in skipped.keys {
             skipped[display] = skipped[display]?.filter { !gone.contains($0.key) }
         }
-        if changed { persist(plansChanged: true) }
+        if changed {
+            persist(plansChanged: true)
+        } else if roundsChanged {
+            persistRounds()
+        }
     }
 
     func recordFailure(_ id: String, on display: String, message: String, retryAfter: Date) {
@@ -177,9 +194,12 @@ final class PlaylistStore {
         persist()
     }
 
-    /// Remembers a pick for shuffle; see `PlaylistPlanner.remember(_:in:candidates:)`.
+    /// Remembers a pick for shuffle; see `PlaylistPlanner.remember(_:in:candidates:)`. A shuffled
+    /// display's round is saved at once, without a notification (nothing on screen depends on
+    /// it); an in-order rotation has no round worth keeping and writes nothing.
     func recordPick(_ id: String, on display: String, candidates: [String]) {
         recent[display] = PlaylistPlanner.remember(id, in: recent[display] ?? [], candidates: candidates)
+        if playlist(for: display).order == .shuffle { persistRounds() }
     }
 
     func plan(id: String) -> PlaylistPlan? {
@@ -282,6 +302,66 @@ final class PlaylistStore {
         }
         defaults.set(nextChange.mapValues(\.timeIntervalSince1970), forKey: Self.nextChangeKey)
         defaults.set(holds.mapValues(\.rawValue), forKey: Self.holdsKey)
+        // Every change that clears or prunes a round lands here, so a playlist edit, a plan, a
+        // Focus restore or a deleted wallpaper never leaves a stale round behind.
+        persistRounds()
         NotificationCenter.default.post(name: Self.didChangeNotification, object: self)
+    }
+
+    /// A shuffle round as it is saved. The signature names what the round was drawn from, so a
+    /// round is only picked up again for the same source, collection and order: the playlist's
+    /// `revisions` start at zero on every launch and cannot say that.
+    private struct Round: Codable, Equatable {
+        var signature: String
+        var ids: [String]
+    }
+
+    /// The saved rounds, in a wrapper with default-tolerant decoding so a build that keeps more
+    /// than shuffle rounds can add a field without migrating this one.
+    private struct SavedRounds: Codable {
+        var playlists: [String: Round] = [:]
+
+        init(playlists: [String: Round] = [:]) { self.playlists = playlists }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            playlists = (try? container.decodeIfPresent([String: Round].self, forKey: .playlists)) ?? [:]
+        }
+    }
+
+    private static func signature(of playlist: DisplayPlaylist) -> String {
+        "\(playlist.source.rawValue)|\(playlist.collectionID ?? "")|\(playlist.order.rawValue)"
+    }
+
+    /// The rounds worth picking up again: a display that rotates in shuffle order over the same
+    /// source and collection it was saved under. Anything else (an edited, switched-off or gone
+    /// display, or a playlist restored from a backup) starts a fresh round. Wallpapers that left
+    /// the library need no pruning here: the planner ignores them and the next pick drops them.
+    private static func savedRounds(in defaults: UserDefaults, for playlists: [String: DisplayPlaylist]) -> [String: [String]] {
+        guard let data = defaults.data(forKey: roundsKey),
+              let saved = try? JSONDecoder().decode(SavedRounds.self, from: data) else { return [:] }
+        var rounds: [String: [String]] = [:]
+        for (display, round) in saved.playlists {
+            guard let playlist = playlists[display], playlist.mode == .rotate, playlist.order == .shuffle,
+                  round.signature == signature(of: playlist) else { continue }
+            if !round.ids.isEmpty { rounds[display] = Array(round.ids.suffix(roundLimit)) }
+        }
+        return rounds
+    }
+
+    /// Writes the rounds of the displays that shuffle, and the whole key away when none do.
+    /// Posts nothing: a pick already posts through the date of the next change.
+    private func persistRounds() {
+        var rounds: [String: Round] = [:]
+        for (display, ids) in recent where !ids.isEmpty {
+            let playlist = playlist(for: display)
+            guard playlist.mode == .rotate, playlist.order == .shuffle else { continue }
+            rounds[display] = Round(signature: Self.signature(of: playlist), ids: Array(ids.suffix(Self.roundLimit)))
+        }
+        if rounds.isEmpty {
+            if defaults.object(forKey: Self.roundsKey) != nil { defaults.removeObject(forKey: Self.roundsKey) }
+        } else if let data = try? JSONEncoder().encode(SavedRounds(playlists: rounds)) {
+            defaults.set(data, forKey: Self.roundsKey)
+        }
     }
 }

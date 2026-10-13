@@ -923,10 +923,12 @@ signed-in answers and the real sign-in page are not covered
 `PlaylistPlannerTests` (candidates, order, shuffle rounds, day/night boundaries),
 `PlaylistStoreTests` (persistence, custom intervals, reordering, plans copied
 across displays and detached on manual edit, cleanup when wallpapers or
-collections go), `PlaylistSchedulerTests` (fake clock, library and activation;
+collections go, a shuffle round kept across a relaunch and dropped with its playlist),
+`PlaylistSchedulerTests` (fake clock, library and activation;
 no renderer: failure cooldowns, paused catch-up, a newer manual command
 outranking a failed automatic switch, a rotation yielding to a waiting Apply, a manual choice holding a
-due rotation, a display the user emptied staying empty until a wallpaper, Change now or Resume),
+due rotation, a display the user emptied staying empty until a wallpaper, Change now or Resume,
+a relaunch finishing its shuffle round without a repeat),
 `WebPanelPlaylistTests` and offscreen
 `ControlPanelPlaybackToolsTests` (drag and button sorting, keyboard focus,
 stale-drag rejection, escaped history titles, clearing only the target display, the
