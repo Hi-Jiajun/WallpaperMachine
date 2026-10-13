@@ -72,9 +72,12 @@ kernel's resource-coalition accounting (`CoalitionEnergySource`,
   sent.
 - **Battery share.** On a Mac with a battery, the row adds **About N% of a full
   battery charge per hour** (or less than 1%). `BatteryCapacity` reads today's full
-  charge (`AppleRawMaxCapacity`, mAh) from the `AppleSmartBattery` registry entry,
-  once per activation, and multiplies it by 3.85 V per cell; a desktop Mac has no
-  such entry and shows no line.
+  charge in mAh from the `AppleSmartBattery` registry entry, once per activation:
+  `AppleRawMaxCapacity`, or `BatteryData`'s `FullChargeCapacity` on macOS 27,
+  which dropped the top-level keys. It multiplies that by 3.85 V per cell, counting
+  cells from `BatteryData`'s `CellVoltage` or, where macOS 27 no longer lists it,
+  from the pack voltage (a 99.6 Wh MacBook Pro reads about 98.5 Wh). A desktop Mac
+  has no such entry and shows no line.
 - **Before and after.** A Performance setting that changes rendering work
   (`WebPanelController.renderingSettings`: presets, frame-rate limit, render scale,
   battery mode and quality, video backend, scene renderer and the scene and
