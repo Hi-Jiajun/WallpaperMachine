@@ -12,7 +12,8 @@ use futures_util::Future;
 pub use types::{
     BridgeAppSnapshot, BridgeAudioSpectrum, BridgeComboOption, BridgeDirectoryMode,
     BridgeDisplayConfigRow, BridgeDisplayMode, BridgeDisplayMutationBundle,
-    BridgeDisplaySettingsRow, BridgeFileFilter, BridgeLibraryScanStatus, BridgeLibrarySnapshot,
+    BridgeDisplaySettingsRow, BridgeFileFilter, BridgeFraming, BridgeLibraryScanStatus,
+    BridgeLibrarySnapshot,
     BridgeLockScreenScene, BridgeLogLevel, BridgeLogStatus, BridgeMonitorInfoRow, BridgeWallpaperPreview,
     BridgeNativeVideoWallpaper, BridgeMediaSnapshot,
     BridgeMonitorInformationSnapshot, BridgePlaybackState, BridgeBatteryMode, BridgePropertyDescriptor,

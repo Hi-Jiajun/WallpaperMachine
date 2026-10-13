@@ -94,7 +94,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       displayId: CGMainDisplayID(), wallpaperId: "2001", title: "t",
       projectPath: project.appendingPathComponent("project.json").path,
       assetsPath: project.path, fps: 30, scalingMode: .fill, scalingFactor: 1,
-      propertiesJson: propertiesJSON, paused: false)
+      framing: .centered, propertiesJson: propertiesJSON, paused: false)
   }
 
   /// The managed store as the app writes it, isolated per test through

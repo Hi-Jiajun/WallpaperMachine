@@ -28,7 +28,7 @@ pub use api::{
     validate_backup_renderer_configuration,
     BridgeAppSnapshot, BridgeAudioSpectrum, BridgeComboOption, BridgeDirectoryMode,
     BridgeDisplayConfigRow, BridgeDisplayMode, BridgeDisplayMutationBundle,
-    BridgeDisplaySettingsRow, BridgeError, BridgeErrorKind, BridgeFileFilter,
+    BridgeDisplaySettingsRow, BridgeError, BridgeErrorKind, BridgeFileFilter, BridgeFraming,
     BridgeLibraryScanStatus,
     BridgeLibrarySnapshot, BridgeLockScreenScene, BridgeLogLevel, BridgeLogStatus,
     BridgeMonitorInfoRow, BridgeMonitorInformationSnapshot, BridgePlaybackState, BridgeBatteryMode,

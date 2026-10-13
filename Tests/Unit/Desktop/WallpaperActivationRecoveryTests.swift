@@ -1118,8 +1118,8 @@ private final class ApplyFailureBridge: WallpaperBridge {
             wallpaperId: "failing", title: "Failing", kind: kind, dirty: dirty,
             displayConfigurations: [BridgeDisplayConfigRow(
                 displayId: "primary", title: "Primary", enabled: false, scalingMode: .fill,
-                scalingFactor: 1, targetFps: 30, maxFps: 60, muted: false, volume: 1,
-                dirty: false, canRestoreDefaults: false)],
+                scalingFactor: 1, framing: .centered, targetFps: 30, maxFps: 60, muted: false,
+                volume: 1, dirty: false, canRestoreDefaults: false)],
             audioResponseEnabled: false)
     }
 

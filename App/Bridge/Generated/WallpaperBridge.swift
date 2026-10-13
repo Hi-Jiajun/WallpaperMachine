@@ -3949,6 +3949,11 @@ public struct BridgeDisplayConfigRow {
     public var enabled: Bool
     public var scalingMode: BridgeScalingMode
     public var scalingFactor: Double
+    /**
+     * Where the wallpaper sits on this display. Unlike the scale factor it is
+     * never a draft: this is what is saved and what the display shows.
+     */
+    public var framing: BridgeFraming
     public var targetFps: UInt32
     public var maxFps: UInt32
     public var muted: Bool
@@ -3958,12 +3963,17 @@ public struct BridgeDisplayConfigRow {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(displayId: String, title: String, enabled: Bool, scalingMode: BridgeScalingMode, scalingFactor: Double, targetFps: UInt32, maxFps: UInt32, muted: Bool, volume: Float, dirty: Bool, canRestoreDefaults: Bool) {
+    public init(displayId: String, title: String, enabled: Bool, scalingMode: BridgeScalingMode, scalingFactor: Double, 
+        /**
+         * Where the wallpaper sits on this display. Unlike the scale factor it is
+         * never a draft: this is what is saved and what the display shows.
+         */framing: BridgeFraming, targetFps: UInt32, maxFps: UInt32, muted: Bool, volume: Float, dirty: Bool, canRestoreDefaults: Bool) {
         self.displayId = displayId
         self.title = title
         self.enabled = enabled
         self.scalingMode = scalingMode
         self.scalingFactor = scalingFactor
+        self.framing = framing
         self.targetFps = targetFps
         self.maxFps = maxFps
         self.muted = muted
@@ -3990,6 +4000,9 @@ extension BridgeDisplayConfigRow: Equatable, Hashable {
             return false
         }
         if lhs.scalingFactor != rhs.scalingFactor {
+            return false
+        }
+        if lhs.framing != rhs.framing {
             return false
         }
         if lhs.targetFps != rhs.targetFps {
@@ -4019,6 +4032,7 @@ extension BridgeDisplayConfigRow: Equatable, Hashable {
         hasher.combine(enabled)
         hasher.combine(scalingMode)
         hasher.combine(scalingFactor)
+        hasher.combine(framing)
         hasher.combine(targetFps)
         hasher.combine(maxFps)
         hasher.combine(muted)
@@ -4041,6 +4055,7 @@ public struct FfiConverterTypeBridgeDisplayConfigRow: FfiConverterRustBuffer {
                 enabled: FfiConverterBool.read(from: &buf), 
                 scalingMode: FfiConverterTypeBridgeScalingMode.read(from: &buf), 
                 scalingFactor: FfiConverterDouble.read(from: &buf), 
+                framing: FfiConverterTypeBridgeFraming.read(from: &buf), 
                 targetFps: FfiConverterUInt32.read(from: &buf), 
                 maxFps: FfiConverterUInt32.read(from: &buf), 
                 muted: FfiConverterBool.read(from: &buf), 
@@ -4056,6 +4071,7 @@ public struct FfiConverterTypeBridgeDisplayConfigRow: FfiConverterRustBuffer {
         FfiConverterBool.write(value.enabled, into: &buf)
         FfiConverterTypeBridgeScalingMode.write(value.scalingMode, into: &buf)
         FfiConverterDouble.write(value.scalingFactor, into: &buf)
+        FfiConverterTypeBridgeFraming.write(value.framing, into: &buf)
         FfiConverterUInt32.write(value.targetFps, into: &buf)
         FfiConverterUInt32.write(value.maxFps, into: &buf)
         FfiConverterBool.write(value.muted, into: &buf)
@@ -4309,6 +4325,78 @@ public func FfiConverterTypeBridgeDisplaySettingsRow_lower(_ value: BridgeDispla
 }
 
 
+/**
+ * Where a wallpaper sits on one display when that display leaves room around
+ * it, as a fraction of that room on each axis: `0.0` is left or top, `1.0` is
+ * right or bottom, and `0.5` on both is the centred layout every wallpaper
+ * has until it is moved. Always a finite fraction between 0 and 1.
+ */
+public struct BridgeFraming {
+    public var panX: Double
+    public var panY: Double
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(panX: Double, panY: Double) {
+        self.panX = panX
+        self.panY = panY
+    }
+}
+
+
+
+extension BridgeFraming: Equatable, Hashable {
+    public static func ==(lhs: BridgeFraming, rhs: BridgeFraming) -> Bool {
+        if lhs.panX != rhs.panX {
+            return false
+        }
+        if lhs.panY != rhs.panY {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(panX)
+        hasher.combine(panY)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBridgeFraming: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BridgeFraming {
+        return
+            try BridgeFraming(
+                panX: FfiConverterDouble.read(from: &buf), 
+                panY: FfiConverterDouble.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: BridgeFraming, into buf: inout [UInt8]) {
+        FfiConverterDouble.write(value.panX, into: &buf)
+        FfiConverterDouble.write(value.panY, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBridgeFraming_lift(_ buf: RustBuffer) throws -> BridgeFraming {
+    return try FfiConverterTypeBridgeFraming.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBridgeFraming_lower(_ value: BridgeFraming) -> RustBuffer {
+    return FfiConverterTypeBridgeFraming.lower(value)
+}
+
+
 public struct BridgeLibraryScanStatus {
     public var scanning: Bool
     public var done: UInt64
@@ -4499,6 +4587,11 @@ public struct BridgeLockScreenScene {
     public var scalingMode: BridgeScalingMode
     public var scalingFactor: Double
     /**
+     * Where the wallpaper sits on that display. Web wallpapers fill their
+     * page and are always centred.
+     */
+    public var framing: BridgeFraming
+    /**
      * Flat renderer overrides, or decorated `{id: {value, type, ...}}` web options.
      */
     public var propertiesJson: String?
@@ -4513,6 +4606,10 @@ public struct BridgeLockScreenScene {
          * path so a Workshop update does not orphan it.
          */wallpaperId: String, title: String, projectPath: String, assetsPath: String, fps: UInt32, scalingMode: BridgeScalingMode, scalingFactor: Double, 
         /**
+         * Where the wallpaper sits on that display. Web wallpapers fill their
+         * page and are always centred.
+         */framing: BridgeFraming, 
+        /**
          * Flat renderer overrides, or decorated `{id: {value, type, ...}}` web options.
          */propertiesJson: String?, paused: Bool) {
         self.displayId = displayId
@@ -4523,6 +4620,7 @@ public struct BridgeLockScreenScene {
         self.fps = fps
         self.scalingMode = scalingMode
         self.scalingFactor = scalingFactor
+        self.framing = framing
         self.propertiesJson = propertiesJson
         self.paused = paused
     }
@@ -4556,6 +4654,9 @@ extension BridgeLockScreenScene: Equatable, Hashable {
         if lhs.scalingFactor != rhs.scalingFactor {
             return false
         }
+        if lhs.framing != rhs.framing {
+            return false
+        }
         if lhs.propertiesJson != rhs.propertiesJson {
             return false
         }
@@ -4574,6 +4675,7 @@ extension BridgeLockScreenScene: Equatable, Hashable {
         hasher.combine(fps)
         hasher.combine(scalingMode)
         hasher.combine(scalingFactor)
+        hasher.combine(framing)
         hasher.combine(propertiesJson)
         hasher.combine(paused)
     }
@@ -4595,6 +4697,7 @@ public struct FfiConverterTypeBridgeLockScreenScene: FfiConverterRustBuffer {
                 fps: FfiConverterUInt32.read(from: &buf), 
                 scalingMode: FfiConverterTypeBridgeScalingMode.read(from: &buf), 
                 scalingFactor: FfiConverterDouble.read(from: &buf), 
+                framing: FfiConverterTypeBridgeFraming.read(from: &buf), 
                 propertiesJson: FfiConverterOptionString.read(from: &buf), 
                 paused: FfiConverterBool.read(from: &buf)
         )
@@ -4609,6 +4712,7 @@ public struct FfiConverterTypeBridgeLockScreenScene: FfiConverterRustBuffer {
         FfiConverterUInt32.write(value.fps, into: &buf)
         FfiConverterTypeBridgeScalingMode.write(value.scalingMode, into: &buf)
         FfiConverterDouble.write(value.scalingFactor, into: &buf)
+        FfiConverterTypeBridgeFraming.write(value.framing, into: &buf)
         FfiConverterOptionString.write(value.propertiesJson, into: &buf)
         FfiConverterBool.write(value.paused, into: &buf)
     }

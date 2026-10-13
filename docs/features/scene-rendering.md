@@ -93,8 +93,12 @@ on that display without rebuilding it. Like the scaling mode, and unlike the sca
 a position is not part of the options draft, so Apply does not wait for it, Cancel does
 not undo it and Apply reopens no scene because of it. Saying the position it already has
 writes nothing and tells the renderer nothing, and a renderer that refuses the move
-leaves the position saved for the next time the scene is built. The app does not offer it
-yet.
+leaves the position saved for the next time the scene is built. The bridge reports the
+position to the app in each display's row of the wallpaper options (a moved display also
+offers Restore defaults) and in the lock-screen and screen-saver export, which comes from
+the saved configuration and so never holds a draft. The export carries it for a scene and
+for a video the desktop plays natively; a web page and a mirror display are exported
+centred. The app does not offer it yet, and the lock-screen extension does not use it yet.
 
 Compiled work is reused across launches where it can be. A scene's translated Metal
 shaders, their reflection and their binding plans are stored in that scene's shader

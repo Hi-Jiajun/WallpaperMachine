@@ -376,6 +376,11 @@ cargo test -p shader --test pipeline -- --nocapture
   position saved for the next reconcile, and a failed save leaves nothing saved so
   asking again saves it; two displays keep their own positions.
   The engine here is the fake one, so the move on a live renderer is a desktop check.
+- `wallpaper-bridge` position reports (same filter): the options snapshot carries each
+  display's position, only a moved display offers Restore defaults, the reply to a move
+  already carries it and a restart loads it; the lock-screen export carries a scene's
+  and a natively played video's saved position, centres a web page and a mirror, and
+  follows a position at once while an unapplied scale factor stays out of it.
 - `wallpaper_background`: renders unattached production Metal layers over a white
   bitmap with no drawable, before and after a resize and after recreation. Every
   pixel must be opaque black. Its harness runs on the process's main thread; no

@@ -583,8 +583,8 @@ final class WebPanelLetterboxTests: XCTestCase {
           ?? store.settingsSnapshot.displays.first { $0.displayId == display }?.scalingMode ?? .fill
         options.displayConfigurations = [
           BridgeDisplayConfigRow(displayId: display, title: "Display", enabled: true, scalingMode: mode,
-                                 scalingFactor: factor, targetFps: 60, maxFps: 60, muted: false, volume: 1,
-                                 dirty: true, canRestoreDefaults: true)
+                                 scalingFactor: factor, framing: .centered, targetFps: 60, maxFps: 60,
+                                 muted: false, volume: 1, dirty: true, canRestoreDefaults: true)
         ]
         options.dirty = true
         return BridgeWallpaperMutationBundle(
@@ -616,8 +616,8 @@ final class WebPanelLetterboxTests: XCTestCase {
 
     func configuration(mode: BridgeScalingMode, factor: Double) -> BridgeDisplayConfigRow {
       BridgeDisplayConfigRow(displayId: "7", title: "Display", enabled: true, scalingMode: mode,
-                             scalingFactor: factor, targetFps: 60, maxFps: 60, muted: false, volume: 1,
-                             dirty: false, canRestoreDefaults: false)
+                             scalingFactor: factor, framing: .centered, targetFps: 60, maxFps: 60,
+                             muted: false, volume: 1, dirty: false, canRestoreDefaults: false)
     }
 
     func payload() throws -> [String: Any] {

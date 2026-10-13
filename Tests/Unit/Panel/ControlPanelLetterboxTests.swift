@@ -55,8 +55,8 @@ final class ControlPanelLetterboxTests: ControlPanelTestCase {
         var options = try XCTUnwrap(store.wallpaperOptionsSnapshot)
         options.displayConfigurations = [
           BridgeDisplayConfigRow(displayId: display, title: "Display", enabled: true, scalingMode: .fill,
-                                 scalingFactor: factor, targetFps: 30, maxFps: 60, muted: false, volume: 1,
-                                 dirty: true, canRestoreDefaults: true)
+                                 scalingFactor: factor, framing: .centered, targetFps: 30, maxFps: 60,
+                                 muted: false, volume: 1, dirty: true, canRestoreDefaults: true)
         ]
         options.dirty = true
         return BridgeWallpaperMutationBundle(

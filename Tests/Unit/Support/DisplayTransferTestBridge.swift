@@ -50,8 +50,8 @@ final class DisplayTransferTestBridge: LayoutSnapshotBridge {
         BridgeSnapshotFixtures.options(wallpaperId: id, title: id, kind: .webpage,
             dirty: dirtyWallpapers.contains(id), displayConfigurations: ["primary", "secondary"].map { display in
                 .init(displayId: display, title: title(display), enabled: edits[id]?[display] ?? (assignments[display] == id),
-                      scalingMode: .fill, scalingFactor: 1, targetFps: 30, maxFps: 60,
-                      muted: true, volume: 0, dirty: false, canRestoreDefaults: false)
+                      scalingMode: .fill, scalingFactor: 1, framing: .centered, targetFps: 30,
+                      maxFps: 60, muted: true, volume: 0, dirty: false, canRestoreDefaults: false)
             })
     }
     var currentBundle: BridgeSnapshotBundle {

@@ -14,7 +14,7 @@ use wallpaper_core::{
     DisplayIdentity, DisplaySelector, DisplaySnapshotEntry, SceneRendererPreference,
     WallpaperAssignment,
     media::audio::AudioVolume,
-    project::{ScalingMode, SceneDesc, SceneHandle, SerdeValudeExt},
+    project::{ScalingMode, SceneDesc, SceneFraming, SceneHandle, SerdeValudeExt},
     render::{
         RendererCounterKind, RendererSharedCounterKind, RendererSurfaceCounters, shared_value,
     },
@@ -1415,6 +1415,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                     fps: self.live_target_fps(scene.fps),
                     scaling_mode: scene.scaling_mode.into(),
                     scaling_factor: scene.scaling_factor,
+                    framing: scene.framing.into(),
                     properties_json,
                     paused: scene.paused,
                 })
@@ -1465,6 +1466,8 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                 fps: self.live_target_fps(desc.fps),
                 scaling_mode: BridgeScalingMode::Fill,
                 scaling_factor: 1.0,
+                // A web page fills its window and has nothing to move.
+                framing: SceneFraming::default().into(),
                 properties_json: Some(properties_json),
                 paused: desc.paused,
             });

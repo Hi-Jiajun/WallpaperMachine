@@ -308,6 +308,7 @@ impl BridgeActorState {
                         ScalingMode::Fill => BridgeScalingMode::Fill,
                     },
                     scaling_factor: render.scaling_factor,
+                    framing: render.framing.into(),
                     target_fps: render.fps_on(max_fps),
                     max_fps,
                     muted: config.audio.muted,

@@ -544,8 +544,8 @@ final class PanelFixture {
         displayConfigurations: [
           BridgeDisplayConfigRow(
             displayId: display, title: display, enabled: true, scalingMode: .fill,
-            scalingFactor: 1, targetFps: fps, maxFps: 60, muted: false, volume: volume,
-            dirty: false, canRestoreDefaults: false)
+            scalingFactor: 1, framing: .centered, targetFps: fps, maxFps: 60, muted: false,
+            volume: volume, dirty: false, canRestoreDefaults: false)
         ], audioResponseEnabled: false, volume: volume)
     }
     store.wallpaperOptionsSnapshot = bridge.options["first"]

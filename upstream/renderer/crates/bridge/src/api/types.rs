@@ -68,6 +68,33 @@ pub enum BridgeScalingMode {
     Fill,
 }
 
+/// Where a wallpaper sits on one display when that display leaves room around
+/// it, as a fraction of that room on each axis: `0.0` is left or top, `1.0` is
+/// right or bottom, and `0.5` on both is the centred layout every wallpaper
+/// has until it is moved. Always a finite fraction between 0 and 1.
+#[derive(Clone, Copy, Debug, PartialEq, uniffi::Record)]
+pub struct BridgeFraming {
+    pub pan_x: f64,
+    pub pan_y: f64,
+}
+
+impl From<wallpaper_core::project::SceneFraming> for BridgeFraming {
+    fn from(framing: wallpaper_core::project::SceneFraming) -> Self {
+        Self {
+            pan_x: framing.pan_x,
+            pan_y: framing.pan_y,
+        }
+    }
+}
+
+impl From<crate::config::FramingCfg> for BridgeFraming {
+    /// What the app is told is what the engine is handed, so a saved position
+    /// that is not a valid fraction reads the way it plays.
+    fn from(framing: crate::config::FramingCfg) -> Self {
+        framing.to_scene().into()
+    }
+}
+
 /// Committed wallpaper inputs for a native lock-screen or screen-saver display.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct BridgeLockScreenScene {
@@ -82,6 +109,9 @@ pub struct BridgeLockScreenScene {
     pub fps: u32,
     pub scaling_mode: BridgeScalingMode,
     pub scaling_factor: f64,
+    /// Where the wallpaper sits on that display. Web wallpapers fill their
+    /// page and are always centred.
+    pub framing: BridgeFraming,
     /// Flat renderer overrides, or decorated `{id: {value, type, ...}}` web options.
     pub properties_json: Option<String>,
     pub paused: bool,
@@ -272,6 +302,9 @@ pub struct BridgeDisplayConfigRow {
     pub enabled: bool,
     pub scaling_mode: BridgeScalingMode,
     pub scaling_factor: f64,
+    /// Where the wallpaper sits on this display. Unlike the scale factor it is
+    /// never a draft: this is what is saved and what the display shows.
+    pub framing: BridgeFraming,
     pub target_fps: u32,
     pub max_fps: u32,
     pub muted: bool,

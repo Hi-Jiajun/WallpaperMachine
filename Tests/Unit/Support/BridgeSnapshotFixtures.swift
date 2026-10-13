@@ -2,6 +2,11 @@ import Foundation
 
 @testable import WallpaperMachine
 
+extension BridgeFraming {
+  /// The layout every wallpaper has until it is moved.
+  static let centered = BridgeFraming(panX: 0.5, panY: 0.5)
+}
+
 /// Snapshot values for tests that need a settings snapshot but do not care what
 /// is in it.
 ///
