@@ -170,6 +170,15 @@ pub enum BridgePropertyValue {
     Empty,
 }
 
+/// One value a host is showing for a property without having saved it, such
+/// as a slider the person is still dragging. It is checked like an edit and
+/// never becomes one.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct BridgePropertyEdit {
+    pub property_id: String,
+    pub value: BridgePropertyValue,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum BridgePropertyKind {
     Slider,

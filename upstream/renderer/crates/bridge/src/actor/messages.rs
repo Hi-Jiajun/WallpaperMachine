@@ -5,7 +5,7 @@ use crate::{
     api::{
         BridgeAppSnapshot, BridgeDisplayMode, BridgeDisplayMutationBundle,
         BridgeDisplaySettingsRow, BridgeError, BridgeLibrarySnapshot, BridgeLockScreenScene,
-        BridgeMonitorInformationSnapshot, BridgePlaybackState, BridgePropertyValue,
+        BridgeMonitorInformationSnapshot, BridgePlaybackState, BridgePropertyEdit, BridgePropertyValue,
         BridgeNativeVideoWallpaper, BridgeQualityThrottleCause, BridgeRendererCountersReport,
         BridgeScalingMode, BridgeSettingsSnapshot, BridgeSnapshotBundle, BridgeWallpaperEntry,
         BridgeWallpaperKind, BridgeWallpaperMutationBundle, BridgeWallpaperOptionsSnapshot,
@@ -34,6 +34,8 @@ pub struct GetLockScreenScenes;
 pub struct GetWallpaperPreview {
     pub wallpaper_id: String,
     pub display_id: String,
+    /// Values shown without being saved, made to the draft for this export only.
+    pub pending: Vec<BridgePropertyEdit>,
 }
 
 pub struct GetWebWallpapers;
@@ -206,6 +208,8 @@ pub struct PreviewDisplayPosition {
 pub struct PreviewWallpaperProperties {
     pub wallpaper_id: String,
     pub show: bool,
+    /// Values shown without being saved, made to the draft for this call only.
+    pub pending: Vec<BridgePropertyEdit>,
 }
 
 pub struct SetTargetFps {

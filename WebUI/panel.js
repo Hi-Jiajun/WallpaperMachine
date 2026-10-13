@@ -869,28 +869,35 @@ function positionRows(options, display, index) {
     : escapeHTML(t('Choose which part of the wallpaper stays in view when it is larger than the display, or where it sits when it is smaller. Nothing moves when it already fits the display exactly.'));
   return `<div class="position-rows" ${keyAttr(`position-${display.id}`)}>${slider('x', t('Horizontal position'), x)}${slider('y', t('Vertical position'), y)}<div class="actions">${button(t('Center'), 'displayPositionReset', { id: options.id, displayID: display.id }, { className: 'link', icon: 'refresh', disabled: x === 0.5 && y === 0.5, title: t('Center the wallpaper on the display') })}</div><p class="muted field-note"><small>${note}</small></p></div>`;
 }
-// A Position slider also shows the wallpaper at the thumb while the person drags it. The page sends
-// the newest value at most every PREVIEW_MS and one step at a time, native keeps nothing from it
-// and does not reply with a snapshot, and a step that fails is ignored: the release sends the
-// value that counts through `send`, which saves it and reports its own errors. Only a pointer
-// drag previews (a key press or VoiceOver action fires its change at once), and the release waits
-// for the step still on its way so that step cannot land after it. A drag that ends where it
-// began fires no change, so the pointer coming up, being cancelled or leaving the window settles
-// it with the value last shown; otherwise the wallpaper would stay at the last step.
-const positionDrag = (() => {
+// A Position slider also shows the wallpaper at the thumb while the person drags it, and a property's
+// slider or colour picker does the same with its value. The page sends the newest value at most every
+// PREVIEW_MS and one step at a time, native keeps nothing from it and does not reply with a snapshot,
+// and a step that fails is ignored: the release sends the value that counts through `send`, which
+// saves it and reports its own errors. Only a pointer drag previews (a key press or VoiceOver
+// action fires its change at once), and the release waits for the step still on its way so that step
+// cannot land after it. A drag that ends where it began fires no change, so the pointer coming up,
+// being cancelled or leaving the window settles it with the value last shown; otherwise the
+// wallpaper would stay at the last step.
+//
+// `describe(element)` gives the step an input event stands for, or nothing: its `value`, the
+// `message` that shows a value, the `commit` that saves one, and `unpointed` for a control whose
+// drag the page cannot see because it happens in a panel of its own (a colour picker). That one
+// waits a task before its first step, so a single pick, whose change event follows at once, shows
+// nothing before it is saved.
+function dragPreview({ action, pointerOn, describe }) {
   const PREVIEW_MS = 100;
   let pointerDown = false, drag = null;
-  function preview(args) {
+  function preview(message) {
     const bridge = window.webkit?.messageHandlers?.native;
     if (!bridge) return Promise.resolve();
-    try { return Promise.resolve(bridge.postMessage({ action: 'displayPositionPreview', ...args })).then(() => {}, () => {}); } catch { return Promise.resolve(); }
+    try { return Promise.resolve(bridge.postMessage({ action, ...message })).then(() => {}, () => {}); } catch { return Promise.resolve(); }
   }
   function pump(current) {
     if (drag !== current || current.inFlight || current.timer || current.value === current.shown) return;
     const wait = current.sentAt + PREVIEW_MS - performance.now();
     if (wait > 0) { current.timer = setTimeout(() => { current.timer = 0; pump(current); }, wait); return; }
     current.shown = current.value; current.sentAt = performance.now();
-    current.inFlight = preview({ id: current.id, displayID: current.displayID, [current.axis]: current.value }).then(() => { current.inFlight = null; pump(current); });
+    current.inFlight = preview(current.message(current.value)).then(() => { current.inFlight = null; pump(current); });
   }
   // Ends the drag in progress. The promise settles once the step already sent has been answered.
   function end() {
@@ -900,10 +907,10 @@ const positionDrag = (() => {
     return current.inFlight || Promise.resolve();
   }
   function settle() {
-    if (drag) run(commitPosition(drag.id, drag.displayID, drag.axis, drag.value));
+    if (drag) run(drag.commit(drag.value));
   }
   function release() { if (!pointerDown) return; pointerDown = false; setTimeout(settle, 0); }
-  document.addEventListener('pointerdown', event => { pointerDown = Boolean(event.target.closest?.('input[data-change="displayPosition"]')); });
+  document.addEventListener('pointerdown', event => { pointerDown = Boolean(event.target.closest?.(pointerOn)); });
   for (const type of ['pointerup', 'pointercancel']) document.addEventListener(type, release);
   // The button came up outside the window, where no pointerup reached the page.
   document.addEventListener('pointermove', event => { if (pointerDown && !(event.buttons & 1)) release(); });
@@ -911,21 +918,52 @@ const positionDrag = (() => {
   return {
     end,
     input(element) {
-      const axis = element.dataset.axis;
-      if (!pointerDown || (axis !== 'x' && axis !== 'y')) return;
+      const step = describe(element);
+      if (!step || (!pointerDown && !step.unpointed)) return;
       if (drag?.element !== element) {
         clearTimeout(drag?.timer);
-        drag = { element, id: element.dataset.id, displayID: element.dataset.displayId, axis, value: Number(element.value) / 100, shown: NaN, inFlight: null, timer: 0, sentAt: -Infinity };
+        drag = { element, shown: NaN, inFlight: null, timer: 0, sentAt: -Infinity };
+        if (step.unpointed) drag.timer = setTimeout(() => { const current = drag; if (current?.element === element) { current.timer = 0; pump(current); } }, 0);
       }
-      drag.value = Number(element.value) / 100;
+      Object.assign(drag, { value: step.value, message: step.message, commit: step.commit });
       pump(drag);
     },
   };
-})();
+}
+const positionDrag = dragPreview({
+  action: 'displayPositionPreview',
+  pointerOn: 'input[data-change="displayPosition"]',
+  describe(element) {
+    const axis = element.dataset.axis;
+    if (axis !== 'x' && axis !== 'y') return null;
+    const { id, displayId: displayID } = element.dataset;
+    return {
+      value: Number(element.value) / 100,
+      message: value => ({ id, displayID, [axis]: value }),
+      commit: value => commitPosition(id, displayID, axis, value),
+    };
+  },
+});
 async function commitPosition(id, displayID, axis, fraction) {
   await positionDrag.end();
   return send('displayPosition', { id, displayID, [axis]: fraction });
 }
+const propertyDrag = dragPreview({
+  action: 'propertyPreview',
+  pointerOn: 'input[type="range"][data-change="property"]',
+  describe(element) {
+    if (element.type !== 'range' && element.type !== 'color') return null;
+    const value = element.type === 'range' ? Number(element.value) : element.value;
+    if (typeof value === 'number' && !Number.isFinite(value)) return null;
+    const { id, propertyId } = element.dataset;
+    return {
+      value,
+      unpointed: element.type === 'color',
+      message: value => ({ id, propertyID: propertyId, value }),
+      commit: value => commitPropertyValue(id, propertyId, value),
+    };
+  },
+});
 // Displays and collections sit above the properties, which can run very long; Displays
 // opens by itself once the wallpaper is on a display.
 function renderOptions(options, collectionsSection = '') {
@@ -1363,8 +1401,13 @@ async function commitProperty(element) {
   const { id, propertyId } = element.dataset;
   let value = element.type === 'checkbox' ? element.checked : element.type === 'range' || element.type === 'number' ? Number(element.value) : element.tagName === 'SELECT' ? JSON.parse(element.value) : element.value;
   if (typeof value === 'number' && !Number.isFinite(value)) return;
+  await commitPropertyValue(id, propertyId, value);
+}
+async function commitPropertyValue(id, propertyId, value) {
   const key = draftKey(id, propertyId);
   drafts.set(key, value);
+  // A step of the drag that is still on its way lands before the value that counts, never after it.
+  await propertyDrag.end();
   await send('property', { id, propertyID: propertyId, value });
   if (drafts.get(key) === value) drafts.delete(key);
   render();
@@ -1615,6 +1658,7 @@ document.addEventListener('input', event => {
   if (collections.handleInput(element) || presets.handleInput(element) || placement.handleInput(element)) return;
   if (element.type === 'range') { const output = element.parentElement.querySelector('output'); if (output) output.textContent = element.dataset.setting === 'volume' || element.dataset.change === 'displayPosition' ? `${element.value}%` : element.value; }
   if (element.dataset.change === 'displayPosition') positionDrag.input(element);
+  if (element.dataset.change === 'property') propertyDrag.input(element);
   if (element.dataset.input === 'property') { drafts.set(draftKey(element.dataset.id, element.dataset.propertyId), element.value); renderInspector(false); }
   if (element.dataset.input === 'account' && dialogAccount) { dialogAccount.account = element.value; renderDialog(); }
   if (element.dataset.input === 'pixivSearch' && state?.page === 'pixiv') pixiv.handleInput(element);

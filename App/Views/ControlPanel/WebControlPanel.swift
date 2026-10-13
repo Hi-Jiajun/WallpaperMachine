@@ -615,10 +615,11 @@ final class WebPanelController: NSObject, WKNavigationDelegate {
       reply(nil, nil)
       return
     }
-    // A position slider reports every step of a drag. The wallpaper follows, but nothing is
-    // saved and no state changed, so there is no snapshot to build or push, and a refusal is
-    // not an error to show: the release that ends the drag reports its own.
-    if action == "displayPositionPreview" {
+    // A position slider or a property's slider or colour reports every step of a drag. The
+    // wallpaper follows, but nothing is saved and no state changed, so there is no snapshot to
+    // build or push, and a refusal is not an error to show: the release that ends the drag
+    // reports its own.
+    if action == "displayPositionPreview" || action == "propertyPreview" {
       Task { @MainActor in
         do {
           try await perform(action, body: body)

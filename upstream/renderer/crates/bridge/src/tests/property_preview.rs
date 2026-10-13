@@ -11,7 +11,7 @@ use wallpaper_core::project::SceneHandle;
 
 use super::display_position::{identified_display, new_engine, running};
 use crate::{
-    BridgeDisplayMode, BridgeErrorKind, BridgePropertyValue, WallpaperBridge,
+    BridgeDisplayMode, BridgeErrorKind, BridgePropertyEdit, BridgePropertyValue, WallpaperBridge,
     api::BridgeBuilder,
     config::ConfigStore,
     engine::{EngineFacade as _, FakeEngineFacade},
@@ -149,12 +149,22 @@ async fn edit(bridge: &WallpaperBridge, property: &str, value: BridgePropertyVal
 }
 
 async fn show(bridge: &WallpaperBridge) -> Result<(), crate::BridgeError> {
-    bridge.preview_wallpaper_properties("100".into(), true).await
+    show_dragging(bridge, Vec::new()).await
+}
+
+/// The pending edits, with the values of properties still being dragged.
+async fn show_dragging(
+    bridge: &WallpaperBridge,
+    pending: Vec<BridgePropertyEdit>,
+) -> Result<(), crate::BridgeError> {
+    bridge
+        .preview_wallpaper_properties("100".into(), true, pending)
+        .await
 }
 
 async fn show_saved(bridge: &WallpaperBridge) -> Result<(), crate::BridgeError> {
     bridge
-        .preview_wallpaper_properties("100".into(), false)
+        .preview_wallpaper_properties("100".into(), false, Vec::new())
         .await
 }
 
@@ -496,29 +506,156 @@ async fn apply_clears_the_mark_and_a_later_revert_does_not_touch_the_rebuilt_sce
     );
 }
 
+/// The bridge keeps no copy of what a scene shows, so it asks every time and
+/// leaves it to the engine, which knows which scene it kept and which it opened
+/// again.
 #[tokio::test]
-async fn a_reconcile_makes_the_last_document_untrustworthy_so_it_is_sent_again() {
+async fn a_scene_the_engine_kept_is_not_told_again_and_one_it_opened_afresh_is() {
     let (engine, _release) = new_engine();
     let (bridge, _root) = shown_on(&engine, &[1, 2]).await;
     edit(&bridge, "alpha", number(0.5)).await;
     show(&bridge).await.unwrap();
     assert_eq!(engine.preview_property_calls().len(), 2);
 
-    // Whether the engine kept the scenes or opened them again is not known to
-    // the bridge.
+    // The scene on display 1 is the same wallpaper before and after, so the
+    // engine keeps it, and with it the edit it shows.
     bridge.set_display_enabled("2".into(), false).await.unwrap();
     show(&bridge).await.unwrap();
-    let after = engine.preview_property_calls().len();
-    assert!(
-        after > 2,
-        "the document is sent again to the scene that still draws the wallpaper"
+    assert_eq!(
+        engine.preview_property_calls().len(),
+        2,
+        "the scene that was kept already shows the document"
     );
 
-    // And a scene that may be showing an edit is put back when that is asked,
-    // even if the bridge no longer knows what it showed.
-    bridge.set_display_enabled("1".into(), true).await.unwrap();
+    // Display 2 gets a scene opened from the saved configuration.
+    bridge.set_display_enabled("2".into(), true).await.unwrap();
+    show(&bridge).await.unwrap();
+    let calls = engine.preview_property_calls();
+    assert_eq!(calls.len(), 3, "only the scene that was opened afresh is told");
+    assert_eq!(calls[2].0, handle_of(&engine, 2));
+
+    // A scene that may be showing an edit is put back when that is asked.
     show_saved(&bridge).await.unwrap();
     assert_eq!(documents(&engine).last().map(String::as_str), Some(SAVED));
+}
+
+#[tokio::test]
+async fn clearing_the_shader_cache_loads_every_scene_again_so_the_next_call_shows_the_edit_again() {
+    let (engine, _release) = new_engine();
+    let (bridge, _root) = shown_on(&engine, &[1]).await;
+    edit(&bridge, "alpha", number(0.5)).await;
+    show(&bridge).await.unwrap();
+    assert_eq!(engine.preview_property_calls().len(), 1);
+
+    // Every scene is rebuilt from the saved configuration and draws the saved look.
+    bridge.clear_shader_cache().await.unwrap();
+
+    // Picking a picture changes the draft and not the document, which is the
+    // edit that leaves the last document equal to the one asked for.
+    edit(&bridge, "picture", text("pending.png")).await;
+    show(&bridge).await.unwrap();
+    let calls = engine.preview_property_calls();
+    assert_eq!(
+        calls.len(),
+        2,
+        "the rebuilt scene shows the saved look, so it is told the document again"
+    );
+    assert_eq!(calls[1], calls[0]);
+}
+
+#[tokio::test]
+async fn a_renderer_the_engine_replaced_on_its_own_is_shown_the_edit_again() {
+    let (engine, _release) = new_engine();
+    let (bridge, _root) = shown_on(&engine, &[1, 2]).await;
+    edit(&bridge, "alpha", number(0.5)).await;
+    show(&bridge).await.unwrap();
+    assert_eq!(engine.preview_property_calls().len(), 2);
+
+    // A surface recovery after a wake or a failed frame rebuilds one display's
+    // renderer from the saved descriptor. No reconcile runs and the bridge is
+    // not told, so it cannot know.
+    engine.rebuild_renderer_of(2);
+    edit(&bridge, "picture", text("pending.png")).await;
+    show(&bridge).await.unwrap();
+
+    let calls = engine.preview_property_calls();
+    assert_eq!(calls.len(), 3, "only the renderer that was replaced is told");
+    assert_eq!(calls[2].0, handle_of(&engine, 2));
+    assert_eq!(calls[2].1, calls[0].1);
+}
+
+/// A reconcile moves a display from one wallpaper to another and commits the
+/// configuration only after it has finished. For that long the bridge still
+/// finds the first wallpaper's handle on the display, and the engine already
+/// runs the second wallpaper on it.
+#[tokio::test]
+async fn a_document_made_for_one_wallpaper_never_reaches_the_scene_a_reconcile_gave_to_another() {
+    let (engine, _release) = new_engine();
+    let (bridge, _root) = shown_on(&engine, &[1, 2]).await;
+    let bridge = Arc::new(bridge);
+    let path_of_100 = engine.rendered_scenes()[0].scene_path.clone();
+    let (on_one, on_two) = (handle_of(&engine, 1), handle_of(&engine, 2));
+    edit(&bridge, "alpha", number(0.5)).await;
+    show(&bridge).await.unwrap();
+    assert_eq!(engine.preview_property_calls().len(), 2);
+    // The next step of the edit is made, and its document not yet sent: the
+    // panel sends it a moment after the edit.
+    edit(&bridge, "alpha", number(0.25)).await;
+
+    // Wallpaper 200 takes display 1. The engine has switched the display, and
+    // is asked for the new scene's audio, when the apply is held there.
+    bridge
+        .inject_scene_project_for_test("200", "Other", SCENE)
+        .await;
+    bridge
+        .set_display_config_enabled("200".into(), "1".into(), true)
+        .await
+        .unwrap();
+    let gate = engine.block_next_audio_capture();
+    let applying = bridge.clone();
+    let job = std::thread::spawn(move || {
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(applying.apply_wallpaper_options("200".into(), true))
+    });
+    assert!(gate.wait_until_blocked(Duration::from_secs(2)));
+    assert!(
+        engine.rendered_scenes().iter().any(|scene| {
+            scene.display.display_id == 1 && scene.scene_path.contains("/200/")
+        }),
+        "the engine runs wallpaper 200 on display 1"
+    );
+
+    // The panel's debounced update for wallpaper 100 arrives.
+    show(&bridge).await.unwrap();
+
+    assert_eq!(
+        engine.declined_property_previews(),
+        vec![(on_one, path_of_100)],
+        "the engine was asked, and refused the scene that no longer draws it"
+    );
+    let calls = engine.preview_property_calls();
+    assert_eq!(calls.len(), 3);
+    assert_eq!(
+        calls.iter().filter(|call| call.0 == on_one).count(),
+        1,
+        "display 1 heard only the document it showed before it was switched: {calls:?}"
+    );
+    assert_eq!(
+        calls.last().map(|call| call.0),
+        Some(on_two),
+        "the display still showing wallpaper 100 follows the edit"
+    );
+
+    gate.release();
+    job.join().unwrap().unwrap();
+
+    // The configuration has committed, and wallpaper 100 is on display 2 alone.
+    bridge.cancel_wallpaper_options("100".into()).await.unwrap();
+    let calls = engine.preview_property_calls();
+    assert_eq!(calls.last(), Some(&(on_two, SAVED.to_string())));
+    assert_eq!(calls.iter().filter(|call| call.0 == on_one).count(), 1);
+    assert_eq!(engine.declined_property_previews().len(), 1);
 }
 
 #[tokio::test]
@@ -591,7 +728,7 @@ async fn a_wallpaper_no_display_shows_a_video_and_a_web_wallpaper_are_silent() {
         .await
         .unwrap();
     bridge
-        .preview_wallpaper_properties("400".into(), true)
+        .preview_wallpaper_properties("400".into(), true, Vec::new())
         .await
         .unwrap();
 
@@ -602,7 +739,7 @@ async fn a_wallpaper_no_display_shows_a_video_and_a_web_wallpaper_are_silent() {
         .await
         .unwrap();
     bridge
-        .preview_wallpaper_properties("300".into(), true)
+        .preview_wallpaper_properties("300".into(), true, Vec::new())
         .await
         .unwrap();
 
@@ -620,7 +757,7 @@ async fn unknown_wallpaper_is_refused() {
 
     for show in [true, false] {
         let error = bridge
-            .preview_wallpaper_properties("404".into(), show)
+            .preview_wallpaper_properties("404".into(), show, Vec::new())
             .await
             .unwrap_err();
         assert_eq!(error.kind(), BridgeErrorKind::InvalidInput);
@@ -666,4 +803,263 @@ async fn a_preview_while_an_apply_is_loading_does_not_make_the_apply_stale() {
         sent,
         "the scene was opened again from the saved configuration"
     );
+}
+
+fn pending(property: &str, value: BridgePropertyValue) -> BridgePropertyEdit {
+    BridgePropertyEdit {
+        property_id: property.into(),
+        value,
+    }
+}
+
+fn colour(red: f64, green: f64, blue: f64) -> BridgePropertyValue {
+    BridgePropertyValue::ColorRgb { red, green, blue }
+}
+
+#[tokio::test]
+async fn a_value_being_dragged_is_shown_on_top_of_the_draft_and_kept_nowhere() {
+    let (engine, _release) = new_engine();
+    let (bridge, root) = shown_on(&engine, &[1, 2]).await;
+    let file = root.path().join("wallpapers").join("100.json");
+    std::fs::remove_file(&file).ok();
+    edit(&bridge, "glow", BridgePropertyValue::Bool { value: true }).await;
+
+    show_dragging(&bridge, vec![pending("alpha", number(0.25))])
+        .await
+        .unwrap();
+
+    let calls = engine.preview_property_calls();
+    assert_eq!(calls.len(), 2, "one document for each scene that draws it");
+    for display in [1, 2] {
+        assert!(
+            calls.contains(&(
+                handle_of(&engine, display),
+                r#"{"alpha":0.25,"glow":true,"playpausebutton":"media:playpause"}"#.to_string()
+            )),
+            "display {display} follows the drag and keeps the edit already made: {calls:?}"
+        );
+    }
+    let options = bridge
+        .wallpaper_options_snapshot("100".into())
+        .await
+        .unwrap();
+    let alpha = options
+        .properties
+        .iter()
+        .find(|property| property.id == "alpha")
+        .unwrap();
+    assert_eq!(alpha.value, number(1.0), "the draft never learns of the drag");
+    assert!(!alpha.dirty);
+    assert!(!file.exists(), "nothing is written");
+
+    show(&bridge).await.unwrap();
+    assert_eq!(
+        documents(&engine).last().map(String::as_str),
+        Some(r#"{"glow":true,"playpausebutton":"media:playpause"}"#),
+        "a call that does not name the drag shows the draft, so the drag is forgotten"
+    );
+}
+
+#[tokio::test]
+async fn a_drag_alone_does_not_make_a_clean_wallpaper_dirty_and_revert_takes_it_back() {
+    let (engine, _release) = new_engine();
+    let (bridge, _root) = shown_on(&engine, &[1]).await;
+
+    show_dragging(
+        &bridge,
+        vec![
+            pending("alpha", number(0.5)),
+            pending("tint", colour(0.5, 0.25, 0.75)),
+        ],
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        documents(&engine),
+        vec![
+            r#"{"alpha":0.5,"playpausebutton":"media:playpause","tint":"0.5 0.25 0.75"}"#
+                .to_string()
+        ],
+        "a slider and a colour move together"
+    );
+    assert!(!is_dirty(&bridge).await, "a drag is not an edit");
+
+    bridge.cancel_wallpaper_options("100".into()).await.unwrap();
+    assert_eq!(
+        documents(&engine).last().map(String::as_str),
+        Some(SAVED),
+        "Revert puts the saved look back even though the draft held nothing"
+    );
+}
+
+#[tokio::test]
+async fn dragging_back_to_the_authored_value_is_the_saved_look_and_a_drag_to_it_from_rest_sends_nothing()
+{
+    let (engine, _release) = new_engine();
+    let (bridge, _root) = shown_on(&engine, &[1]).await;
+
+    show_dragging(&bridge, vec![pending("alpha", number(1.0))])
+        .await
+        .unwrap();
+    assert!(
+        engine.preview_property_calls().is_empty(),
+        "the scene already shows that"
+    );
+
+    show_dragging(&bridge, vec![pending("alpha", number(0.5))])
+        .await
+        .unwrap();
+    show_dragging(&bridge, vec![pending("alpha", number(1.0))])
+        .await
+        .unwrap();
+    assert_eq!(
+        documents(&engine),
+        vec![
+            r#"{"alpha":0.5,"playpausebutton":"media:playpause"}"#.to_string(),
+            SAVED.to_string()
+        ],
+        "back at the start of the drag is the saved look, put back"
+    );
+}
+
+#[tokio::test]
+async fn pending_values_land_in_order_and_a_texture_among_them_waits_for_apply() {
+    let (engine, _release) = new_engine();
+    let (bridge, _root) = shown_on(&engine, &[1]).await;
+
+    show_dragging(
+        &bridge,
+        vec![
+            pending("alpha", number(0.25)),
+            pending("alpha", number(0.75)),
+            pending("picture", text("pending.png")),
+        ],
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        documents(&engine),
+        vec![r#"{"alpha":0.75,"playpausebutton":"media:playpause"}"#.to_string()],
+        "the last value for a property wins and the texture is read only while a scene loads"
+    );
+    show_dragging(&bridge, vec![pending("picture", text("other.png"))])
+        .await
+        .unwrap();
+    assert_eq!(
+        documents(&engine).last().map(String::as_str),
+        Some(SAVED),
+        "a texture alone changes nothing the scene could show"
+    );
+}
+
+#[tokio::test]
+async fn committing_the_value_last_shown_sends_nothing_more_and_another_value_does() {
+    let (engine, _release) = new_engine();
+    let (bridge, _root) = shown_on(&engine, &[1]).await;
+
+    show_dragging(&bridge, vec![pending("alpha", number(0.25))])
+        .await
+        .unwrap();
+    edit(&bridge, "alpha", number(0.25)).await;
+    show(&bridge).await.unwrap();
+    assert_eq!(
+        engine.preview_property_calls().len(),
+        1,
+        "the release saved what the scenes already show"
+    );
+
+    show_dragging(&bridge, vec![pending("alpha", number(0.5))])
+        .await
+        .unwrap();
+    edit(&bridge, "alpha", number(0.3)).await;
+    show(&bridge).await.unwrap();
+    assert_eq!(
+        documents(&engine).last().map(String::as_str),
+        Some(r#"{"alpha":0.3,"playpausebutton":"media:playpause"}"#),
+        "a release at another value than the last step shows that value"
+    );
+}
+
+#[tokio::test]
+async fn a_pending_value_is_checked_like_an_edit_and_a_refused_one_sends_nothing() {
+    let (engine, _release) = new_engine();
+    let (bridge, _root) = shown_on(&engine, &[1]).await;
+    let refused = [
+        ("unknown", number(0.5)),
+        ("alpha", number(2.0)),
+        ("alpha", number(-0.5)),
+        ("alpha", number(f64::NAN)),
+        ("alpha", number(f64::INFINITY)),
+        ("alpha", text("0.5")),
+        ("glow", number(1.0)),
+        ("tint", colour(1.5, 0.0, 0.0)),
+        ("tint", colour(0.0, f64::NAN, 0.0)),
+        ("tint", text("#ffffff")),
+        ("mode", text("c")),
+        ("mode", number(0.0)),
+        ("label", number(0.0)),
+    ];
+
+    for (property, value) in refused {
+        let editing = bridge
+            .edit_property("100".into(), property.into(), value.clone())
+            .await
+            .unwrap_err();
+        let showing = show_dragging(&bridge, vec![pending(property, value.clone())])
+            .await
+            .unwrap_err();
+        assert_eq!(
+            showing.kind(),
+            BridgeErrorKind::InvalidInput,
+            "{property} = {value:?}"
+        );
+        assert_eq!(
+            showing.message(),
+            editing.message(),
+            "{property} = {value:?} is refused for the same reason as an edit"
+        );
+    }
+    let mixed = show_dragging(
+        &bridge,
+        vec![pending("alpha", number(0.5)), pending("alpha", number(9.0))],
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(mixed.kind(), BridgeErrorKind::InvalidInput);
+    let restoring = bridge
+        .preview_wallpaper_properties("100".into(), false, vec![pending("alpha", number(9.0))])
+        .await
+        .unwrap_err();
+    assert_eq!(restoring.kind(), BridgeErrorKind::InvalidInput);
+
+    assert!(
+        engine.preview_property_calls().is_empty(),
+        "a drag with one refused step shows none of it"
+    );
+    show_dragging(&bridge, vec![pending("alpha", number(0.5))])
+        .await
+        .unwrap();
+    assert_eq!(
+        engine.preview_property_calls().len(),
+        1,
+        "and the refusal left nothing behind that would stop the next one"
+    );
+}
+
+#[tokio::test]
+async fn a_wallpaper_that_takes_no_document_is_not_asked_about_its_pending_values() {
+    let (engine, _release) = new_engine();
+    let root = tempfile::tempdir().unwrap();
+    engine.set_snapshot(vec![identified_display(1)]);
+    let bridge = bridge_over(&engine, &root);
+    show_wallpaper(&bridge, &engine, "400", VIDEO, &[1]).await;
+
+    bridge
+        .preview_wallpaper_properties("400".into(), true, vec![pending("alpha", number(9.0))])
+        .await
+        .unwrap();
+
+    assert!(engine.preview_property_calls().is_empty());
 }

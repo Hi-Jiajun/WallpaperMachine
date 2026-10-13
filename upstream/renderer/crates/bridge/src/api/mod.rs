@@ -17,7 +17,8 @@ pub use types::{
     BridgeLockScreenScene, BridgeLogLevel, BridgeLogStatus, BridgeMonitorInfoRow, BridgeWallpaperPreview,
     BridgeNativeVideoWallpaper, BridgeMediaSnapshot,
     BridgeMonitorInformationSnapshot, BridgePlaybackState, BridgeBatteryMode, BridgePropertyDescriptor,
-    BridgePropertyKind, BridgePropertyValue, BridgeQualityThrottleCause, BridgeRendererCountersReport,
+    BridgePropertyEdit, BridgePropertyKind, BridgePropertyValue, BridgeQualityThrottleCause,
+    BridgeRendererCountersReport,
     BridgeRendererSurfaceCounters, BridgeScalingMode, BridgeSceneBackendReport,
     BridgeSceneUpdateModeReport, BridgeSettingsSnapshot, BridgeUserShortcut,
     BridgeSliderMetadata, BridgeSnapshotBundle, BridgeStorageStatus, BridgeSurfaceCheck,
@@ -883,9 +884,10 @@ impl EngineFacade for ArcEngineFacade {
     fn preview_property_override(
         &self,
         handle: SceneHandle,
+        scene_path: String,
         flat_json: String,
-    ) -> Pin<Box<dyn Future<Output = Result<(), wallpaper_core::EngineError>> + Send>> {
-        self.0.preview_property_override(handle, flat_json)
+    ) -> Pin<Box<dyn Future<Output = Result<wallpaper_core::PropertyPreview, wallpaper_core::EngineError>> + Send>> {
+        self.0.preview_property_override(handle, scene_path, flat_json)
     }
 
     fn set_fps(
@@ -1044,12 +1046,19 @@ impl WallpaperBridge {
     /// Exports current draft inputs for an isolated preview, without selecting, applying,
     /// persisting or opening any wallpaper. Preview playback is owned by the host.
     ///
+    /// `pending` holds values the host is showing without having saved them, a
+    /// slider still being dragged: each is made to the draft's properties, in
+    /// order, for this export alone, so the draft, the dirty state and the
+    /// snapshots stay as they are. An entry is checked like
+    /// [`WallpaperBridge::edit_property`] checks its value.
+    ///
     /// # Errors
-    /// Returns an error for a missing or unsupported project or invalid input paths.
+    /// Returns an error for a missing or unsupported project, invalid input paths, or a
+    /// pending value the property does not accept. Nothing is exported then.
     pub async fn wallpaper_preview(
-        &self, wallpaper_id: String, display_id: String,
+        &self, wallpaper_id: String, display_id: String, pending: Vec<BridgePropertyEdit>,
     ) -> Result<BridgeWallpaperPreview, BridgeError> {
-        self.actor.ask(GetWallpaperPreview { wallpaper_id, display_id }).await
+        self.actor.ask(GetWallpaperPreview { wallpaper_id, display_id, pending }).await
     }
 
     /// Returns committed web wallpapers for the currently connected displays.
@@ -1448,6 +1457,16 @@ impl WallpaperBridge {
     /// the draft stays as it is, no snapshot changes and the lock screen and
     /// screen saver are not told, so a page can call it after every edit.
     ///
+    /// `pending` holds values the host is showing without having saved them, a
+    /// slider or colour still being dragged. Each is made to the draft for this
+    /// call alone, in order, as [`WallpaperBridge::edit_property`] would make
+    /// it, so the scenes follow the drag; none is kept, and the next call
+    /// shows the draft again unless it names them anew. Each is checked like
+    /// an edit's value, and one the property does not accept refuses the call
+    /// before any scene is told anything. A texture, a file or a folder in
+    /// `pending` stays at what is saved, like one in the draft. With `show`
+    /// false it has no effect on what the scenes are given.
+    ///
     /// Asking for what the scenes already show, or for the saved look when they
     /// are showing it, sends the engine nothing. Cancelling the options puts
     /// the saved look back by itself, and applying them loads the scenes from
@@ -1458,15 +1477,21 @@ impl WallpaperBridge {
     ///
     /// # Errors
     ///
-    /// Returns an error when the wallpaper id is unknown or the live engine
+    /// Returns an error when the wallpaper id is unknown, a scene wallpaper's
+    /// pending value is not one its property accepts, or the live engine
     /// update fails. A refused update leaves the call to be repeated.
     pub async fn preview_wallpaper_properties(
         &self,
         wallpaper_id: String,
         show: bool,
+        pending: Vec<BridgePropertyEdit>,
     ) -> Result<(), BridgeError> {
         self.actor
-            .ask(PreviewWallpaperProperties { wallpaper_id, show })
+            .ask(PreviewWallpaperProperties {
+                wallpaper_id,
+                show,
+                pending,
+            })
             .await
     }
 

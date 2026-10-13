@@ -13,7 +13,8 @@ use wallpaper_core::project::{SceneDesc, WallpaperProjectType};
 
 use crate::{
     api::{
-        BridgeDisplaySettingsRow, BridgeError, BridgePlaybackState, BridgeQualityThrottleCause,
+        BridgeDisplaySettingsRow, BridgeError, BridgePlaybackState, BridgePropertyEdit,
+        BridgeQualityThrottleCause,
         BridgeWallpaperEntry, BridgeWallpaperKind,
     },
     config::{AppConfig, QualityInForce, SerializedSelector, WallpaperConfig},
@@ -203,12 +204,18 @@ impl BridgeActorState {
     /// for a wallpaper whose scenes take none: a video, a web page, and one
     /// whose project is not loaded, none of which a property document reaches.
     ///
+    /// `pending` is made to the draft for these documents alone (see
+    /// [`WallpaperOptionsDraft::with_edits`]), and is not looked at for a
+    /// wallpaper with no documents.
+    ///
     /// # Errors
     ///
-    /// Returns an error when the wallpaper id is unknown.
+    /// Returns an error when the wallpaper id is unknown or a pending value is
+    /// not one its property accepts.
     pub fn pending_property_documents(
         &self,
         wallpaper_id: &str,
+        pending: Vec<BridgePropertyEdit>,
     ) -> Result<Option<drafts::PropertyDocuments>, BridgeError> {
         self.ensure_wallpaper_exists(wallpaper_id)?;
         let Some(model) = self
@@ -218,17 +225,21 @@ impl BridgeActorState {
         else {
             return Ok(None);
         };
+        let edits = model.checked_edits(pending)?;
         Ok(Some(match self.wallpaper_drafts.get(wallpaper_id) {
-            Some(draft) => draft.property_documents(model),
+            Some(draft) => draft.with_edits(model, &edits).property_documents(model),
             // Nothing was edited, so the draft that would be made is the saved
             // configuration twice.
-            None => match self.wallpaper_configs.get(wallpaper_id) {
-                Some(saved) => drafts::property_documents(model, saved, saved),
-                None => {
-                    let saved = WallpaperConfig::new_for(wallpaper_id, "scene");
-                    drafts::property_documents(model, &saved, &saved)
-                }
-            },
+            None => {
+                let saved = self
+                    .wallpaper_configs
+                    .get(wallpaper_id)
+                    .cloned()
+                    .unwrap_or_else(|| WallpaperConfig::new_for(wallpaper_id, "scene"));
+                WallpaperOptionsDraft::from_committed(saved)
+                    .with_edits(model, &edits)
+                    .property_documents(model)
+            }
         }))
     }
 

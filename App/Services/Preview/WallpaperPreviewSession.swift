@@ -121,7 +121,11 @@ final class WallpaperPreviewSession {
     /// when it is showing and ready; a hidden or still loading preview takes the newest draft
     /// once, when it can. Other wallpapers, a closed or failed preview, and a video (no property
     /// reaches its player) are left alone.
-    func propertiesDidChange(wallpaperID: String) {
+    ///
+    /// `whileDragging` says a slider or colour is being dragged, whose steps arrive spaced
+    /// already and never stop for the quiet period an edit waits out, so the preview follows the
+    /// newest one as soon as it has taken the one before.
+    func propertiesDidChange(wallpaperID: String, whileDragging: Bool = false) {
         guard let selection, selection.wallpaperID == wallpaperID else { return }
         switch phase {
         case .closed, .failed: return
@@ -129,7 +133,7 @@ final class WallpaperPreviewSession {
         }
         if request?.kind == .video { return }
         propertiesStale = true
-        refreshPropertiesIfNeeded()
+        refreshPropertiesIfNeeded(delay: whileDragging ? .zero : nil)
     }
 
     func togglePause() {
@@ -188,10 +192,10 @@ final class WallpaperPreviewSession {
         refreshPropertiesIfNeeded()
     }
 
-    private func refreshPropertiesIfNeeded() {
+    private func refreshPropertiesIfNeeded(delay: Duration? = nil) {
         guard propertiesStale, ready, visible, surface != nil else { return }
         let ticket = generation
-        refreshes.schedule(key: Self.refreshKey) { [weak self] in await self?.refreshProperties(ticket: ticket) }
+        refreshes.schedule(key: Self.refreshKey, delay: delay) { [weak self] in await self?.refreshProperties(ticket: ticket) }
     }
 
     /// Reads the draft again and shows what changed. Open-time text overrides are dropped: they

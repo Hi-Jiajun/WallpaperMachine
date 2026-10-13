@@ -1018,11 +1018,7 @@ impl SceneDescBuilderExt for SceneDescBuilder {
     fn build_from_wallpaper_config(
         context: SceneBuildContext<'_>,
     ) -> Result<SceneDesc, BridgeError> {
-        let project_json = context
-            .paths
-            .steam_workshop_root()
-            .join(context.workshop_id)
-            .join("project.json");
+        let project_json = context.paths.project_json(context.workshop_id);
         let assets_path = context.paths.assets_root();
         let audio_volume =
             AudioVolume::try_from(context.wallpaper.audio.volume).map_err(|error| {

@@ -468,11 +468,18 @@ cargo test -p shader --test pipeline -- --nocapture
   one flat object (nested keys joined with underscores, `null` as the empty string, key
   order and spacing normalised). `OweScene` sets a property of its own, not the
   override's, the reset's or the shader refresh's, and refuses a document with a NUL
-  byte and a closed scene without reaching the renderer. These tests have no scene:
-  `SceneRuntime::preview_property_override_json` leaving the runtime's saved override,
+  byte and a closed scene (also one it was last shown the document) without reaching
+  the renderer. Through an allocated, never initialised renderer object, which takes
+  property updates like a running one: it remembers the document it was shown until the
+  scene is loaded again by `set_property_override` or `reset_property_override`, a
+  refused document leaves what it shows alone, and `preview_on_scene_of` hands a
+  document made for another wallpaper to nothing (`OtherWallpaper`, the renderer's record
+  unchanged) and one made for the scene's own to the renderer. `SceneRuntime` itself
+  has no test, because it needs a window: it leaving the runtime's saved override,
   descriptor and stored template alone (so an abandoned edit leaves nothing to rebuild)
-  is by construction, like `preview_framing`, and the picture is covered only by the
-  renderer tests above and a desktop run.
+  is by construction, like `preview_framing`, as is passing its own `scene_path` to
+  `preview_on_scene_of`, and the picture is covered only by the renderer tests above and
+  a desktop run.
 - `wallpaper-bridge` property previews (`cargo test --release -p wallpaper-bridge --lib
   property_preview`, and `--lib state::drafts` for the document builder):
   `preview_wallpaper_properties` tells the fake engine's
@@ -481,15 +488,33 @@ cargo test -p shader --test pipeline -- --nocapture
   nor the draft and leaves nothing for a display refresh to rebuild. The document equals
   the one Apply loads byte for byte, a restored property or restore all defaults sends
   the saved document (host-supplied defaults included), and a texture waits for Apply
-  while a picked file, which is saved at once, stays in every later document. An unchanged
-  document, an untouched wallpaper and a saved look already shown send nothing; Revert and
-  `show` false put the saved look back once and keep the draft; a refused update or a
-  refused restore is repeated, the restore leaving the draft dirty; Apply drops the mark
-  and a reconcile (a display change here) makes the last document untrustworthy, so it is
-  sent again. A preview that lands while an Apply is loading does not make the Apply
-  stale. A video, a web page and a wallpaper no display shows are a silent no-op, and an
-  unknown wallpaper is refused. These are fake-engine tests: what a real scene does with
-  the document is covered by the renderer tests above.
+  while a picked file, which is saved at once, stays in every later document. An untouched
+  wallpaper sends nothing, and a document a scene already shows is not sent to it again;
+  Revert and `show` false put the saved look back once and keep the draft; a refused update
+  or a refused restore is repeated, the restore leaving the draft dirty; Apply drops the
+  mark. The fake engine follows the real engine's rules, which the bridge relies on: it
+  remembers per display what it was shown, forgets it when a reconcile gives the display a
+  scene that is not the same wallpaper (the shader cache clear is one), and
+  `rebuild_renderer_of` forgets it as an engine-internal recovery does, so a scene the
+  engine kept is not told again, one it opened afresh or rebuilt is, and the bridge keeps no
+  copy of its own. A document made for a wallpaper that a reconcile has just moved off a
+  display (the apply held after the engine switched it, before the bridge committed) is
+  declined for that display only, never recorded as sent to the scene that now draws another
+  wallpaper, and a display still showing the wallpaper follows the edit and is the only one
+  Revert puts back afterwards. A preview that lands while an Apply is loading does not make
+  the Apply stale. A video, a web page and a wallpaper no display shows are a silent no-op, and an
+  unknown wallpaper is refused. A value still being dragged (`pending`) goes on top of the
+  draft for the document of that call alone, in order and the last for a property winning,
+  without making a clean wallpaper dirty or writing a file; the next call that does not name
+  it shows the draft, committing the value last shown sends nothing more and another value
+  does, dragging back to the authored value puts the saved look back, a texture among the
+  steps changes nothing, a drag with one refused step (unknown id, out of range, `NaN`, wrong
+  kind, a colour channel, an option that is not offered, in the same words as the edit's
+  refusal) sends nothing, and a video is not asked about its steps. `tests::wallpaper_preview`
+  holds the same list for the preview export: the step wins over the draft, the draft and its
+  dirty marks do not move, a Web page follows too and a refused step exports nothing. These
+  are fake-engine tests: what a real scene does with the document is covered by the renderer
+  tests above.
 - `wallpaper_background`: renders unattached production Metal layers over a white
   bitmap with no drawable, before and after a resize and after recreation. Every
   pixel must be opaque black. Its harness runs on the process's main thread; no

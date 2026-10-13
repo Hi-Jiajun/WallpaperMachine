@@ -42,6 +42,10 @@ final class BridgeStore {
     /// apply or a preset. It runs once the change is stored and names the wallpaper, so whatever
     /// shows a copy of the draft (the preview window) can follow it.
     @ObservationIgnored var onPropertyDraftChanged: (@MainActor (_ wallpaperID: String) -> Void)?
+    /// A slider or colour of the wallpaper is being dragged to a value nobody saved yet. Runs for
+    /// every step the panel sends, so whatever shows the pending properties can follow the drag
+    /// without waiting for it to stop; the drag ends in an edit, which runs the callback above.
+    @ObservationIgnored var onPropertyDragged: (@MainActor (_ wallpaperID: String) -> Void)?
     /// Whether the displays follow a wallpaper's pending property edits while they are made
     /// (`LivePropertyEditing`). Read at every edit, so turning the switch off or on takes effect
     /// with the next one. The app supplies the stored choice; a store built without one, as in a
@@ -62,6 +66,9 @@ final class BridgeStore {
     /// choice off, Apply, deleting the wallpaper), so whatever withholds a picture of the desktop
     /// while they show an edit (`isShowingPropertyEdits`) can take it again.
     @ObservationIgnored var onPropertyEditsOnDesktopEnded: (@MainActor () -> Void)?
+    /// The refusal last logged for each wallpaper whose displays could not follow an edit, so a drag
+    /// that keeps being refused is logged once rather than for every step.
+    @ObservationIgnored private var desktopPreviewProblems: [String: String] = [:]
     /// Runs after a wallpaper was moved on a display and the move is saved, so whatever
     /// shows a picture of the desktop can retake it. Not run when the bridge refused the move.
     @ObservationIgnored var onDisplayFramingChanged: (@MainActor (_ wallpaperID: String, _ displayID: String) -> Void)?
@@ -203,7 +210,7 @@ final class BridgeStore {
             editorState.discard(wallpaperID: id)
             // Nothing draws it any more, so nothing is left to take back.
             desktopPropertyPreviews.cancel(id)
-            propertyEditsOnDesktop.remove(id)
+            forgetPropertyEditsOnDesktop(id)
         }
         return report
     }
@@ -636,7 +643,9 @@ final class BridgeStore {
                 throw WallpaperActionError(message: String(localized: "Some preview options are no longer available. Refresh the library and try again."))
             }
         }
-        let descriptor = try await bridge.wallpaperPreview(wallpaperId: id, displayId: displayID)
+        // A slider or colour still being dragged shows in the preview as it does on the displays.
+        let descriptor = try await bridge.wallpaperPreview(
+            wallpaperId: id, displayId: displayID, pending: editorState.propertyPreviews(wallpaperID: id))
         try Task.checkCancellation()
         var request = try WallpaperPreviewRequest(descriptor)
         request.frozenPropertyIDs = Set(options.properties.filter { Self.previewHoldsAtLoadedValue($0.kind) }.map(\.id))
@@ -802,11 +811,27 @@ final class BridgeStore {
         propertyId: String,
         value: BridgePropertyValue
     ) async throws {
-        beginWallpaperEdit(wallpaperId)
-        defer { endWallpaperEdit(wallpaperId) }
-        let bundle = try await bridge.editProperty(wallpaperId: wallpaperId, propertyId: propertyId, value: value)
-        apply(bundle)
-        propertyDraftEdited(wallpaperId)
+        try await changeDraftProperties(wallpaperId, replacing: propertyId) {
+            try await self.bridge.editProperty(wallpaperId: wallpaperId, propertyId: propertyId, value: value)
+        }
+    }
+
+    /// Shows the value a slider or colour is being dragged to on whatever follows the wallpaper's
+    /// pending properties, the preview window and, with the choice on, the displays, without
+    /// making it an edit: nothing is dirty, saved or announced, and the edit that ends the drag
+    /// (`editPropertyAsync`) is what keeps the value. The value is held until that edit, a restore
+    /// of the property, a revert, an apply or another wallpaper's inspector replaces it, and
+    /// every update of the previews in the meantime includes it.
+    ///
+    /// The panel sends one step at a time and waits for this to return, so the displays are
+    /// updated here instead of after the quiet period an edit waits out: a drag has no quiet.
+    /// A step that comes while the wallpaper is being applied or reverted is dropped.
+    func previewPropertyAsync(wallpaperId: String, propertyId: String, value: BridgePropertyValue) async {
+        guard applyingWallpaperID != wallpaperId else { return }
+        editorState.setPropertyPreview(value, key: .init(wallpaperID: wallpaperId, fieldID: propertyId))
+        onPropertyDragged?(wallpaperId)
+        guard canShowEditsOnDesktop(wallpaperId) else { return }
+        await showPropertyEditsOnDesktop(wallpaperId)
     }
 
     /// The path a `file` or `directory` property points at. `nil` clears it; the engine
@@ -821,21 +846,45 @@ final class BridgeStore {
     }
 
     func restorePropertyDefaultAsync(wallpaperId: String, propertyId: String) async throws {
-        beginWallpaperEdit(wallpaperId)
-        defer { endWallpaperEdit(wallpaperId) }
-        let bundle = try await bridge.restorePropertyDefault(wallpaperId: wallpaperId, propertyId: propertyId)
-        apply(bundle)
-        propertyDraftEdited(wallpaperId)
+        try await changeDraftProperties(wallpaperId, replacing: propertyId) {
+            try await self.bridge.restorePropertyDefault(wallpaperId: wallpaperId, propertyId: propertyId)
+        }
     }
 
     /// Stages the authored default for every property except the files and folders the user chose,
     /// which are saved as they are picked and keep their own Clear. Revert undoes it.
     func restoreAllPropertyDefaultsAsync(wallpaperId: String) async throws {
+        try await changeDraftProperties(wallpaperId, replacing: nil) {
+            try await self.bridge.restoreAllPropertyDefaults(wallpaperId: wallpaperId)
+        }
+    }
+
+    /// Runs a call that changes the wallpaper's pending properties. What the call replaces, the
+    /// value of one property or of all of them, is no longer something a drag is showing, whether
+    /// the call took or was refused: the draft is what the previews follow from then on.
+    private func changeDraftProperties(
+        _ wallpaperId: String,
+        replacing propertyId: String?,
+        _ call: () async throws -> BridgeWallpaperMutationBundle
+    ) async throws {
         beginWallpaperEdit(wallpaperId)
         defer { endWallpaperEdit(wallpaperId) }
-        let bundle = try await bridge.restoreAllPropertyDefaults(wallpaperId: wallpaperId)
+        let bundle: BridgeWallpaperMutationBundle
+        do {
+            bundle = try await call()
+        } catch {
+            if dropPropertyPreviews(wallpaperId, propertyId: propertyId) { propertyDraftEdited(wallpaperId) }
+            throw error
+        }
+        dropPropertyPreviews(wallpaperId, propertyId: propertyId)
         apply(bundle)
         propertyDraftEdited(wallpaperId)
+    }
+
+    @discardableResult
+    private func dropPropertyPreviews(_ wallpaperId: String, propertyId: String?) -> Bool {
+        guard let propertyId else { return editorState.clearPropertyPreviews(wallpaperID: wallpaperId) }
+        return editorState.clearPropertyPreview(.init(wallpaperID: wallpaperId, fieldID: propertyId))
     }
 
     /// An edit changed the wallpaper's pending properties: tells whatever follows the draft, and
@@ -848,26 +897,40 @@ final class BridgeStore {
     }
 
     private func showPendingPropertyEditsOnDesktop(_ wallpaperId: String) {
-        guard showsPropertyEditsOnDesktop(), applyingWallpaperID != wallpaperId else { return }
-        // A video has no properties to show and a web page gets its own delivery.
-        if let options = wallpaperOptionsSnapshot, options.wallpaperId == wallpaperId, options.kind != .projectScene {
-            return
-        }
+        guard canShowEditsOnDesktop(wallpaperId) else { return }
         desktopPropertyPreviews.schedule(key: wallpaperId) { [weak self] in
             await self?.showPropertyEditsOnDesktop(wallpaperId)
         }
     }
 
+    private func canShowEditsOnDesktop(_ wallpaperId: String) -> Bool {
+        guard showsPropertyEditsOnDesktop(), applyingWallpaperID != wallpaperId else { return false }
+        // A video has no properties to show and a web page gets its own delivery.
+        if let options = wallpaperOptionsSnapshot, options.wallpaperId == wallpaperId, options.kind != .projectScene {
+            return false
+        }
+        return true
+    }
+
+    private func forgetPropertyEditsOnDesktop(_ wallpaperId: String) {
+        propertyEditsOnDesktop.remove(wallpaperId)
+        desktopPreviewProblems.removeValue(forKey: wallpaperId)
+    }
+
     /// The bridge builds what it shows from the draft as it is when the call arrives, so a call
-    /// that lands after a Revert or an Apply shows the saved look again, which is a no-op.
+    /// that lands after a Revert or an Apply shows the saved look again, which is a no-op. The
+    /// values being dragged ride along, so an update of the edits never takes a drag back a step.
     private func showPropertyEditsOnDesktop(_ wallpaperId: String) async {
         // The wait can outlive the choice. A Revert or an Apply drops the update that is waiting.
         guard showsPropertyEditsOnDesktop() else { return }
         propertyEditsOnDesktop.insert(wallpaperId)
         do {
-            try await bridge.previewWallpaperProperties(wallpaperId: wallpaperId, show: true)
+            try await bridge.previewWallpaperProperties(
+                wallpaperId: wallpaperId, show: true, pending: editorState.propertyPreviews(wallpaperID: wallpaperId))
+            desktopPreviewProblems.removeValue(forKey: wallpaperId)
         } catch {
-            desktopPropertyPreviewLog("properties: \(wallpaperId) could not show its pending edits on the desktop: \(error.localizedDescription)")
+            let problem = "properties: \(wallpaperId) could not show its pending edits on the desktop: \(error.localizedDescription)"
+            if desktopPreviewProblems.updateValue(problem, forKey: wallpaperId) != problem { desktopPropertyPreviewLog(problem) }
         }
     }
 
@@ -878,8 +941,8 @@ final class BridgeStore {
         desktopPropertyPreviews.cancelAll()
         for wallpaperId in propertyEditsOnDesktop.sorted() {
             do {
-                try await bridge.previewWallpaperProperties(wallpaperId: wallpaperId, show: false)
-                propertyEditsOnDesktop.remove(wallpaperId)
+                try await bridge.previewWallpaperProperties(wallpaperId: wallpaperId, show: false, pending: [])
+                forgetPropertyEditsOnDesktop(wallpaperId)
             } catch {
                 desktopPropertyPreviewLog("properties: \(wallpaperId) could not put its saved look back on the desktop: \(error.localizedDescription)")
             }
@@ -1161,7 +1224,7 @@ final class BridgeStore {
             // The scenes were loaded from what is saved, and activating a wallpaper commits its
             // pending edits through here too, so an update scheduled by them has nothing left to show.
             desktopPropertyPreviews.cancel(wallpaperId)
-            propertyEditsOnDesktop.remove(wallpaperId)
+            forgetPropertyEditsOnDesktop(wallpaperId)
         } catch {
             wallpaperAppliesNeedingSave.insert(wallpaperId)
             // `activationNeedsRefresh` disables every Library action, so only the
@@ -1192,7 +1255,7 @@ final class BridgeStore {
         // The bridge puts the saved look back on the displays before it discards the edit, and
         // keeps the edit if a display refuses, so Revert can be asked again.
         let bundle = try await bridge.cancelWallpaperOptions(wallpaperId: wallpaperId)
-        propertyEditsOnDesktop.remove(wallpaperId)
+        forgetPropertyEditsOnDesktop(wallpaperId)
         apply(bundle)
         editorState.discard(wallpaperID: wallpaperId)
         onPropertyDraftChanged?(wallpaperId)
@@ -1426,6 +1489,9 @@ final class BridgeStore {
         if let options = wallpaperOptionsSnapshot {
             editorState.reconcile(wallpaperID: options.wallpaperId,
                 textPropertyIDs: Set(options.properties.filter { $0.kind == .textInput && $0.enabled }.map(\.id)))
+            // The inspector shows another wallpaper now, so a drag in the one it left is over. What
+            // the previews showed of it goes back to the draft.
+            for left in editorState.clearPropertyPreviews(except: options.wallpaperId) { propertyDraftEdited(left) }
         }
         self.snapshotRevision &+= 1
         onSnapshotApplied?()

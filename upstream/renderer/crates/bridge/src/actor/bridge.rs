@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     fs,
     sync::Arc,
 };
@@ -11,8 +11,8 @@ use kameo::{
     reply::{DelegatedReply, Reply},
 };
 use wallpaper_core::{
-    DisplayIdentity, DisplaySelector, DisplaySnapshotEntry, SceneRendererPreference,
-    WallpaperAssignment,
+    DisplayIdentity, DisplaySelector, DisplaySnapshotEntry, PropertyPreview,
+    SceneRendererPreference, WallpaperAssignment,
     media::audio::AudioVolume,
     project::{ScalingMode, SceneDesc, SceneFraming, SceneHandle, SerdeValudeExt},
     render::{
@@ -62,7 +62,7 @@ use crate::{
         BridgeAppSnapshot, BridgeDisplayMode, BridgeDisplayMutationBundle,
         BridgeDisplaySettingsRow, BridgeError, BridgeLibraryScanStatus, BridgeLibrarySnapshot,
         BridgeLockScreenScene, BridgeNativeVideoWallpaper, BridgePlaybackState,
-        BridgePropertyValue,
+        BridgePropertyEdit,
         BridgeRendererCountersReport, BridgeRendererSurfaceCounters, BridgeScalingMode,
         BridgeSnapshotBundle, BridgeWallpaperEntry, BridgeWallpaperKind,
         BridgeWallpaperMutationBundle, BridgeWallpaperPreview, BridgeWebWallpaper, MousePollingControl,
@@ -91,12 +91,6 @@ const IDENTITY_DISPLAY_ID_PREFIX: &str = "identity:";
 const INDEPENDENT_DISPLAY_MODE: &str = "independent";
 const MIRROR_DISPLAY_MODE: &str = "mirror";
 
-macro_rules! is_color_channel_valid {
-    ($color:expr) => {
-        ($color.is_finite() && (0.0..=1.0).contains(&$color))
-    };
-}
-
 #[derive(kameo::Actor)]
 pub struct BridgeActor<E: EngineFacade> {
     pub state: BridgeActorState,
@@ -122,12 +116,17 @@ pub struct BridgeActor<E: EngineFacade> {
     /// the saved position instead of being skipped as already held.
     previewed_framing: HashSet<SceneHandle>,
     /// Wallpapers whose scenes may be showing pending property edits nobody
-    /// saved, with the document shown to all of them, so that asking for it
-    /// again sends nothing and a cancelled edit still puts the saved look back.
-    /// `None` is "may be showing something": after a reconcile that could have
-    /// kept or rebuilt a scene, or an update the engine refused partway. A
-    /// wallpaper without an entry shows its saved look.
-    previewed_properties: HashMap<String, Option<String>>,
+    /// saved, so that a cancelled edit still puts the saved look back. It says
+    /// only that a scene may show something, never what: which scenes show which
+    /// document is the engine's to know, because it owns the renderers and
+    /// replaces them. A reconcile, a shader cache clear and a recovery after a
+    /// wake or a failed frame all load scenes again without this actor being
+    /// told, so a copy of the last document kept here goes stale; the engine
+    /// skips a document a scene already shows and sends it to one that does not.
+    /// A mark outlives a rebuild harmlessly: the saved look it then puts back
+    /// is the one the scene shows. A wallpaper without a mark shows its saved
+    /// look.
+    previewed_properties: HashSet<String>,
 }
 
 /// What a reconcile needs to keep the load journal honest: the journal to
@@ -192,7 +191,7 @@ impl<E: EngineFacade> BridgeActorHandle<E> {
             mouse_polling,
             load_journal,
             previewed_framing: HashSet::new(),
-            previewed_properties: HashMap::new(),
+            previewed_properties: HashSet::new(),
         };
         actor.refresh_mouse_polling_policy();
 
@@ -622,7 +621,6 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
     }
 
     fn reserve_reconcile(&mut self) -> u64 {
-        self.property_previews_may_have_reloaded();
         self.bump_generation();
         self.latest_reconcile_generation = self.generation;
         self.repair_after_reconcile_generation = None;
@@ -630,7 +628,6 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
     }
 
     fn finish_reconcile(&mut self, generation: u64, actor: ActorRef<BridgeActor<E>>) {
-        self.property_previews_may_have_reloaded();
         self.reconciled_generation = generation;
         self.refresh_mouse_polling_policy();
         if self.active_restore_generation == Some(generation) {
@@ -695,38 +692,39 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         }
     }
 
-    /// A reconcile keeps a scene whose descriptor is unchanged, and with it any
-    /// property edit shown on it, and loads a scene whose descriptor changed
-    /// afresh, which shows the saved look. Which of the two happened is not
-    /// known here, so a wallpaper that was being previewed is only known to
-    /// possibly still be: the next call sends its document again instead of
-    /// trusting the last one, and puts the saved look back if that is asked.
-    fn property_previews_may_have_reloaded(&mut self) {
-        for shown in self.previewed_properties.values_mut() {
-            *shown = None;
-        }
-    }
-
     /// Shows a scene wallpaper's pending property edits on every scene that
     /// draws it, or with `show` false puts the saved look back on them.
     ///
     /// Only the renderers change. Nothing is saved, the draft and the
     /// generation stay as they are and the lock-screen export, which follows
     /// the saved configuration, does not move, so an editor can call this after
-    /// every edit. The scenes are told only what they do not already show: a
-    /// wallpaper that is not being previewed and whose document is the saved
-    /// one is left alone, and so is one that already shows the document asked
-    /// for.
+    /// every edit. A wallpaper that is not being previewed and whose document is
+    /// the saved one is left alone, because its scenes show it already.
+    ///
+    /// Everything else is asked of the engine, which answers for each scene.
+    /// The bridge keeps no copy of what a scene shows: that goes stale the
+    /// moment anything loads the scene again, and most things that do never pass
+    /// through here. The engine skips a scene that already shows the document,
+    /// sends it to one that does not, and declines one that draws another
+    /// wallpaper. That last answer is what keeps a document from reaching the
+    /// wrong scene. The handles come from the committed configuration, and a
+    /// reconcile that moves a display to another wallpaper commits it only after
+    /// it has finished, so for that long a handle still found for this wallpaper
+    /// can be running the next one.
     ///
     /// A scene that takes the update and a scene that refuses it can both be
     /// among the wallpaper's scenes, so a refusal leaves the wallpaper marked as
-    /// possibly previewed, which makes the next call send its document again.
+    /// possibly previewed, which makes the next call ask again.
     async fn show_wallpaper_properties(
         &mut self,
         wallpaper_id: &str,
         show: bool,
+        pending: Vec<BridgePropertyEdit>,
     ) -> Result<(), BridgeError> {
-        let Some(documents) = self.state.pending_property_documents(wallpaper_id)? else {
+        let Some(documents) = self
+            .state
+            .pending_property_documents(wallpaper_id, pending)?
+        else {
             return Ok(());
         };
         let shown = if show {
@@ -734,10 +732,8 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         } else {
             documents.saved.clone()
         };
-        match self.previewed_properties.get(wallpaper_id) {
-            None if shown == documents.saved => return Ok(()),
-            Some(Some(last)) if *last == shown => return Ok(()),
-            _ => {}
+        if shown == documents.saved && !self.previewed_properties.contains(wallpaper_id) {
+            return Ok(());
         }
         let handles = self.wallpaper_handles(wallpaper_id, true);
         if handles.is_empty() {
@@ -746,19 +742,26 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             self.previewed_properties.remove(wallpaper_id);
             return Ok(());
         }
-        self.previewed_properties
-            .insert(wallpaper_id.to_string(), None);
+        self.previewed_properties.insert(wallpaper_id.to_string());
+        let scene_path = self
+            .paths
+            .project_json(wallpaper_id)
+            .to_string_lossy()
+            .into_owned();
+        let mut drawn = false;
         for handle in handles {
-            self.engine
-                .preview_property_override(handle, shown.clone())
+            let outcome = self
+                .engine
+                .preview_property_override(handle, scene_path.clone(), shown.clone())
                 .await
                 .map_err(|error| BridgeError::engine(error.to_string()))?;
+            drawn |= outcome == PropertyPreview::Shown;
         }
-        if shown == documents.saved {
+        // A scene the engine declined no longer draws this wallpaper, so there
+        // is nothing on it to show or to put back; with none left, no scene
+        // shows an edit of it.
+        if shown == documents.saved || !drawn {
             self.previewed_properties.remove(wallpaper_id);
-        } else {
-            self.previewed_properties
-                .insert(wallpaper_id.to_string(), Some(shown));
         }
         Ok(())
     }
@@ -1425,7 +1428,9 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             .collect()
     }
 
-    fn wallpaper_preview(&self, wallpaper_id: &str, display_id: &str) -> Result<BridgeWallpaperPreview, BridgeError> {
+    fn wallpaper_preview(
+        &self, wallpaper_id: &str, display_id: &str, pending: Vec<BridgePropertyEdit>,
+    ) -> Result<BridgeWallpaperPreview, BridgeError> {
         use std::path::{Component, Path, PathBuf};
         let mut components = Path::new(wallpaper_id).components();
         if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
@@ -1437,7 +1442,8 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         if !entry.supported || entry.kind == BridgeWallpaperKind::Unknown {
             return Err(BridgeError::invalid_input("this wallpaper type cannot be previewed"));
         }
-        let draft = self.state.wallpaper_draft(wallpaper_id)?;
+        let edits = model.checked_edits(pending)?;
+        let draft = self.state.wallpaper_draft(wallpaper_id)?.with_edits(model, &edits);
         let config = draft.current();
         let render = config.monitors.iter().find(|render| render.selector.id() == display_id);
         let overrides = model.override_values(&config.property_overrides);
@@ -1867,8 +1873,6 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             self.load_guard(),
         )
         .await;
-        // Kept or opened afresh, a scene may no longer show what it was shown.
-        self.property_previews_may_have_reloaded();
         result
     }
 
@@ -2620,7 +2624,7 @@ impl<E: EngineFacade + Clone> Message<GetWallpaperPreview> for BridgeActor<E> {
     type Reply = Result<BridgeWallpaperPreview, BridgeError>;
 
     async fn handle(&mut self, msg: GetWallpaperPreview, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        self.wallpaper_preview(&msg.wallpaper_id, &msg.display_id)
+        self.wallpaper_preview(&msg.wallpaper_id, &msg.display_id, msg.pending)
     }
 }
 
@@ -4909,7 +4913,7 @@ impl<E: EngineFacade + Clone> Message<PreviewWallpaperProperties> for BridgeActo
         msg: PreviewWallpaperProperties,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        self.show_wallpaper_properties(&msg.wallpaper_id, msg.show)
+        self.show_wallpaper_properties(&msg.wallpaper_id, msg.show, msg.pending)
             .await
     }
 }
@@ -4961,40 +4965,7 @@ impl<E: EngineFacade + Clone> Message<EditProperty> for BridgeActor<E> {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         let model = self.state.project_model(&msg.wallpaper_id)?.clone();
-        let property = model
-            .properties
-            .iter()
-            .find(|property| property.id == msg.property_id)
-            .ok_or_else(|| {
-                BridgeError::invalid_input(format!("unknown property id {}", msg.property_id))
-            })?;
-        match (&property.kind, &property.metadata, &msg.value) {
-            (PropertyKind::Bool, _, BridgePropertyValue::Bool { .. })
-            | (PropertyKind::TextInput, _, BridgePropertyValue::String { .. })
-            | (PropertyKind::File, _, BridgePropertyValue::String { .. })
-            | (PropertyKind::Directory, _, BridgePropertyValue::String { .. })
-            | (PropertyKind::Texture, _, BridgePropertyValue::String { .. }) => {}
-            (
-                PropertyKind::Slider,
-                PropertyMetadata::Slider { min, max, .. },
-                BridgePropertyValue::Number { value },
-            ) if value.is_finite() && (*min..=*max).contains(value) => {}
-            (PropertyKind::Color, _, BridgePropertyValue::ColorRgb { red, green, blue })
-                if is_color_channel_valid!(*red)
-                    && is_color_channel_valid!(*green)
-                    && is_color_channel_valid!(*blue) => {}
-            (
-                PropertyKind::Combo,
-                PropertyMetadata::Combo { options },
-                BridgePropertyValue::String { value },
-            ) if options.iter().any(|option| option.value == *value) => {}
-            _ => {
-                return Err(BridgeError::invalid_input(format!(
-                    "invalid value for property id {}",
-                    property.id
-                )));
-            }
-        }
+        model.check_edit(&msg.property_id, &msg.value)?;
         self.state
             .wallpaper_draft_mut(&msg.wallpaper_id)?
             .edit_property(&model, &msg.property_id, PropertyValue::from(msg.value));
@@ -5333,7 +5304,7 @@ impl<E: EngineFacade + Clone> Message<CancelWallpaperOptions> for BridgeActor<E>
         // The saved look goes back first, so that a scene the engine refuses
         // leaves the draft and every other preview exactly as they were and
         // Revert can simply be asked again.
-        self.show_wallpaper_properties(&msg.wallpaper_id, false)
+        self.show_wallpaper_properties(&msg.wallpaper_id, false, Vec::new())
             .await?;
         let preview = draft.current().monitors.clone();
         let mut restored = draft;

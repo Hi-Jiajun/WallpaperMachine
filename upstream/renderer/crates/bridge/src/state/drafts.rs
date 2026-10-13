@@ -491,6 +491,20 @@ impl WallpaperOptionsDraft {
         model.edit_overrides(&mut self.current.property_overrides, id, value);
     }
 
+    /// This draft with `edits` made to it one after another, as
+    /// [`Self::edit_property`] makes them, and this draft left as it is.
+    ///
+    /// It is how a value that is only being shown, a slider still being
+    /// dragged, reaches a preview without becoming an edit: nothing is dirty,
+    /// saved or announced by it.
+    #[must_use]
+    pub fn with_edits(&self, model: &ProjectModel, edits: &[(String, PropertyValue)]) -> Self {
+        let mut edited = self.clone();
+        edited.current.property_overrides =
+            model.edited_overrides(&self.current.property_overrides, edits);
+        edited
+    }
+
     pub fn restore_property_default(&mut self, id: &str) {
         self.current.property_overrides.remove(id);
     }
@@ -654,5 +668,42 @@ mod tests {
              Apply saved is part of every document from then on"
         );
         assert_eq!(back.saved, r#"{"alpha":0.5,"picture":"pending.png"}"#);
+    }
+
+    /// A value that is only being shown goes on top of the draft in the order
+    /// it is given, the way edits would, and the draft never learns of it.
+    #[test]
+    fn edits_made_for_showing_leave_the_draft_alone_and_land_in_order() {
+        let model = ProjectModel::parse("100", DOCUMENT_PROJECT).unwrap();
+        let mut draft =
+            WallpaperOptionsDraft::from_committed(WallpaperConfig::new_for("100", "scene"));
+        draft.edit_property(&model, "alpha", PropertyValue::Number(0.5));
+        let before = draft.current().clone();
+
+        let shown = draft.with_edits(
+            &model,
+            &[
+                ("alpha".to_string(), PropertyValue::Number(0.25)),
+                ("alpha".to_string(), PropertyValue::Number(0.75)),
+            ],
+        );
+
+        assert_eq!(draft.current(), &before, "the draft is as it was");
+        assert!(draft.is_dirty(&[]), "and just as dirty");
+        assert_eq!(shown.property_documents(&model).shown, r#"{"alpha":0.75}"#);
+        let defaulted = draft.with_edits(
+            &model,
+            &[("alpha".to_string(), PropertyValue::Number(1.0))],
+        );
+        assert_eq!(
+            defaulted.property_documents(&model).shown,
+            "{}",
+            "a value shown at the authored default leaves the property out, as an edit does"
+        );
+        assert_eq!(
+            draft.with_edits(&model, &[]).current(),
+            draft.current(),
+            "nothing pending shows the draft"
+        );
     }
 }

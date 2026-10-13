@@ -25,6 +25,18 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-13 — Follow sliders and colours while they are dragged
+
+A property's slider or colour picker now shows its value in the preview window and, with the Settings switch on, on the displays while the person is still dragging (propertyPreview, at most one step every 100 ms, one in flight), through a pending list on the bridge's wallpaper_preview and preview_wallpaper_properties; releasing saves through the normal property edit. Lane worktree, targeted runs only, not the bare full gate.
+
+- `python3 scripts/test.py --only` the touched and neighbouring panel, preview and store classes (WebPanelPropertyPreviewTests, WebPanelPropertyDragPageTests, WebPanelDisplayPositionTests, WallpaperEditorStateTests, PropertyPreviewSchedulerTests, WallpaperPreviewLivePropertiesTests, WallpaperPreviewRequestTests, PropertyDraftHookTests and 11 more) — exit 0; 182 passed, 0 failed, 0 skipped
+- `cargo test -p wallpaper-bridge --lib` — 579 passed (7 new in property_preview, 3 in wallpaper_preview, 1 in state::drafts); `python3 scripts/check_rust.py` — exit 0 (core 299, bridge 579, core-integration, shader)
+- `python3 scripts/build.py --renderer-only` — exit 0; the regenerated bindings are in the commit
+- Every `scripts/tests/test_*.py` module run directly — all passed
+- Mutation checks: dropping the property-preview clears in the edit path and the zero-delay scheduler wait fails 6 tests; dropping the release wait on the step in flight and the colour picker first-step deferral fails 4
+- Not run: the bare full gate, `python3 scripts/check_renderer.py` (no C++ change), a Release build, any desktop run
+- Unverified without a desktop run: the feel and rate of a drag under load, whether WebKit's colour picker sends input events while it is open (and whether its change event comes with each), the preview window and displays following a real drag, and Revert while holding the thumb (listed in manual-smoke.md)
+
 ## 2026-10-13 — Optional live property edits on the desktop
 
 A Settings switch (off by default, this Mac only) lets the displays follow a scene wallpaper's pending property edits through the bridge's property preview before Apply changes; Revert, Apply and turning the switch off put the saved look back. Swift, WebUI and docs only; the renderer and bridge sides were verified in the earlier commits of this package.
@@ -125,13 +137,3 @@ Commit 7 of the framing lane: the inspector's Position sliders and Center for sc
 - Mutation checks — eleven deliberate breakages (dead change handler, sliders hidden for scenes, request naming no axis accepted, clamping instead of refusing, no scene/video and display check, no change notice, native flag for any backend, reset sending one axis, move not queued, both axes sent, native note dropped) each failed the new class, which passed again once they were undone
 - Not run: the bare `python3 scripts/test.py` gate, `check_rust.py` and `check_renderer.py` (no Rust or C++ change), a Release build
 - Unverified (desktop only): the wallpaper visibly moving under the sliders on a real display on both scene renderers, slider feel and layout at the narrowest panel width, VoiceOver reading, the Mission Control picture being retaken after a move
-
-## 2026-10-13 — Web host takes the switch hold
-
-A replacement web page's window opens with the picture it replaces over it and drops it 500 ms after the page has loaded, or at once when it fails. A window closed with no web successor ends only the veil it carries. Targeted run only: the lane runs the full gate once, at its end.
-
-- `python3 scripts/test.py --only WebWallpaperHostLifecycleTests --only WallpaperSwitchHoldTests` — exit 0; 51 passed (10 new: 8 web host, 2 hold)
-- `python3 scripts/test.py` with the web test classes, `NativeVideoWallpaperHostTests`, `WallpaperActivationRecoveryTests` and `DesktopWallpaperTests` — exit 0; 336 passed
-- Mutation check — five one-line breakages of `WebWallpaperHost` (no adopt, no release on load, no release on failure, the plan's unconditional `cancel` where a window closes, no release of a veil on the closed window) each failed between 1 and 4 of the host tests
-- Skipped: the full gate and `check_rust.py`/`check_renderer.py` (no Rust or renderer change in this commit), any desktop run
-- Not established: that 500 ms after `didFinish` is enough for a real project's first paint; how long the system picture shows while a page's window is replaced, and after a scene closes; the fade and the page-to-page, scene-to-page and page-to-scene switches on a real display ([manual smoke](manual-smoke.md#wallpaper-switching))

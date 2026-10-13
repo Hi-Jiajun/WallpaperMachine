@@ -825,6 +825,16 @@ public protocol WallpaperBridgeProtocol : AnyObject {
      * the draft stays as it is, no snapshot changes and the lock screen and
      * screen saver are not told, so a page can call it after every edit.
      *
+     * `pending` holds values the host is showing without having saved them, a
+     * slider or colour still being dragged. Each is made to the draft for this
+     * call alone, in order, as [`WallpaperBridge::edit_property`] would make
+     * it, so the scenes follow the drag; none is kept, and the next call
+     * shows the draft again unless it names them anew. Each is checked like
+     * an edit's value, and one the property does not accept refuses the call
+     * before any scene is told anything. A texture, a file or a folder in
+     * `pending` stays at what is saved, like one in the draft. With `show`
+     * false it has no effect on what the scenes are given.
+     *
      * Asking for what the scenes already show, or for the saved look when they
      * are showing it, sends the engine nothing. Cancelling the options puts
      * the saved look back by itself, and applying them loads the scenes from
@@ -835,10 +845,11 @@ public protocol WallpaperBridgeProtocol : AnyObject {
      *
      * # Errors
      *
-     * Returns an error when the wallpaper id is unknown or the live engine
+     * Returns an error when the wallpaper id is unknown, a scene wallpaper's
+     * pending value is not one its property accepts, or the live engine
      * update fails. A refused update leaves the call to be repeated.
      */
-    func previewWallpaperProperties(wallpaperId: String, show: Bool) async throws 
+    func previewWallpaperProperties(wallpaperId: String, show: Bool, pending: [BridgePropertyEdit]) async throws 
     
     /**
      * # Errors
@@ -1497,10 +1508,17 @@ public protocol WallpaperBridgeProtocol : AnyObject {
      * Exports current draft inputs for an isolated preview, without selecting, applying,
      * persisting or opening any wallpaper. Preview playback is owned by the host.
      *
+     * `pending` holds values the host is showing without having saved them, a
+     * slider still being dragged: each is made to the draft's properties, in
+     * order, for this export alone, so the draft, the dirty state and the
+     * snapshots stay as they are. An entry is checked like
+     * [`WallpaperBridge::edit_property`] checks its value.
+     *
      * # Errors
-     * Returns an error for a missing or unsupported project or invalid input paths.
+     * Returns an error for a missing or unsupported project, invalid input paths, or a
+     * pending value the property does not accept. Nothing is exported then.
      */
-    func wallpaperPreview(wallpaperId: String, displayId: String) async throws  -> BridgeWallpaperPreview
+    func wallpaperPreview(wallpaperId: String, displayId: String, pending: [BridgePropertyEdit]) async throws  -> BridgeWallpaperPreview
     
     /**
      * The most recent process-wide audio analysis, or `None` when none has
@@ -2175,6 +2193,16 @@ open func previewDisplayPosition(wallpaperId: String, displayId: String, panX: D
      * the draft stays as it is, no snapshot changes and the lock screen and
      * screen saver are not told, so a page can call it after every edit.
      *
+     * `pending` holds values the host is showing without having saved them, a
+     * slider or colour still being dragged. Each is made to the draft for this
+     * call alone, in order, as [`WallpaperBridge::edit_property`] would make
+     * it, so the scenes follow the drag; none is kept, and the next call
+     * shows the draft again unless it names them anew. Each is checked like
+     * an edit's value, and one the property does not accept refuses the call
+     * before any scene is told anything. A texture, a file or a folder in
+     * `pending` stays at what is saved, like one in the draft. With `show`
+     * false it has no effect on what the scenes are given.
+     *
      * Asking for what the scenes already show, or for the saved look when they
      * are showing it, sends the engine nothing. Cancelling the options puts
      * the saved look back by itself, and applying them loads the scenes from
@@ -2185,16 +2213,17 @@ open func previewDisplayPosition(wallpaperId: String, displayId: String, panX: D
      *
      * # Errors
      *
-     * Returns an error when the wallpaper id is unknown or the live engine
+     * Returns an error when the wallpaper id is unknown, a scene wallpaper's
+     * pending value is not one its property accepts, or the live engine
      * update fails. A refused update leaves the call to be repeated.
      */
-open func previewWallpaperProperties(wallpaperId: String, show: Bool)async throws  {
+open func previewWallpaperProperties(wallpaperId: String, show: Bool, pending: [BridgePropertyEdit])async throws  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_wallpaper_bridge_fn_method_wallpaperbridge_preview_wallpaper_properties(
                     self.uniffiClonePointer(),
-                    FfiConverterString.lower(wallpaperId),FfiConverterBool.lower(show)
+                    FfiConverterString.lower(wallpaperId),FfiConverterBool.lower(show),FfiConverterSequenceTypeBridgePropertyEdit.lower(pending)
                 )
             },
             pollFunc: ffi_wallpaper_bridge_rust_future_poll_void,
@@ -3736,16 +3765,23 @@ open func wallpaperOptionsSnapshot(wallpaperId: String)async throws  -> BridgeWa
      * Exports current draft inputs for an isolated preview, without selecting, applying,
      * persisting or opening any wallpaper. Preview playback is owned by the host.
      *
+     * `pending` holds values the host is showing without having saved them, a
+     * slider still being dragged: each is made to the draft's properties, in
+     * order, for this export alone, so the draft, the dirty state and the
+     * snapshots stay as they are. An entry is checked like
+     * [`WallpaperBridge::edit_property`] checks its value.
+     *
      * # Errors
-     * Returns an error for a missing or unsupported project or invalid input paths.
+     * Returns an error for a missing or unsupported project, invalid input paths, or a
+     * pending value the property does not accept. Nothing is exported then.
      */
-open func wallpaperPreview(wallpaperId: String, displayId: String)async throws  -> BridgeWallpaperPreview {
+open func wallpaperPreview(wallpaperId: String, displayId: String, pending: [BridgePropertyEdit])async throws  -> BridgeWallpaperPreview {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_wallpaper_bridge_fn_method_wallpaperbridge_wallpaper_preview(
                     self.uniffiClonePointer(),
-                    FfiConverterString.lower(wallpaperId),FfiConverterString.lower(displayId)
+                    FfiConverterString.lower(wallpaperId),FfiConverterString.lower(displayId),FfiConverterSequenceTypeBridgePropertyEdit.lower(pending)
                 )
             },
             pollFunc: ffi_wallpaper_bridge_rust_future_poll_rust_buffer,
@@ -5744,6 +5780,77 @@ public func FfiConverterTypeBridgePropertyDescriptor_lift(_ buf: RustBuffer) thr
 #endif
 public func FfiConverterTypeBridgePropertyDescriptor_lower(_ value: BridgePropertyDescriptor) -> RustBuffer {
     return FfiConverterTypeBridgePropertyDescriptor.lower(value)
+}
+
+
+/**
+ * One value a host is showing for a property without having saved it, such
+ * as a slider the person is still dragging. It is checked like an edit and
+ * never becomes one.
+ */
+public struct BridgePropertyEdit {
+    public var propertyId: String
+    public var value: BridgePropertyValue
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(propertyId: String, value: BridgePropertyValue) {
+        self.propertyId = propertyId
+        self.value = value
+    }
+}
+
+
+
+extension BridgePropertyEdit: Equatable, Hashable {
+    public static func ==(lhs: BridgePropertyEdit, rhs: BridgePropertyEdit) -> Bool {
+        if lhs.propertyId != rhs.propertyId {
+            return false
+        }
+        if lhs.value != rhs.value {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(propertyId)
+        hasher.combine(value)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBridgePropertyEdit: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BridgePropertyEdit {
+        return
+            try BridgePropertyEdit(
+                propertyId: FfiConverterString.read(from: &buf), 
+                value: FfiConverterTypeBridgePropertyValue.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: BridgePropertyEdit, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.propertyId, into: &buf)
+        FfiConverterTypeBridgePropertyValue.write(value.value, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBridgePropertyEdit_lift(_ buf: RustBuffer) throws -> BridgePropertyEdit {
+    return try FfiConverterTypeBridgePropertyEdit.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBridgePropertyEdit_lower(_ value: BridgePropertyEdit) -> RustBuffer {
+    return FfiConverterTypeBridgePropertyEdit.lower(value)
 }
 
 
@@ -9834,6 +9941,31 @@ fileprivate struct FfiConverterSequenceTypeBridgePropertyDescriptor: FfiConverte
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeBridgePropertyEdit: FfiConverterRustBuffer {
+    typealias SwiftType = [BridgePropertyEdit]
+
+    public static func write(_ value: [BridgePropertyEdit], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeBridgePropertyEdit.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [BridgePropertyEdit] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [BridgePropertyEdit]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeBridgePropertyEdit.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeBridgeRendererSurfaceCounters: FfiConverterRustBuffer {
     typealias SwiftType = [BridgeRendererSurfaceCounters]
 
@@ -10206,7 +10338,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_preview_display_position() != 55563) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_preview_wallpaper_properties() != 35488) {
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_preview_wallpaper_properties() != 23240) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_refresh_displays() != 55592) {
@@ -10386,7 +10518,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_wallpaper_options_snapshot() != 45708) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_wallpaper_preview() != 42915) {
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_wallpaper_preview() != 6907) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_web_audio_spectrum() != 62382) {

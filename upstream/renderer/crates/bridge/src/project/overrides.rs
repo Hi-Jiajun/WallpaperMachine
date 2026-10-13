@@ -5,6 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{ProjectModel, ProjectProperty, PropertyKind, PropertyMetadata, PropertyValue};
+use crate::api::{BridgeError, BridgePropertyEdit, BridgePropertyValue};
 
 pub trait OverrideMapExt {
     fn to_override_json(&self) -> String;
@@ -107,6 +108,90 @@ impl ProjectModel {
             .into_iter()
             .map(|(id, value)| (id, value.to_json()))
             .collect();
+    }
+
+    /// Whether `value` is one the property `property_id` accepts: the checks
+    /// every way of setting a property's value goes through, so a value a host
+    /// only shows is held to the same rules as one it saves.
+    ///
+    /// # Errors
+    ///
+    /// Returns an invalid-input error when the project has no such property,
+    /// or its kind, range or options do not accept the value.
+    pub fn check_edit(
+        &self,
+        property_id: &str,
+        value: &BridgePropertyValue,
+    ) -> Result<(), BridgeError> {
+        let property = self.property(property_id).ok_or_else(|| {
+            BridgeError::invalid_input(format!("unknown property id {property_id}"))
+        })?;
+        let channel = |channel: f64| channel.is_finite() && (0.0..=1.0).contains(&channel);
+        match (&property.kind, &property.metadata, value) {
+            (PropertyKind::Bool, _, BridgePropertyValue::Bool { .. })
+            | (
+                PropertyKind::TextInput
+                | PropertyKind::File
+                | PropertyKind::Directory
+                | PropertyKind::Texture,
+                _,
+                BridgePropertyValue::String { .. },
+            ) => Ok(()),
+            (
+                PropertyKind::Slider,
+                PropertyMetadata::Slider { min, max, .. },
+                BridgePropertyValue::Number { value },
+            ) if value.is_finite() && (*min..=*max).contains(value) => Ok(()),
+            (PropertyKind::Color, _, BridgePropertyValue::ColorRgb { red, green, blue })
+                if channel(*red) && channel(*green) && channel(*blue) =>
+            {
+                Ok(())
+            }
+            (
+                PropertyKind::Combo,
+                PropertyMetadata::Combo { options },
+                BridgePropertyValue::String { value },
+            ) if options.iter().any(|option| option.value == *value) => Ok(()),
+            _ => Err(BridgeError::invalid_input(format!(
+                "invalid value for property id {}",
+                property.id
+            ))),
+        }
+    }
+
+    /// `edits` checked by [`Self::check_edit`] and in the form the editing
+    /// functions take.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first edit's refusal; none is made then.
+    pub fn checked_edits(
+        &self,
+        edits: Vec<BridgePropertyEdit>,
+    ) -> Result<Vec<(String, PropertyValue)>, BridgeError> {
+        edits
+            .into_iter()
+            .map(|edit| {
+                self.check_edit(&edit.property_id, &edit.value)?;
+                Ok((edit.property_id, edit.value.into()))
+            })
+            .collect()
+    }
+
+    /// `values` with `edits` made to them one after another, as
+    /// [`Self::edit_overrides`] makes them to a draft's. `values` itself is not
+    /// changed.
+    #[must_use]
+    pub fn edited_overrides(
+        &self,
+        values: &BTreeMap<String, serde_json::Value>,
+        edits: &[(String, PropertyValue)],
+    ) -> BTreeMap<String, serde_json::Value> {
+        let mut edited = values.clone();
+        for (id, value) in edits {
+            self.edit_overrides(&mut edited, id, value.clone());
+        }
+        edited
     }
 
     /// The properties whose value is a path the user picked. Each is stored

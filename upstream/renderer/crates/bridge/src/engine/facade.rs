@@ -18,8 +18,8 @@ use futures_util::future::{BoxFuture, FutureExt};
 use wallpaper_core::project::SceneTemplate;
 use wallpaper_core::{
     AudioSpectrum128, DisplaySelector, DisplaySnapshotEntry, EngineError, FirstFrameCallback,
-    RecoveryOutcome, RecoveryReason, SceneBackend, SceneDemandReasons, SceneRendererPreference,
-    SceneUpdateMode, WallpaperAssignment, WallpaperEngine,
+    PropertyPreview, RecoveryOutcome, RecoveryReason, SceneBackend, SceneDemandReasons,
+    SceneRendererPreference, SceneUpdateMode, WallpaperAssignment, WallpaperEngine,
     media::audio::{
         AudioCaptureBackend, AudioCaptureController, AudioVolume, PlatformAudioCaptureBackend,
         RESTART_RETRY_DELAYS, RestartOutcome, device_watch::OutputDeviceWatcher,
@@ -121,11 +121,21 @@ pub trait EngineFacade: Send + Sync + 'static {
     /// what is saved. The document is the complete state to show (`{}` is the
     /// project's authored defaults), and the engine refuses one that is not a
     /// JSON object.
+    ///
+    /// `scene_path` is the project file of the wallpaper the document was made
+    /// for. A handle names a display's scene, which a reconcile still under way
+    /// can have given to another wallpaper; the engine checks what the scene
+    /// draws when it handles the request and answers
+    /// [`PropertyPreview::OtherWallpaper`], sending nothing, when it is not that
+    /// wallpaper. The engine also knows what each scene was last shown, so a
+    /// scene that already shows the document is not told again and one that was
+    /// loaded again is.
     fn preview_property_override(
         &self,
         handle: SceneHandle,
+        scene_path: String,
         flat_json: String,
-    ) -> EngineFuture<()>;
+    ) -> EngineFuture<PropertyPreview>;
     fn set_fps(&self, handle: SceneHandle, fps: u32) -> EngineFuture<()>;
     /// Live-updates one scene's internal rasterization scale. Resizes render
     /// targets in place; it must not reparse the project or reopen video.
@@ -633,10 +643,16 @@ impl EngineFacade for RealEngineFacade {
     fn preview_property_override(
         &self,
         handle: SceneHandle,
+        scene_path: String,
         flat_json: String,
-    ) -> EngineFuture<()> {
+    ) -> EngineFuture<PropertyPreview> {
         let engine = self.engine.clone();
-        async move { engine.preview_property_override(handle, flat_json).await }.boxed()
+        async move {
+            engine
+                .preview_property_override(handle, scene_path, flat_json)
+                .await
+        }
+        .boxed()
     }
 
     fn set_fps(&self, handle: SceneHandle, fps: u32) -> EngineFuture<()> {
@@ -1145,6 +1161,14 @@ pub struct FakeEngineFacade {
     framing_calls: Arc<ArcSwap<Vec<(SceneHandle, SceneFraming)>>>,
     preview_framing_calls: Arc<ArcSwap<Vec<(SceneHandle, SceneFraming)>>>,
     preview_property_calls: Arc<ArcSwap<Vec<(SceneHandle, String)>>>,
+    /// Property previews the fake engine declined because the scene on the
+    /// handle draws another wallpaper: the handle and the project file the
+    /// document was made for.
+    declined_property_previews: Arc<ArcSwap<Vec<(SceneHandle, String)>>>,
+    /// What each fake renderer was last shown by a property preview, by its
+    /// display, like the real renderer's own record: gone when a reconcile opens
+    /// the display's scene afresh or loads it again.
+    shown_property_documents: Arc<std::sync::Mutex<std::collections::HashMap<u32, String>>>,
     framing_failure: Arc<ArcSwap<Option<String>>>,
     property_preview_failure: Arc<ArcSwap<Option<String>>>,
     fps_calls: Arc<ArcSwap<Vec<(SceneHandle, u32)>>>,
@@ -1299,6 +1323,55 @@ impl ReconcileDone {
 
 #[cfg(test)]
 impl FakeEngineFacade {
+    /// What the scene on `handle` draws now: the descriptor the last reconcile
+    /// gave the display the snapshot puts the handle on. Like the real engine's
+    /// handle, it stays with the display when the wallpaper on it changes.
+    fn scene_behind(&self, handle: SceneHandle) -> Option<SceneDesc> {
+        let display_id = self
+            .snapshot
+            .load()
+            .iter()
+            .find(|entry| entry.handle == Some(handle))?
+            .desc
+            .display_id;
+        self.rendered_scenes
+            .load()
+            .iter()
+            .find(|scene| scene.display.display_id == display_id)
+            .cloned()
+    }
+
+    /// The engine replaces a display's renderer on its own, as a surface
+    /// recovery after a wake or a failed frame does: nothing is reconciled and
+    /// nobody is told, and the new renderer shows what the scene was loaded with.
+    pub fn rebuild_renderer_of(&self, display_id: u32) {
+        self.shown_property_documents
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(&display_id);
+    }
+
+    /// Forgets what a display's renderer was shown when a reconcile gives it a
+    /// scene the engine opens afresh or loads again, which is what a descriptor
+    /// that is not the same wallpaper means. A scene the engine keeps keeps it.
+    fn keep_previewed_documents(&self, before: &[SceneDesc], after: &[SceneDesc]) {
+        self.shown_property_documents
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .retain(|display_id, _| {
+                let find = |scenes: &'_ [SceneDesc]| {
+                    scenes
+                        .iter()
+                        .find(|scene| scene.display.display_id == *display_id)
+                        .cloned()
+                };
+                match (find(before), find(after)) {
+                    (Some(before), Some(after)) => before.same_wallpaper(&after),
+                    _ => false,
+                }
+            });
+    }
+
     /// Reports a press the way the engine does when a wallpaper calls
     /// `engine.openUserShortcut`. Returns false when nothing is installed,
     /// which is the failure this exists to catch.
@@ -1609,13 +1682,24 @@ impl FakeEngineFacade {
         load_log(&self.preview_framing_calls)
     }
 
-    /// Every property document the fake was asked to show on a scene while an
+    /// Every property document the fake renderers were told to show while an
     /// edit is under way, in order, as the flat JSON the renderer would
-    /// receive. A refused call is in here too: it is what the bridge asked
-    /// for. Showing a document moves nothing the fake stores.
+    /// receive. A document the renderer refused is in here too: it was sent. One
+    /// the engine declined because the scene draws another wallpaper
+    /// ([`Self::declined_property_previews`]) and one the scene already shows
+    /// are not, because the real engine does not send them either. Showing a
+    /// document moves nothing the fake stores.
     #[must_use]
     pub fn preview_property_calls(&self) -> Vec<(SceneHandle, String)> {
         load_log(&self.preview_property_calls)
+    }
+
+    /// Every property preview the fake engine declined because the scene on the
+    /// handle draws another wallpaper than the one the document was made for, in
+    /// order, with the project file it was made for.
+    #[must_use]
+    pub fn declined_property_previews(&self) -> Vec<(SceneHandle, String)> {
+        load_log(&self.declined_property_previews)
     }
 
     #[must_use]
@@ -1882,6 +1966,8 @@ impl EngineFacade for FakeEngineFacade {
                     )
                 })
                 .collect();
+            let before = fake.rendered_scenes.load_full();
+            fake.keep_previewed_documents(&before, &scenes);
             fake.rendered_scenes.store(Arc::new(scenes));
             complete_reconcile_waiters(&fake.reconcile_done);
             Ok(results)
@@ -1917,6 +2003,10 @@ impl EngineFacade for FakeEngineFacade {
             if let Some(message) = fake.close_failure.swap(Arc::new(None)).as_ref() {
                 return Err(EngineError::Platform(message.clone()));
             }
+            fake.shown_property_documents
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .clear();
             fake.publish_snapshot(|current| {
                 let mut next = current.to_vec();
                 for display in &mut next {
@@ -2186,15 +2276,43 @@ impl EngineFacade for FakeEngineFacade {
     fn preview_property_override(
         &self,
         handle: SceneHandle,
+        scene_path: String,
         flat_json: String,
-    ) -> EngineFuture<()> {
+    ) -> EngineFuture<PropertyPreview> {
         let fake = self.clone();
         async move {
-            push_log(&fake.preview_property_calls, (handle, flat_json));
+            // The real engine looks at the scene when it handles the request,
+            // not when it was made.
+            let drawn = fake.scene_behind(handle).ok_or_else(|| {
+                EngineError::InvalidInput(format!("unknown scene handle {}", handle.raw()))
+            })?;
+            if drawn.scene_path != scene_path {
+                push_log(&fake.declined_property_previews, (handle, scene_path));
+                return Ok(PropertyPreview::OtherWallpaper);
+            }
+            let display_id = drawn.display.display_id;
+            let already_shown = fake
+                .shown_property_documents
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .get(&display_id)
+                .is_some_and(|shown| *shown == flat_json);
+            if already_shown {
+                return Ok(PropertyPreview::Shown);
+            }
+            push_log(&fake.preview_property_calls, (handle, flat_json.clone()));
+            let mut shown = fake
+                .shown_property_documents
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
             if let Some(message) = fake.property_preview_failure.swap(Arc::new(None)).as_ref() {
+                // A refused update leaves the renderer's record empty, so
+                // asking again sends the document.
+                shown.remove(&display_id);
                 return Err(EngineError::Platform(message.clone()));
             }
-            Ok(())
+            shown.insert(display_id, flat_json);
+            Ok(PropertyPreview::Shown)
         }
         .boxed()
     }

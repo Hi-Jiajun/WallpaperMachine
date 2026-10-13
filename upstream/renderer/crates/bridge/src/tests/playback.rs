@@ -9,7 +9,8 @@ use std::{
 use arc_swap::ArcSwap;
 use futures_util::future::{BoxFuture, FutureExt};
 use wallpaper_core::{
-    DisplaySelector, DisplaySnapshotEntry, EngineError, FirstFrameCallback, WallpaperAssignment,
+    DisplaySelector, DisplaySnapshotEntry, EngineError, FirstFrameCallback, PropertyPreview,
+    WallpaperAssignment,
     media::audio::AudioVolume,
     project::{ScalingMode, SceneDesc, SceneFraming, SceneHandle, SceneResult},
 };
@@ -541,9 +542,10 @@ impl EngineFacade for FailingPlaybackEngine {
     fn preview_property_override(
         &self,
         _handle: SceneHandle,
+        _scene_path: String,
         _flat_json: String,
-    ) -> BoxFuture<'static, Result<(), EngineError>> {
-        async move { Ok::<(), EngineError>(()) }.boxed()
+    ) -> BoxFuture<'static, Result<PropertyPreview, EngineError>> {
+        async move { Ok(PropertyPreview::Shown) }.boxed()
     }
 
     fn set_fps(
@@ -815,9 +817,10 @@ impl EngineFacade for ShutdownEngine {
     fn preview_property_override(
         &self,
         _handle: SceneHandle,
+        _scene_path: String,
         _flat_json: String,
-    ) -> BoxFuture<'static, Result<(), EngineError>> {
-        async move { Ok::<(), EngineError>(()) }.boxed()
+    ) -> BoxFuture<'static, Result<PropertyPreview, EngineError>> {
+        async move { Ok(PropertyPreview::Shown) }.boxed()
     }
 
     fn set_fps(

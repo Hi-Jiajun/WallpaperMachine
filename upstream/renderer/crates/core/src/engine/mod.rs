@@ -68,6 +68,19 @@ pub struct DisplaySnapshotEntry {
     pub assignment: Option<WallpaperAssignment>,
 }
 
+/// What came of showing a property document on a scene.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PropertyPreview {
+    /// The scene shows the document: this call sent it, or an earlier one had
+    /// and nothing has loaded the scene since.
+    Shown,
+    /// The scene draws a different wallpaper than the one the document was made
+    /// for, so nothing was sent. The caller's idea of what the handle draws was
+    /// out of date, which a reconcile that was still under way explains; there
+    /// is nothing to show on that scene and nothing to retry.
+    OtherWallpaper,
+}
+
 /// Rust entry point for controlling wallpaper scenes.
 ///
 /// The type is cloneable so UI, audio, and smoke-test code can share the same
@@ -1160,9 +1173,22 @@ impl WallpaperEngine {
     /// per step of an edit and an edit that is abandoned leaves nothing for the
     /// next reconcile to rebuild. The shown state is gone as soon as the scene
     /// is loaded again for any reason, and the scene then shows its saved
-    /// look, so an editor that is still open sends its document again with its
-    /// next step. A property the scene reads only while it loads stays at the
+    /// look. A property the scene reads only while it loads stays at the
     /// value the scene loaded with.
+    ///
+    /// `scene_path` is the project file of the wallpaper the document was made
+    /// for. A handle names a display's scene, and a reconcile that is still
+    /// under way can put another wallpaper on it; this call is handled after
+    /// that reconcile, so the scene is checked then, and one that draws another
+    /// wallpaper is left alone and reported as
+    /// [`PropertyPreview::OtherWallpaper`]. A document for one wallpaper never
+    /// reaches another, whatever property names they share.
+    ///
+    /// The engine also knows what each scene was last shown, because it owns
+    /// the renderer that shows it and replaces it: a scene that already shows
+    /// the document is not told again, and a scene that was loaded again, for
+    /// any reason, is, so a caller can ask after every edit without tracking
+    /// which scenes were rebuilt.
     ///
     /// # Errors
     ///
@@ -1170,15 +1196,24 @@ impl WallpaperEngine {
     /// communication fails, or the renderer rejects the document. The document
     /// is checked before the actor is asked, so a malformed one never reaches
     /// the renderer.
-    pub async fn preview_property_override<T: Into<String> + Send>(
+    pub async fn preview_property_override<S, T>(
         &self,
         handle: SceneHandle,
+        scene_path: S,
         json: T,
-    ) -> Result<(), EngineError> {
+    ) -> Result<PropertyPreview, EngineError>
+    where
+        S: Into<String> + Send,
+        T: Into<String> + Send,
+    {
         let flat_json = flat_property_document(&json.into())?;
 
-        self.ask_actor(messages::PreviewPropertyOverride { handle, flat_json })
-            .await
+        self.ask_actor(messages::PreviewPropertyOverride {
+            handle,
+            expected_scene_path: scene_path.into(),
+            flat_json,
+        })
+        .await
     }
 
     /// Clears project property overrides for an open scene.
@@ -2915,7 +2950,7 @@ mod tests {
             "",
         ] {
             let err = engine
-                .preview_property_override(handle, document)
+                .preview_property_override(handle, "/library/1/project.json", document)
                 .await
                 .expect_err("a malformed document should be refused");
             // The unknown handle would have produced a different message had the
@@ -2935,7 +2970,7 @@ mod tests {
         }
 
         let err = engine
-            .preview_property_override(handle, "[]")
+            .preview_property_override(handle, "/library/1/project.json", "[]")
             .await
             .expect_err("an array root should be refused");
         assert!(
@@ -2956,7 +2991,11 @@ mod tests {
             r#"{"example":{"inner":true},"label":null}"#,
         ] {
             let err = engine
-                .preview_property_override(SceneHandle::new(u64::MAX), document)
+                .preview_property_override(
+                    SceneHandle::new(u64::MAX),
+                    "/library/1/project.json",
+                    document,
+                )
                 .await
                 .expect_err("unknown handle should fail");
             assert!(

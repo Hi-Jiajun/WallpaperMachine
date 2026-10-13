@@ -6,6 +6,10 @@ import Foundation
 /// what the key will run and restarts the wait, so a burst costs one run. At most one run per
 /// key is in flight: edits that arrive while it works queue behind it as one more run, again
 /// with only the newest work. Keys are independent of each other.
+///
+/// A source that already spaces its edits, a drag the page sends a step of every 100 ms, passes
+/// `delay: .zero` and is served as soon as nothing of the key is running: waiting out a quiet
+/// period would never end while the drag goes on.
 @MainActor
 final class PropertyPreviewScheduler {
     typealias Work = @MainActor () async -> Void
@@ -15,6 +19,8 @@ final class PropertyPreviewScheduler {
         var work: Work?
         /// Counts `schedule` calls, so a wait that was overtaken by a newer edit starts over.
         var revision: UInt64 = 0
+        /// The wait the newest `schedule` asked for, or the scheduler's own.
+        var delay: Duration?
         var task: Task<Void, Never>?
     }
 
@@ -33,10 +39,11 @@ final class PropertyPreviewScheduler {
     /// Whether the key has work waiting or running.
     func isPending(_ key: String) -> Bool { slots[key]?.task != nil }
 
-    func schedule(key: String, _ work: @escaping Work) {
+    func schedule(key: String, delay: Duration? = nil, _ work: @escaping Work) {
         let slot = slots[key] ?? Slot()
         slots[key] = slot
         slot.work = work
+        slot.delay = delay
         slot.revision &+= 1
         if slot.task == nil { slot.task = Task { [weak self, weak slot] in await self?.drain(key: key, slot: slot) } }
     }
@@ -62,7 +69,8 @@ final class PropertyPreviewScheduler {
         defer { if slots[key] === slot { slot.task = nil } }
         while true {
             let seen = slot.revision
-            do { try await sleep(delay) } catch { return }
+            let wait = slot.delay ?? delay
+            if wait > .zero { do { try await sleep(wait) } catch { return } }
             if Task.isCancelled { return }
             // Overtaken while waiting: the trailing edge is the newest edit's.
             if slot.revision != seen { continue }

@@ -14,7 +14,7 @@ use crate::{
         state::{DisplayKey, DisplayStateModel},
     },
     engine::{
-        EngineSnapshotPublisher, FirstFrameCallback,
+        EngineSnapshotPublisher, FirstFrameCallback, PropertyPreview,
         messages::{self, Ping},
         runtime::{RuntimeRefreshJob, RuntimeRefreshMode, SceneRuntime},
         state::{DisplayRuntimeRecord, EngineState},
@@ -453,14 +453,18 @@ impl EngineActor {
     /// Shows a property document while an edit is under way. Nothing about the
     /// scene's state changes, so unlike [`Self::set_property_override`] there
     /// is no runtime state to record and no snapshot to publish.
+    ///
+    /// The scene is looked at now, in this actor's turn, so a reconcile that was
+    /// handled first has already put its wallpaper on the handle.
     pub fn preview_property_override(
         &mut self,
         handle: SceneHandle,
+        expected_scene_path: &str,
         flat_json: &str,
-    ) -> Result<(), EngineError> {
+    ) -> Result<PropertyPreview, EngineError> {
         self.state
             .scene_mut(handle)?
-            .preview_property_override_json(flat_json)
+            .preview_property_override_json(expected_scene_path, flat_json)
     }
 
     pub fn update_display_state(
@@ -1423,14 +1427,14 @@ impl Message<messages::ResetPropertyOverride> for EngineActor {
 }
 
 impl Message<messages::PreviewPropertyOverride> for EngineActor {
-    type Reply = Result<(), EngineError>;
+    type Reply = Result<PropertyPreview, EngineError>;
 
     async fn handle(
         &mut self,
         msg: messages::PreviewPropertyOverride,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        self.preview_property_override(msg.handle, &msg.flat_json)
+        self.preview_property_override(msg.handle, &msg.expected_scene_path, &msg.flat_json)
     }
 }
 

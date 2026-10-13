@@ -184,8 +184,9 @@ Protocol, both directions:
   `titleDoubleClick` (a drag must start on the mouse event that caused it) and `viewState`
   (Installed's filters and scroll offsets, reported as they change), and one that is
   acknowledged with `nil` once its bridge call returns: `displayPositionPreview`, a Position
-  slider's step while it is dragged, which keeps nothing, builds no snapshot, raises no panel
-  error and reaches the bridge outside the user-command queue. The reply to a page's first
+  slider's step while it is dragged, and `propertyPreview`, the same for a property's slider
+  or colour, which keep nothing, build no snapshot, raise no panel error and reach the bridge
+  outside the user-command queue. The reply to a page's first
   `ready` can also carry `restoreViewState`, the last stored report
   ([reopening the panel](features/control-panel.md#reopening-the-panel)).
   `WebPanelController.receive` rejects any message that is not from the main frame of the
@@ -473,7 +474,7 @@ injected closure, so tests never open System Settings. System Settings does not 
 when the user allows the item, so while the approval is pending the panel reads every snapshot
 again each time its window becomes key (`WebPanelController.windowStateChanged`).
 
-`preview_wallpaper_properties(wallpaper_id, show)` shows a wallpaper's pending property edits on
+`preview_wallpaper_properties(wallpaper_id, show, pending)` shows a wallpaper's pending property edits on
 every scene that draws it, mirrors included, without applying them (the Revert and drag-follow
 counterpart of `preview_display_position`). The document is built from the whole draft by the
 function that builds a scene descriptor's, except that a texture, a file and a folder keep their
@@ -481,13 +482,22 @@ saved value, so it is what Apply would load. The call saves nothing, keeps the d
 generation and builds no snapshot; the lock-screen export follows the saved configuration, and
 the app keeps the Mission Control picture at the saved look by not taking it from a display that
 may be showing an edit (`DesktopWallpaperSync.showsUnsavedLook`) and by taking it again when the
-edit ends (`BridgeStore.onPropertyEditsOnDesktopEnded`). The actor remembers the wallpapers it
-showed an edit on (`previewed_properties`, the document last shown to all of them, or nothing known after a
-reconcile or a refused update): asking for what is shown, or for the saved look when that is
-shown, sends the engine nothing; `show` false and Revert (`cancel_wallpaper_options`) put the
-saved look back, and Apply forgets the mark because the scenes are opened again from the saved
-configuration. A wallpaper that is a video or a web page, or that no display shows, is a silent
-no-op. See [scene rendering](features/scene-rendering.md#live-property-edits).
+edit ends (`BridgeStore.onPropertyEditsOnDesktopEnded`). The actor remembers only which
+wallpapers it showed an edit on (`previewed_properties`): `show` false and Revert
+(`cancel_wallpaper_options`) put the saved look back on them, an untouched wallpaper whose saved
+look is asked for sends the engine nothing, and Apply forgets the mark because the scenes are
+opened again from the saved configuration. What each scene shows is the engine's to know, not the
+actor's: the renderer records the document it was last shown and loses the record whenever it is
+replaced or loads the scene again, so a scene that already shows the document is not told again
+and one that does not is, whatever rebuilt it (a reconcile, a shader cache clear, a surface
+recovery after a wake or a failed frame, none of which the actor sees all of). Each call also names
+the wallpaper's project file, and the engine declines a scene that draws another wallpaper when it
+handles the call, so a call that overlaps a reconcile moving a display to another wallpaper does
+not put one wallpaper's document on the other. A wallpaper that is a video or a web page, or that
+no display shows, is a silent no-op. `pending` is a list of values a host is showing without having saved them (a slider being
+dragged): each is checked by the function `edit_property` uses and made to a copy of the draft for
+that call alone, and `wallpaper_preview` takes the same list. See [scene
+rendering](features/scene-rendering.md#live-property-edits).
 
 ### Rust crates and the C++ scene engine
 

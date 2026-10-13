@@ -7,7 +7,7 @@ use crate::{
     DisplayDesc, EngineError, WallpaperWindow,
     display::state::DisplayKey,
     engine::{
-        FirstFrameCallback, actor::EngineActor,
+        FirstFrameCallback, PropertyPreview, actor::EngineActor,
         messages::{
             NativeAudioRequirementChanged, NativePointerInputChanged, NativeRenderFailed,
             NativeUserShortcutRequested,
@@ -1056,8 +1056,15 @@ impl SceneRuntime {
     /// nothing to rebuild and a rebuilt renderer shows the saved look. It is
     /// the opposite of [`Self::set_property_override_json`], which loads the
     /// scene again with the override and remembers it.
-    pub fn preview_property_override_json(&mut self, flat_json: &str) -> Result<(), EngineError> {
-        self.renderer.preview_property_override(flat_json)
+    ///
+    /// The document is for the wallpaper at `expected_scene_path`; a scene that
+    /// draws another is left alone.
+    pub fn preview_property_override_json(
+        &mut self,
+        expected_scene_path: &str,
+        flat_json: &str,
+    ) -> Result<PropertyPreview, EngineError> {
+        preview_on_scene_of(&self.desc.scene_path, &mut self.renderer, expected_scene_path, flat_json)
     }
 
     pub fn close(&mut self) -> Result<(), EngineError> {
@@ -1112,6 +1119,33 @@ impl SceneRuntime {
             move || callback(handle)
         })
     }
+}
+
+/// Shows `flat_json` on `renderer`, which draws the wallpaper at `drawn`, when
+/// the document was made for that wallpaper.
+///
+/// A property document is the whole property state of one project, and the
+/// renderer applies it by name, so a document for another wallpaper would not
+/// be refused: it would replace this scene's saved values with the other
+/// project's wherever the names collide and with authored defaults everywhere
+/// else. Nothing in the document says which project it came from, so the caller
+/// says, and the answer is compared here, with what the scene draws at the
+/// moment the request is handled.
+///
+/// Apart from [`SceneRuntime`], which cannot exist without a window, so that the
+/// rule can be tested against a renderer object alone.
+#[allow(clippy::single_call_fn)]
+fn preview_on_scene_of(
+    drawn: &str,
+    renderer: &mut OweScene,
+    expected_scene_path: &str,
+    flat_json: &str,
+) -> Result<PropertyPreview, EngineError> {
+    if drawn != expected_scene_path {
+        return Ok(PropertyPreview::OtherWallpaper);
+    }
+    renderer.preview_property_override(flat_json)?;
+    Ok(PropertyPreview::Shown)
 }
 
 impl Drop for SceneRuntime {
@@ -1723,6 +1757,62 @@ mod tests {
     fn relay_without_runtime_returns_error() {
         let (prepared, _actor) = prepared_empty_actor();
         assert!(PointerInputRelay::new(prepared.actor_ref().downgrade(), SceneHandle::new(1)).is_err());
+    }
+
+    #[test]
+    fn a_document_for_another_wallpaper_never_reaches_the_renderer() {
+        let mut renderer = OweScene::uninitialized_for_test();
+
+        // The scene on the handle is the second wallpaper's now, and the first
+        // one's document was made before the engine switched it.
+        let outcome = preview_on_scene_of(
+            "/library/200/project.json",
+            &mut renderer,
+            "/library/100/project.json",
+            r#"{"alpha":0.5}"#,
+        )
+        .unwrap();
+
+        assert_eq!(outcome, PropertyPreview::OtherWallpaper);
+        assert_eq!(
+            renderer.previewed_properties(),
+            None,
+            "the renderer was not told, so it does not show the document"
+        );
+    }
+
+    #[test]
+    fn a_document_for_the_wallpaper_a_scene_draws_is_shown_and_remembered() {
+        let mut renderer = OweScene::uninitialized_for_test();
+
+        let outcome = preview_on_scene_of(
+            "/library/100/project.json",
+            &mut renderer,
+            "/library/100/project.json",
+            r#"{"alpha":0.5}"#,
+        )
+        .unwrap();
+
+        assert_eq!(outcome, PropertyPreview::Shown);
+        assert_eq!(renderer.previewed_properties(), Some(r#"{"alpha":0.5}"#));
+    }
+
+    #[test]
+    fn a_refused_document_for_another_wallpaper_does_not_disturb_what_a_scene_shows() {
+        let mut renderer = OweScene::uninitialized_for_test();
+        preview_on_scene_of("/library/100/project.json", &mut renderer, "/library/100/project.json", r#"{"alpha":0.5}"#)
+            .unwrap();
+
+        let outcome = preview_on_scene_of(
+            "/library/100/project.json",
+            &mut renderer,
+            "/library/200/project.json",
+            r#"{"alpha":0.25}"#,
+        )
+        .unwrap();
+
+        assert_eq!(outcome, PropertyPreview::OtherWallpaper);
+        assert_eq!(renderer.previewed_properties(), Some(r#"{"alpha":0.5}"#));
     }
 
     #[test]

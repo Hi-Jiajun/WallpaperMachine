@@ -85,13 +85,28 @@ loading, which is shown once the first frame has drawn. A paused preview takes t
 change too, so it resumes current. A failure to show an update is logged (once per
 distinct problem) and the preview keeps playing what it has; the next edit tries again.
 
+A slider or a colour is also followed while it is being dragged, not only when it is
+let go. The panel sends the value under the thumb (`propertyPreview`) at most every
+100 ms and one at a time, as a Position slider does, and the window reads the draft with
+that value on top (the `pending` list of the bridge's `wallpaper_preview`) as soon as it
+has taken the step before, without the 150 ms wait an edit gets, which a drag would
+never get to the end of. A step is not an edit: nothing becomes **Modified**, dirty or
+saved, and letting go of the control makes the edit that keeps the value. A step that
+fails is ignored, and a key press, which changes the value at once, shows no step before
+it is saved. A colour picker is used in a panel of its own, so the page sees no pointer
+on it: its first step waits one task, and a single pick, whose change event follows at
+once, shows nothing before it is saved. Whether the colour picker of WebKit sends steps
+while it is open is checked on a desktop
+([manual smoke](../testing/manual-smoke.md)).
+
 A scene takes the whole property state through the renderer's
 [live property edits](scene-rendering.md#live-property-edits), a Web page through
 `applyUserProperties`, which hands the page only the properties whose value changed.
 A video has no properties to follow. `PropertyPreviewScheduler` is the wait and
 `LivePropertyPayload` decides what is sent; `BridgeStore.onPropertyDraftChanged` is
 what tells the session that a wallpaper's draft changed (after an edit, a chosen file,
-a restore, a revert or an apply).
+a restore, a revert or an apply) and `BridgeStore.onPropertyDragged` what tells it of
+each step of a drag.
 
 What a preview reads only while it loads does not follow. A picture or file a
 property picks (a texture, a file, a folder) keeps the value the preview started with,
@@ -242,10 +257,26 @@ With the switch on, a slider, a colour, a switch, a choice, **Restore default**,
 a chosen file are each followed by one update once the edits pause for 150 ms
 (`PropertyPreviewScheduler`), so a drag or a preset costs a display one update, and an
 edit that arrives while one is under way queues one more. The update is the
-bridge's `preview_wallpaper_properties(wallpaper_id, show)`: it shows the whole pending
-state on every scene that draws the wallpaper, mirrors included, so a restored default
-is back at the authored value. Turning the switch on shows nothing by itself; the next
-edit does.
+bridge's `preview_wallpaper_properties(wallpaper_id, show, pending)`: it shows the whole
+pending state on every scene that draws the wallpaper, mirrors included, so a restored
+default is back at the authored value. Turning the switch on shows nothing by itself; the
+next edit does.
+
+A dragged slider or colour is followed as it goes, with no wait: each step the panel
+sends (at most every 100 ms, one at a time, as above) is handed to the bridge in the same
+call's `pending` list, which puts it on top of the draft for that call alone. The bridge
+checks it like an edit's value (the same kind, range and options, the same refusal) and
+keeps it nowhere, so the draft, the dirty state and the saved options never see it.
+`BridgeStore` keeps the newest step of each property in `WallpaperEditorState`
+(`propertyPreviewValues`, which is not a draft and never counts as a pending edit) so
+that every update of the displays and of the preview window in the meantime carries it,
+and the update an earlier edit started does not take the drag back a step. It lasts until
+the edit that ends the drag (taken or refused), a restore of that property or of every
+default, **Revert**, **Apply** or the inspector showing another wallpaper. A step that
+arrives while the wallpaper is being applied or reverted is dropped. Releasing the control
+saves the value as it always did; when it is the value of the last step, the one update that
+follows finds the scenes already showing it and sends them nothing, and otherwise it shows
+the saved value.
 
 - A picture (a texture property), a file or a folder, and what a scene reads only
   while it loads (an effect that a switch or choice builds or leaves out, the
@@ -263,8 +294,9 @@ edit does.
   changes** is unchanged: it loads the wallpaper from the saved options, so the scene
   still reloads once.
 - Anything else that loads the scene again (a display change, waking, Reapply,
-  switching the wallpaper) shows the saved look. The edit stays pending, and the next
-  edit shows it again.
+  switching the wallpaper, clearing the shader cache, the repair of a display that
+  stopped drawing) shows the saved look. The edit stays pending, and the next edit shows
+  it again, even one that leaves the shown document as it was, such as picking a picture.
 - Turning the switch off puts the saved look back on every wallpaper whose displays
   were shown an edit; the edits stay pending in the inspector. A refusal is retried the
   next time the switch is turned off.

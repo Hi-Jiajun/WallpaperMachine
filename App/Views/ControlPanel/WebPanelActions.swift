@@ -287,6 +287,19 @@ extension WebPanelController {
         preview(selection)
       }
       return
+    // A slider or colour being dragged. Not a command: it changes no state a later command depends
+    // on, and queued behind a running one it would reach the previews long after the thumb moved
+    // on. Only sliders and colours take part, and a value is held to the rules of an edit's.
+    case "propertyPreview":
+      let id = try wallpaperID(request)
+      let propertyID = try request.string("propertyID")
+      let options = try await store.wallpaperOptionsSnapshotAsync(wallpaperId: id)
+      guard let descriptor = options.properties.first(where: { $0.id == propertyID && $0.enabled }),
+        descriptor.kind == .slider || descriptor.kind == .color
+      else { throw WebPanelRequest.invalid }
+      let value = try propertyValue(body["value"], descriptor: descriptor)
+      await store.previewPropertyAsync(wallpaperId: id, propertyId: propertyID, value: value)
+      return
     case "playlistSkip":
       let display = try playlistDisplay(request)
       guard playlists.skipHandler?(display) == true else {

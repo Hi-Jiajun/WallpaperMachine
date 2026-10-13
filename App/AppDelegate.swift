@@ -126,6 +126,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             store = created
             created.openPreview = { [weak self] selection in self?.showWallpaperPreview(selection) }
             created.onPropertyDraftChanged = { [weak self] id in self?.previewWindow?.session.propertiesDidChange(wallpaperID: id) }
+            created.onPropertyDragged = { [weak self] id in
+                self?.previewWindow?.session.propertiesDidChange(wallpaperID: id, whileDragging: true)
+            }
             created.showsPropertyEditsOnDesktop = { LivePropertyEditing.isEnabled() }
             // A display that showed an edit was not asked for its picture; once it draws the saved
             // look again, Mission Control gets the picture it missed.

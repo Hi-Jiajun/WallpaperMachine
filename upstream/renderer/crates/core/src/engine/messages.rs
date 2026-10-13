@@ -231,8 +231,15 @@ pub struct ResetPropertyOverride {
 /// Shows a property document on the running scene without keeping it: the
 /// renderer follows, the stored runtime state does not, and the scene is not
 /// loaded again.
+///
+/// `expected_scene_path` names the wallpaper the document was made for. The
+/// handle names a display's scene, not a wallpaper: a reconcile queued ahead of
+/// this message can have put another wallpaper on the same handle, and the
+/// engine is the only place that can tell, because it handles this message
+/// after that reconcile, not before.
 pub struct PreviewPropertyOverride {
     pub handle: SceneHandle,
+    pub expected_scene_path: String,
     pub flat_json: String,
 }
 

@@ -140,6 +140,51 @@ final class PropertyPreviewSchedulerTests: XCTestCase {
         XCTAssertEqual(ran, ["b"])
     }
 
+    func testAZeroDelayRunsAtOnceWithoutAnyWaitAndStepsInFlightCostOneMoreRun() async {
+        let sleep = ManualSleeper()
+        let scheduler = make(sleep)
+        var gate: CheckedContinuation<Void, Never>?
+        var ran: [String] = []
+        scheduler.schedule(key: "k", delay: .zero) {
+            await withCheckedContinuation { gate = $0 }
+            ran.append("first")
+        }
+        await settle()
+        XCTAssertNotNil(gate, "the work started without the quiet period")
+        XCTAssertTrue(sleep.requested.isEmpty, "a source that spaces its own edits is not made to wait")
+        for name in ["second", "third", "fourth"] { scheduler.schedule(key: "k", delay: .zero) { ran.append(name) } }
+        await settle()
+        XCTAssertTrue(ran.isEmpty, "nothing overlaps a run in flight")
+        gate?.resume()
+        await settle()
+        XCTAssertEqual(ran, ["first", "fourth"], "the steps that came meanwhile cost one more run, the newest")
+        XCTAssertTrue(sleep.requested.isEmpty)
+        XCTAssertFalse(scheduler.isPending("k"))
+    }
+
+    func testAZeroDelayEditOvertakesTheQuietPeriodAnEarlierEditStartedAndAnotherEditRestoresIt() async {
+        let sleep = ManualSleeper()
+        let scheduler = make(sleep)
+        var ran: [String] = []
+        scheduler.schedule(key: "k") { ran.append("edit") }
+        await settle()
+        XCTAssertEqual(sleep.pendingCount, 1)
+        scheduler.schedule(key: "k", delay: .zero) { ran.append("step") }
+        await settle()
+        sleep.finishWaits()
+        await settle()
+        XCTAssertEqual(ran, ["step"], "the wait that was running ends, and the newest work follows without another")
+        XCTAssertEqual(sleep.requested, [.milliseconds(150)])
+
+        scheduler.schedule(key: "k", delay: .zero) { ran.append("step again") }
+        await settle()
+        scheduler.schedule(key: "k") { ran.append("release") }
+        await settle()
+        sleep.finishWaits()
+        await settle()
+        XCTAssertEqual(ran.last, "release", "an edit after a drag waits out its quiet period again")
+    }
+
     func testAWaitThatFailsDoesNotBlockTheKeyForever() async {
         let sleep = ManualSleeper()
         let failing = FailingSwitch()

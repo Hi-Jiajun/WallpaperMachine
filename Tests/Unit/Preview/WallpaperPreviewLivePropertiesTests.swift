@@ -48,6 +48,52 @@ final class WallpaperPreviewLivePropertiesTests: XCTestCase {
         XCTAssertEqual(h.loads[1].textOverrides, [:])
     }
 
+    func testADragIsFollowedWithoutTheQuietPeriodAndStepsDuringARefreshCostOneMore() async throws {
+        let h = make()
+        await h.show()
+        let surface = try XCTUnwrap(h.surfaces.first)
+        h.draft = Harness.scene(size: 20)
+        h.session.propertiesDidChange(wallpaperID: "a", whileDragging: true)
+        await settle()
+        XCTAssertEqual(surface.applied.count, 1, "the step shows without waiting for the edits to pause")
+        XCTAssertEqual(try value(try XCTUnwrap(surface.applied.last), "size") as? Int, 20)
+        XCTAssertFalse(h.sleep.requested.contains(.milliseconds(150)), "a drag never stops, so there is no quiet to wait for")
+
+        // Steps that arrive while the preview is still reading an earlier one.
+        h.holdLoads = true
+        h.draft = Harness.scene(size: 30)
+        h.session.propertiesDidChange(wallpaperID: "a", whileDragging: true)
+        await settle()
+        let loading = h.loads.count
+        for size in [40, 50, 60] {
+            h.draft = Harness.scene(size: size)
+            h.session.propertiesDidChange(wallpaperID: "a", whileDragging: true)
+        }
+        await settle()
+        XCTAssertEqual(h.loads.count, loading, "one read at a time")
+        h.holdLoads = false
+        h.releaseLoads()
+        await settle()
+        XCTAssertEqual(h.loads.count, loading + 1, "the steps in between cost one more read")
+        XCTAssertEqual(surface.applied.count, 2, "the read that was under way shows the newest, and the next finds nothing to add")
+        XCTAssertEqual(try value(try XCTUnwrap(surface.applied.last), "size") as? Int, 60)
+        XCTAssertFalse(h.sleep.requested.contains(.milliseconds(150)))
+    }
+
+    func testADragStepHiddenOrNotReadyWaitsForTheWindowLikeAnyEdit() async throws {
+        let hidden = make()
+        hidden.session.open(.init(wallpaperID: "a", displayID: "primary"))
+        await settle()
+        hidden.draft = Harness.scene(size: 20)
+        hidden.session.propertiesDidChange(wallpaperID: "a", whileDragging: true)
+        await settle()
+        XCTAssertEqual(hidden.loads.count, 1, "a hidden preview does no work for a drag either")
+        XCTAssertTrue(hidden.surfaces.isEmpty)
+        hidden.session.setVisible(true)
+        await elapse(hidden)
+        XCTAssertEqual(try value(try XCTUnwrap(hidden.surfaces.first?.applied.last), "size") as? Int, 20)
+    }
+
     func testIdenticalOrFrozenOnlyChangesPushNothing() async throws {
         let h = make()
         await h.show()

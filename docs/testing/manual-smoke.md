@@ -257,6 +257,13 @@ reuse, or visual behavior, which is why these items are manual.
       picture or file where the wallpaper has such a property: the preview keeps the old one and
       its status line asks for a reload; **Reload preview** shows the new one and clears the
       line. **Apply changes** still reloads the desktop wallpaper from the saved options.
+      Drag the slider and hold: the preview follows the thumb as it moves, not only after it
+      stops, and stays where the thumb is while it is held; let go and nothing jumps, and a drag
+      back to where it began puts the preview back. Open the colour picker and move around in it:
+      note whether the preview follows the colour while the picker is open or only when it
+      closes (WebKit's picker may send its input events either way), and that choosing a colour
+      and closing it saves that colour. Press **Revert** or **Restore default** while the picker
+      is open: the preview goes back and nothing stays on show.
 - [ ] Property edits on the desktop ([edits on the desktop](../features/wallpaper-properties.md#showing-edits-on-the-desktop)):
       with **Show property edits on the desktop as I make them** off, change a slider on a
       scene that is on a display: the desktop does not move until **Apply changes**. Turn it
@@ -272,7 +279,13 @@ reuse, or visual behavior, which is why these items are manual.
       returns. **Apply changes** still reloads the wallpaper. The lock screen and the Mission
       Control picture show the saved look throughout (open Mission Control while an edit is on
       show, and again after **Revert**, a Space change or a wake, which must not take the edit
-      into the picture).
+      into the picture). With the switch on, drag a slider on a
+      scene that is on a display and then a colour: the desktop follows the thumb while it is
+      held, without waiting for it to stop, at a pace that does not make the panel or the
+      wallpaper stutter (also with a heavy scene and two displays); letting go does not make
+      the desktop jump, a drag back to the starting value returns the saved look, and
+      **Revert** while holding the thumb ends the drag on the saved look. With the switch off
+      the desktop does not move during a drag.
 - [ ] Wallpaper position ([display position](../features/wallpaper-properties.md#display-position)):
       show a scene or video whose shape differs from the display with **Fill**, then drag
       **Horizontal position** and **Vertical position** across 0 to 100%. The visible part

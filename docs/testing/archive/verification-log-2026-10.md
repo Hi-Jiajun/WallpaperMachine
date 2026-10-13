@@ -9,6 +9,16 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-13 — Web host takes the switch hold
+
+A replacement web page's window opens with the picture it replaces over it and drops it 500 ms after the page has loaded, or at once when it fails. A window closed with no web successor ends only the veil it carries. Targeted run only: the lane runs the full gate once, at its end.
+
+- `python3 scripts/test.py --only WebWallpaperHostLifecycleTests --only WallpaperSwitchHoldTests` — exit 0; 51 passed (10 new: 8 web host, 2 hold)
+- `python3 scripts/test.py` with the web test classes, `NativeVideoWallpaperHostTests`, `WallpaperActivationRecoveryTests` and `DesktopWallpaperTests` — exit 0; 336 passed
+- Mutation check — five one-line breakages of `WebWallpaperHost` (no adopt, no release on load, no release on failure, the plan's unconditional `cancel` where a window closes, no release of a veil on the closed window) each failed between 1 and 4 of the host tests
+- Skipped: the full gate and `check_rust.py`/`check_renderer.py` (no Rust or renderer change in this commit), any desktop run
+- Not established: that 500 ms after `didFinish` is enough for a real project's first paint; how long the system picture shows while a page's window is replaced, and after a scene closes; the fade and the page-to-page, scene-to-page and page-to-scene switches on a real display ([manual smoke](../manual-smoke.md#wallpaper-switching))
+
 ## 2026-10-13 — Native video host takes the switch hold
 
 A replacement clip's window opens with the picture it replaces over it and drops it on the clip's first frame; a replacement's admission is decided before the old surface stops. Targeted run only: the lane runs the full gate once, at its end.

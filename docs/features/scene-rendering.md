@@ -222,15 +222,35 @@ document with the code `set_property_override` uses, so a document that is not a
 object, has an array leaf or is not JSON is refused before the actor is asked and never
 reaches the renderer, and it then sets the preview property through
 `SceneRuntime::preview_property_override_json`. Unlike `set_property_override` it asks
-for no shader refresh and loads nothing, and it records nothing: the runtime's saved
-override, its descriptor, the stored scene template and the published snapshot stay as
-they were, so the next reconcile still compares the saved configuration, an edit that is
-abandoned leaves nothing to rebuild, and a rebuilt renderer shows the saved look.
-`set_property_override` and `reset_property_override` keep their meaning, a reload that
+for no shader refresh and loads nothing, and it records nothing in the runtime: the
+runtime's saved override, its descriptor, the stored scene template and the published
+snapshot stay as they were, so the next reconcile still compares the saved configuration,
+an edit that is abandoned leaves nothing to rebuild, and a rebuilt renderer shows the saved
+look. `set_property_override` and `reset_property_override` keep their meaning, a reload that
 remembers (or forgets) the override.
 
-The bridge sends it with `preview_wallpaper_properties(wallpaper_id, show)`. The document
-is built from the whole draft, so a property the draft restored is back at its authored
+The call names the project file of the wallpaper the document was made for, and returns
+`PropertyPreview::Shown` or `PropertyPreview::OtherWallpaper`. A handle names a display's
+scene, not a wallpaper: a reconcile that is still under way (an Apply, a playlist or schedule
+switch, a mirror change) replaces the renderer inside the same `SceneRuntime`, keeps the
+handle, and commits the bridge's configuration only after it finishes, so for that long the
+bridge can still find the first wallpaper's handle on a display that already runs the second.
+The engine handles the call after that reconcile, not before, so it compares the scene's
+`scene_path` then (`preview_on_scene_of`) and leaves a scene that draws another wallpaper
+alone. This is what keeps the invariant above: the document of one wallpaper cannot reach
+another by sharing property names, however the bridge's picture of the displays lags.
+
+The engine also keeps what each scene was last shown. `OweScene` records the document it
+took from a preview and drops the record when the scene is loaded again through
+`set_property_override` or `reset_property_override`; a replaced renderer is a new object and
+starts without one. Nothing else needs to remember to forget it, so every path that rebuilds a
+scene is covered (a descriptor change, a shader cache clear, the wake check's repair, the
+engine's own recovery of a failed frame), including the ones the bridge never sees. A scene
+that already shows the document is not sent it again, and a refused update leaves no record,
+so asking again sends it.
+
+The bridge sends it with `preview_wallpaper_properties(wallpaper_id, show, pending)`. The
+document is built from the whole draft, so a property the draft restored is back at its authored
 default, by the function that builds a scene descriptor's document: it is byte for byte
 what Apply would load, except that a texture, a file and a folder stay at their saved
 value (a texture is read only while a scene loads, and a file or folder is saved the
@@ -241,16 +261,28 @@ generation and builds no snapshot, so a reconcile that is already under way is n
 stale; the lock-screen export follows the saved configuration, and the app keeps the
 Mission Control picture at the saved look by not taking it from a display that may be showing
 an edit and by taking it again when the edit ends
-([desktop picture](desktop-picture.md#when-a-poster-is-taken)). A scene that already shows the
-document, or whose saved look is asked for while it shows it, is not told again. The bridge keeps the wallpapers it showed an edit on
-(`previewed_properties`) so that **Revert** (`cancel_wallpaper_options`) puts the saved
-look back on those scenes before the draft is cancelled, and asks again if the engine
+([desktop picture](desktop-picture.md#when-a-poster-is-taken)). A wallpaper that is not being
+previewed and whose saved look is asked for sends the engine nothing, and a scene that already
+shows the document is not told again, which the engine decides, not the bridge: the bridge
+keeps no copy of what a scene shows, because anything that loads a scene again would leave the
+copy wrong, and most of those never pass through the bridge. It keeps only which wallpapers it
+showed an edit on (`previewed_properties`) so that **Revert** (`cancel_wallpaper_options`) puts
+the saved look back on those scenes before the draft is cancelled, and asks again if the engine
 refused: a refusal leaves the draft dirty. `show` false does the same restore without
 cancelling anything. **Apply** forgets the mark, because it loads the scene again from the
-saved configuration, and every reconcile and every refused update leaves the mark only as
-"may be showing a preview", which makes the next call send its document again instead of
-trusting the last one. Anything else that loads a scene again (a display change, waking)
-shows the saved look, and the next edit shows the draft again.
+saved configuration. A scene the engine declines because it now draws another wallpaper is
+skipped, not an error: there is nothing of this wallpaper on it to show or to put back, and
+when no scene is left the mark goes too. Anything that loads a scene again (a display change,
+waking, a shader cache clear, a recovery) shows the saved look, and the next edit shows the
+draft again, even one that leaves the document as it was.
+
+`pending` holds the values of sliders and colours the person is still dragging. Each is
+checked by the function `edit_property` uses and made to a copy of the draft, in order,
+for the document of that call alone (`WallpaperOptionsDraft::with_edits`), so the scenes
+follow the drag while the draft, the dirty state and the saved options never hear of it,
+and a call that does not name the value shows the draft again. One the property does not
+accept refuses the whole call before any scene is told anything. `wallpaper_preview`
+takes the same list for the preview window's export.
 
 The app asks for it from `BridgeStore` after each property edit while [the Settings
 switch](wallpaper-properties.md#showing-edits-on-the-desktop) is on; the preview window

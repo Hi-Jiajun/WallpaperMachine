@@ -42,7 +42,7 @@ pub use display::{
 pub use engine::{
     AudioRequirementCallback, DisplayConfig, DisplaySelector, DisplaySnapshotEntry,
     FirstFrameCallback, PointerActivity,
-    PointerActivityCallback, PointerConsumerCallback, PointerProbe, RecoveryOutcome,
+    PointerActivityCallback, PointerConsumerCallback, PointerProbe, PropertyPreview, RecoveryOutcome,
     RecoveryReason, RecoveryStep, UserShortcutObserverCallback, WallpaperAssignment,
     WallpaperEngine, WallpaperEngineConfig,
 };

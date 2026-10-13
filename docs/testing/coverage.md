@@ -1096,9 +1096,12 @@ preview taking the draft once when it can, a paused one taking it too, other
 wallpapers, a closed or replaced session and a late read being ignored, a failed push
 or unreadable draft logged once while the preview plays on, reload starting from the
 new baseline and dropping open-time text, videos left alone, Web entries kept whole,
-and the window's status line. `PropertyPreviewSchedulerTests` — trailing edge, one run
-in flight per key with the newest queued behind it, cancel, independent keys and a
-failing wait. `LivePropertyPayloadTests` — merging the draft over the started
+and the window's status line; a drag followed with no quiet period, the steps that arrive
+during a read costing one more, and a hidden preview ignoring a drag too.
+`PropertyPreviewSchedulerTests` — trailing edge, one run
+in flight per key with the newest queued behind it, cancel, independent keys, a failing
+wait, and a zero delay running at once with no wait while a later edit with a delay waits
+again. `LivePropertyPayloadTests` — merging the draft over the started
 values for scene and Web payloads, frozen ids restored, key order not a change,
 invalid documents refused. `PropertyDraftHookTests` — every draft-changing call names
 its wallpaper after the change is stored, and a failed call announces nothing
@@ -1115,12 +1118,30 @@ left alone, and a refused update logged rather than shown. The displays that may
 an edit (the ones showing the wallpaper and its mirrors, none while the update waits or the
 switch is off) are known until Revert, Apply, the switch or a deletion ends it, which also tells
 the app to take the desktop's picture again, and a wallpaper that could not be put back keeps
-them. `WebPanelGeneralSettingsTests`
+them. The drags, `propertyPreview`:
+a step reaches the displays at once with its value and the other steps still on show, in a
+fixed order, and saves, flags and announces nothing as an edit; with the switch off it reaches
+only what follows the draft; it is refused for the values an edit is refused for (range,
+`NaN`, an infinity, a boolean, text, a malformed colour) and, besides, for any kind but a
+slider or colour, a disabled or unknown property and a wallpaper the library lacks, with no
+bridge call and nothing held; it does not wait behind the running command; the edit that
+ends the drag, taken or refused, a restore of the property or of every default, Revert,
+Apply, another wallpaper's inspector and an Apply in progress each end the step so no update
+keeps showing it; and a refusal that repeats is logged once. `WebPanelPropertyDragPageTests`
+drives the page offscreen: five quick steps of a pointer drag show the first at once and the
+newest after the interval, the release saves the newest once and cancels a step still waiting,
+waits for the step already on its way, a drag that ends on its starting value or a cancelled
+pointer still saves the last value shown, a key press saves without showing a step, a
+colour's input events show steps that its change event saves while a single pick shows none,
+and another kind of control shows none. `WallpaperEditorStateTests` also covers the held
+steps: newest per property, one wallpaper's, never a draft, ended by a discard.
+`WebPanelGeneralSettingsTests`
 holds the setting action and snapshot key. The bridge's own bookkeeping is in the Rust
 `property_preview` tests ([renderer](renderer.md)).
 `WallpaperPreviewRequestTests` — installed-path bounds, symlink escape, stale
 manifests, resource checks, copying unapplied values without changing bridge
-state, and naming the pictures and files a preview holds. `WebWallpaperPreviewSurfaceTests`
+state, asking the bridge for the steps of a drag until it ends, and naming the pictures
+and files a preview holds. `WebWallpaperPreviewSurfaceTests`
 use real offscreen WebKit for typed properties, a second delivery changing only the
 edited property, a staged file keeping its value, isolated temporary storage and
 mute. `ControlPanelPreviewTests` drive
@@ -1133,8 +1154,9 @@ combo types. Not covered: native window presentation, how the stage looks in a
 real window on a portrait or ultrawide display, scene or video first frames in
 that window, OS visibility events, and a real renderer taking the document in the
 preview window (the renderer's side is in
-[scene regressions](scene-regressions.md)); the visible follow, and a desktop
-following an edit on one or several displays, a mirror, after Revert and with the switch
+[scene regressions](scene-regressions.md)); the visible follow, the feel and the rate of a
+drag under load, whether WebKit's colour picker sends input events while it is open, and a
+desktop following an edit on one or several displays, a mirror, after Revert and with the switch
 turned off, are in the [manual smoke](manual-smoke.md) and have not been run.
 
 ## Steam
