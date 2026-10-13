@@ -36,6 +36,13 @@ use `rg -u` only when those are the target.
   never patch generated bindings.
 - `upstream/` is vendored renderer code, not app code. Every change requires updating
   `upstream/provenance.json`; preserve notices and [licensing constraints](LICENSING.md).
+- Wallpaper/renderer fixes repair the general mechanism (format, shader, scene,
+  script, playback): never detect or special-case a wallpaper by workshop ID,
+  title, path, hash or a fingerprint of its quirks. Reproduce the failure as a
+  general test first; keep existing behavior and the regression areas intact.
+  No frame-time, memory or energy cost to paper over a bug (extra passes,
+  per-frame CPU work, unbounded caches); if a real trade-off is unavoidable,
+  stop and ask.
 - Every new user-facing string goes into every shipped catalog in the same change
   (`App/Resources/*.xcstrings`, `Extension/Localizable.xcstrings`, `WebUI/locales/`);
   `README.md` and `README.zh-CN.md` change together ([localization](docs/localization.md)).
