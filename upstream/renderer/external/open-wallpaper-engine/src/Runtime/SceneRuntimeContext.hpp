@@ -46,7 +46,11 @@ struct ScriptHostContext;
 struct SceneRuntimeBootstrap {
     int               canvas_width { 0 };
     int               canvas_height { 0 };
+    // The values the scene loads with.
     ProjectProperties project_properties {};
+    // What the project declares, apart from any saved choice already folded into
+    // `project_properties`. Unset means the loaded table is also the authored one.
+    std::optional<ProjectProperties> authored_project_properties {};
 };
 
 // How window-normalized cursor input maps onto scene coordinates:
@@ -101,13 +105,22 @@ public:
 
     ScriptEngine&            scriptEngine();
     const ScriptHostContext& hostContext() const;
+    // What the project declares: the table a document is applied over, and the
+    // one a reset returns to. It is not the table the scene loaded with when a
+    // saved choice was loaded over it.
     const ProjectProperties& defaultProjectProperties() const;
+    // The values currently in effect.
     const ProjectProperties& projectProperties() const;
     // Property bindings are refreshed as one transaction before script callbacks
     // see the change, so callback-only programs never initialize on a partial set.
     bool          ProjectPropertiesChanging() const { return m_project_properties_changing; }
-    void          ApplyProjectPropertyOverride(const ProjectProperties& override_properties);
-    void          ResetProjectPropertyOverride();
+    // `override_properties` is the whole document: the declared defaults with
+    // exactly these values over them. A property the document leaves out is at
+    // its declared default again, whatever the scene loaded with. Returns the
+    // sorted names whose value in effect changed.
+    std::vector<std::string> ApplyProjectPropertyOverride(const ProjectProperties& override_properties);
+    // The declared defaults, as applying an empty document.
+    std::vector<std::string> ResetProjectPropertyOverride();
     void          AttachScene(Scene* scene);
     void          SetCursorWorldPosition(const Eigen::Vector3f& value);
     // World rectangle the window shows, so window-normalized cursor input lands

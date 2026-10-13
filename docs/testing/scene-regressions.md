@@ -407,6 +407,28 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   avoid recomputing sources but still repair changed destinations in the
   original phases; a failed registration releases only its new
   subscriptions/values and restores existing mask/puppet identity.
+- **Authored defaults versus loaded values** — `project_property_preview_test`
+  (CPU only, in the `check_renderer.py` gate). A scene loads with the project's
+  defaults under the user's saved choices, and `SceneParseRequest::authored_project_properties`
+  (set by `MainHandler::loadScene`; null means the loaded table is also the
+  authored one) keeps the defaults apart, as `SceneRuntimeBootstrap` does for the
+  runtime. `ApplyProjectPropertyOverride(document)` takes a whole document: the
+  declared defaults with exactly these values over them, so a property the
+  document leaves out is at its default again whatever the scene loaded with, and
+  `ResetProjectPropertyOverride()` is the empty document. Both return the sorted
+  names whose value in effect changed (a change of kind counts). The test pins
+  the table arithmetic and, through the real `WPSceneParser`, every way a
+  property reaches a scene: a flag and a choice with a user condition (layer
+  visibility), a slider (`g_UserAlpha`) and a colour (`g_Color4`) on an image
+  layer, a bound text, and a bound material constant. For each, loading with a
+  saved choice, applying a document and returning leaves visibility, every
+  material constant and the text bit for bit equal to a fresh parse of the
+  authored table, and applying a document equals loading with it. The fixture
+  makes the authored and the saved value differ on every layer, so a return that
+  stops at the loaded values fails. A document adds no time-advancing work
+  (`DescribeTimeAdvancingWork` stays 0 for a still scene), so the on-demand idle
+  analysis is unchanged. A name the scene loaded with but the project does not
+  declare keeps its last value until the next load; callers send only declared ids.
 - **Scene commits in headless tests** — `scene_schema_tests` helpers wait for
   posted work with a render-looper round trip (`beginSurfaceReconfigure`) and a
   main-looper one (installing a pointer callback replays from the main looper)

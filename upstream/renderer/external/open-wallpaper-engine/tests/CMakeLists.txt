@@ -348,6 +348,15 @@ gtest_discover_tests(
     PROPERTIES TIMEOUT 30
     DISCOVERY_TIMEOUT 60
 )
+add_executable(project_property_preview_test project_property_preview_test.cpp)
+target_link_libraries(project_property_preview_test PRIVATE ${PROJECT_NAME} wpVulkanRender wpVulkan wpRGraph wpScene wpAudio wpFs nlohmann_json::nlohmann_json GTest::gtest_main)
+target_include_directories(project_property_preview_test PRIVATE . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/VulkanRender ${CMAKE_SOURCE_DIR}/src/Scene/RenderGraph/include)
+target_compile_features(project_property_preview_test PRIVATE cxx_std_20)
+gtest_discover_tests(
+    project_property_preview_test
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 60
+)
 add_executable(vulkan_render_batch_planner_smoke vulkan_render_batch_planner_smoke.cpp)
 target_link_libraries(vulkan_render_batch_planner_smoke PRIVATE wpVulkanRender wpVulkan)
 target_include_directories(vulkan_render_batch_planner_smoke PRIVATE .)

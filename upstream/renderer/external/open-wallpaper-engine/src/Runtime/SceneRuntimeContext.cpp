@@ -346,6 +346,18 @@ double WrapSeconds(double seconds, double duration_seconds) {
     return wrapped;
 }
 
+// A value of another kind is a change even when both print alike.
+bool ProjectPropertyValueChanged(const RuntimeScalarValue& previous,
+                                 const RuntimeScalarValue& next) {
+    if (previous.kind != next.kind) return true;
+    switch (next.kind) {
+    case RuntimeScalarValue::Kind::Bool: return previous.bool_value != next.bool_value;
+    case RuntimeScalarValue::Kind::Float: return previous.float_value != next.float_value;
+    case RuntimeScalarValue::Kind::String: return previous.string_value != next.string_value;
+    }
+    return false;
+}
+
 std::unique_ptr<DynamicValue> MakePropertyValue(const RuntimeScalarValue& value) {
     switch (value.kind) {
     case RuntimeScalarValue::Kind::Bool: return std::make_unique<DynamicValue>(value.asBool());
@@ -479,7 +491,8 @@ bool NodeHitMask::covers(float u, float v) const noexcept {
 SceneRuntimeContext::SceneRuntimeContext(SceneRuntimeBootstrap bootstrap)
     : m_script_engine(std::make_unique<ScriptEngine>()),
       m_host_context(std::make_unique<ScriptHostContext>()),
-      m_default_project_properties(bootstrap.project_properties),
+      m_default_project_properties(
+          bootstrap.authored_project_properties.value_or(bootstrap.project_properties)),
       m_project_properties(bootstrap.project_properties) {
     m_host_context->canvas_size = Eigen::Vector2f(static_cast<float>(bootstrap.canvas_width),
                                                   static_cast<float>(bootstrap.canvas_height));
@@ -619,7 +632,7 @@ const ProjectProperties& SceneRuntimeContext::projectProperties() const {
     return m_project_properties;
 }
 
-void SceneRuntimeContext::ApplyProjectPropertyOverride(
+std::vector<std::string> SceneRuntimeContext::ApplyProjectPropertyOverride(
     const ProjectProperties& override_properties) {
     m_project_property_overrides = override_properties;
     auto next_properties =
@@ -627,19 +640,10 @@ void SceneRuntimeContext::ApplyProjectPropertyOverride(
     ProjectProperties changed_properties;
     for (const auto& [name, value] : next_properties) {
         const auto previous = m_project_properties.find(name);
-        bool changed = previous == m_project_properties.end();
-        if (! changed) {
-            const auto& old = previous->second;
-            changed = old.kind != value.kind;
-            if (! changed) {
-                switch (value.kind) {
-                case RuntimeScalarValue::Kind::Bool: changed = old.bool_value != value.bool_value; break;
-                case RuntimeScalarValue::Kind::Float: changed = old.float_value != value.float_value; break;
-                case RuntimeScalarValue::Kind::String: changed = old.string_value != value.string_value; break;
-                }
-            }
+        if (previous == m_project_properties.end() ||
+            ProjectPropertyValueChanged(previous->second, value)) {
+            changed_properties.emplace(name, value);
         }
-        if (changed) changed_properties.emplace(name, value);
     }
     m_project_properties = std::move(next_properties);
     m_project_properties_changing = true;
@@ -668,9 +672,17 @@ void SceneRuntimeContext::ApplyProjectPropertyOverride(
         auto* script = m_scene_scripts[index].script.get();
         if (script != nullptr) script->ApplyProjectProperties(m_project_properties, changed_properties);
     }
+
+    std::vector<std::string> changed_names;
+    changed_names.reserve(changed_properties.size());
+    for (const auto& entry : changed_properties) changed_names.push_back(entry.first);
+    std::sort(changed_names.begin(), changed_names.end());
+    return changed_names;
 }
 
-void SceneRuntimeContext::ResetProjectPropertyOverride() { ApplyProjectPropertyOverride({}); }
+std::vector<std::string> SceneRuntimeContext::ResetProjectPropertyOverride() {
+    return ApplyProjectPropertyOverride({});
+}
 
 void SceneRuntimeContext::AttachScene(Scene* scene) { m_scene = scene; }
 

@@ -551,6 +551,11 @@ against the leading and trailing edges for an overflowing and a letterboxed pict
 alike, non-finite values fall back to the centre and out-of-range ones clamp, and the
 pointer mapping follows the position.
 
+`project_property_preview_test` (CPU only, in the check) pins what a property
+document means to a running scene: the project's declared defaults with exactly the
+given values over them, whatever the scene loaded with. See
+[scene regressions](scene-regressions.md#scene-scripts-and-property-bindings).
+
 `unchanged_present_test` exercises Compatibility frames that would repeat the
 picture through a real swapchain on a `CAMetalLayer` no window owns. In
 `AStaticSceneStopsPresentingOnceEveryPassIsReused` it also reads

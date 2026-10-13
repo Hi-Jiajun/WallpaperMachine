@@ -28,6 +28,7 @@ REGRESSION_BINARIES = {
     "static_subgraph_cache_test": False, "texture_prefetch_test": False,
     "scene_mesh_tests": False, "particle_rope_geometry_test": False,
     "particle_mouse_controlpoint_test": False, "layer_texture_reference_test": False,
+    "project_property_preview_test": False,
     "timer_tests": False, "playback_gpu_test": True, "metal_backend_test": False,
     "metal_scene_draw_smoke": True, "metal_poster_capture_test": True,
     "metal_video_texture_test": True, "unchanged_present_test": True,

@@ -2420,6 +2420,9 @@ void MainHandler::loadScene() {
                       source_error.c_str());
             return;
         }
+        // What the project declares, before the saved choices go over it: a
+        // property the renderer is later told to drop returns to this value.
+        const ProjectProperties authored_properties = project_properties;
         if (! m_project_property_override_json.empty()) {
             ProjectProperties override_properties;
             if (! ParseFlatProjectPropertyOverrideJson(
@@ -2435,6 +2438,7 @@ void MainHandler::loadScene() {
             .scene_id           = source_paths.scene_id,
             .project_path       = m_source,
             .project_properties = &project_properties,
+            .authored_project_properties = &authored_properties,
             .pkg_version        = ReadPkgVersionFromFile(source_paths.pkg_path),
         };
         scene = m_scene_parser.Parse(request, scene_src, vfs, *m_sound_manager);

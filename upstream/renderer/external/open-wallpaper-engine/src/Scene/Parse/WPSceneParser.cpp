@@ -3238,6 +3238,9 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
             .canvas_height      = scene.ortho[1],
             .project_properties = *context.request->project_properties,
         };
+        if (context.request->authored_project_properties != nullptr) {
+            bootstrap.authored_project_properties = *context.request->authored_project_properties;
+        }
         scene.runtime = CreateSceneRuntimeContext(std::move(bootstrap));
         scene.runtime->AttachScene(&scene);
         if (sc.general.dynamic_clearcolor) {
