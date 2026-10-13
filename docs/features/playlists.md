@@ -1,7 +1,8 @@
 # Playlists
 
 Each display can change wallpaper on its own: a rotation through a set of
-wallpapers every so often, or one wallpaper by day and another by night. Nothing
+wallpapers every so often or each time the Mac is unlocked, or one wallpaper by day
+and another by night. Nothing
 changes until the user turns it on; an unconfigured display is **Off**.
 
 ## Where it lives
@@ -13,11 +14,13 @@ the mode:
 | Mode | Rows | What happens |
 | --- | --- | --- |
 | **Off** | — | The wallpaper changes only when the user changes it. |
-| **Rotate wallpapers** | **Wallpapers** (All wallpapers, Favorites, This display's list, or a local collection), **Order** (In order, Shuffle), **How often** (every 5, 10, 15 or 30 minutes, every hour, every 2, 3, 6 or 12 hours, every day, or **Custom**: any whole number of minutes from 1 to 10,080, one week) | After each interval the display moves to the next wallpaper. |
+| **Rotate wallpapers** | **Wallpapers** (All wallpapers, Favorites, This display's list, or a local collection), **Order** (In order, Shuffle), **How often** (every 5, 10, 15 or 30 minutes, every hour, every 2, 3, 6 or 12 hours, every day, **Each time the Mac is unlocked**, or **Custom**: any whole number of minutes from 1 to 10,080, one week) | After each interval, or each time the Mac is unlocked, the display moves to the next wallpaper. |
 | **Day and night** | **Day wallpaper**, **Day starts at**, **Night wallpaper**, **Night starts at** | The day wallpaper takes over at the day time and the night wallpaper at the night time. |
 
 A new rotation defaults to every 30 minutes, in order; day starts at 07:00 and night at
-19:00.
+19:00. A rotation set to change when the Mac is unlocked has no timer and no next-change
+date (see [below](#each-time-the-mac-is-unlocked)); choosing a time again brings the timer
+back.
 
 For weekday schedules, sunrise/sunset, system appearance or temporary Focus
 playlists, use [Automatic wallpaper selection](automation.md#automatic-selection)
@@ -36,7 +39,8 @@ after its night (say day 22:00, night 06:00) wraps past midnight. Times are loca
 clock times, so a daylight-saving day still switches at the time on the clock.
 
 **Change now** moves a rotating display along at once and starts a fresh
-interval; the row's note says roughly when the next change is due. The menu bar's
+interval; the row's note says roughly when the next change is due, or, for a rotation that
+waits for the unlock, that it changes then. The menu bar's
 **Next Wallpaper** does the same for the panel's target display when that display
 rotates, and otherwise takes the next wallpaper in library order. Both are asked
 for, so they also change a display that is paused or covered; only the timer's own
@@ -64,9 +68,10 @@ next switch is chosen. Removing a wallpaper from the library removes it from
 collections and saved playlists too.
 
 Each display's Playlist disclosure has **Saved playlist** and **Save as…**.
-Saving keeps a named copy of the mode, source, order, interval and day/night
+Saving keeps a named copy of the mode, source, order, trigger, interval and day/night
 choices; choosing it applies a copy to an enabled independent display. A rotating
-copy becomes due immediately, but waits while that display cannot play. Manual
+copy on a timer becomes due immediately, but waits while that display cannot play; one
+that changes when the Mac is unlocked waits for the next unlock. Manual
 edits detach the display's copy from the saved plan. Renaming a plan preserves its
 identity; deleting it leaves active copies and their deadlines intact. Deleting a
 collection turns playlists using it into empty explicit lists, never All wallpapers.
@@ -155,10 +160,44 @@ when the display is emptied finds the hold and leaves the display empty. The hol
 kept across launches, so a relaunch does not fill a display that was cleared. It is
 run state like the shuffle round: it is not part of a backup.
 
+### Each time the Mac is unlocked
+
+**How often → Each time the Mac is unlocked** makes a rotation change when the Mac is
+unlocked instead of on a timer (`DisplayPlaylist.trigger` is `unlock`; every other choice
+is `interval`, and so is a stored trigger this build does not know). Such a display has no next-change date and no timer, its
+row's note reads "Changes when you unlock the Mac, while wallpapers are playing.", and
+its interval is kept unused, so **Custom** shows it again. Locking the Mac, a screen
+saver or display sleep never changes a wallpaper; only the lock clearing does.
+**Change now** and **Next Wallpaper** still work, and do not start a timer.
+
+The signal is `WallpaperPresentationPolicy`, which already keeps a corrected copy of the
+session's lock state (re-read from the window server on every evaluation while it counts
+as locked). When that state goes from locked to unlocked the policy calls
+`onSessionUnlocked` once, after it has settled the new presentation, and the app delegate
+passes it to `PlaylistScheduler.noteUnlock()`. The edge comes from the corrected state, not
+from the `com.apple.screenIsUnlocked` notification, so an unlock whose notification was
+lost still counts at the next evaluation. A session that was already locked when the app
+started has not been seen to unlock, so only the unlocks after that count.
+
+`noteUnlock()` treats a second report within 2 seconds as the same unlock, then opens a
+30-second window (`unlockDebounce`, `unlockGrace`). Every display whose rotation waits for
+the unlock changes once in it, as soon as wallpapers are playing there. A display that
+cannot play at the moment (covered, re-enumerating after wake, or its presentation still
+resuming) is retried by the evaluations the app already runs on every presentation change
+until the window closes and is then left alone, never changed minutes later; a display that
+appears within the window is covered too. The change goes through the display's command
+slot like any other, so it waits behind the presentation resume the unlock itself
+triggers. While playback is paused nothing changes, and nothing is replayed afterwards. A
+display the user cleared (see above) is not refilled by an unlock, and a wallpaper chosen
+by hand, **Change now**, or a wallpaper put on the display by anyone else while the window
+is open counts as the display's answer to that unlock. An unlock that no display waits for
+is forgotten, so choosing the setting later never acts on an unlock that is over.
+
 ## Storage
 
 `PlaylistStore` keeps every display's playlist in the `WallpaperMachine.playlists`
-default (JSON; missing fields decode with defaults, and an interval outside 1–10,080
+default (JSON; missing fields decode with defaults, so a playlist saved before the
+trigger existed rotates on its interval, and an interval outside 1–10,080
 minutes falls back to 30) and each display's next change in
 `WallpaperMachine.playlistNextChange`, so a relaunch neither restarts a long interval
 nor skips a change that fell due while the app was closed. A display whose playlist is
@@ -206,10 +245,18 @@ due rotation for min(interval, 5 minutes) without ever shortening a later deadli
 or touching Off and Day and night, a display the user emptied staying empty at a due
 change or a day and night boundary until a wallpaper, Change now or Resume ends the
 wait, and a change waiting in the queue leaving it empty, and a relaunch finishing
-the shuffle round it was in without repeating a wallpaper) and
-`WebPanelPlaylistTests` (the actions' validation and the paused state in the snapshot).
+the shuffle round it was in without repeating a wallpaper, an unlock changing an unlock
+rotation once and ignoring a double report, waiting for a display that cannot play yet but
+only for the 30-second window, leaving timed rotations, cleared displays and a hand-chosen
+wallpaper alone, and never dating a display) and
+`WebPanelPlaylistTests` (the actions' validation, the trigger and the paused state in the
+snapshot). `WallpaperPresentationPolicyTests` checks the unlock edge: once per unlock, also
+when the notification was missed, after a wake or a user switch, and never at start or
+stop. `WallpaperBackupTests` checks that a backup carries the trigger and rejects an
+unknown one.
 `WallpaperDisplayTransferIntegrationTests` checks that only the user's removal reports
 one, not a delete or a reload. `ControlPanelPlaybackToolsTests` drives reorder buttons
 and drag/drop in an offscreen panel, including an edit made while a drag is in
-progress, and the Resume row in English and Chinese. Real
-switching on a desktop is not covered by these tests.
+progress, the Resume row in English and Chinese, and the How often menu offering the
+unlock choice and storing it. Real switching on a desktop, and the order of the
+operating system's unlock events against a display waking, are not covered by these tests.

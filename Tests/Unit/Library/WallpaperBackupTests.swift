@@ -461,6 +461,7 @@ final class WallpaperBackupTests: XCTestCase {
             $0.source = .collection
             $0.collectionID = collection.id
             $0.interval = 45
+            $0.trigger = .unlock
         }
         let plan = try playlists.savePlan(from: "display-one", name: "Night plan")
         let placement = try StillImagePlacement(x: 0.2, y: 0.7, zoom: 1.5)
@@ -482,6 +483,8 @@ final class WallpaperBackupTests: XCTestCase {
         let restoredPlaylists = PlaylistStore(defaults: targetDefaults)
         XCTAssertEqual(restoredPlaylists.plan(id: plan.id), plan)
         XCTAssertEqual(restoredPlaylists.playlist(for: "display-one").collectionID, collection.id)
+        XCTAssertEqual(restoredPlaylists.playlist(for: "display-one").trigger, .unlock, "a playlist that changes on unlock restores as one")
+        XCTAssertEqual(restoredPlaylists.plan(id: plan.id)?.playlist.trigger, .unlock)
         XCTAssertEqual(StillImagePlacementStore(defaults: targetDefaults, library: destination.appendingPathComponent("Library"))
             .placement(wallpaperID: "image-test", displayID: "display-one"), placement)
     }
@@ -647,6 +650,9 @@ final class WallpaperBackupTests: XCTestCase {
             ("WallpaperMachine.collections", Data(#"[{"id":"x","name":"Missing members"}]"#.utf8)),
             ("WallpaperMachine.playlistPlans", Data(#"[{"id":"p","name":"Bad","playlist":{"mode":"unknown"}}]"#.utf8)),
             ("WallpaperMachine.playlists", Data(#"{"screen":{"wallpaperIDs":["a"],"interval":0}}"#.utf8)),
+            ("WallpaperMachine.playlists", Data(#"{"screen":{"mode":"rotate","trigger":"weekly"}}"#.utf8)),
+            ("WallpaperMachine.playlists", Data(#"{"screen":{"mode":"rotate","trigger":5}}"#.utf8)),
+            ("WallpaperMachine.playlistPlans", Data(#"[{"id":"p","name":"Bad","playlist":{"mode":"rotate","trigger":"weekly"}}]"#.utf8)),
             ("WallpaperMachine.imagePlacements", Data(#"{"version":1,"placements":{"w":{"screen":{"x":2,"y":0.5,"zoom":1}}}}"#.utf8)),
             ("WallpaperMachine.imagePlacements", Data(#"{"version":2,"placements":{}}"#.utf8)),
             ("WallpaperMachine.hotKeys", Data(#"{"togglePlayback":{"keyCode":"oops","modifiers":0,"label":"P"}}"#.utf8)),

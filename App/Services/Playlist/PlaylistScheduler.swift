@@ -8,6 +8,9 @@ import Foundation
 /// running. The app delegate calls `evaluate()` when playback or presentation changes, so
 /// nothing is polled. Every switch runs through the display's command slot, the same one the
 /// panel and the menu bar use, so the latest request for a display wins.
+///
+/// A rotation set to change each time the Mac is unlocked has no timer. `noteUnlock()` opens a
+/// short window, and every such display changes once in it, as soon as it can play.
 @MainActor
 final class PlaylistScheduler {
     /// Runs one switch on `display` through its command slot. `choose` names the wallpaper when
@@ -40,7 +43,21 @@ final class PlaylistScheduler {
     /// it was brought into line under: a wallpaper the user applies by hand stays until the next
     /// period, and choosing a different day or night wallpaper applies at once.
     private var settledPeriods: [String: (period: Date, revision: UInt64)] = [:]
+    /// The unlock the rotations that wait for one are answering: a number that tells it from the
+    /// last, and when its window closes. A display that cannot play yet (covered, re-enumerating
+    /// after wake, presentation still settling) is retried by the evaluations the app delegate
+    /// runs on every presentation change until then, and is never changed minutes later.
+    private var unlock: (id: UInt64, expires: Date)?
+    private var unlockCount: UInt64 = 0
+    /// The unlock each display has been dealt with for, so it changes once per unlock.
+    private var handledUnlock: [String: UInt64] = [:]
+    private var lastUnlock: Date?
     private var random = SystemRandomNumberGenerator()
+    /// Two unlocks closer than this are one: the session reports the lock clearing, and the
+    /// unlock notification of a screen saver or a lock screen can follow it.
+    static let unlockDebounce: TimeInterval = 2
+    /// How long after an unlock a display that could not play at once may still change for it.
+    static let unlockGrace: TimeInterval = 30
     static let failureCooldown: TimeInterval = 15 * 60
     /// A broken library must not monopolize the command queue in one automatic change.
     static let maximumAttempts = 5
@@ -106,6 +123,26 @@ final class PlaylistScheduler {
         timer?.cancel()
         timer = nil
         armedFor = nil
+        unlock = nil
+        handledUnlock.removeAll()
+        lastUnlock = nil
+    }
+
+    /// The Mac was unlocked. Every display whose rotation waits for that changes to its next
+    /// wallpaper once, as soon as wallpapers are playing there, for as long as `unlockGrace`.
+    /// A second report within `unlockDebounce` is the same unlock. Without such a display
+    /// nothing is kept, so choosing the setting later never acts on an unlock that is over.
+    func noteUnlock() {
+        guard !observers.isEmpty,
+              store.playlists.values.contains(where: { $0.mode == .rotate && $0.trigger == .unlock })
+        else { return }
+        let date = now()
+        if let lastUnlock, date.timeIntervalSince(lastUnlock) < Self.unlockDebounce { return }
+        lastUnlock = date
+        unlockCount &+= 1
+        unlock = (unlockCount, date.addingTimeInterval(Self.unlockGrace))
+        AppLog.info("playlist: the Mac was unlocked, so rotations that wait for it change within \(Int(Self.unlockGrace)) s")
+        evaluate()
     }
 
     /// A restored/manual choice in a day/night plan stays until its next boundary.
@@ -128,7 +165,11 @@ final class PlaylistScheduler {
     /// hand-picked wallpaper until its next boundary, and an Off display has nothing to hold.
     func noteManualChoice(_ display: String) {
         let playlist = store.playlist(for: display)
-        guard playlist.mode == .rotate, let due = store.nextChange[display] else { return }
+        if playlist.mode == .rotate, playlist.trigger == .unlock {
+            answerUnlock(display)
+            return
+        }
+        guard playlist.hasTimer, let due = store.nextChange[display] else { return }
         let date = now()
         let held = date.addingTimeInterval(min(Self.seconds(playlist.interval), Self.manualGrace))
         guard due < held else { return }
@@ -137,10 +178,20 @@ final class PlaylistScheduler {
         AppLog.info("playlist: a manual choice on display \(display) holds the rotation for \(Int(held.timeIntervalSince(date))) s")
     }
 
+    /// Counts the unlock that is still waiting, if any, as dealt with for `display`: someone chose
+    /// what it shows, or it has nothing to show, and the unlock must not change that afterwards.
+    private func answerUnlock(_ display: String) {
+        if let unlock { handledUnlock[display] = unlock.id }
+    }
+
     /// Makes every change that is due, dates the next ones and arms the timer for the earliest.
     func evaluate() {
         guard !observers.isEmpty else { return }
         let date = now()
+        if let current = unlock, current.expires <= date {
+            unlock = nil
+            handledUnlock.removeAll()
+        }
         var earliest: Date?
         for display in displays() {
             let playlist = store.playlist(for: display)
@@ -152,9 +203,11 @@ final class PlaylistScheduler {
                 // screen until its next boundary), never a deadline it kept while the display
                 // was empty.
                 guard playlist.mode == .off || current(display) != nil else {
-                    // Nothing is due while the display waits, so no deadline or timer exists.
+                    // Nothing is due while the display waits, so no deadline or timer exists, and
+                    // an unlock does not fill it, nor change what is put there before it ends.
                     store.schedule(display, at: nil)
                     settledPeriods[display] = nil
+                    answerUnlock(display)
                     continue
                 }
                 // Settle the period before lifting: lifting posts the store's notification.
@@ -170,6 +223,14 @@ final class PlaylistScheduler {
             case .off:
                 store.schedule(display, at: nil)
                 settledPeriods[display] = nil
+            case .rotate where playlist.trigger == .unlock:
+                settledPeriods[display] = nil
+                // No timer: a rotation that waits for the unlock has nothing dated.
+                store.schedule(display, at: nil)
+                if let unlock, handledUnlock[display] != unlock.id, running, !inFlight.contains(display) {
+                    handledUnlock[display] = unlock.id
+                    rotate(display, playlist: playlist, answering: unlock.id)
+                }
             case .rotate:
                 settledPeriods[display] = nil
                 guard let due = store.nextChange[display] else {
@@ -215,6 +276,8 @@ final class PlaylistScheduler {
     func skip(_ display: String) -> Bool {
         let playlist = store.playlist(for: display)
         guard playlist.mode == .rotate, displays().contains(display) else { return false }
+        // Asking for a change answers an unlock that is still waiting to give one.
+        answerUnlock(display)
         if inFlight.contains(display) {
             store.setHold(nil, on: display)
             requestedWhileInFlight.insert(display)
@@ -241,7 +304,8 @@ final class PlaylistScheduler {
     }
 
     /// A change the timer brings waits while the display cannot play; a `requested` one does not.
-    private func rotate(_ display: String, playlist: DisplayPlaylist, requested: Bool = false) {
+    /// `answering` names the unlock this change is for, when it is for one.
+    private func rotate(_ display: String, playlist: DisplayPlaylist, requested: Bool = false, answering unlockID: UInt64? = nil) {
         let revision = store.revisions[display] ?? 0
         inFlight.insert(display)
         Task {
@@ -252,9 +316,15 @@ final class PlaylistScheduler {
                 // unmade (the playlist changed meanwhile), the asked-for change is made on its own.
                 let unanswered = requestedWhileInFlight.remove(display) != nil && !attempted
                 let remade = unanswered && skip(display)
+                // A change for an unlock that never got its turn because the display stopped
+                // playing meanwhile is made when it plays again, if the unlock is still recent.
+                // One that is not playing gives no evaluation a reason to start it again at once.
+                if let unlockID, !attempted, handledUnlock[display] == unlockID, !isRunning(display) {
+                    handledUnlock[display] = nil
+                }
                 if remade {
                     // That change schedules the next interval once it is made.
-                } else if (attempted || isRunning(display)), (store.revisions[display] ?? 0) == revision,
+                } else if playlist.hasTimer, (attempted || isRunning(display)), (store.revisions[display] ?? 0) == revision,
                           store.holds[display] == nil {
                     store.schedule(display, at: now().addingTimeInterval(Self.seconds(playlist.interval)))
                 } else {

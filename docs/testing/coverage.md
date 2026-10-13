@@ -121,7 +121,9 @@ on the desktop ([manual-smoke.md](manual-smoke.md)).
 
 - `WallpaperPresentationPolicyTests` — display sleep and wake, session lock
   (asked only when it can have changed, re-asked on wake and user switch, a
-  missed unlock clearing at the next evaluation), full occlusion and a covered
+  missed unlock clearing at the next evaluation), the unlock reported once to
+  `onSessionUnlocked` (also when missed, after a wake or a user switch, never at start
+  while locked or at stop), full occlusion and a covered
   working area suspending after the settle delay, per-display independence,
   reconnect handling, retried failed suspends and resumes, `stop()` resuming
   every suspended surface, and the resume announcement (`onResumed`) after a global
@@ -921,18 +923,21 @@ signed-in answers and the real sign-in page are not covered
 ## Playlist
 
 `PlaylistPlannerTests` (candidates, order, shuffle rounds, day/night boundaries),
-`PlaylistStoreTests` (persistence, custom intervals, reordering, plans copied
+`PlaylistStoreTests` (persistence, custom intervals, the trigger defaulting for older
+records and starting a fresh wait, reordering, plans copied
 across displays and detached on manual edit, cleanup when wallpapers or
 collections go, a shuffle round kept across a relaunch and dropped with its playlist),
 `PlaylistSchedulerTests` (fake clock, library and activation;
 no renderer: failure cooldowns, paused catch-up, a newer manual command
 outranking a failed automatic switch, a rotation yielding to a waiting Apply, a manual choice holding a
 due rotation, a display the user emptied staying empty until a wallpaper, Change now or Resume,
-a relaunch finishing its shuffle round without a repeat),
+a relaunch finishing its shuffle round without a repeat, an unlock changing an
+unlock rotation once, waiting for a display that cannot play yet for 30 seconds at
+most, and leaving timed rotations, cleared displays and a hand-chosen wallpaper alone),
 `WebPanelPlaylistTests` and offscreen
 `ControlPanelPlaybackToolsTests` (drag and button sorting, keyboard focus,
 stale-drag rejection, escaped history titles, clearing only the target display, the
-Resume row in two languages).
+Resume row in two languages, the How often menu's unlock choice).
 What each covers: [playlists](../features/playlists.md#verification).
 
 ## Preview

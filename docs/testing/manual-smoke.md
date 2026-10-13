@@ -218,6 +218,15 @@ reuse, or visual behavior, which is why these items are manual.
 - [ ] Check the Language, Clock Location and Bar Style property menus, and that
       language-row changes survive reopening the app.
 - [ ] When relevant, check each connected display and sleep/wake behavior.
+- [ ] Set a display's playlist to **Rotate wallpapers** with **How often** at **Each time
+      the Mac is unlocked** (the row's note says so and no next change is shown). Lock the
+      screen, wait a few seconds and unlock: the wallpaper changes once, soon after the
+      desktop is back, not while the screen is locked; locking and unlocking again
+      changes it again, and two unlocks within a second change it once. Repeat after the
+      display slept and woke, with a second display on its own unlock playlist (each
+      changes once), with playback paused (nothing changes, and nothing changes later
+      when playing resumes), and with a full-screen app covering the display (no change
+      once the unlock is more than half a minute old).
 - [ ] Preview a wallpaper for a portrait or ultrawide display (rotate one, or
       use a 21:9 or 9:16 display): the window opens with a stage of that shape
       and black bars, a scene or page lays out as it does on the display, and

@@ -477,6 +477,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 guard let self, !self.shutdownInProgress else { return }
                 self.wakeRevalidator?.presentationResumed()
             }
+            // Rotations that wait for the Mac to be unlocked. The edge comes from the policy's
+            // corrected lock state, so an unlock whose notification was lost still counts.
+            policy.onSessionUnlocked = { [weak self] in
+                guard let self, !self.shutdownInProgress else { return }
+                self.playlistScheduler?.noteUnlock()
+            }
             // Records the system's memory-pressure events beside the app's footprint;
             // it never unloads or pauses anything.
             let pressure = MemoryPressureMonitor(presentingScenes: { [weak store] in

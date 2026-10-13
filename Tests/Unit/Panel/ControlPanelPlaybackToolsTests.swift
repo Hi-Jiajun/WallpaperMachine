@@ -135,6 +135,58 @@ final class ControlPanelPlaybackToolsTests: ControlPanelTestCase {
     }
   }
 
+  /// The How often menu offers changing on unlock beside the times: choosing it stores the
+  /// trigger and takes the minutes field away, and choosing a time brings the timer back.
+  func testTheHowOftenMenuOffersTheUnlockChoiceAndSelectingItStoresTheTrigger() async throws {
+    try await withPanel { panel in
+      installLibrary(panel)
+      panel.playlists.update("primary") { $0.mode = .rotate }
+      try await panel.finishWelcome()
+      panel.navigation.selection = .settings
+      panel.show()
+      try await panel.waitJS("powerProbe.received.at(-1)?.page === 'settings'")
+      _ = try await panel.js("document.querySelector('[data-section=\"displays\"]').click()")
+      _ = try await panel.js("document.querySelector('[data-key=\"display-primary-playlist\"] > summary').click()")
+      let menu = "document.querySelector('[data-key=\"display-primary-playlist-interval\"]')"
+      let custom = "document.querySelector('[data-key=\"display-primary-playlist-custom-interval-row\"]')"
+      let next = "document.querySelector('[data-key=\"display-primary-playlist-next-row\"] .settings-note')"
+      try await panel.waitJS("\(menu) !== null && \(menu).getClientRects().length > 0")
+      try await panel.expectJS("return [...\(menu).options].map(option => option.value).slice(-2)", equals: ["unlock", "custom"])
+      let unlockOption = "[...\(menu).options].find(option => option.value === 'unlock').textContent"
+      let englishOption = try await texts(panel, "[\(unlockOption)]")
+      try await panel.expectJS("return \(menu).value", equals: "30")
+
+      _ = try await panel.js("\(menu).value = 'unlock'; \(menu).dispatchEvent(new Event('change', { bubbles: true }))")
+      try await panel.waitUntil { panel.playlists.playlist(for: "primary").trigger == .unlock }
+      XCTAssertEqual(panel.playlists.playlist(for: "primary").interval, 30, "the interval is not rewritten")
+      try await panel.waitJS("\(menu).value === 'unlock'")
+      try await panel.expectJS("return \(custom) === null", equals: true)
+      let englishNext = try await texts(panel, "[\(next).textContent]")
+
+      // Another time brings the timer back, and its minutes field is not shown for a preset.
+      _ = try await panel.js("\(menu).value = '60'; \(menu).dispatchEvent(new Event('change', { bubbles: true }))")
+      try await panel.waitUntil { panel.playlists.playlist(for: "primary").trigger == .interval }
+      XCTAssertEqual(panel.playlists.playlist(for: "primary").interval, 60)
+      try await panel.waitJS("\(menu).value === '60'")
+      try await panel.expectJS("return \(custom) === null", equals: true)
+
+      // The page in Chinese names the choice and explains it, in words other than the English ones.
+      panel.playlists.update("primary") { $0.trigger = .unlock }
+      _ = try await panel.js("""
+        const bridge = window.webkit.messageHandlers.native;
+        await window.wallpaperUI.receive(await bridge.postMessage({action:'languageSetting', value:'zh-Hans'}));
+        """)
+      try await panel.waitJS("\(menu).value === 'unlock'")
+      let chineseChoice = try await texts(panel, "[\(menu).selectedOptions[0].textContent, \(next).textContent]")
+      XCTAssertNotEqual(chineseChoice[0], englishOption[0])
+      XCTAssertNotEqual(chineseChoice[1], englishNext[0])
+      _ = try await panel.js("""
+        const bridge = window.webkit.messageHandlers.native;
+        await window.wallpaperUI.receive(await bridge.postMessage({action:'languageSetting', value:'system'}));
+        """)
+    }
+  }
+
   func testRecentHistoryEscapesTitlesAndClearsOnlyTheTargetDisplay() async throws {
     try await withPanel { panel in
       installLibrary(panel)

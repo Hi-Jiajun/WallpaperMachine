@@ -57,6 +57,53 @@ final class PlaylistStoreTests: XCTestCase {
         XCTAssertNil(store.nextChange["primary"])
     }
 
+    /// A playlist saved before the trigger existed rotates on its interval, and moving it to the
+    /// unlock trigger (or back) forgets the date it had.
+    func testTriggerDefaultsToIntervalForOlderRecordsAndChangingItStartsFresh() throws {
+        let older = try XCTUnwrap(#"{"mode":"rotate","interval":15}"#.data(using: .utf8))
+        let playlist = try JSONDecoder().decode(DisplayPlaylist.self, from: older)
+        XCTAssertEqual(playlist.trigger, .interval)
+        XCTAssertTrue(playlist.hasTimer)
+        let unknown = try XCTUnwrap(#"{"mode":"rotate","trigger":"weekly"}"#.data(using: .utf8))
+        XCTAssertEqual(try JSONDecoder().decode(DisplayPlaylist.self, from: unknown).trigger, .interval,
+                       "a trigger this build does not know rotates on the interval")
+
+        let store = PlaylistStore(defaults: defaults)
+        store.update("primary") { $0.mode = .rotate }
+        store.schedule("primary", at: Date())
+        store.update("primary") { $0.trigger = .unlock }
+        XCTAssertNil(store.nextChange["primary"], "an unlock rotation has no date")
+        XCTAssertFalse(store.playlist(for: "primary").hasTimer)
+        XCTAssertEqual(PlaylistStore(defaults: defaults).playlist(for: "primary").trigger, .unlock)
+        XCTAssertEqual(PlaylistStore(defaults: defaults).playlist(for: "primary").interval, 30, "the interval is kept for later")
+
+        store.schedule("primary", at: Date())
+        store.update("primary") { $0.trigger = .interval }
+        XCTAssertNil(store.nextChange["primary"], "going back to a timer starts a fresh wait too")
+    }
+
+    /// Applying a saved playlist or restoring one after a Focus dates a change only when the
+    /// playlist has a timer.
+    func testOnlyAPlaylistWithATimerIsDatedWhenAPlanIsAppliedOrRestored() throws {
+        let store = PlaylistStore(defaults: defaults)
+        store.update("source") { $0.mode = .rotate; $0.trigger = .unlock }
+        let unlockPlan = try store.savePlan(from: "source", name: "On unlock")
+        store.update("source") { $0.trigger = .interval }
+        let timedPlan = try store.savePlan(from: "source", name: "Timed")
+
+        try store.applyPlan(unlockPlan.id, to: "primary")
+        XCTAssertEqual(store.playlist(for: "primary").trigger, .unlock)
+        XCTAssertNil(store.nextChange["primary"])
+        try store.applyPlan(timedPlan.id, to: "primary")
+        XCTAssertEqual(store.nextChange["primary"], .distantPast)
+
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        store.restore(unlockPlan.playlist, on: "second", now: now)
+        XCTAssertNil(store.nextChange["second"])
+        store.restore(timedPlan.playlist, on: "second", now: now)
+        XCTAssertEqual(store.nextChange["second"], now.addingTimeInterval(30 * 60))
+    }
+
     func testReorderingPreservesMembershipAndDeadlineAndDetachesSavedPlan() throws {
         let store = PlaylistStore(defaults: defaults)
         store.update("primary") { $0.mode = .rotate; $0.source = .list; $0.wallpaperIDs = ["a", "b", "c"] }

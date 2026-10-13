@@ -160,13 +160,14 @@ struct WallpaperBackupPreferences: Sendable {
             for (display, record) in records {
                 try identities([display])
                 guard let record = record as? [String: Any] else { throw invalid() }
-                let allowed: Set<String> = ["mode", "source", "order", "interval", "wallpaperIDs", "collectionID", "planID", "dayWallpaperID", "nightWallpaperID", "dayStart", "nightStart"]
+                let allowed: Set<String> = ["mode", "source", "order", "trigger", "interval", "wallpaperIDs", "collectionID", "planID", "dayWallpaperID", "nightWallpaperID", "dayStart", "nightStart"]
                 guard Set(record.keys).isSubset(of: allowed) else { throw invalid() }
                 for (key, item) in record {
                     switch key {
                     case "mode": guard let raw = item as? String, PlaylistMode(rawValue: raw) != nil else { throw invalid() }
                     case "source": guard let raw = item as? String, PlaylistSource(rawValue: raw) != nil else { throw invalid() }
                     case "order": guard let raw = item as? String, PlaylistOrder(rawValue: raw) != nil else { throw invalid() }
+                    case "trigger": guard let raw = item as? String, PlaylistTrigger(rawValue: raw) != nil else { throw invalid() }
                     case "interval", "dayStart", "nightStart":
                         guard let number = item as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
                               number.doubleValue == Double(number.intValue),

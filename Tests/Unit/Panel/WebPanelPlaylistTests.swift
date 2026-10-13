@@ -73,6 +73,21 @@ final class WebPanelPlaylistTests: XCTestCase {
     XCTAssertEqual(playlists.playlist(for: "primary").interval, 7 * 24 * 60)
   }
 
+  func testTheUnlockTriggerIsStoredAndATimeBringsTheTimerBack() async throws {
+    try await controller.perform("playlistSetting", body: ["displayID": "primary", "key": "mode", "value": "rotate"])
+    try await controller.perform("playlistSetting", body: ["displayID": "primary", "key": "trigger", "value": "unlock"])
+    XCTAssertEqual(playlists.playlist(for: "primary").trigger, .unlock)
+    XCTAssertEqual(PlaylistStore(defaults: defaults).playlist(for: "primary").trigger, .unlock)
+    var snapshot = try XCTUnwrap(controller.snapshot()["playlists"] as? [String: [String: Any]])
+    XCTAssertEqual(snapshot["primary"]?["trigger"] as? String, "unlock")
+
+    try await controller.perform("playlistSetting", body: ["displayID": "primary", "key": "interval", "value": 60])
+    XCTAssertEqual(playlists.playlist(for: "primary").trigger, .interval, "choosing a time is choosing the timer")
+    XCTAssertEqual(playlists.playlist(for: "primary").interval, 60)
+    snapshot = try XCTUnwrap(controller.snapshot()["playlists"] as? [String: [String: Any]])
+    XCTAssertEqual(snapshot["primary"]?["trigger"] as? String, "interval")
+  }
+
   func testValuesThePanelNeverOffersAreRefused() async {
     for body: [String: Any] in [
       ["displayID": "primary", "key": "interval", "value": 0],
@@ -80,6 +95,9 @@ final class WebPanelPlaylistTests: XCTestCase {
       ["displayID": "primary", "key": "interval", "value": 7.5],
       ["displayID": "primary", "key": "dayStart", "value": 1440],
       ["displayID": "primary", "key": "mode", "value": "sometimes"],
+      ["displayID": "primary", "key": "trigger", "value": "weekly"],
+      ["displayID": "primary", "key": "trigger", "value": 5],
+      ["displayID": "mirrored", "key": "trigger", "value": "unlock"],
       ["displayID": "primary", "key": "nightWallpaper", "value": "app"],
       ["displayID": "mirrored", "key": "mode", "value": "rotate"],
       ["displayID": "gone", "key": "mode", "value": "rotate"],

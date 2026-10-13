@@ -1,5 +1,5 @@
 import { t, language } from './i18n.js';
-import { intervalLabel, sourceSelect, sourceNote, planRows, plansGroup } from './plans.js';
+import { intervalLabel, unlockLabel, sourceSelect, sourceNote, planRows, plansGroup } from './plans.js';
 import { backupGroup } from './backup.js';
 import { playlistOrderMarkup, movePlaylistItem, installPlaylistDrag } from './playlist-order.js';
 import { automationRows, solarLocationGroup, automationClick, automationInput, automationChange, automationSubmit, restoreAutomationFocus } from './automation.js';
@@ -566,23 +566,23 @@ function draw(view) {
     const limited = performanceLimitedFps(playback.fps, settings);
     const number = (field, label, min, max, step, suffix = '', { value = playback[field], attributes = data(field), off: inactive = playbackOff } = {}) => `<input class="settings-number" data-key="${e(key(field))}" type="number" inputmode="decimal" aria-label="${e(name(label))}"${min == null ? '' : ` min="${min}"`}${max == null ? '' : ` max="${max}"`} step="${step}" value="${e(draft(key(field), value))}" ${attributes}${disabled(inactive)}>${suffix ? `<span class="settings-unit">${e(suffix)}</span>` : ''}`;
     // The display's playlist: off, a rotation, or a day and a night wallpaper.
-    const playlist = { mode: 'off', source: 'all', order: 'sequential', interval: 30, wallpaperIDs: [], collectionID: null, planID: null, dayWallpaperID: null, nightWallpaperID: null, dayStart: 420, nightStart: 1140, nextChange: null, ...((state.playlists || {})[id] || {}) };
+    const playlist = { mode: 'off', source: 'all', order: 'sequential', trigger: 'interval', interval: 30, wallpaperIDs: [], collectionID: null, planID: null, dayWallpaperID: null, nightWallpaperID: null, dayStart: 420, nightStart: 1140, nextChange: null, ...((state.playlists || {})[id] || {}) };
     const playlistData = field => `data-playlist="${e(id)}" data-playlist-key="${field}"`;
     // The menu offers the presets; any other stored interval, or choosing Custom, shows a minutes field.
     const intervalPresets = state.playlistIntervals || [];
     const [intervalMin, intervalMax] = state.playlistIntervalRange || [];
-    const intervalChoice = String(draft(intervalKeys(id).menu, intervalPresets.includes(Number(playlist.interval)) ? playlist.interval : 'custom'));
+    const intervalChoice = String(draft(intervalKeys(id).menu, playlist.trigger === 'unlock' ? 'unlock' : intervalPresets.includes(Number(playlist.interval)) ? playlist.interval : 'custom'));
     const listed = (playlist.wallpaperIDs || []).map(wallpaperID => (state.wallpapers || []).find(item => item.id === wallpaperID)).filter(Boolean);
     const playable = (state.wallpapers || []).filter(item => item.supported).sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' }));
     const nextChange = playlist.nextChange != null && Number.isFinite(Number(playlist.nextChange)) ? changeTime(Number(playlist.nextChange)) : '';
     const clockInput = (field, label, minute) => `<input type="time" data-key="${e(key(`playlist-${field}`))}" aria-label="${e(name(label))}" value="${e(draft(key(`playlist-${field}`), clockValue(minute)))}" ${playlistData(field)}${disabled(off)}>`;
     const rotateRows = row(key('playlist-source-row'), t('Wallpapers'), sourceSelect(ctx, key('playlist-source'), name(t('Wallpapers')), playlist, listed.length, playlistData('source'), off), sourceNote(ctx, playlist))
       + row(key('playlist-order-row'), t('Order'), select(key('playlist-order'), name(t('Order')), draft(key('playlist-order'), playlist.order), localizedOptions(playlistOrders), playlistData('order'), off))
-      + row(key('playlist-interval-row'), t('How often'), select(intervalKeys(id).menu, name(t('How often')), intervalChoice, [...intervalPresets.map(minutes => [minutes, intervalLabel(minutes)]), ['custom', t('Custom')]], playlistData('interval'), off))
+      + row(key('playlist-interval-row'), t('How often'), select(intervalKeys(id).menu, name(t('How often')), intervalChoice, [...intervalPresets.map(minutes => [minutes, intervalLabel(minutes)]), ['unlock', unlockLabel()], ['custom', t('Custom')]], playlistData('interval'), off))
       + (intervalChoice === 'custom' ? row(key('playlist-custom-interval-row'), t('Minutes between changes'), number('playlist-custom-interval', t('Minutes between changes'), intervalMin, intervalMax, 1, t('min'), { value: playlist.interval, attributes: playlistData('interval'), off }), intervalMax == null ? '' : t('Any whole number of minutes, up to {count}.', { count: Number(intervalMax).toLocaleString(language()) })) : '')
       + (playlist.source === 'list' ? playlistOrderMarkup(ctx, id, playlist, off) : '')
       + playlistFailures(ctx, id, playlist, off)
-      + row(key('playlist-next-row'), t('Next change'), button(t('Change now'), 'playlistSkip', { displayID: id }, off), nextChange ? t('Around {time}, if wallpapers are playing then.', { time: nextChange }) : t('Starts counting once wallpapers play.'));
+      + row(key('playlist-next-row'), t('Next change'), button(t('Change now'), 'playlistSkip', { displayID: id }, off), playlist.trigger === 'unlock' ? t('Changes when you unlock the Mac, while wallpapers are playing.') : nextChange ? t('Around {time}, if wallpapers are playing then.', { time: nextChange }) : t('Starts counting once wallpapers play.'));
     const wallpaperChoices = [['', t('Leave as it is')], ...playable.map(item => [item.id, item.title])];
     const dayNightRows = row(key('playlist-day-row'), t('Day wallpaper'), select(key('playlist-day'), name(t('Day wallpaper')), draft(key('playlist-day'), playlist.dayWallpaperID || ''), wallpaperChoices, playlistData('dayWallpaper'), off))
       + row(key('playlist-day-start-row'), t('Day starts at'), clockInput('dayStart', t('Day starts at'), playlist.dayStart))
@@ -840,8 +840,12 @@ async function onChange(view, event) {
         [...view.container.querySelectorAll('input[data-key]')].find(node => node.dataset.key === keys.field)?.focus();
         return;
       }
-      if (input.type === 'number' && (!input.checkValidity() || input.value.trim() === '')) { input.reportValidity(); return; }
-      value = Number(value);
+      // Unlocking is not a number of minutes: it is the playlist's trigger, which minutes replace.
+      if (value === 'unlock') { field = 'trigger'; }
+      else {
+        if (input.type === 'number' && (!input.checkValidity() || input.value.trim() === '')) { input.reportValidity(); return; }
+        value = Number(value);
+      }
     }
     if (field === 'dayStart' || field === 'nightStart') {
       value = clockMinute(value);

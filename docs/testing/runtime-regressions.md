@@ -554,7 +554,10 @@ engine to redo, and when.
   `.testASessionLockedBeforeStartIsSuspendedFromTheStart`,
   `.testWakingDisplaysAskForTheLockStateAgain`,
   `.testSwitchingUsersAsksForTheLockStateAgain` and
-  `.testAMissedUnlockClearsAtTheNextEvaluation`. Every snapshot the engine applies
+  `.testAMissedUnlockClearsAtTheNextEvaluation`, plus
+  `.testUnlockIsReportedOnceWhenTheLockClears` and
+  `.testAMissedUnlockIsStillReportedAtTheNextEvaluation` for the edge the playlists
+  answer. Every snapshot the engine applies
   runs the presentation policy, and `CGSessionCopyCurrentDictionary` is a
   synchronous window-server round trip. It is asked again only at start, on a lock
   or unlock, on display wake, on a user switch and while the session counts as

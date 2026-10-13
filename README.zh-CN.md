@@ -78,7 +78,7 @@
 | [**pixiv**](docs/features/pixiv.md) | pixiv 的插画排行榜和标签搜索。作品的任意一页都能保存为静态壁纸；登录 pixiv 后可查看仅限会员的作品，账户允许的话还能查看 R-18 作品。 |
 | [**壁纸选项**](docs/features/wallpaper-properties.md#properties) | 作者提供的每一个选项，在你应用修改时保存；[命名的属性预设](docs/features/wallpaper-properties.md#property-presets)可以保留多个版本，并能导出或导入。 |
 | [**音乐**](docs/features/audio-response.md) | 打开“音频响应”，为声音制作的壁纸就会随 Mac 播放的声音律动。打开“[媒体集成](docs/features/media-integration.md)”，带音乐显示的壁纸会显示正在播放的歌曲。 |
-| [**播放列表**](docs/features/playlists.md) | 让每台显示器轮流播放全部壁纸、收藏、它自己的列表或一个[本地合集](docs/features/control-panel.md#local-collections)。可以调整列表顺序、保存命名的播放方案，或在白天和夜晚的壁纸之间切换。应用失败的壁纸会被暂时跳过。 |
+| [**播放列表**](docs/features/playlists.md) | 让每台显示器轮流播放全部壁纸、收藏、它自己的列表或一个[本地合集](docs/features/control-panel.md#local-collections)，可按时间间隔更换，也可在每次解锁 Mac 时更换。可以调整列表顺序、保存命名的播放方案，或在白天和夜晚的壁纸之间切换。应用失败的壁纸会被暂时跳过。 |
 | [**显示器**](docs/features/control-panel.md#target-display) | 每台显示器都可以有自己的壁纸，也可以镜像另一台，缩放、帧率和音量各自独立。[复制或交换壁纸，并保存多屏壁纸方案](docs/features/display-layouts.md)，之后可从设置或“快捷指令”恢复各显示器的壁纸选择。 |
 | [**电池**](docs/features/performance.md#playback) | 使用电池时，继续运行、降到你选择的渲染比例和帧率，或者暂停。只需一个选择，在你选定之前保持关闭。其余播放与画质选项在[性能](docs/features/performance.md)中。 |
 | [**能耗**](docs/features/performance.md#energy-use) | “设置 → 性能”会显示应用消耗的功率；在笔记本电脑上，还会显示它每小时消耗的电量占满电的比例。在那里更改设置，它会对比前后的差异。每张已安装的壁纸在测量后都会有自己的能耗评级。 |

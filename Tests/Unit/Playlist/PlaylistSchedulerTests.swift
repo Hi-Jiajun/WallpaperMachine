@@ -8,6 +8,7 @@ final class PlaylistSchedulerTests: XCTestCase {
     private var collections: WallpaperCollectionStore!
     private var shown: [String: String] = [:]
     private var running = true
+    private var displayIDs = ["primary"]
     private var clock = Date()
     private var applied: [String] = []
     private let calendar: Calendar = {
@@ -23,6 +24,7 @@ final class PlaylistSchedulerTests: XCTestCase {
         collections = WallpaperCollectionStore(defaults: defaults)
         shown = ["primary": "a"]
         running = true
+        displayIDs = ["primary"]
         clock = calendar.date(from: DateComponents(year: 2027, month: 1, day: 15, hour: 12))!
         applied = []
     }
@@ -40,7 +42,7 @@ final class PlaylistSchedulerTests: XCTestCase {
         activate: PlaylistScheduler.Activate? = nil
     ) -> PlaylistScheduler {
         PlaylistScheduler(
-            store: store, collections: collections, displays: { ["primary"] }, library: { library }, favorites: { favorites },
+            store: store, collections: collections, displays: { self.displayIDs }, library: { library }, favorites: { favorites },
             current: { self.shown[$0] }, isRunning: { _ in self.running },
             activate: activate ?? { display, choose in
                 guard let id = choose() else { return nil }
@@ -954,5 +956,242 @@ final class PlaylistSchedulerTests: XCTestCase {
         release?.resume()
         await settle()
         XCTAssertEqual(applied, ["a"])
+    }
+
+    // MARK: Changing when the Mac is unlocked
+
+    /// An unlock changes an unlock playlist once. A second report within the debounce is the same
+    /// unlock, a later one is a new unlock, and no date is ever put on the display.
+    func testUnlockRotatesAnUnlockPlaylistOnceAndIgnoresADoubleEvent() async {
+        store.update("primary") { $0.mode = .rotate; $0.trigger = .unlock }
+        let scheduler = makeScheduler()
+        scheduler.start()
+        defer { scheduler.stop() }
+        await settle()
+        XCTAssertNil(store.nextChange["primary"], "an unlock playlist has no timer")
+        XCTAssertTrue(applied.isEmpty, "nothing changes until the Mac is unlocked")
+
+        scheduler.noteUnlock()
+        await settle()
+        XCTAssertEqual(applied, ["b"])
+        clock.addTimeInterval(PlaylistScheduler.unlockDebounce - 1)
+        scheduler.noteUnlock()
+        scheduler.evaluate()
+        await settle()
+        XCTAssertEqual(applied, ["b"], "a double report is one unlock, and evaluating again does not repeat it")
+
+        clock.addTimeInterval(PlaylistScheduler.unlockDebounce + 1)
+        scheduler.noteUnlock()
+        await settle()
+        XCTAssertEqual(applied, ["b", "c"], "the next unlock changes the wallpaper again")
+        XCTAssertNil(store.nextChange["primary"])
+    }
+
+    /// A display that cannot play when the Mac unlocks changes as soon as it can, but only while
+    /// the unlock is recent: it is not changed minutes later.
+    func testUnlockWaitsForTheDisplayToPlayButNotLongerThanTheGrace() async {
+        store.update("primary") { $0.mode = .rotate; $0.trigger = .unlock }
+        let scheduler = makeScheduler()
+        scheduler.start()
+        defer { scheduler.stop() }
+        running = false
+        scheduler.noteUnlock()
+        await settle()
+        XCTAssertTrue(applied.isEmpty)
+
+        clock.addTimeInterval(PlaylistScheduler.unlockGrace - 1)
+        running = true
+        scheduler.evaluate()
+        await settle()
+        XCTAssertEqual(applied, ["b"], "playing again within the grace answers the unlock")
+        scheduler.evaluate()
+        await settle()
+        XCTAssertEqual(applied, ["b"], "once per unlock")
+
+        clock.addTimeInterval(60)
+        running = false
+        scheduler.noteUnlock()
+        clock.addTimeInterval(PlaylistScheduler.unlockGrace + 1)
+        running = true
+        scheduler.evaluate()
+        await settle()
+        XCTAssertEqual(applied, ["b"], "an unlock that is over changes nothing")
+    }
+
+    /// The timer and the unlock are separate triggers: an interval playlist ignores the unlock,
+    /// and an unlock playlist ignores the clock.
+    func testIntervalPlaylistsIgnoreUnlockAndUnlockPlaylistsIgnoreTheClock() async {
+        store.update("primary") { $0.mode = .rotate; $0.interval = 30 }
+        shown["second"] = "a"
+        displayIDs = ["primary", "second"]
+        store.update("second") { $0.mode = .rotate; $0.trigger = .unlock }
+        let scheduler = makeScheduler()
+        scheduler.start()
+        defer { scheduler.stop() }
+        await settle()
+        XCTAssertNotNil(store.nextChange["primary"])
+        XCTAssertNil(store.nextChange["second"])
+
+        scheduler.noteUnlock()
+        await settle()
+        XCTAssertEqual(shown["primary"], "a", "a timed rotation does not answer an unlock")
+        XCTAssertEqual(shown["second"], "b")
+
+        clock.addTimeInterval(10 * 60 * 60)
+        scheduler.evaluate()
+        await settle()
+        XCTAssertEqual(shown["primary"], "b", "the timed rotation still follows the clock")
+        XCTAssertEqual(shown["second"], "b", "an unlock rotation does not")
+        XCTAssertNil(store.nextChange["second"])
+    }
+
+    /// An unlock nobody waits for is dropped, so choosing the setting afterwards cannot act on it.
+    func testAnUnlockIsNotKeptForAPlaylistChosenAfterwards() async {
+        store.update("primary") { $0.mode = .rotate; $0.interval = 30 }
+        let scheduler = makeScheduler()
+        scheduler.start()
+        defer { scheduler.stop() }
+        await settle()
+        scheduler.noteUnlock()
+        clock.addTimeInterval(5)
+        store.update("primary") { $0.trigger = .unlock }
+        scheduler.evaluate()
+        await settle()
+        XCTAssertTrue(applied.isEmpty, "the unlock was over before anything waited for it")
+    }
+
+    /// Every display that waits for the unlock changes once, including one that shows up while
+    /// the displays are still being enumerated after wake.
+    func testADisplayThatAppearsWithinTheGraceChangesOnceToo() async {
+        store.update("primary") { $0.mode = .rotate; $0.trigger = .unlock }
+        store.update("second") { $0.mode = .rotate; $0.trigger = .unlock }
+        shown["second"] = "a"
+        let scheduler = makeScheduler()
+        scheduler.start()
+        defer { scheduler.stop() }
+        scheduler.noteUnlock()
+        await settle()
+        XCTAssertEqual(shown["primary"], "b")
+        XCTAssertEqual(shown["second"], "a", "a display that is not there is not changed")
+
+        clock.addTimeInterval(10)
+        displayIDs = ["primary", "second"]
+        scheduler.evaluate()
+        await settle()
+        XCTAssertEqual(shown["second"], "b")
+        XCTAssertEqual(shown["primary"], "b", "the display that already changed is left alone")
+        scheduler.evaluate()
+        await settle()
+        XCTAssertEqual(applied, ["b", "b"])
+    }
+
+    /// A display the user emptied stays empty, and Change now still works on an unlock playlist
+    /// without giving it a timer.
+    func testUnlockSkipsAHeldDisplayAndChangeNowStillWorks() async {
+        store.update("primary") { $0.mode = .rotate; $0.trigger = .unlock }
+        let scheduler = makeScheduler()
+        scheduler.start()
+        defer { scheduler.stop() }
+        await settle()
+        shown["primary"] = nil
+        store.setHold(.removedWallpaper, on: "primary")
+        scheduler.noteUnlock()
+        await settle()
+        XCTAssertTrue(applied.isEmpty, "an unlock does not refill a display the user cleared")
+        XCTAssertEqual(store.holds["primary"], .removedWallpaper)
+
+        XCTAssertTrue(scheduler.skip("primary"))
+        await settle()
+        XCTAssertEqual(applied, ["a"], "Change now fills it")
+        XCTAssertTrue(store.holds.isEmpty)
+        XCTAssertNil(store.nextChange["primary"], "the change does not start a timer")
+    }
+
+    /// A wallpaper the user chooses while an unlock is still waiting for the display answers it.
+    func testAManualChoiceWhileAnUnlockWaitsIsLeftAlone() async {
+        store.update("primary") { $0.mode = .rotate; $0.trigger = .unlock }
+        let scheduler = makeScheduler()
+        scheduler.start()
+        defer { scheduler.stop() }
+        running = false
+        scheduler.noteUnlock()
+        shown["primary"] = "chosen"
+        scheduler.noteManualChoice("primary")
+        running = true
+        scheduler.evaluate()
+        await settle()
+        XCTAssertTrue(applied.isEmpty)
+        XCTAssertEqual(shown["primary"], "chosen")
+    }
+
+    /// Change now asked for while the display cannot play yet answers the unlock: the display is
+    /// not changed a second time when it plays.
+    func testChangeNowWhileAnUnlockWaitsAnswersIt() async {
+        store.update("primary") { $0.mode = .rotate; $0.trigger = .unlock }
+        let scheduler = makeScheduler()
+        scheduler.start()
+        defer { scheduler.stop() }
+        running = false
+        scheduler.noteUnlock()
+        XCTAssertTrue(scheduler.skip("primary"))
+        await settle()
+        XCTAssertEqual(applied, ["b"], "Change now is made even though the display cannot play")
+        running = true
+        scheduler.evaluate()
+        await settle()
+        XCTAssertEqual(applied, ["b"], "the unlock has been answered")
+    }
+
+    /// A change that lost its turn because the display stopped playing meanwhile is made when it
+    /// plays again, while the unlock is recent.
+    func testAnUnlockChangeThatLostItsTurnToAPauseIsMadeOncePlayingResumes() async {
+        store.update("primary") { $0.mode = .rotate; $0.trigger = .unlock }
+        var release: CheckedContinuation<Void, Never>?
+        var blocking = true
+        let scheduler = makeScheduler(activate: { display, choose in
+            if blocking { await withCheckedContinuation { release = $0 } }
+            guard let id = choose() else { return nil }
+            self.shown[display] = id
+            self.applied.append(id)
+            return id
+        })
+        scheduler.start()
+        defer { scheduler.stop() }
+        scheduler.noteUnlock()
+        await settle()
+        XCTAssertNotNil(release, "the change is waiting for its turn")
+        running = false
+        blocking = false
+        release?.resume()
+        await settle()
+        XCTAssertTrue(applied.isEmpty, "the display was paused when the change got its turn")
+
+        clock.addTimeInterval(5)
+        running = true
+        scheduler.evaluate()
+        await settle()
+        XCTAssertEqual(applied, ["b"])
+    }
+
+    /// A rotation that waits for the unlock has no date, so a playlist moved to it forgets the
+    /// one it had, and a plan with that trigger starts nothing on its own.
+    func testMovingAPlaylistToTheUnlockTriggerDropsItsTimer() async throws {
+        store.update("primary") { $0.mode = .rotate; $0.interval = 30 }
+        let scheduler = makeScheduler()
+        scheduler.start()
+        defer { scheduler.stop() }
+        await settle()
+        XCTAssertNotNil(store.nextChange["primary"])
+        store.update("primary") { $0.trigger = .unlock }
+        await settle()
+        XCTAssertNil(store.nextChange["primary"])
+
+        let plan = try store.savePlan(from: "primary", name: "On unlock")
+        displayIDs = ["primary", "second"]
+        shown["second"] = "a"
+        try store.applyPlan(plan.id, to: "second")
+        await settle()
+        XCTAssertNil(store.nextChange["second"], "an unlock plan is not due the moment it is applied")
+        XCTAssertTrue(applied.isEmpty)
     }
 }

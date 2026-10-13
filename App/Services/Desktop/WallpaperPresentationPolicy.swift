@@ -131,6 +131,14 @@ final class WallpaperPresentationPolicy {
     /// the resume `stop()` delivers on teardown.
     var onResumed: (@MainActor () -> Void)?
 
+    /// Called once each time the session goes from locked to unlocked, after the decision that
+    /// follows from it (`globalPresentation`) has been made. It comes from the corrected lock
+    /// state and not from the unlock notification, so an unlock whose notification was lost is
+    /// still reported by the next evaluation. Not called for a session that was already locked
+    /// when `start()` ran (nothing was seen to unlock), nor for `stop()`. Callers must only read
+    /// the policy from it: it runs inside `evaluate()`.
+    var onSessionUnlocked: (@MainActor () -> Void)?
+
     /// Between `start()` and `stop()`.
     private var isRunning: Bool { !observers.isEmpty }
 
@@ -365,10 +373,17 @@ final class WallpaperPresentationPolicy {
 
     /// Retry unacknowledged delivery even when visibility is unchanged.
     func evaluate() {
+        // Reported when evaluate() returns, whichever path it takes, so `globalPresentation` is
+        // already settled for the callback.
+        var unlocked = false
+        defer { if unlocked { onSessionUnlocked?() } }
         syncProbes()
         if sessionLockStale || sessionLocked {
+            let wasLocked = sessionLocked
             sessionLocked = isSessionLocked()
             sessionLockStale = false
+            unlocked = wasLocked && !sessionLocked
+            if unlocked { AppLog.info("session unlocked") }
         }
         let presentation = resolvedPresentation()
         let audio = resolvedAudioSuppressed()

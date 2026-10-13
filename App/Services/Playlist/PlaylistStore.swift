@@ -66,8 +66,8 @@ final class PlaylistStore {
         playlists[display] ?? DisplayPlaylist()
     }
 
-    /// Changes one display's playlist. A new mode, interval or day and night times start a
-    /// fresh wait, which the scheduler dates.
+    /// Changes one display's playlist. A new mode, trigger, interval or day and night times
+    /// start a fresh wait, which the scheduler dates.
     func update(_ display: String, _ change: (inout DisplayPlaylist) -> Void) {
         let before = playlist(for: display)
         var after = before
@@ -78,7 +78,7 @@ final class PlaylistStore {
         playlists[display] = after
         // Turning the playlist off leaves nothing to wait for.
         if after.mode == .off { holds[display] = nil }
-        if after.mode != before.mode || after.interval != before.interval
+        if after.mode != before.mode || after.trigger != before.trigger || after.interval != before.interval
             || after.dayStart != before.dayStart || after.nightStart != before.nightStart
         {
             nextChange[display] = nil
@@ -255,7 +255,7 @@ final class PlaylistStore {
         recent[display] = nil
         // Choosing a playlist is asking for it to run.
         holds[display] = nil
-        nextChange[display] = playlist.mode == .rotate ? .distantPast : nil
+        nextChange[display] = playlist.hasTimer ? .distantPast : nil
         persist()
     }
 
@@ -266,7 +266,7 @@ final class PlaylistStore {
         playlists[display] = playlist
         recent[display] = nil
         holds[display] = nil
-        nextChange[display] = playlist.mode == .rotate ? now.addingTimeInterval(TimeInterval(playlist.interval * 60)) : nil
+        nextChange[display] = playlist.hasTimer ? now.addingTimeInterval(TimeInterval(playlist.interval * 60)) : nil
         persist()
     }
 

@@ -189,6 +189,92 @@ final class WallpaperPresentationPolicyTests: XCTestCase {
         XCTAssertEqual(probe.applied, [true, false])
     }
 
+    /// The unlock is reported once, after the decision it causes was made, however many
+    /// evaluations follow.
+    func testUnlockIsReportedOnceWhenTheLockClears() {
+        let probe = PolicyProbe()
+        let policy = makePolicy(probe)
+        var unlocks: [GlobalPresentation] = []
+        policy.onSessionUnlocked = { unlocks.append(policy.globalPresentation) }
+        policy.start()
+        defer { policy.stop() }
+
+        probe.sessionLocked = true
+        lockCenter.post(name: Notification.Name("com.apple.screenIsLocked"), object: nil)
+        XCTAssertTrue(unlocks.isEmpty, "locking is not an unlock")
+        probe.sessionLocked = false
+        lockCenter.post(name: Notification.Name("com.apple.screenIsUnlocked"), object: nil)
+        XCTAssertEqual(unlocks, [.running], "the callback sees the presentation the unlock restored")
+        for _ in 0..<5 { policy.evaluate() }
+        lockCenter.post(name: Notification.Name("com.apple.screenIsUnlocked"), object: nil)
+        XCTAssertEqual(unlocks.count, 1, "an unlock is reported once, not again by later evaluations or a repeated notification")
+
+        probe.sessionLocked = true
+        lockCenter.post(name: Notification.Name("com.apple.screenIsLocked"), object: nil)
+        probe.sessionLocked = false
+        lockCenter.post(name: Notification.Name("com.apple.screenIsUnlocked"), object: nil)
+        XCTAssertEqual(unlocks.count, 2, "the next unlock is a new one")
+    }
+
+    /// The lock state is read from the window server, so an unlock whose notification never
+    /// arrived is still reported by the next evaluation.
+    func testAMissedUnlockIsStillReportedAtTheNextEvaluation() {
+        let probe = PolicyProbe()
+        let policy = makePolicy(probe)
+        var unlocks = 0
+        policy.onSessionUnlocked = { unlocks += 1 }
+        policy.start()
+        defer { policy.stop() }
+
+        probe.sessionLocked = true
+        lockCenter.post(name: Notification.Name("com.apple.screenIsLocked"), object: nil)
+        probe.sessionLocked = false
+        policy.evaluate()
+        XCTAssertEqual(unlocks, 1)
+        XCTAssertEqual(probe.applied, [true, false])
+    }
+
+    /// A lock the app saw only after wake, and a user switched away and back, end like any other.
+    func testUnlockAfterWakeOrAUserSwitchIsReported() {
+        let probe = PolicyProbe()
+        let policy = makePolicy(probe)
+        var unlocks = 0
+        policy.onSessionUnlocked = { unlocks += 1 }
+        policy.start()
+        defer { policy.stop() }
+
+        workspaceCenter.post(name: NSWorkspace.screensDidSleepNotification, object: nil)
+        probe.sessionLocked = true
+        workspaceCenter.post(name: NSWorkspace.screensDidWakeNotification, object: nil)
+        XCTAssertEqual(unlocks, 0)
+        probe.sessionLocked = false
+        lockCenter.post(name: Notification.Name("com.apple.screenIsUnlocked"), object: nil)
+        XCTAssertEqual(unlocks, 1)
+
+        probe.sessionLocked = true
+        workspaceCenter.post(name: NSWorkspace.sessionDidResignActiveNotification, object: nil)
+        probe.sessionLocked = false
+        workspaceCenter.post(name: NSWorkspace.sessionDidBecomeActiveNotification, object: nil)
+        XCTAssertEqual(unlocks, 2)
+    }
+
+    func testStartingLockedOrStoppingReportsNoUnlock() {
+        let probe = PolicyProbe()
+        probe.sessionLocked = true
+        let policy = makePolicy(probe)
+        var unlocks = 0
+        policy.onSessionUnlocked = { unlocks += 1 }
+        policy.start()
+        XCTAssertEqual(unlocks, 0, "a session that was locked before the app looked has not been seen to unlock")
+
+        policy.stop()
+        XCTAssertEqual(unlocks, 0, "tearing the policy down while locked is not an unlock")
+        probe.sessionLocked = false
+        policy.start()
+        defer { policy.stop() }
+        XCTAssertEqual(unlocks, 0, "starting again with the session unlocked is a first look, not an unlock")
+    }
+
     func testFullOcclusionSuspendsOnlyAfterTheSettleDelay() async throws {
         let probe = PolicyProbe()
         let policy = makePolicy(probe)

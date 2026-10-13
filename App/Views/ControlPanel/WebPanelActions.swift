@@ -949,7 +949,14 @@ extension WebPanelController {
       let range = DisplayPlaylist.intervalRange
       let minutes = try request.number("value", range: Double(range.lowerBound)...Double(range.upperBound))
       guard minutes == minutes.rounded() else { throw WebPanelRequest.invalid }
-      playlists.update(display) { $0.interval = Int(minutes) }
+      // Choosing a time is choosing to change on a timer again.
+      playlists.update(display) {
+        $0.interval = Int(minutes)
+        $0.trigger = .interval
+      }
+    case "trigger":
+      guard let trigger = PlaylistTrigger(rawValue: try request.string("value")) else { throw WebPanelRequest.invalid }
+      playlists.update(display) { $0.trigger = trigger }
     case "dayWallpaper", "nightWallpaper":
       // Empty clears the choice; anything else must be a wallpaper that can play.
       let value = try request.string("value")

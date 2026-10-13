@@ -275,9 +275,12 @@ per-Space getter and setter through optional private CoreGraphics and HIServices
   audio set to pause suspend; an active stop rule unloads. The lock state comes from
   `CGSessionCopyCurrentDictionary`, a synchronous window-server round trip, so the policy asks
   only at start, on `com.apple.screenIsLocked`/`Unlocked`, on display wake and on a user
-  switch, and at every evaluation while the session counts as locked. `AppRuleMonitor` and
-  `OtherAudioMonitor` feed those conditions, and wallpaper audio is suppressed separately
-  (`setAudioSuppressed`) for a mute rule or other-app audio set to mute. Occlusion is per display
+  switch, and at every evaluation while the session counts as locked; the evaluation that finds
+  it went from locked to unlocked calls `onSessionUnlocked` once, after the presentation it
+  settles, which the app delegate hands to `PlaylistScheduler.noteUnlock()` for playlists set
+  to change when the Mac is unlocked ([playlists](features/playlists.md#each-time-the-mac-is-unlocked)).
+  `AppRuleMonitor` and `OtherAudioMonitor` feed those conditions, and wallpaper audio is
+  suppressed separately (`setAudioSuppressed`) for a mute rule or other-app audio set to mute. Occlusion is per display
   (`setDisplayPresentationSuspended`): one covered screen stops only its own decoding,
   simulation and rendering, and a visible screen never resumes a covered one. Neither call returns a
   snapshot, yet both fold into every web and native video descriptor's `paused`, so `AppDelegate`
