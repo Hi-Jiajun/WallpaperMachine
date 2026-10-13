@@ -802,10 +802,27 @@ Rust regressions in `crates/shader/tests` (`legalize`, `preprocess`,
   `legacy_builtins` renames them; mixed-width vector operands inside a call
   argument truncate to that expression's narrowest operand, while sampler
   coordinate arguments stay with the texture strategy that narrows them to the
-  sampler's dimensionality; and a parenthesized comparison used as an arithmetic
-  operand is converted with `float(...)`. Known and not handled: logical-not
-  applied to a float (`!someFloat`), which still rejects Wallpaper Engine's own
-  `clipping_mask` effect.
+  sampler's dimensionality; a declaration or assignment truncates its wider
+  operands whether they sit next to a call, a constructor or a parenthesized
+  group (`round(v2) * v4`, `(CAST2(500) / res4) * s`); a scalar operand of `pow`,
+  `mix` and the other broadcasting builtins broadcasts when it is a
+  component-wise builtin of known scalars or a one-component read
+  (`pow(abs(c), color)`, legacy `saturate`/`lerp`/`fmod` spellings included);
+  a scalar stored into a vector by plain `=` broadcasts, and a returned value
+  converts to the declared return type the same way (`vec3 f() { vec4 c; return
+  c; }` keeps `.xyz`); a comparison stored into a float lvalue (`x += a < b;`,
+  `x = a < b;`) becomes `1.0`/`0.0`, while a conditional whose condition
+  compares (`a < b ? 1.0 : 2.0`) stays the number it selects; and a parenthesized
+  comparison used as an arithmetic operand is converted with `float(...)`.
+  A global initializer that reads a runtime value (a uniform, a texture, a stage
+  input, a mutable global or a user function) runs at the start of `main`:
+  strict GLSL rejects it on a `const` global and silently drops it on a mutable
+  one, which then reads zero. Constant initializers stay constant expressions.
+  A statement that follows a JSON annotation or a `#define` is analyzed like any
+  other; before, it took that token for its type and every repair skipped it.
+  Known and not handled: logical-not applied to a float (`!someFloat`), which
+  still rejects Wallpaper Engine's own `clipping_mask` effect, and a builtin
+  scalar call initializing a vector (`vec2 proj = dot(a, b);`).
 - **Legacy effect shader interfaces** — `pipeline` tests: array varyings reserve
   all element locations; unambiguous user function parameters narrow wider vector
   arguments; a whole vector variable assigned to a narrower one keeps its leading
@@ -841,7 +858,8 @@ Rust regressions in `crates/shader/tests` (`legalize`, `preprocess`,
   different address on Metal than the host wrote it to. The swizzle follows reads
   reached through `#define` aliases (written inside `main` by the audio-bars
   shader family) and through array-parameter specialization, not just direct
-  ones.
+  ones. A `float` element is one component, so a further subscript
+  (`g_AudioSpectrum64Left[i / 4][i % 4]`) selects the element itself.
 - **A sampler slot's `combo` answers whether the material bound a texture there**,
   which is not the same as whether the slot is bound. An annotation's `default`
   exists so an unused sampler still reads something sane; `WPSceneParser` binds

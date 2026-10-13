@@ -9,6 +9,15 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-13 — Menu bar: control each display
+
+The menu bar menu gets a submenu per display when two or more displays can show their own wallpaper (StatusMenuModel), with Remove from Display, Start Again and Open in Control Panel; one display keeps the flat menu. Lane worktree, targeted run only, not the full gate.
+
+- `python3 scripts/test.py --only StatusMenuModelTests --only AutomationCommandTests --only WallpaperDisplayTransferIntegrationTests --only AppAutomationTests --only UserCommandQueueTests --only WallpaperActivationRecoveryTests --only WallpaperDisplayTransferTests --only HotKeyPreferencesTests --only GlobalHotKeysTests --only DisplayTitleResolverTests` — exit 0; 107 passed, 0 failed, 0 skipped
+- `python3 -m unittest discover -s scripts/tests -p test_panel_localization.py` — OK (6 tests); the three new native strings are in all four languages
+- Not run: the full `python3 scripts/test.py` gate, `python3 scripts/check_renderer.py` (no Rust, bridge or renderer change), Release build, any desktop run
+- Not covered: how the NSMenu draws, orders and reads (VoiceOver) with two or more real displays, and Remove then Start Again on real displays; see manual-smoke "The menu bar with two displays"
+
 ## 2026-10-13 — Apply a wallpaper to every display
 
 A new transfer request, WallpaperDisplayTransfer.Request.everywhere, expands over the eligible displays when it is planned (main display first), so it keeps copy and swap's preflight, re-plan after preparing and verified rollback. Entry points: the inspector's Apply to all displays, apply?id=…&display=all and Apply Wallpaper's On all displays. Commit 6 of the desktop-menubar lane, checked in an isolated worktree on macOS 27.0.1.
