@@ -417,6 +417,25 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   the source layer says `"clampuvs": false` and clamps when it is true or absent;
   otherwise a model whose UVs run far outside 0..1 smears the composite's edge
   texels into solid bands.
+- **Layers a wallpaper's properties hide** — `HiddenLayers.ALayerItsPropertiesHideStaysOutOfTheGraphUntilSomethingShowsIt`
+  in `layer_texture_reference_test` (CPU, in the gate) and
+  `MetalSceneDraw.ALayerItsPropertiesHideHoldsNoImagesUntilAScriptShowsIt` in
+  `metal_scene_draw_smoke`. A layer hidden by a visibility only a reload changes
+  (authored, or bound to one of the wallpaper's properties, on the layer or an
+  ancestor) has no passes in the graph: on both backends it holds no effect
+  images, loads no textures and costs what a dropped layer costs. A
+  script-driven visibility stays in the graph, and so does a hidden layer another
+  layer samples, with its ancestors. A script writing `visible` takes the layer
+  over: showing a left-out layer, or a property applied in place showing one,
+  marks the graph mutated, the rebuilt graph draws it exactly as the property
+  would, and a layer a script has written is never left out again, so blinking
+  it rebuilds nothing. A left-out layer that was the scene output's first
+  writer leaves its load and clear to the first layer drawn: with clearing off
+  that layer still loads instead of discarding
+  (`RenderGraph.aHiddenFirstWriterLeftOutKeepsTheSceneOutputsLoadAndClear` in
+  `rendergraph_smoke`). Customizable wallpapers ship every theme, language and
+  format as a layer; keeping their hidden effect chains cost gigabytes of
+  targets and a render pass per hidden first-use clear every frame.
 - **Layer as texture** — `layer_texture_reference_test` (CPU, in the gate):
   `_rt_imageLayerComposite_<id>[_a|_b]` forward refs, duplicate names, missing
   targets, cycles, history `_b`, file names vs layer names, invisible sources

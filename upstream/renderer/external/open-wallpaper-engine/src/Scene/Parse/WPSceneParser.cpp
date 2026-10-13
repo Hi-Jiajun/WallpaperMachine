@@ -347,6 +347,13 @@ bool HasDynamicSetting(const nlohmann::json& value) {
     return value.is_object() && (value.contains("script") || value.contains("user"));
 }
 
+/// A visibility only a reload changes: the authored value, or one of the
+/// wallpaper's own properties, which reparse the scene when they change.
+/// Anything handed to a script can change from one frame to the next.
+bool VisibilitySettledBy(const nlohmann::json& setting) {
+    return ! setting.is_object() || ! setting.contains("script");
+}
+
 bool HasUpdateScript(const nlohmann::json& value) {
     if (! value.is_object() || ! value.contains("script") || ! value.at("script").is_string()) {
         return false;
@@ -597,6 +604,7 @@ void ParseLayerNodes(ParseContext& context, const nlohmann::json& objects) {
                                    layer.dynamic_visible ? layer.visible_setting
                                                          : nlohmann::json(layer.visible),
                                    runtime_name));
+            node->SetVisibilitySettled(VisibilitySettledBy(layer.visible_setting));
             // Typed parents get their timeline when their real object is
             // parsed; registering it on the placeholder creates a second clock.
             RegisterNodeOriginSetting(*context.scene->runtime, node.get(), runtime_name,
@@ -1805,6 +1813,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
                                obj.dynamic_visible ? obj.visible_setting
                                                    : nlohmann::json(obj.visible),
                                runtime_name));
+        node->SetVisibilitySettled(VisibilitySettledBy(obj.visible_setting));
         context.scene->runtime->RegisterTextLayer(runtime_name, std::move(text_state));
         RegisterLayerAlpha(context, runtime_name,
                            obj.field_bindings.contains("alpha") ? obj.field_bindings.at("alpha")
@@ -3342,6 +3351,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                                wpimgobj.dynamic_visible ? wpimgobj.visible_setting
                                                         : nlohmann::json(wpimgobj.visible),
                                runtime_name));
+        spImgNode->SetVisibilitySettled(VisibilitySettledBy(wpimgobj.visible_setting));
         RegisterNodeOriginSetting(*context.scene->runtime, spImgNode.get(), runtime_name,
                                   wpimgobj.origin_setting);
         if (wpimgobj.dynamic_scale) {
@@ -3968,6 +3978,7 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
                                    wppartobj.dynamic_visible ? wppartobj.visible_setting
                                                              : nlohmann::json(wppartobj.visible),
                                    runtime_name));
+            spNode->SetVisibilitySettled(VisibilitySettledBy(wppartobj.visible_setting));
             RegisterNodeOriginSetting(*context.scene->runtime, spNode.get(), runtime_name,
                                       wppartobj.origin_setting);
             if (wppartobj.dynamic_scale) {
@@ -4320,6 +4331,7 @@ void RegisterCommonNodeBindings(ParseContext& context, SceneNode& node, std::str
         ResolveBoolSetting(*context.scene->runtime,
                            obj.dynamic_visible ? obj.visible_setting : nlohmann::json(obj.visible),
                            std::string(runtime_name)));
+    node.SetVisibilitySettled(VisibilitySettledBy(obj.visible_setting));
     RegisterNodeOriginSetting(*context.scene->runtime, &node, runtime_name,
                               obj.origin_setting, animate_origin);
     if (obj.dynamic_scale) {

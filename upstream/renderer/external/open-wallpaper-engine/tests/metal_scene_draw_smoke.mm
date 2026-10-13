@@ -5252,6 +5252,110 @@ TEST_F(MetalSceneDraw, LayersSharingATargetShareOneRenderPassAndHiddenLayersCost
     EXPECT_NE(pixels["shown"], pixels["hidden"]) << "showing the middle card changed nothing";
 }
 
+TEST_F(MetalSceneDraw, ALayerItsPropertiesHideHoldsNoImagesUntilAScriptShowsIt)
+{
+    // A layer the wallpaper's properties hide cannot appear before the next
+    // parse unless a script shows it, so it holds none of the images its
+    // effect chain draws through: it costs what a layer that is not there
+    // costs. A script that shows it gets a graph that draws it, and the
+    // picture is the one the property would have given.
+    struct Variant
+    {
+        std::string name;
+        std::string visible;
+        bool        show;
+    };
+    const Variant variants[] = {
+        { "hidden", R"({"user":"showmiddle","value":false})", false },
+        { "dropped", "false", false },
+        { "shown", R"({"user":"showmiddle","value":false})", true },
+    };
+    std::map<std::string, std::vector<uint8_t>> pixels;
+    std::map<std::string, uint64_t>             bytes;
+    for (const auto& variant : variants) {
+        SCOPED_TRACE(variant.name);
+        const auto directory = root_ / ("property-hidden-" + variant.name);
+        const auto project   = WriteLayeredFixture(directory, variant.visible, variant.show);
+        // The middle card draws through an effect, whose ping-pong images are
+        // what a hidden layer would otherwise keep.
+        std::filesystem::create_directories(directory / "effects");
+        std::ofstream(directory / "effects/identity.json")
+            << R"({"name":"identity","passes":[{"material":"materials/identity.json"}]})";
+        std::ofstream(directory / "materials/identity.json")
+            << R"({"passes":[{"shader":"identity_effect","blending":"translucent","cullmode":"nocull",)"
+               R"("depthtest":"disabled","depthwrite":"disabled","textures":[null]}]})";
+        std::ofstream(directory / "shaders/identity_effect.vert")
+            << "uniform mat4 g_ModelViewProjectionMatrix;\n"
+               "attribute vec3 a_Position;\n"
+               "attribute vec2 a_TexCoord;\n"
+               "varying vec2 v_TexCoord;\n"
+               "void main() {\n"
+               "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+               "  v_TexCoord = a_TexCoord;\n"
+               "}\n";
+        std::ofstream(directory / "shaders/identity_effect.frag")
+            << "uniform sampler2D g_Texture0;\n"
+               "varying vec2 v_TexCoord;\n"
+               "void main() { gl_FragColor = texture(g_Texture0, v_TexCoord); }\n";
+        auto layout = nlohmann::json::parse(std::ifstream(directory / "layout.json"));
+        layout["objects"][1]["effects"] = nlohmann::json::array({
+            { { "file", "effects/identity.json" }, { "visible", true } },
+        });
+        std::ofstream(directory / "layout.json") << layout;
+
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, directory / "cache", loaded, error)) << error;
+        auto& scene = *loaded.scene;
+        ASSERT_EQ(SelectSceneBackend(scene).backend, SceneBackend::NativeMetal);
+
+        @autoreleasepool {
+            CAMetalLayer* layer   = [CAMetalLayer layer];
+            layer.device          = MTLCreateSystemDefaultDevice();
+            layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+            layer.drawableSize    = CGSizeMake(384, 256);
+            layer.framebufferOnly = NO;
+            MetalRender render;
+            ASSERT_TRUE(render.init(MetalRenderInitInfo {
+                .metal_layer = (__bridge void*)layer, .width = 384, .height = 256,
+                .render_width = 384, .render_height = 256, .display_scale_factor = 1.0,
+            })) << render.lastError();
+            auto graph = sceneToRenderGraph(scene);
+            ASSERT_NE(graph, nullptr);
+            ASSERT_TRUE(render.compileRenderGraph(scene, *graph)) << render.lastError();
+            render.UpdateCameraFillMode(scene, FillMode::ASPECTFIT);
+            for (int frame = 0; frame < 2; ++frame) AdvanceSceneFrame(render, scene);
+            ASSERT_FALSE(scene.runtime->ConsumeSceneGraphMutationFlag());
+            bytes[variant.name]  = render.RenderTargetBytesForTests();
+            pixels[variant.name] = ReadOutput(render, scene);
+
+            if (variant.name == "hidden") {
+                // What `thisScene.getLayer('middle').visible = true` reaches.
+                ASSERT_TRUE(scene.runtime->SetNodeVisible("middle", true));
+                EXPECT_TRUE(scene.runtime->ConsumeSceneGraphMutationFlag())
+                    << "a script showed a layer the graph left out and no new graph was asked for";
+                ASSERT_TRUE(render.clearLastRenderGraph()) << render.lastError();
+                graph = sceneToRenderGraph(scene);
+                ASSERT_TRUE(render.compileRenderGraph(scene, *graph)) << render.lastError();
+                for (int frame = 0; frame < 2; ++frame) AdvanceSceneFrame(render, scene);
+                bytes["revealed"]  = render.RenderTargetBytesForTests();
+                pixels["revealed"] = ReadOutput(render, scene);
+            }
+            render.destroy();
+        }
+    }
+
+    ASSERT_FALSE(pixels["hidden"].empty());
+    EXPECT_EQ(bytes["hidden"], bytes["dropped"])
+        << "a layer its properties hide still holds the images its effects draw through";
+    EXPECT_GT(bytes["shown"], bytes["hidden"]) << "the shown layer's effect chain holds no images";
+    EXPECT_EQ(pixels["hidden"], pixels["dropped"]);
+    EXPECT_NE(pixels["shown"], pixels["hidden"]) << "showing the middle card changed nothing";
+    EXPECT_EQ(pixels["revealed"], pixels["shown"])
+        << "a layer a script showed is not drawn the way its property shows it";
+    EXPECT_EQ(bytes["revealed"], bytes["shown"]);
+}
+
 TEST_F(MetalSceneDraw, AFeedbackCopyTradesTexturesAndDrawsTheSamePicture)
 {
     // Each lens reads the scene's own image, so the graph copies that image

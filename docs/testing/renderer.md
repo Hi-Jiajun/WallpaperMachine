@@ -195,7 +195,8 @@ same directory for a warm run. It resolves each project's entry/package version
 and render dimensions and discovers text nodes instead of using fixed layer IDs.
 It tests scene rendering only — not video or web projects, and not AppKit
 presentation. It builds its render graph once, after its warm-up ticks, so it
-draws layers a script creates during `init` but not ones created later;
+draws layers a script creates during `init` but not ones created later, nor a
+layer its properties hide that a script shows later;
 `metal_scene_draw_smoke` rebuilds on every graph mutation, as production does.
 Local-asset probe sound managers use the null backend: not calling `Play()` alone
 does not prevent `MountStream()` from initializing a system audio device.

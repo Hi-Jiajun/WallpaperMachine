@@ -231,11 +231,22 @@ rate and render scale ([Quality](performance.md#quality)). Bloom spread is this
 renderer's own energy-conserving model; exact Wallpaper Engine parameter parity is
 not established.
 
+On both backends, a layer hidden by its authored visibility or by one of the
+wallpaper's own properties, itself or through a parent, is left out of the render
+graph. Changing a property reloads the scene, so until then only a script can show
+it. Customizable wallpapers ship every theme, language and date format as a layer,
+and those hidden layers no longer hold effect images, load textures or clear
+targets every frame. When a script shows one, a graph that draws it is built
+before that frame is drawn; this happens once per layer, because a layer whose
+visibility a script has written stays in the graph from then on. A hidden layer
+another layer samples keeps drawing into its composite.
+
 Native Metal allocates render targets only when the compiled graph writes or samples
 them, plus the final output. Parser-provided shadow, mipmapped-frame and bloom
-buffers are metadata until a pass needs them. References from hidden passes and
-elided copies still count, so animation and live optimization toggles retain the
-targets they can use, and the same filter applies when a toggle reallocates targets.
+buffers are metadata until a pass needs them. References from hidden passes left in
+the graph (a script decides their visibility) and elided copies still count, so
+animation and live optimization toggles retain the targets they can use, and the
+same filter applies when a toggle reallocates targets.
 This applies to scenes drawn with **Native Metal preferred**; the Compatibility
 backend already requests its targets from the cache as passes prepare them.
 

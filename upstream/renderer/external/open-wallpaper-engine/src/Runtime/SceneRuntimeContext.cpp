@@ -525,12 +525,16 @@ void SceneRuntimeContext::Tick(double frame_time) {
         if (value != nullptr) value->reevaluate();
     }
     DispatchPendingAnimationEvents();
+    bool shown = false;
     for (auto& [name, binding] : m_node_visibility) {
         (void)name;
         if (binding.node != nullptr && binding.value != nullptr) {
-            binding.node->SetVisible(binding.value->getBool());
+            const bool visible = binding.value->getBool();
+            shown = shown || (visible && ! binding.node->Visible());
+            binding.node->SetVisible(visible);
         }
     }
+    if (shown) RequestGraphForShownLayers();
     for (auto& [name, binding] : m_node_translate) {
         (void)name;
         if (binding.node == nullptr || binding.value == nullptr ||
@@ -2061,8 +2065,25 @@ bool SceneRuntimeContext::SetNodeVisible(std::string_view name, bool visible) {
     }
     const auto iterator = m_nodes.find(std::string(name));
     if (iterator == m_nodes.end() || iterator->second == nullptr) return false;
-    iterator->second->SetVisible(visible);
+    auto* node = iterator->second;
+    const bool shown = visible && ! node->Visible();
+    node->SetVisible(visible);
+    // The script decides this layer's visibility from now on, so no later
+    // graph may leave it out for being hidden.
+    node->SetVisibilitySettled(false);
+    if (shown) RequestGraphForShownLayers();
     return true;
+}
+
+void SceneRuntimeContext::RequestGraphForShownLayers() {
+    if (m_scene == nullptr) return;
+    for (const auto& excluded : m_scene->render_excluded_nodes) {
+        const auto node = excluded.lock();
+        if (node != nullptr && node->EffectiveVisible()) {
+            m_scene_graph_mutated = true;
+            return;
+        }
+    }
 }
 
 bool SceneRuntimeContext::SetNodeTranslate(std::string_view name, const Eigen::Vector3f& value) {

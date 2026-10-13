@@ -6,6 +6,7 @@
 #include "Fs/Fs.h"
 #include "Fs/MemBinaryStream.h"
 #include "Fs/VFS.h"
+#include "Runtime/SceneRuntimeContext.hpp"
 #include "Scene/Scene.h"
 #include "Scene/SceneCamera.h"
 #include "Scene/SceneLayerReference.hpp"
@@ -705,6 +706,121 @@ TEST(LayerTextureReference, ABareComposeLayerAnotherSamplesIsDrawnOnlyIntoItsCom
     const auto unused_graph = sceneToRenderGraph(*unused);
     ASSERT_NE(unused_graph, nullptr);
     EXPECT_EQ(FindPassByNode(*unused_graph, "behind"), nullptr);
+}
+
+// A wallpaper whose settings offer a choice -- a theme, a language, a date
+// format -- usually ships every option as a layer and hides all but the chosen
+// one through its properties. Changing a property reloads the scene, so a layer
+// they hide cannot appear before the next parse unless a script shows it. Its
+// passes, and the effect targets they would allocate, stay out of the graph
+// until then; a layer a script drives, or one another layer samples, stays in.
+TEST(HiddenLayers, ALayerItsPropertiesHideStaysOutOfTheGraphUntilSomethingShowsIt) {
+    const ProjectProperties properties {
+        { "light", RuntimeScalarValue::Bool(true) },
+        { "dark", RuntimeScalarValue::Bool(false) },
+    };
+    auto files = CopyEffectFiles();
+    files["/linked_mat.json"] =
+        R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":["_rt_imageLayerComposite_6_a"]}]})";
+    fs::VFS vfs;
+    MountFiles(vfs, std::move(files));
+    audio::SoundManager sound;
+    WPSceneParser       parser;
+    auto                parsed = parser.Parse(
+        SceneParseRequest { .scene_id = "hidden-layers", .project_properties = &properties },
+        SceneJson(R"([
+        {"id":1,"name":"chosen","image":"image.json","visible":{"user":"light","value":false},
+         "effects":[{"file":"effects/copy/effect.json","visible":true}]},
+        {"id":2,"name":"unchosen","image":"image.json","visible":{"user":"dark","value":true},
+         "effects":[{"file":"effects/copy/effect.json","visible":true}]},
+        {"id":3,"name":"group","visible":{"user":"dark","value":true}},
+        {"id":4,"name":"member","image":"image.json","parent":3,
+         "effects":[{"file":"effects/copy/effect.json","visible":true}]},
+        {"id":5,"name":"scripted","image":"image.json",
+         "visible":{"script":"export function update(value) { return value; }",
+                    "user":"dark","value":true}},
+        {"id":6,"name":"source","image":"image.json","visible":{"user":"dark","value":true}},
+        {"id":7,"name":"consumer","image":"linked.json","dependencies":[6]}
+      ])"),
+        vfs,
+        sound);
+    ASSERT_NE(parsed, nullptr);
+    ASSERT_NE(parsed->runtime, nullptr);
+    AddScreenTarget(*parsed);
+    auto& runtime = *parsed->runtime;
+
+    // Every pass a layer owns, its effect steps included, counted by the layer
+    // whose visibility decides whether it draws.
+    const auto passes_of = [](const rg::RenderGraph& graph, std::string_view name) {
+        std::size_t count = 0;
+        for (const auto id : graph.topologicalOrder()) {
+            auto* pass = dynamic_cast<const vulkan::CustomShaderPass*>(graph.getPass(id));
+            if (pass == nullptr) continue;
+            const auto* owner = pass->desc().visibility_node != nullptr
+                                    ? pass->desc().visibility_node
+                                    : pass->desc().node;
+            if (owner != nullptr && owner->Name() == name) ++count;
+        }
+        return count;
+    };
+
+    auto graph = sceneToRenderGraph(*parsed);
+    ASSERT_NE(graph, nullptr);
+    EXPECT_GT(passes_of(*graph, "chosen"), 1u) << "the chosen layer lost its effect";
+    EXPECT_EQ(passes_of(*graph, "unchosen"), 0u) << "a layer its properties hide was drawn";
+    EXPECT_EQ(passes_of(*graph, "member"), 0u) << "a hidden group's member was drawn";
+    EXPECT_EQ(passes_of(*graph, "scripted"), 1u)
+        << "a layer whose script decides its visibility must stay in the graph";
+    EXPECT_EQ(passes_of(*graph, "source"), 1u) << "a hidden layer another samples must still draw";
+
+    // Showing a layer that is already in the graph changes nothing about it.
+    EXPECT_FALSE(runtime.ConsumeSceneGraphMutationFlag());
+    ASSERT_TRUE(runtime.SetNodeVisible("scripted", true));
+    EXPECT_FALSE(runtime.ConsumeSceneGraphMutationFlag());
+
+    // What `layer.visible = true` from a SceneScript reaches.
+    ASSERT_TRUE(runtime.SetNodeVisible("unchosen", true));
+    EXPECT_TRUE(runtime.ConsumeSceneGraphMutationFlag())
+        << "a script showed a layer the graph left out, and nothing asked for a new graph";
+    graph = sceneToRenderGraph(*parsed);
+    EXPECT_EQ(passes_of(*graph, "unchosen"), passes_of(*graph, "chosen"));
+    // From now on the script decides: hidden again, it keeps its passes, so a
+    // script that blinks a layer asks for one new graph and not one per blink.
+    ASSERT_TRUE(runtime.SetNodeVisible("unchosen", false));
+    ASSERT_TRUE(runtime.SetNodeVisible("unchosen", true));
+    EXPECT_FALSE(runtime.ConsumeSceneGraphMutationFlag());
+    ASSERT_TRUE(runtime.SetNodeVisible("unchosen", false));
+    graph = sceneToRenderGraph(*parsed);
+    EXPECT_EQ(passes_of(*graph, "unchosen"), passes_of(*graph, "chosen"));
+
+    // The group's member shows when the group does.
+    ASSERT_TRUE(runtime.SetNodeVisible("group", true));
+    EXPECT_TRUE(runtime.ConsumeSceneGraphMutationFlag());
+    graph = sceneToRenderGraph(*parsed);
+    EXPECT_EQ(passes_of(*graph, "member"), passes_of(*graph, "chosen"));
+    ASSERT_TRUE(runtime.SetNodeVisible("group", false));
+
+    // A property applied in place, rather than by a reload, shows the rest.
+    fs::VFS             reload_vfs;
+    MountFiles(reload_vfs, CopyEffectFiles());
+    auto in_place = parser.Parse(
+        SceneParseRequest { .scene_id = "hidden-layers", .project_properties = &properties },
+        SceneJson(R"([
+        {"id":2,"name":"unchosen","image":"image.json","visible":{"user":"dark","value":true},
+         "effects":[{"file":"effects/copy/effect.json","visible":true}]}
+      ])"),
+        reload_vfs,
+        sound);
+    ASSERT_NE(in_place, nullptr);
+    AddScreenTarget(*in_place);
+    graph = sceneToRenderGraph(*in_place);
+    EXPECT_EQ(passes_of(*graph, "unchosen"), 0u);
+    in_place->runtime->ApplyProjectPropertyOverride({ { "dark", RuntimeScalarValue::Bool(true) } });
+    in_place->runtime->Tick(1.0 / 60.0);
+    EXPECT_TRUE(in_place->runtime->ConsumeSceneGraphMutationFlag())
+        << "a property shown in place left its layer out of the graph";
+    graph = sceneToRenderGraph(*in_place);
+    EXPECT_GT(passes_of(*graph, "unchosen"), 1u);
 }
 
 // A fullscreen layer post-processes the screen, so its result has to land on

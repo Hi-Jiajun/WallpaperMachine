@@ -205,6 +205,10 @@ struct ExtraInfo {
     rg::RenderGraph*           rgraph { nullptr };
     Scene*                     scene { nullptr };
     bool                       use_mipmap_framebuffer { false };
+    /// Whether a pass drawing into the scene output has been added yet, and
+    /// whether a layer left out for being hidden came before any did.
+    bool                       output_written { false };
+    bool                       output_writer_left_out { false };
 };
 
 static std::string IsolateReferencedLayerOutput(
@@ -271,6 +275,7 @@ static void AddCustomShaderGraphPass(
                 ? std::string(output)
                 : std::move(output_override);
             const auto  resolved_output = scene.ResolveRenderTargetName(pass_output);
+            if (resolved_output == SpecTex_Default) extra.output_written = true;
             pdesc.node            = node;
             pdesc.visibility_node = visibility_node != nullptr ? visibility_node : node;
             pdesc.output          = resolved_output;
@@ -506,12 +511,50 @@ static void ToGraphPass(
     if (mode != GraphPassMode::BaseOnly && imgeff != nullptr) loadEffect(imgeff);
 }
 
+static bool SubtreeDraws(SceneNode* node) {
+    if (node->Mesh() != nullptr) return true;
+    for (const auto& child : node->GetChildren()) {
+        if (SubtreeDraws(child.get())) return true;
+    }
+    return false;
+}
+
 std::unique_ptr<rg::RenderGraph> wallpaper::sceneToRenderGraph(Scene& scene) {
     std::unique_ptr<rg::RenderGraph> rgraph = std::make_unique<rg::RenderGraph>();
     ExtraInfo                        extra { .rgraph = rgraph.get(), .scene = &scene };
     for (const auto id : scene.layer_texture_sources) {
         extra.referenced_ids.insert(static_cast<size_t>(id));
     }
+    // A layer hidden by a visibility only a reload changes -- its own or an
+    // ancestor's -- cannot draw before the next parse, so its passes, the
+    // effect targets they would allocate and the textures they would load are
+    // left out. Something can still show it: a script writing `visible`, which
+    // then owns that visibility, or a property applied in place. Either asks
+    // for a new graph (`render_excluded_nodes`). A layer another one samples
+    // keeps drawing into its composite while hidden, and so does every layer
+    // above it, so its subtree stays.
+    std::unordered_set<const SceneNode*> producing;
+    const auto mark_producing = [&scene, &producing](auto&& self, SceneNode* node) -> bool {
+        bool produces = node->MustProduce() || scene.layer_texture_sources.contains(node->ID());
+        for (const auto& child : node->GetChildren()) {
+            produces = self(self, child.get()) || produces;
+        }
+        if (produces) producing.insert(node);
+        return produces;
+    };
+    if (scene.sceneGraph != nullptr) mark_producing(mark_producing, scene.sceneGraph.get());
+    const auto left_out = [&producing](const SceneNode* node) {
+        if (producing.contains(node)) return false;
+        for (const auto* current = node; current != nullptr; current = current->Parent()) {
+            if (! current->Visible() && current->VisibilitySettled()) return true;
+        }
+        return false;
+    };
+    scene.render_excluded_nodes.clear();
+    const auto note_left_out = [&extra](SceneNode* node) {
+        if (! extra.output_written && SubtreeDraws(node)) extra.output_writer_left_out = true;
+    };
+
     std::unordered_set<SceneNode*> opaque_nodes;
     if (scene.opaque_first) {
         // Depth-tested opaque geometry must precede translucent cards: a
@@ -519,6 +562,10 @@ std::unique_ptr<rg::RenderGraph> wallpaper::sceneToRenderGraph(Scene& scene) {
         // opaque bodies. Effect/compose subgraphs retain their own ordering.
         const auto opaque = [&](auto&& self, SceneNode* node) -> void {
             if (node == nullptr || IsComposeEffectNode(scene, node)) return;
+            if (left_out(node)) {
+                note_left_out(node);
+                return;
+            }
             const auto camera = scene.cameras.find(node->Camera());
             const bool effect = camera != scene.cameras.end() && camera->second != nullptr &&
                                 camera->second->HasImgEffect();
@@ -544,8 +591,16 @@ std::unique_ptr<rg::RenderGraph> wallpaper::sceneToRenderGraph(Scene& scene) {
         };
         opaque(opaque, scene.sceneGraph.get());
     }
-    std::function<void(SceneNode*)> build_graph = [&extra, &build_graph, &opaque_nodes](SceneNode* node) {
+    std::function<void(const std::shared_ptr<SceneNode>&)> build_graph =
+        [&extra, &build_graph, &opaque_nodes, &left_out, &note_left_out, &scene](
+            const std::shared_ptr<SceneNode>& shared) {
+        auto* node = shared.get();
         if (node == nullptr) return;
+        if (left_out(node)) {
+            note_left_out(node);
+            scene.render_excluded_nodes.push_back(shared);
+            return;
+        }
 
         const bool is_compose_effect_node = IsComposeEffectNode(*extra.scene, node);
 
@@ -562,7 +617,7 @@ std::unique_ptr<rg::RenderGraph> wallpaper::sceneToRenderGraph(Scene& scene) {
         }
 
         for (auto& child : node->GetChildren()) {
-            build_graph(child.get());
+            build_graph(child);
         }
 
         if (is_compose_effect_node) {
@@ -577,7 +632,7 @@ std::unique_ptr<rg::RenderGraph> wallpaper::sceneToRenderGraph(Scene& scene) {
             ToGraphPass(node, std::string(SpecTex_Default), node->ID(), extra);
         }
     };
-    build_graph(scene.sceneGraph.get());
+    build_graph(scene.sceneGraph);
 
     for (const auto& post_process : scene.post_processes) {
         if (post_process == nullptr) continue;
@@ -719,6 +774,13 @@ std::unique_ptr<rg::RenderGraph> wallpaper::sceneToRenderGraph(Scene& scene) {
             transfer_written_targets.erase(desc.output);
         }
         if (desc.output == SpecTex_Default) {
+            // With clearing off, a hidden first writer neither cleared nor
+            // drew, and the first layer drawn loaded what the frame began
+            // with. Leaving the hidden one out must not make it discard that.
+            if (! scene.clearEnabled && extra.output_writer_left_out) {
+                desc.preserve_target_contents = true;
+                continue;
+            }
             desc.clear_on_first_use = scene.clearEnabled;
             continue;
         }

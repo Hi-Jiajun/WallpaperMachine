@@ -378,6 +378,10 @@ private:
         double sampled_animation_frame { std::numeric_limits<double>::quiet_NaN() };
     };
     static void ApplyNodeOriginAnimation(NodeVec3Binding& binding);
+    /// Called when a layer has just become visible: if that shows one the
+    /// render graph left out (`Scene::render_excluded_nodes`), the graph is
+    /// marked mutated so the next frame builds one that draws it.
+    void RequestGraphForShownLayers();
     struct NodeEffectFinalBinding {
         SceneNode*             node { nullptr };
         SceneImageEffectLayer* layer { nullptr };
