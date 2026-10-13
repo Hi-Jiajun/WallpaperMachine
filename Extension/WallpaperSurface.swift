@@ -88,7 +88,7 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
         return
       }
       guard scene.fps > 0, (0...3).contains(scene.scalingMode), scene.scalingFactor.isFinite,
-        scene.scalingFactor > 0
+        scene.scalingFactor > 0, scene.framing?.isValid ?? true
       else {
         throw WallpaperRuntime.failure("Invalid lock-screen playback configuration.")
       }
@@ -140,6 +140,10 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
       try check(
         owe_scene_wallpaper_set_property_float(
           renderer, owe_property_scaling_factor(), Float(scene.scalingFactor)))
+      let framing = scene.effectiveFraming
+      try check(owe_scene_wallpaper_set_framing(renderer, framing.panX, framing.panY))
+      WallpaperRuntime.log(
+        "Framing display=\(scene.displayID) panX=\(framing.panX) panY=\(framing.panY)")
       firstFrameReply = completion
       requestFrame()
       deadline = Task { [weak self] in

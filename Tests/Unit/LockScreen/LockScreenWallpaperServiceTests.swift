@@ -1493,6 +1493,94 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     try await service.shutdown()
   }
 
+  /// The scene the app publishes for one display showing a project of `type` at `framing`.
+  @MainActor
+  private func publishedScene(type: String, framing: BridgeFraming) async throws -> LockScreenScene {
+    try Data(#"{"type":"\#(type)","title":"t","file":"index.html"}"#.utf8).write(
+      to: project.appendingPathComponent("project.json"))
+    try Data("<html></html>".utf8).write(to: project.appendingPathComponent("index.html"))
+    var record = scene()
+    record.displayId = 1
+    record.framing = framing
+    let service = LockScreenWallpaperService(prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [record] },
+      selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {}),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
+      displayUUID: { _ in "one" })
+    let responder = readinessResponder()
+    defer { responder.cancel() }
+    try service.start()
+    // A web page can only be a screen saver; the others take the lock screen.
+    if type == "web" { service.setScreenSaverEnabled(true) } else { service.setEnabled(true) }
+    await waitFor("\(type) published") {
+      (service.isEnabled || service.screenSaverEnabled) && !service.isBusy
+    }
+    let published = try XCTUnwrap(publishedConfiguration().scenes.first)
+    try await service.shutdown()
+    return published
+  }
+
+  @MainActor
+  func testASceneAndAVideoPublishTheirPositionButAWebPageDoesNot() async throws {
+    let position = BridgeFraming(panX: 0.2, panY: 0.8)
+    for type in ["video", "scene"] {
+      let published = try await publishedScene(type: type, framing: position)
+      XCTAssertEqual(
+        published.framing, LockScreenFraming(panX: 0.2, panY: 0.8), "a \(type) is positioned")
+      XCTAssertNil(published.webEntryFile)
+    }
+    let web = try await publishedScene(type: "web", framing: position)
+    XCTAssertEqual(web.webEntryFile, "index.html")
+    XCTAssertNil(web.framing, "a web page fills its window, so it carries no position")
+  }
+
+  /// Moving a wallpaper on its display has to reach the extension. It publishes a new
+  /// revision, which the extension answers by replacing its renderer, and a position
+  /// that did not change publishes nothing.
+  @MainActor
+  func testMovingAWallpaperRepublishesOnlyWhenItsPositionChanges() async throws {
+    var record = scene()
+    record.displayId = 1
+    record.framing = BridgeFraming(panX: 0.2, panY: 0.8)
+    var publications = 0
+    let service = LockScreenWallpaperService(prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [record] },
+      selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {}),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
+      displayUUID: { _ in "one" },
+      persistConfiguration: { url, bytes in
+        try bytes.write(to: url, options: .atomic)
+        publications += 1
+      })
+    let responder = readinessResponder()
+    defer { responder.cancel() }
+    try service.start()
+    service.setEnabled(true)
+    await waitFor("first publication") { service.isEnabled && !service.isBusy }
+    let first = try publishedConfiguration()
+    XCTAssertEqual(first.scenes.first?.framing, LockScreenFraming(panX: 0.2, panY: 0.8))
+    let count = publications
+
+    service.refresh()
+    await waitFor("unchanged refresh") { !service.isBusy }
+    XCTAssertEqual(publications, count, "the same position publishes nothing")
+    XCTAssertEqual(try publishedConfiguration().revision, first.revision)
+
+    record.framing = BridgeFraming(panX: 0.7, panY: 0.8)
+    service.refresh()
+    await waitFor("moved publication") {
+      publications > count && service.isEnabled && !service.isBusy
+    }
+    let moved = try publishedConfiguration()
+    XCTAssertNotEqual(moved.revision, first.revision, "the extension reloads on a new revision")
+    XCTAssertEqual(moved.scenes.first?.framing, LockScreenFraming(panX: 0.7, panY: 0.8))
+    XCTAssertEqual(moved.scenes.first?.projectPath, first.scenes.first?.projectPath,
+      "only the position moved, so the published project is reused")
+    let extensionView = try XCTUnwrap(first.scenes.first)
+    XCTAssertFalse(
+      extensionView.sharesRenderer(with: try XCTUnwrap(moved.scenes.first)),
+      "the extension replaces its renderer to move the picture")
+    try await service.shutdown()
+  }
+
   private func publishedConfiguration() throws -> LockScreenConfiguration {
     try JSONDecoder().decode(LockScreenConfiguration.self,
       from: Data(contentsOf: exchange.appendingPathComponent(LockScreenConfiguration.fileName)))

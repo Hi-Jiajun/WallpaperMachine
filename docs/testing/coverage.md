@@ -620,7 +620,11 @@ or depend on a second physical monitor.
   restore, or stay recoverable after a reload failure; later global Desktop and
   Idle edits are preserved; malformed baselines are rejected without store
   writes; an unchanged journal is not rewritten; a concurrent store change keeps
-  the union.
+  the union. The same class holds the scene contract the extension reads: a file
+  without a position reads as centred and one with it round-trips, an unmoved scene
+  keeps the old file shape, a moved picture or a changed scaling mode replaces the
+  renderer while frame rate, title and pause do not, no position and the middle are one
+  picture, and an out-of-range or non-finite position is invalid.
 - `LockScreenWallpaperServiceTests` — activation failure hands the Desktop back
   to the poster provider; surviving lock screens are not cleared by topology
   changes; screen-saver-only, lock-only and both modes disable and roll back
@@ -631,7 +635,9 @@ or depend on a second physical monitor.
   renderer stops activation at once and only the user's Retry (lock-screen or
   screen-saver) switches it back on, once per click, never from the monitor after a
   relaunch, after another failure, after a click that had nothing to activate or
-  from switching a mode off and on again.
+  from switching a mode off and on again; a scene or video publishes its display's position
+  and a web page none, and moving the picture publishes a new revision that reuses the
+  project while the same position publishes nothing.
 - `LockScreenExtensionRegistrationTests` use synthetic app bundles and an
   injected registry: current-copy selection, duplicate and removed-copy cleanup,
   symlink aliases, invalid inventory rejection, cancellation, command failures;
@@ -685,8 +691,9 @@ or depend on a second physical monitor.
   locked, and an unlocked one settling for `desktopSettleBudget` before it holds
   a frame.
 
-Not covered: real lock-screen visual timing, private XPC snapshot transport, the
-wallpaper service's wake and time-change notices completing, the real display power
+Not covered: the extension drawing a moved picture at its position, real lock-screen
+visual timing, private XPC snapshot transport, the wallpaper service's wake and
+time-change notices completing, the real display power
 and session state after sleep, wake, lock and unlock, live
 registration repair, ending a genuinely stale extension process, a really ignored
 renderer being switched back on and macOS choosing the intended extension copy; these

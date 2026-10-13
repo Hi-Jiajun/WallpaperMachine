@@ -54,6 +54,23 @@ back at the same moment. A notification that arrives early, late or not at all
 therefore cannot leave a surface paused or rendering for good. A newer event replaces
 the checks still pending, and a surface whose state did not change does nothing.
 
+### Where the picture sits
+
+A scene or video sits on the lock screen and as the screen saver where it sits on the
+desktop: the display's position decides how the room a Fit, Original size or small
+Scale factor leaves, or the overflow of Fill or a large one, is divided (see [scene
+rendering](scene-rendering.md)). The app publishes it with each scene in
+`configuration.json` as an optional `framing` (`panX` and `panY`, fractions from 0 to
+1). A file without it, such as one an older app wrote, reads as centred, and a copy of
+the extension that predates the key ignores it and draws the picture centred; the
+configuration version is unchanged. The extension reads the position, like the scaling
+mode, when it builds a renderer, so moving the picture publishes a new revision and
+replaces the renderer instead of updating the running one: the held frame stays
+beneath it until the new one arrives, and it takes a moment longer than on the desktop.
+A position outside 0 to 1 is refused with the usual invalid-playback-configuration
+error rather than drawn somewhere else. Web wallpapers fill their page and carry no
+position, and a display that mirrors another is published centred, as on the desktop.
+
 ### Display changes
 
 Topology refreshes stage the next complete configuration before
@@ -433,9 +450,11 @@ select no real wallpaper. Real idle transitions, password UI, multi-monitor comp
 delivery, sleep/wake visuals, live registration repair, ending a genuinely stale
 extension process, macOS choosing the intended extension, switching a really ignored
 renderer back on from Retry, the wallpaper service's wake and time-change notices
-completing without an error in WallpaperAgent's log, and what the timing, connection and
+completing without an error in WallpaperAgent's log, what the timing, connection and
 request-shape lines report after a real activation (see [What the logs
-record](#what-the-logs-record)) still require an authorized desktop check.
+record](#what-the-logs-record)) and a moved picture appearing at its position on the lock
+screen and as the screen saver (the extension logs `Framing display=… panX=… panY=…` each
+time it builds a renderer) still require an authorized desktop check.
 
 ### After sleep, wake, lock and unlock
 

@@ -346,6 +346,7 @@ final class LockScreenWallpaperService {
           wallpaperID: record.wallpaperId, title: record.title,
           projectPath: record.projectPath, assetsPath: record.assetsPath, fps: record.fps,
           scalingMode: mode, scalingFactor: record.scalingFactor,
+          framing: LockScreenFraming(panX: record.framing.panX, panY: record.framing.panY),
           propertiesJSON: record.propertiesJson, paused: record.paused))
       }
       inputs.sort { $0.displayID < $1.displayID }
@@ -716,6 +717,8 @@ private struct LockScreenPublishInput: Equatable, Sendable {
   var fps: UInt32
   var scalingMode: Int32
   var scalingFactor: Double
+  /// Part of the input, so moving a wallpaper on its display republishes a revision.
+  var framing: LockScreenFraming
   var propertiesJSON: String?
   var paused: Bool
 }
@@ -807,7 +810,9 @@ private enum LockScreenAssetPublisher {
           projectPath: projectRevision + "/project.json", assetsPath: assetsRevision,
           previewPath: nil,
           fps: input.fps, scalingMode: input.scalingMode, scalingFactor: input.scalingFactor,
-          propertiesJSON: properties, paused: input.paused, webEntryFile: webEntry))
+          propertiesJSON: properties, paused: input.paused, webEntryFile: webEntry,
+          // A web page fills its window, so it has no position to carry.
+          framing: isWeb ? nil : input.framing))
     }
     return Prepared(
       configuration: LockScreenConfiguration(scenes: scenes),

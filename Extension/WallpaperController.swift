@@ -71,13 +71,7 @@ final class WallpaperController {
           surface.clear()
           continue
         }
-        if surface.hasContent, surface.scene.projectPath == scene.projectPath,
-          surface.scene.assetsPath == scene.assetsPath,
-          surface.scene.webEntryFile == scene.webEntryFile,
-          surface.scene.propertiesJSON == scene.propertiesJSON,
-          surface.scene.scalingMode == scene.scalingMode,
-          surface.scene.scalingFactor == scene.scalingFactor
-        {
+        if surface.hasContent, surface.scene.sharesRenderer(with: scene) {
           surface.update(scene: scene)
           acknowledge(surface: surface)
         } else {
