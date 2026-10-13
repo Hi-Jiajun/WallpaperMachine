@@ -2194,6 +2194,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     /// while this is empty, so a user who left the setting off is never asked
     /// for Automation permission, and a handle that was not there before is a
     /// scene that still has to be told what is playing.
+    private static func sceneMediaHandles(store: BridgeStore) async -> Set<UInt64> {
+        do {
+            return Set(try await store.bridge.systemMediaSceneHandles())
+        } catch {
+            AppLog.warn("Scene media consumers could not be read: \(error.localizedDescription)")
+            return []
+        }
+    }
+
     /// The content layers of the wallpaper windows showing on a display, the front one first.
     /// A window that was closed is no longer ordered in, so it is not listed.
     private static func wallpaperLayers(on displayID: UInt32) -> [CALayer] {
@@ -2201,15 +2210,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             guard window.isVisible, let screen = window.screen,
                   SystemDesktopPictureWorkspace.id(screen) == String(displayID) else { return nil }
             return window.contentView?.layer
-        }
-    }
-
-    private static func sceneMediaHandles(store: BridgeStore) async -> Set<UInt64> {
-        do {
-            return Set(try await store.bridge.systemMediaSceneHandles())
-        } catch {
-            AppLog.warn("Scene media consumers could not be read: \(error.localizedDescription)")
-            return []
         }
     }
 
