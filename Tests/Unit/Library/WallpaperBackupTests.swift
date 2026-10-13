@@ -602,14 +602,20 @@ final class WallpaperBackupTests: XCTestCase {
             try WallpaperBackupPreferences.validate(stored, forKey: key)
             XCTAssertEqual("\(stored)", "\(expected)")
         }
-        for action in ["keepRunning", "pause", "stop"] {
-            XCTAssertNoThrow(try WallpaperBackupPreferences.validate(action, forKey: "WallpaperMachine.lowBatteryAction"))
+        let conditionKeys = ["WallpaperMachine.lowPowerModeAction", "WallpaperMachine.thermalAction", "WallpaperMachine.lowBatteryAction"]
+        for key in conditionKeys {
+            for action in ["keepRunning", "reduceQuality", "pause", "stop"] {
+                XCTAssertNoThrow(try WallpaperBackupPreferences.validate(action, forKey: key), "\(action) for \(key)")
+            }
         }
         for level in [10, 20, 30] {
             XCTAssertNoThrow(try WallpaperBackupPreferences.validate(NSNumber(value: level), forKey: "WallpaperMachine.lowBatteryThreshold"))
         }
-        for action: Any in ["nap", "", 1, true] {
-            XCTAssertThrowsError(try WallpaperBackupPreferences.validate(action, forKey: "WallpaperMachine.lowBatteryAction"), "\(action)")
+        for key in conditionKeys {
+            // "reducedQuality" is the on-battery mode's name, not a condition action.
+            for action: Any in ["nap", "", "reducedQuality", 1, true] {
+                XCTAssertThrowsError(try WallpaperBackupPreferences.validate(action, forKey: key), "\(action) for \(key)")
+            }
         }
         for level: Any in [0, 15, 25, 31, -20, 20.5, "20", true, NSNumber(value: 1e30)] {
             XCTAssertThrowsError(try WallpaperBackupPreferences.validate(level, forKey: "WallpaperMachine.lowBatteryThreshold"), "\(level)")

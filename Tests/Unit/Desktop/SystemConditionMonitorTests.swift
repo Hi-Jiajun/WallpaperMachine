@@ -74,6 +74,169 @@ final class SystemConditionMonitorTests: XCTestCase {
         XCTAssertEqual(changes, 1, "Staying hot is not a change")
     }
 
+    private func announceHeat(_ state: ProcessInfo.ThermalState) {
+        thermal = state
+        systemCenter.post(name: ProcessInfo.thermalStateDidChangeNotification, object: nil)
+    }
+
+    func testReducedQualityInLowPowerModeAsksForAReductionAndNeverForAPause() {
+        let monitor = makeMonitor()
+        monitor.start()
+        defer { monitor.stop() }
+        lowPower = true
+        systemCenter.post(name: .NSProcessInfoPowerStateDidChange, object: nil)
+        XCTAssertTrue(monitor.actions.isEmpty)
+        XCTAssertTrue(monitor.qualityReductions.isEmpty, "Keep running is the default")
+
+        preferences.lowPowerModeAction = .reduceQuality
+        XCTAssertEqual(monitor.qualityReductions, [.lowPowerMode])
+        XCTAssertTrue(monitor.actions.isEmpty, "Reducing quality pauses nothing")
+
+        lowPower = false
+        systemCenter.post(name: .NSProcessInfoPowerStateDidChange, object: nil)
+        XCTAssertTrue(monitor.qualityReductions.isEmpty, "Leaving Low Power Mode restores the quality")
+        XCTAssertTrue(monitor.actions.isEmpty)
+    }
+
+    func testHeatReducesAtSeriousAndPausesAtCritical() {
+        preferences.thermalAction = .reduceQuality
+        let monitor = makeMonitor()
+        var changes = 0
+        monitor.onChange = { changes += 1 }
+        monitor.start()
+        defer { monitor.stop() }
+        for state in [ProcessInfo.ThermalState.nominal, .fair] {
+            announceHeat(state)
+            XCTAssertTrue(monitor.actions.isEmpty)
+            XCTAssertTrue(monitor.qualityReductions.isEmpty, "Only serious and critical heat counts")
+        }
+        XCTAssertEqual(changes, 0)
+
+        announceHeat(.serious)
+        XCTAssertEqual(monitor.qualityReductions, [.heat])
+        XCTAssertTrue(monitor.actions.isEmpty, "Serious heat reduces without pausing")
+        XCTAssertEqual(changes, 1)
+
+        announceHeat(.critical)
+        XCTAssertEqual(monitor.actions, [.pause], "Critical heat escalates to a pause")
+        XCTAssertEqual(monitor.qualityReductions, [.heat], "and stays reduced for the way back")
+        XCTAssertEqual(changes, 2)
+        announceHeat(.critical)
+        XCTAssertEqual(changes, 2, "Staying critical is not a change")
+
+        announceHeat(.serious)
+        XCTAssertTrue(monitor.actions.isEmpty, "Cooling to serious resumes, already reduced")
+        XCTAssertEqual(monitor.qualityReductions, [.heat])
+        XCTAssertEqual(changes, 3)
+
+        announceHeat(.nominal)
+        XCTAssertTrue(monitor.actions.isEmpty)
+        XCTAssertTrue(monitor.qualityReductions.isEmpty)
+        XCTAssertEqual(changes, 4)
+    }
+
+    func testPauseAndStopAtHeatStillAskForNoReduction() {
+        let monitor = makeMonitor()
+        monitor.start()
+        defer { monitor.stop() }
+        for (choice, expected) in [(SystemConditionAction.pause, AppRuleAction.pause), (.stop, .stop)] {
+            preferences.thermalAction = choice
+            for state in [ProcessInfo.ThermalState.serious, .critical] {
+                announceHeat(state)
+                XCTAssertEqual(monitor.actions, [expected], "\(choice) at \(state.rawValue)")
+                XCTAssertTrue(monitor.qualityReductions.isEmpty, "\(choice) at \(state.rawValue)")
+            }
+        }
+    }
+
+    func testLowBatteryReducesQualityThroughTheSameGate() {
+        battery.reading = BatteryReading(percent: 15, isDischarging: true)
+        let monitor = makeMonitor()
+        monitor.start()
+        defer { monitor.stop() }
+        XCTAssertTrue(monitor.qualityReductions.isEmpty, "Keep running is the default")
+        XCTAssertFalse(battery.isObserving, "Nothing is observed until an action is chosen")
+        XCTAssertEqual(battery.reads, 0, "Nothing is read until an action is chosen")
+
+        preferences.lowBatteryAction = .reduceQuality
+        XCTAssertEqual(monitor.qualityReductions, [.lowBattery], "Already low when the rule is chosen engages at once")
+        XCTAssertTrue(monitor.actions.isEmpty, "Reducing quality pauses nothing")
+        XCTAssertTrue(battery.isObserving)
+
+        battery.change(to: BatteryReading(percent: 22, isDischarging: true))
+        XCTAssertEqual(monitor.qualityReductions, [.lowBattery], "22% is still inside the margin above the 20% level")
+        battery.change(to: BatteryReading(percent: 26, isDischarging: true))
+        XCTAssertTrue(monitor.qualityReductions.isEmpty, "Five points above the level restores the quality")
+        battery.change(to: BatteryReading(percent: 21, isDischarging: true))
+        XCTAssertTrue(monitor.qualityReductions.isEmpty, "Falling back to 21% is not low again")
+        battery.change(to: BatteryReading(percent: 8, isDischarging: true))
+        XCTAssertEqual(monitor.qualityReductions, [.lowBattery])
+        battery.change(to: BatteryReading(percent: 8, isDischarging: false))
+        XCTAssertTrue(monitor.qualityReductions.isEmpty, "Plugging in releases however low the charge is")
+        battery.change(to: BatteryReading(percent: 8, isDischarging: true))
+        XCTAssertEqual(monitor.qualityReductions, [.lowBattery])
+
+        preferences.lowBatteryAction = .keepRunning
+        XCTAssertTrue(monitor.qualityReductions.isEmpty, "Choosing Keep running releases")
+        XCTAssertFalse(battery.isObserving, "and stops observing")
+    }
+
+    func testConditionsAreIndependent() {
+        lowPower = true
+        thermal = .serious
+        let monitor = makeMonitor()
+        monitor.start()
+        defer { monitor.stop() }
+
+        preferences.lowPowerModeAction = .reduceQuality
+        preferences.thermalAction = .pause
+        XCTAssertEqual(monitor.actions, [.pause])
+        XCTAssertEqual(monitor.qualityReductions, [.lowPowerMode])
+
+        preferences.lowPowerModeAction = .stop
+        preferences.thermalAction = .reduceQuality
+        XCTAssertEqual(monitor.actions, [.stop])
+        XCTAssertEqual(monitor.qualityReductions, [.heat])
+
+        preferences.lowPowerModeAction = .reduceQuality
+        preferences.lowBatteryAction = .reduceQuality
+        battery.change(to: BatteryReading(percent: 9, isDischarging: true))
+        XCTAssertEqual(monitor.qualityReductions, [.heat, .lowPowerMode, .lowBattery])
+        XCTAssertTrue(monitor.actions.isEmpty)
+
+        focus.set(.mute)
+        announceHeat(.critical)
+        XCTAssertEqual(monitor.actions, [.mute, .pause], "A Focus filter and the critical-heat pause join")
+        XCTAssertEqual(monitor.qualityReductions, [.heat, .lowPowerMode, .lowBattery])
+    }
+
+    func testStoppingReleasesEveryReduction() {
+        preferences.lowPowerModeAction = .reduceQuality
+        preferences.thermalAction = .reduceQuality
+        preferences.lowBatteryAction = .reduceQuality
+        lowPower = true
+        thermal = .critical
+        battery.reading = BatteryReading(percent: 9, isDischarging: true)
+        let monitor = makeMonitor()
+        monitor.start()
+        XCTAssertEqual(monitor.qualityReductions, [.heat, .lowPowerMode, .lowBattery])
+        XCTAssertEqual(monitor.actions, [.pause])
+
+        var changes = 0
+        monitor.onChange = { changes += 1 }
+        monitor.stop()
+        XCTAssertTrue(monitor.qualityReductions.isEmpty, "A stopped monitor must never leave wallpapers reduced")
+        XCTAssertTrue(monitor.actions.isEmpty)
+        XCTAssertEqual(changes, 1, "Releasing everything is one change")
+        XCTAssertFalse(battery.isObserving)
+
+        preferences.thermalAction = .pause
+        announceHeat(.serious)
+        XCTAssertTrue(monitor.qualityReductions.isEmpty, "Nothing is observed after stop")
+        XCTAssertTrue(monitor.actions.isEmpty)
+        XCTAssertEqual(changes, 1)
+    }
+
     func testFocusFilterJoinsTheOtherConditions() {
         preferences.lowPowerModeAction = .pause
         lowPower = true

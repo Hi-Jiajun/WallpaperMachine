@@ -1,15 +1,23 @@
 import Foundation
 
-/// Reports the rule actions that conditions of the whole Mac ask for: Low Power Mode, a hot Mac
-/// and a low battery, each as the user chose under Playback, and whatever a Focus filter set.
-/// They join the app rules' actions in `WallpaperPresentationPolicy`, so they pause, mute or
-/// stop wallpapers the same way and never change the user's own Play/Pause. Only notifications
-/// are observed; nothing is polled. The one source added for the battery is IOKit's power-source
-/// notification, and it is observed only while a low-battery action is chosen.
+/// Reports what conditions of the whole Mac ask for: Low Power Mode, a hot Mac and a low battery,
+/// each as the user chose under Playback, and whatever a Focus filter set.
+///
+/// `actions` are rule actions. They join the app rules' actions in `WallpaperPresentationPolicy`,
+/// so they pause, mute or stop wallpapers the same way and never change the user's own
+/// Play/Pause. `qualityReductions` name the conditions that chose Reduced quality instead: they
+/// pause nothing, they ask for a lower frame-rate ceiling and render scale. A hot Mac that chose
+/// Reduced quality reduces from serious and also contributes a pause once macOS reports critical,
+/// the state in which it is at its limit; Pause and Stop keep acting from serious.
+///
+/// Only notifications are observed; nothing is polled. The one source added for the battery is
+/// IOKit's power-source notification, and it is observed only while a low-battery action is
+/// chosen.
 @MainActor
 final class SystemConditionMonitor {
     var onChange: (@MainActor () -> Void)?
     private(set) var actions: Set<AppRuleAction> = []
+    private(set) var qualityReductions: Set<QualityReduction> = []
 
     private let preferences: PlaybackPreferences
     private let focus: FocusFilterState
@@ -69,7 +77,7 @@ final class SystemConditionMonitor {
         for (center, token) in observers { center.removeObserver(token) }
         observers.removeAll()
         stopObservingBattery()
-        publish([])
+        publish(actions: [], qualityReductions: [])
     }
 
     /// Reads the battery again, for a moment the Mac may have changed it without a notification,
@@ -81,16 +89,35 @@ final class SystemConditionMonitor {
 
     private func recompute() {
         guard !observers.isEmpty else { return }
-        var next = Set<AppRuleAction>()
-        if isLowPowerModeEnabled(), let action = preferences.lowPowerModeAction.ruleAction {
-            next.insert(action)
+        var next = Contributions()
+        if isLowPowerModeEnabled() {
+            next.add(preferences.lowPowerModeAction, reducing: .lowPowerMode)
         }
-        if Self.isHot(thermalState()), let action = preferences.thermalAction.ruleAction {
-            next.insert(action)
+        let thermal = thermalState()
+        if Self.isHot(thermal) {
+            let choice = preferences.thermalAction
+            next.add(choice, reducing: .heat)
+            // Reducing is the answer to serious heat; at critical it is no longer enough.
+            if choice.reducesQuality, thermal == .critical { next.actions.insert(.pause) }
         }
-        if let action = focus.action { next.insert(action) }
-        if let action = lowBatteryAction()?.ruleAction { next.insert(action) }
-        publish(next)
+        if let action = focus.action { next.actions.insert(action) }
+        if let choice = lowBatteryAction() {
+            next.add(choice, reducing: .lowBattery)
+        }
+        publish(actions: next.actions, qualityReductions: next.qualityReductions)
+    }
+
+    /// What the conditions evaluated together ask for.
+    private struct Contributions {
+        var actions = Set<AppRuleAction>()
+        var qualityReductions = Set<QualityReduction>()
+
+        /// Adds what `choice` contributes while its condition holds: its rule action, or the
+        /// reduction it names.
+        mutating func add(_ choice: SystemConditionAction, reducing reduction: QualityReduction) {
+            if let action = choice.ruleAction { actions.insert(action) }
+            if choice.reducesQuality { qualityReductions.insert(reduction) }
+        }
     }
 
     /// The low-battery action while the rule is engaged, nil otherwise. Chosen means observed:
@@ -129,10 +156,15 @@ final class SystemConditionMonitor {
         battery.stop()
     }
 
-    private func publish(_ next: Set<AppRuleAction>) {
-        guard next != actions else { return }
+    private func publish(actions next: Set<AppRuleAction>, qualityReductions nextReductions: Set<QualityReduction>) {
+        guard next != actions || nextReductions != qualityReductions else { return }
         actions = next
-        AppLog.info("system conditions ask wallpapers to \(next.isEmpty ? "run" : next.map(\.rawValue).sorted().joined(separator: ", "))")
+        qualityReductions = nextReductions
+        var asked = next.isEmpty ? "run" : next.map(\.rawValue).sorted().joined(separator: ", ")
+        if !nextReductions.isEmpty {
+            asked += ", reduced quality: \(nextReductions.sorted().map(\.logLabel).joined(separator: ", "))"
+        }
+        AppLog.info("system conditions ask wallpapers to \(asked)")
         onChange?()
     }
 }

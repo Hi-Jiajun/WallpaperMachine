@@ -213,7 +213,9 @@ picture shows between a window closing and the web page's window opening.
 - `PlaybackPolicyCompositionTests`, `PlaybackPreferencesTests`,
   `AppRuleMonitorTests`, `OtherAudioMonitorTests` — how sleep, lock, app rules
   and other-app audio compose (Stop beats Pause, Keep running ignores audio),
-  defaults and corrupt stored values, running versus frontmost rules, and the
+  defaults and corrupt stored values (the battery mode's `reducedQuality` is not a
+  condition choice), the stored Reduced quality choice of the three system conditions
+  that is never a rule action, running versus frontmost rules, and the
   other-audio settle. The user's mute of every wallpaper is one more source of the single
   audio-suppression flag: delivered at launch, silent without touching presentation, still held
   by a mute rule or other-app audio when lifted, and released at teardown; its preference
@@ -224,15 +226,19 @@ picture shows between a window closing and the web page's window opening.
 - `SystemConditionMonitorTests` use injected Low Power Mode and thermal readings
   and a private notification center: Low Power Mode acts only once an action is
   chosen, only serious and critical heat counts, a Focus filter joins the other
-  conditions and survives a new instance, and `stop()` releases every action. A fake
-  battery source drives the low-battery rule: it is neither read nor observed until an
-  action is chosen, engages at the level and releases five points above it, follows a
-  changed level and a plug-in at any charge, never engages without an internal
-  battery, joins the other conditions, and a wake-time refresh reads a change nobody
-  announced. `LowBatteryTests` pin the gate sequence, the margin and the parse of
-  IOKit's power-source description (internal battery only, no UPS, no zero maximum)
-  with synthetic dictionaries; the real source is only started and stopped to prove it
-  releases itself.
+  conditions and survives a new instance, and `stop()` releases every action and every
+  quality reduction. Reduced quality, chosen for any of the three conditions, is
+  reported as a `QualityReduction` and never as a rule action: heat reduces at serious
+  and also pauses at critical (staying reduced on the way back to serious), Pause and
+  Stop at heat report no reduction, and the conditions combine independently. A fake
+  battery source drives the low-battery rule, Reduced quality included: it is neither
+  read nor observed until an action is chosen, engages at the level and releases five
+  points above it, follows a changed level and a plug-in at any charge, never engages
+  without an internal battery, joins the other conditions, and a wake-time refresh
+  reads a change nobody announced. `LowBatteryTests` pin the gate sequence, the margin
+  and the parse of IOKit's power-source description (internal battery only, no UPS, no
+  zero maximum) with synthetic dictionaries; the real source is only started and
+  stopped to prove it releases itself.
   `WallpaperFocusFilterTests` pin the filter's default to the choice that lets
   wallpapers run, since macOS performs it with defaults when a Focus ends.
 - `PowerSourceMonitorTests` use an injected reading: only a different source is

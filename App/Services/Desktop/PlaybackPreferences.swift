@@ -21,16 +21,44 @@ enum DesktopCoveredAction: String, Codable, CaseIterable, Sendable {
 /// reporting it hot, or a low battery.
 enum SystemConditionAction: String, Codable, CaseIterable, Sendable {
     case keepRunning
+    /// Keep playing, but under a lower frame-rate ceiling and render scale. Not a rule action: it
+    /// never pauses, mutes or stops anything by itself. Its stored name differs from the battery
+    /// mode's `reducedQuality` on purpose, so the two choices cannot be mistaken for each other.
+    case reduceQuality
     case pause
     case stop
 
-    /// The rule action it contributes, the same way an app rule's does; nil while it keeps running.
+    /// The rule action it contributes, the same way an app rule's does; nil while it keeps
+    /// running or only reduces quality.
     var ruleAction: AppRuleAction? {
         switch self {
-        case .keepRunning: nil
+        case .keepRunning, .reduceQuality: nil
         case .pause: .pause
         case .stop: .stop
         }
+    }
+
+    var reducesQuality: Bool { self == .reduceQuality }
+}
+
+/// Why wallpapers are asked to run at reduced quality. Declared in the order the causes are
+/// named when several hold: heat first, then Low Power Mode, then a low battery.
+enum QualityReduction: String, CaseIterable, Comparable, Sendable {
+    case heat
+    case lowPowerMode
+    case lowBattery
+
+    /// The words the log uses for it.
+    var logLabel: String {
+        switch self {
+        case .heat: "heat"
+        case .lowPowerMode: "Low Power Mode"
+        case .lowBattery: "low battery"
+        }
+    }
+
+    static func < (lhs: Self, rhs: Self) -> Bool {
+        (Self.allCases.firstIndex(of: lhs) ?? 0) < (Self.allCases.firstIndex(of: rhs) ?? 0)
     }
 }
 
@@ -107,20 +135,24 @@ final class PlaybackPreferences {
         set { store(newValue.rawValue, forKey: Self.desktopCoveredKey) }
     }
 
-    /// Off until chosen, like battery: Low Power Mode alone never changes playback.
+    /// Off until chosen, like battery: Low Power Mode alone never changes playback. Reduced quality
+    /// lowers the frame-rate ceiling and render scale for as long as it lasts.
     var lowPowerModeAction: SystemConditionAction {
         get { storedEnum(Self.lowPowerModeKey, default: .keepRunning) }
         set { store(newValue.rawValue, forKey: Self.lowPowerModeKey) }
     }
 
-    /// Applies while macOS reports the thermal state as serious or critical.
+    /// Applies while macOS reports the thermal state as serious or critical. Reduced quality
+    /// applies from serious and adds a pause at critical, where macOS is at its limit; Pause and
+    /// Stop apply from serious.
     var thermalAction: SystemConditionAction {
         get { storedEnum(Self.thermalKey, default: .keepRunning) }
         set { store(newValue.rawValue, forKey: Self.thermalKey) }
     }
 
     /// Off until chosen: a low battery alone never changes playback. Applies only while the Mac
-    /// runs on its internal battery at or below `lowBatteryThreshold`.
+    /// runs on its internal battery at or below `lowBatteryThreshold`; Reduced quality lowers the
+    /// frame-rate ceiling and render scale instead of pausing.
     var lowBatteryAction: SystemConditionAction {
         get { storedEnum(Self.lowBatteryActionKey, default: .keepRunning) }
         set { store(newValue.rawValue, forKey: Self.lowBatteryActionKey) }

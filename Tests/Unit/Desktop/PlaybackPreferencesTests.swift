@@ -77,6 +77,36 @@ final class PlaybackPreferencesTests: XCTestCase {
         XCTAssertTrue(preferences.appRules.isEmpty)
     }
 
+    func testReducedQualityIsStoredForEachConditionAndIsNotARuleAction() {
+        let preferences = PlaybackPreferences(defaults: defaults)
+        preferences.lowPowerModeAction = .reduceQuality
+        preferences.thermalAction = .reduceQuality
+        preferences.lowBatteryAction = .reduceQuality
+        let reloaded = PlaybackPreferences(defaults: defaults)
+        XCTAssertEqual(reloaded.lowPowerModeAction, .reduceQuality)
+        XCTAssertEqual(reloaded.thermalAction, .reduceQuality)
+        XCTAssertEqual(reloaded.lowBatteryAction, .reduceQuality)
+
+        XCTAssertNil(SystemConditionAction.reduceQuality.ruleAction, "Reducing quality never pauses, mutes or stops")
+        XCTAssertEqual(SystemConditionAction.allCases.filter(\.reducesQuality), [.reduceQuality])
+        XCTAssertEqual(SystemConditionAction.pause.ruleAction, .pause)
+        XCTAssertEqual(SystemConditionAction.stop.ruleAction, .stop)
+
+        // The on-battery mode's own name is not a condition action, so it reads as the default.
+        for key in ["lowPowerModeAction", "thermalAction", "lowBatteryAction"] {
+            defaults.set("reducedQuality", forKey: "WallpaperMachine.\(key)")
+        }
+        let confused = PlaybackPreferences(defaults: defaults)
+        XCTAssertEqual(confused.lowPowerModeAction, .keepRunning)
+        XCTAssertEqual(confused.thermalAction, .keepRunning)
+        XCTAssertEqual(confused.lowBatteryAction, .keepRunning)
+    }
+
+    func testQualityReductionsNameHeatFirstThenLowPowerModeThenALowBattery() {
+        XCTAssertEqual([QualityReduction.lowBattery, .heat, .lowPowerMode].sorted(), [.heat, .lowPowerMode, .lowBattery])
+        XCTAssertEqual(QualityReduction.allCases.sorted(), QualityReduction.allCases)
+    }
+
     func testCorruptLowBatteryValuesFallBackToDefaults() {
         defaults.set("nap", forKey: "WallpaperMachine.lowBatteryAction")
         for stored: Any in [15, 0, -20, 20.5, "30", true, Data("20".utf8)] {
