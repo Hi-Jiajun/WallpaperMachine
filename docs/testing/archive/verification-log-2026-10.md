@@ -9,6 +9,15 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-13 — Switch to stop writing the macOS desktop picture
+
+Settings › General › Use the wallpaper as the macOS desktop picture, on by default. Off, poster writes stop, the user's own picture is put back with the quit's verified restore, and a poster left behind is repaired at launch. Commit 1 of the desktop-menubar lane, checked in an isolated worktree on macOS 27.0.1.
+
+- `python3 scripts/test.py --only PlaybackPreferencesTests --only DesktopWallpaperTests --only WebPanelGeneralSettingsTests --only LockScreenWallpaperServiceTests` — 133 passed, 0 failed, 0 skipped
+- All Desktop, LockScreen, Panel and Lifecycle test classes — 839 passed, 0 failed, 0 skipped; `scripts/tests/test_panel_localization.py` passes with the new catalog keys
+- Mutation check: with the settings.js row removed, the offscreen row test fails and the rest pass.
+- Not run: the full gate, a Release build, any desktop run. Unverified: what Mission Control and the Spaces bar show after the switch goes off and on, the macOS 27 read-back during the 25-attempt restore, enabling Animate lock screen with the switch off, and the relaunch repair; `AppDelegate`'s decision of when to restore is wiring that no unit test reaches. See the new rows in manual-smoke.md.
+
 ## 2026-10-13 — Native video wake and resume repair
 
 A stalled native video pipeline is now kicked, rebuilt once and then handed to Compatibility, after a resume, a wake or an unlock. Commit `fix(native-video): repair a stalled pipeline after a resume, wake or unlock`, checked in an isolated worktree on macOS 27.0.1.

@@ -154,8 +154,8 @@ list is built, never per frame, and the scene resolves its bindings when it load
 and on a property change. A rule that is always false, such as a bare `false`,
 hides its property for good, as Wallpaper Engine does.
 
-Audio, scaling mode and frame rate take effect immediately. Everything else is
-pending until committed:
+Audio, scaling mode, position and frame rate take effect immediately. Everything
+else is pending until committed:
 
 - **Apply changes** saves pending properties and scaling factors.
 - **Revert** discards pending changes.
@@ -230,6 +230,39 @@ reach the running page through properties without resetting its document. An
 app-generated page from an earlier template is upgraded once, and only if its
 provenance, resources and exact unmodified template match; authored or modified
 HTML is never rewritten.
+
+### Display position
+
+A scene or video wallpaper's card for each display, in the inspector's **Displays**
+section, has **Horizontal position** and **Vertical position** sliders (0 to 100%, 50% is
+the middle) and a **Center** link, below the frame rate. They decide where the wallpaper
+sits when the display leaves room around it (Fit, Original size, or a Scale factor
+below 1) and which part stays in view when it is larger than the display (Fill, or a
+factor above 1). Nothing moves when it already fits the display exactly, and an axis
+with no room to spare does not move; the note under the sliders says so. The block is
+not offered for a web wallpaper (an image page keeps **Position on screen**, above),
+and a mirror display has no card, because it is always centred.
+
+Like the scaling mode, and unlike the Scale factor beside it, a position is not a
+draft. A slider sends its value when it is released, or at each keyboard step, and
+only the axis that moved, so a horizontal drag never disturbs the vertical position.
+The running wallpaper follows without restarting, and the position is saved at once
+for that wallpaper on that display. **Apply changes** does not wait for it and
+**Revert** does not undo it. **Center** puts both axes at 50% and is disabled while
+they already are. A request outside 0 to 100% or not a number is refused instead of
+being moved to the nearest edge. The command waits its turn behind the user's other
+commands, such as a wallpaper switch still running. After a move the Mission Control
+picture is taken again ([desktop picture](desktop-picture.md#when-a-poster-is-taken)),
+and the lock screen and screen saver draw the wallpaper at the same position
+([lock screen](lock-screen.md#where-the-picture-sits)).
+
+Both scene renderers honour the position, and so does Compatibility video playback,
+which draws a video as a one-texture scene. The native video player draws a video
+centred whatever the position says. A video it draws shows a note saying so, with a
+link to Performance settings, where choosing Compatibility for **Video playback** lets
+the position apply; the sliders stay available, and the saved position still reaches
+the lock screen. The page learns which displays the native player draws from the
+running backend reports, so a wallpaper with no report yet shows the plain note.
 
 ### Compatibility check
 

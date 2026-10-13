@@ -176,7 +176,7 @@ async function send(action, args = {}) {
   if (!bridge) { localError = t('The native connection is unavailable. Open this panel in WallpaperMachine, then reconnect.'); renderError(); throw new Error(localError); }
   const key = actionKey(action, args);
   if (pending.has(key)) {
-    if (['property', 'wallpaperSetting', 'displayConfig', 'workshopSearch', 'pixivSearch', 'navigate', 'target'].includes(action)) {
+    if (['property', 'wallpaperSetting', 'displayConfig', 'displayPosition', 'workshopSearch', 'pixivSearch', 'navigate', 'target'].includes(action)) {
       // The earlier request reported its own failure; this newer value is still sent.
       await inFlight.get(key)?.catch(() => {});
       return send(action, args);
@@ -852,6 +852,23 @@ function renderAudioAndMedia(options, lock) {
     + (control ? note(t('Output controls are separate from system-audio response.')) + status(volumeStatus) + status(muteStatus) : '')
     + '</div></details>';
 }
+// Where a scene or video sits on one display: the room the display leaves around it (bars) or the
+// overflow it crops is split by a fraction per axis. Native saves the position the moment a
+// slider settles and the wallpaper follows without restarting, so unlike the scale factor beside it
+// this is not a draft and Apply does not wait for it. The percentages are only for reading;
+// native takes fractions. The sliders stay enabled while a command runs: their changes queue, and
+// a disabled slider would drop the keyboard focus the next arrow key needs. A still image page is
+// kind Web and keeps its own Position on screen, and a web wallpaper has nothing to move.
+function positionRows(options, display, index) {
+  if (!['Scene', 'Video'].includes(options.kind) || !options.supported) return '';
+  const fraction = (value) => Number.isFinite(Number(value)) ? Math.min(1, Math.max(0, Number(value))) : 0.5;
+  const x = fraction(display.panX), y = fraction(display.panY);
+  const slider = (axis, label, value) => `<div class="field" ${keyAttr(`position-${axis}`)}><label for="position-${axis}-${index}">${escapeHTML(label)}</label><div class="range-field"><input id="position-${axis}-${index}" type="range" min="0" max="100" step="1" value="${Math.round(value * 100)}" data-change="displayPosition" data-axis="${axis}" data-id="${escapeHTML(options.id)}" data-display-id="${escapeHTML(display.id)}"><output>${Math.round(value * 100)}%</output></div></div>`;
+  const note = display.nativePlayer
+    ? `${escapeHTML(t('This video is drawn by the native video player, which keeps it centered. Choose Compatibility for Video playback in Performance settings to move it.'))} ${button(t('Open Performance'), 'openPerformance', {}, { className: 'link' })}`
+    : escapeHTML(t('Choose which part of the wallpaper stays in view when it is larger than the display, or where it sits when it is smaller. Nothing moves when it already fits the display exactly.'));
+  return `<div class="position-rows" ${keyAttr(`position-${display.id}`)}>${slider('x', t('Horizontal position'), x)}${slider('y', t('Vertical position'), y)}<div class="actions">${button(t('Center'), 'displayPositionReset', { id: options.id, displayID: display.id }, { className: 'link', icon: 'refresh', disabled: x === 0.5 && y === 0.5, title: t('Center the wallpaper on the display') })}</div><p class="muted field-note"><small>${note}</small></p></div>`;
+}
 // Displays and collections sit above the properties, which can run very long; Displays
 // opens by itself once the wallpaper is on a display.
 function renderOptions(options, collectionsSection = '') {
@@ -871,7 +888,7 @@ function renderOptions(options, collectionsSection = '') {
       <div class="field inspector-row"><label for="wallpaper-volume">${icon('volume')}${escapeHTML(t('Volume'))}</label><div class="range-field"><input id="wallpaper-volume" type="range" min="0" max="100" step="1" value="${Number(options.volume) * 100}" data-change="wallpaperSetting" data-id="${escapeHTML(id)}" data-setting="volume"${disabled(lock || options.muted)}><output>${Math.round(options.volume * 100)}%</output></div></div>
       ${renderAudioAndMedia(options, lock)}
     </div></details></section>
-    <section class="inspector-section"><details${options.displays?.length ? ' open' : ''} ${keyAttr(`displays-${id}`)}><summary>${escapeHTML(t('Displays'))}${icon('chevronRight', 14)}</summary><div class="section-content">${(options.displays || []).map(display => `<details class="display-options" open ${keyAttr(display.id)}><summary>${escapeHTML(display.title)}${icon('chevronRight', 13)}</summary><div class="section-content"><label class="check-label"><input type="checkbox" data-change="displayConfig" data-id="${escapeHTML(id)}" data-display-id="${escapeHTML(display.id)}" data-setting="enabled"${checked(display.enabled)}${disabled(lock)}>${escapeHTML(t('Enabled'))}</label><label class="field">${escapeHTML(t('Scaling mode'))}<select data-change="displayConfig" data-id="${escapeHTML(id)}" data-display-id="${escapeHTML(display.id)}" data-setting="scalingMode"${disabled(lock)}>${selectOptions([['none', t('Original size')], ['stretch', t('Stretch')], ['match', t('Fit')], ['fill', t('Fill')]], display.scalingMode)}</select></label><label class="field">${escapeHTML(t('Scale factor'))}<input type="number" min="${Number.MIN_VALUE}" step="any" value="${Number(display.scalingFactor)}" data-change="displayConfig" data-id="${escapeHTML(id)}" data-display-id="${escapeHTML(display.id)}" data-setting="scalingFactor"${disabled(lock)}></label><label class="field">${escapeHTML(t('Frame rate'))}<input type="number" min="1" max="${Number(display.maxFps) || 240}" step="1" value="${Number(display.fps)}" data-change="displayConfig" data-id="${escapeHTML(id)}" data-display-id="${escapeHTML(display.id)}" data-setting="fps"${disabled(lock)}></label>${(() => { const limited = performanceLimitedFps(display.fps, state.settings || {}); return limited == null ? '' : `<p class="muted field-note"><small>${escapeHTML(t('Limited to {fps} fps by Performance settings', { fps: limited }))}</small> ${button(t('Open Performance'), 'openPerformance', {}, { className: 'link' })}</p>`; })()}${button(t('Remove from display'), 'eject', { id, displayID: display.id }, { className: 'link', disabled: lock })}</div></details>`).join('') || `<p class="muted">${escapeHTML(t('Apply this wallpaper to a display to configure playback.'))}</p>`}</div></details></section>${collectionsSection}
+    <section class="inspector-section"><details${options.displays?.length ? ' open' : ''} ${keyAttr(`displays-${id}`)}><summary>${escapeHTML(t('Displays'))}${icon('chevronRight', 14)}</summary><div class="section-content">${(options.displays || []).map((display, index) => `<details class="display-options" open ${keyAttr(display.id)}><summary>${escapeHTML(display.title)}${icon('chevronRight', 13)}</summary><div class="section-content"><label class="check-label"><input type="checkbox" data-change="displayConfig" data-id="${escapeHTML(id)}" data-display-id="${escapeHTML(display.id)}" data-setting="enabled"${checked(display.enabled)}${disabled(lock)}>${escapeHTML(t('Enabled'))}</label><label class="field">${escapeHTML(t('Scaling mode'))}<select data-change="displayConfig" data-id="${escapeHTML(id)}" data-display-id="${escapeHTML(display.id)}" data-setting="scalingMode"${disabled(lock)}>${selectOptions([['none', t('Original size')], ['stretch', t('Stretch')], ['match', t('Fit')], ['fill', t('Fill')]], display.scalingMode)}</select></label><label class="field">${escapeHTML(t('Scale factor'))}<input type="number" min="${Number.MIN_VALUE}" step="any" value="${Number(display.scalingFactor)}" data-change="displayConfig" data-id="${escapeHTML(id)}" data-display-id="${escapeHTML(display.id)}" data-setting="scalingFactor"${disabled(lock)}></label><label class="field">${escapeHTML(t('Frame rate'))}<input type="number" min="1" max="${Number(display.maxFps) || 240}" step="1" value="${Number(display.fps)}" data-change="displayConfig" data-id="${escapeHTML(id)}" data-display-id="${escapeHTML(display.id)}" data-setting="fps"${disabled(lock)}></label>${(() => { const limited = performanceLimitedFps(display.fps, state.settings || {}); return limited == null ? '' : `<p class="muted field-note"><small>${escapeHTML(t('Limited to {fps} fps by Performance settings', { fps: limited }))}</small> ${button(t('Open Performance'), 'openPerformance', {}, { className: 'link' })}</p>`; })()}${positionRows(options, display, index)}${button(t('Remove from display'), 'eject', { id, displayID: display.id }, { className: 'link', disabled: lock })}</div></details>`).join('') || `<p class="muted">${escapeHTML(t('Apply this wallpaper to a display to configure playback.'))}</p>`}</div></details></section>${collectionsSection}
     ${properties ? `<section class="inspector-section"><details open ${keyAttr(`properties-${id}`)}><summary>${escapeHTML(t('Wallpaper properties'))}${icon('chevronRight', 14)}</summary><div class="section-content wallpaper-properties">${presets.section({ id }, { dirty })}<div class="property-tools" ${keyAttr(`property-tools-${id}`)}>${restoreAll}</div>${properties}</div></details></section>` : ''}`;
 }
 function renderInspectorSave(options) {
@@ -1539,7 +1556,7 @@ document.addEventListener('input', event => {
   const element = event.target;
   if (element.closest('#settings-content, #welcome')) return;
   if (collections.handleInput(element) || presets.handleInput(element) || placement.handleInput(element)) return;
-  if (element.type === 'range') { const output = element.parentElement.querySelector('output'); if (output) output.textContent = element.dataset.setting === 'volume' ? `${element.value}%` : element.value; }
+  if (element.type === 'range') { const output = element.parentElement.querySelector('output'); if (output) output.textContent = element.dataset.setting === 'volume' || element.dataset.change === 'displayPosition' ? `${element.value}%` : element.value; }
   if (element.dataset.input === 'property') { drafts.set(draftKey(element.dataset.id, element.dataset.propertyId), element.value); renderInspector(false); }
   if (element.dataset.input === 'account' && dialogAccount) { dialogAccount.account = element.value; renderDialog(); }
   if (element.dataset.input === 'pixivSearch' && state?.page === 'pixiv') pixiv.handleInput(element);
@@ -1566,6 +1583,11 @@ document.addEventListener('change', event => {
   if (change === 'placement') { run(placement.handleChange(element)); return; }
   if (change === 'target') run(send('target', { id: value }));
   else if (change === 'property') run(commitProperty(element));
+  else if (change === 'displayPosition') {
+    // Only the moved axis is sent, so a horizontal drag never disturbs the vertical position.
+    const axis = element.dataset.axis;
+    if (axis === 'x' || axis === 'y') run(send('displayPosition', { id: element.dataset.id, displayID: element.dataset.displayId, [axis]: value / 100 }));
+  }
   else if (change === 'wallpaperSetting' || change === 'displayConfig') {
     if (element.validity && !element.validity.valid) { element.reportValidity(); return; }
     const args = { id: element.dataset.id, key: element.dataset.setting, value };

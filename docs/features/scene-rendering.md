@@ -98,8 +98,10 @@ position to the app in each display's row of the wallpaper options (a moved disp
 offers Restore defaults) and in the lock-screen and screen-saver export, which comes from
 the saved configuration and so never holds a draft. The export carries it for a scene and
 for a video the desktop plays natively; a web page and a mirror display are exported
-centred. The app does not offer it yet. The lock-screen and screen-saver extension draws a
-scene or video at the exported position ([lock screen](lock-screen.md#where-the-picture-sits)).
+centred. The inspector's Displays section offers it for scenes and videos
+([display position](wallpaper-properties.md#display-position)). The lock-screen and
+screen-saver extension draws a scene or video at the exported position
+([lock screen](lock-screen.md#where-the-picture-sits)).
 
 Compiled work is reused across launches where it can be. A scene's translated Metal
 shaders, their reflection and their binding plans are stored in that scene's shader

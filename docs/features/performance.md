@@ -499,7 +499,10 @@ pixel per point (a 1920x1080 clip covers 1920x1080 points of a Retina display, n
 the picture centred and anything outside the display cropped. A factor that is not a
 positive number counts as 1. Changing the mode or factor moves the running picture;
 it does not reopen the clip or read the file again. The desktop picture shown in
-other Spaces and Mission Control is drawn with the same layout. One known difference:
+other Spaces and Mission Control is drawn with the same layout. The wallpaper's
+position on the display is not honoured: the native player always centres, and the
+inspector's Position block says so ([display position](wallpaper-properties.md#display-position)).
+The lock screen and screen saver always use Compatibility and do apply it. One known difference:
 the native player applies a clip's pixel aspect ratio to the picture's size and
 Compatibility ignores it, so an anamorphic clip is laid out by its displayed size
 here. Layer placement is in `NativeVideoLayout`; its expected rectangles come from

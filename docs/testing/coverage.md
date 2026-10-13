@@ -943,6 +943,19 @@ follows the developer's in-app language choice.
 - `ControlPanelRestoreAllTests` — Restore all defaults through the live panel: the
   click reaches the native action, the page shows the defaults the bridge staged
   with Apply changes offered, and text typed but not sent is dropped.
+- `WebPanelDisplayPositionTests` — the inspector's Position sliders. The requests: one axis reaches
+  the bridge alone and the other keeps its saved value, a request naming no axis is refused, so
+  is a value outside 0 to 1, a boolean, text, `NaN`, an infinity or `null` (the bridge sees no call
+  and no position moves), only a scene or video with a row for that display can be moved, **Center**
+  sends 50% on both axes, a committed move reports `onDisplayFramingChanged` once and a move the bridge
+  refused does not, and a move waits behind the command that is running. The snapshot: each display's
+  `panX` and `panY`, and `nativePlayer` only for a display whose backend report for that wallpaper
+  names the native player. The page, offscreen: a scene draws the two sliders and **Center** at the
+  saved percentages, a change event posts the moved axis alone and the page follows the bridge's
+  answer, a web wallpaper draws none, and a video drawn by the native player shows its note beside
+  sliders that stay enabled. Not covered: that the wallpaper visibly moves on a display, the slider's feel,
+  the layout at the narrowest width, VoiceOver and the Mission Control picture being retaken
+  (all on [manual-smoke.md](manual-smoke.md)).
 - `ControlPanelWindowSizingTests` — size floor, key-view loop, full-screen layout
   keeping navigation reachable and restoring windowed bounds, WebKit's color
   picker anchor following its control, the move-to-active-Space collection

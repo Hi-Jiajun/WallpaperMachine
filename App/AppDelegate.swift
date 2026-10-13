@@ -234,6 +234,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             store.invalidateHostAsset = { [weak webHost] wallpaperID, propertyID in
                 webHost?.invalidateAsset(wallpaperID: wallpaperID, propertyID: propertyID)
             }
+            // Mission Control shows the desktop picture, so a wallpaper moved on a display needs
+            // it retaken; the sync coalesces requests that arrive close together.
+            store.onDisplayFramingChanged = { [weak self] _, _ in self?.schedulePosterRefresh() }
             store.sceneMediaAvailability = { [weak mediaSession] in
                 mediaSession?.availability ?? .unavailable(reason: String(localized: "Media integration has not been started."))
             }

@@ -1411,4 +1411,10 @@ export default {
   'A wallpapermachine:// link does the same from a browser, a script or another app. Previous, Next and Apply act on the target display, or on the one a display= value names; an id is the wallpaper’s folder name in your library.': 'wallpapermachine://リンクを使えば、ブラウザ、スクリプト、別のアプリからも同じ操作ができます。前へ・次へ・適用は対象ディスプレイ、またはdisplay=で指定したディスプレイに作用します。idはライブラリ内の壁紙フォルダ名です。',
   'Preview wallpaper': '壁紙をプレビュー',
   'Open a live preview without changing your desktop': 'デスクトップを変更せずにライブプレビューを開く',
+
+  // Wallpaper position on a display (inspector)
+  'Center': '中央に配置',
+  'Center the wallpaper on the display': '壁紙をディスプレイの中央に配置します',
+  'Choose which part of the wallpaper stays in view when it is larger than the display, or where it sits when it is smaller. Nothing moves when it already fits the display exactly.': '壁紙がディスプレイより大きいときは表示する部分を、小さいときは置く位置を選びます。ディスプレイにぴったり収まる壁紙は動きません。',
+  'This video is drawn by the native video player, which keeps it centered. Choose Compatibility for Video playback in Performance settings to move it.': 'このビデオはネイティブのビデオプレーヤーで描画されるため、常に中央に表示されます。動かすには、パフォーマンス設定の「ビデオ再生」で「互換モード」を選んでください。',
 };

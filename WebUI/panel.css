@@ -619,6 +619,7 @@ button.property-reset { width: var(--control-height-compact); min-width: var(--c
 .display-options { border-top: 1px solid var(--line); padding-top: 10px; }
 .display-options:first-child { border-top: 0; padding-top: 0; }
 .display-options .section-content { display: grid; gap: 12px; padding-top: 12px; }
+.position-rows { display: grid; gap: 10px; }
 .empty-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; gap: 12px; }
 .empty-state h1 { font-size: 18px; }
 .empty-state p { max-width: 44ch; color: var(--muted); }

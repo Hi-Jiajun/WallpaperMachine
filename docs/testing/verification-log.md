@@ -25,6 +25,17 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-13 — Per-display wallpaper position
+
+Commit 7 of the framing lane: the inspector's Position sliders and Center for scene and video wallpapers. Commits 1-6 had already carried the position through the engine, the bridge and the lock-screen export; commit 8 follows the sliders live.
+
+- `python3 scripts/test.py --only WebPanelDisplayPositionTests` — exit 0; 10 passed
+- `python3 scripts/test.py` with 23 `--only` classes (the panel suites, UserCommandQueueTests, WallpaperActivationRecoveryTests, ActivationLogTests) — exit 0; 198 passed, 0 failed
+- Script tests (the 20 modules the gate runs first, run directly) — exit 0, including test_panel_localization: the ja, zh-Hans and zh-Hant catalogs carry the four new strings
+- Mutation checks — eleven deliberate breakages (dead change handler, sliders hidden for scenes, request naming no axis accepted, clamping instead of refusing, no scene/video and display check, no change notice, native flag for any backend, reset sending one axis, move not queued, both axes sent, native note dropped) each failed the new class, which passed again once they were undone
+- Not run: the bare `python3 scripts/test.py` gate, `check_rust.py` and `check_renderer.py` (no Rust or C++ change), a Release build
+- Unverified (desktop only): the wallpaper visibly moving under the sliders on a real display on both scene renderers, slider feel and layout at the narrowest panel width, VoiceOver reading, the Mission Control picture being retaken after a move
+
 ## 2026-10-13 — Web host takes the switch hold
 
 A replacement web page's window opens with the picture it replaces over it and drops it 500 ms after the page has loaded, or at once when it fails. A window closed with no web successor ends only the veil it carries. Targeted run only: the lane runs the full gate once, at its end.
@@ -111,12 +122,3 @@ A third How often choice for rotating playlists, Each time the Mac is unlocked (
 - Every module under `scripts/tests/` passes, including the new WebUI catalog keys in zh-Hans, zh-Hant and ja.
 - Mutation checks: with Change now no longer answering a waiting unlock, or with the 30 second window never expiring, the matching scheduler test fails and the rest pass.
 - Not run: the full gate, a Release build, any desktop run. Unverified: the order of the operating system's unlock events against a display waking, an unlock with a second display re-enumerating, and the visible change after unlock; the scheduler logic runs under fakes. See the new row in manual-smoke.md.
-
-## 2026-10-13 — Switch to stop writing the macOS desktop picture
-
-Settings › General › Use the wallpaper as the macOS desktop picture, on by default. Off, poster writes stop, the user's own picture is put back with the quit's verified restore, and a poster left behind is repaired at launch. Commit 1 of the desktop-menubar lane, checked in an isolated worktree on macOS 27.0.1.
-
-- `python3 scripts/test.py --only PlaybackPreferencesTests --only DesktopWallpaperTests --only WebPanelGeneralSettingsTests --only LockScreenWallpaperServiceTests` — 133 passed, 0 failed, 0 skipped
-- All Desktop, LockScreen, Panel and Lifecycle test classes — 839 passed, 0 failed, 0 skipped; `scripts/tests/test_panel_localization.py` passes with the new catalog keys
-- Mutation check: with the settings.js row removed, the offscreen row test fails and the rest pass.
-- Not run: the full gate, a Release build, any desktop run. Unverified: what Mission Control and the Spaces bar show after the switch goes off and on, the macOS 27 read-back during the 25-attempt restore, enabling Animate lock screen with the switch off, and the relaunch repair; `AppDelegate`'s decision of when to restore is wiring that no unit test reaches. See the new rows in manual-smoke.md.

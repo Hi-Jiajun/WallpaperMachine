@@ -100,6 +100,10 @@ Neither path resumes a paused video.
   settings that fade in are missed by the first frame. A wallpaper that resumes after
   a pause, a cover or display sleep settles the same way (`presentationResumed`),
   unless its poster is still fresh (below).
+- **A wallpaper is moved on a display.** The inspector's Position sliders and **Center**
+  change what the final pixels show, so a committed move requests the same capture as a
+  new wallpaper (`BridgeStore.onDisplayFramingChanged`); moves that arrive close together
+  share the 500 ms refresh interval, and a move the bridge refused requests nothing.
 - **A Space change or wake.** The existing poster is applied at once, so a new Space
   has one immediately. A fresh frame is requested only for a surface whose poster has
   aged (see the next item). Desktops that kept refusing posters are tried again, and

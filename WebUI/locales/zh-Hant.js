@@ -1411,4 +1411,10 @@ export default {
   'A wallpapermachine:// link does the same from a browser, a script or another app. Previous, Next and Apply act on the target display, or on the one a display= value names; an id is the wallpaper’s folder name in your library.': '瀏覽器、腳本或其他 App 可以透過 wallpapermachine:// 連結執行相同操作。上一張、下一張和套用作用於目標顯示器，或 display= 指定的顯示器；id 是桌布在資料庫中的資料夾名稱。',
   'Preview wallpaper': '預覽桌布',
   'Open a live preview without changing your desktop': '開啟動態預覽，不變更桌面',
+
+  // Wallpaper position on a display (inspector)
+  'Center': '置中',
+  'Center the wallpaper on the display': '將桌布在顯示器上置中',
+  'Choose which part of the wallpaper stays in view when it is larger than the display, or where it sits when it is smaller. Nothing moves when it already fits the display exactly.': '桌布比顯示器大時，選擇要保留哪一部分在畫面內；比顯示器小時，選擇它擺放的位置。桌布與顯示器完全吻合時不會移動。',
+  'This video is drawn by the native video player, which keeps it centered. Choose Compatibility for Video playback in Performance settings to move it.': '此影片由原生影片播放器繪製，一律置中顯示。若要移動，請在「效能」設定中將「影片播放」選為「相容模式」。',
 };

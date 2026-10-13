@@ -16,6 +16,7 @@ extension WebPanelController {
     if try await performCompatibility(action, request: request) { return }
     if try await performLetterbox(action, request: request) { return }
     if try await performImagePlacement(action, request: request) { return }
+    if try await performDisplayPosition(action, request: request) { return }
     switch action {
     case "ready":
       deliveredLibraryRevision = nil

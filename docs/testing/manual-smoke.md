@@ -225,7 +225,7 @@ reuse, or visual behavior, which is why these items are manual.
 - [ ] Leave invalid scaling text, refresh or change routes, then return: the
       text is preserved and Apply changes is disabled. Return stages only that
       field, not unrelated properties.
-- [ ] Check immediate audio/FPS/scaling-mode semantics versus pending
+- [ ] Check immediate audio/FPS/scaling-mode/position semantics versus pending
       Apply/Revert.
 - [ ] Check the Language, Clock Location and Bar Style property menus, and that
       language-row changes survive reopening the app.
@@ -245,6 +245,24 @@ reuse, or visual behavior, which is why these items are manual.
       dragging the window to other shapes keeps the proportions without
       stretching. Previewing again for a 16:9 display reshapes the stage without
       resizing the window.
+- [ ] Wallpaper position ([display position](../features/wallpaper-properties.md#display-position)):
+      show a scene or video whose shape differs from the display with **Fill**, then drag
+      **Horizontal position** and **Vertical position** across 0 to 100%. The visible part
+      slides on the display without the wallpaper restarting, once on each scene renderer
+      (Compatibility and Native Metal preferred) and with Compatibility video playback. With
+      **Fit** and a **Scale factor** below 1 the picture slides inside the bars. **Center**
+      puts it back and is disabled while both sliders read 50%. With **Stretch** at a factor
+      of 1, or a wallpaper that exactly fits, nothing moves.
+- [ ] The Position sliders by keyboard and screen reader: arrow keys on a focused slider move
+      it a step at a time and keep the focus, VoiceOver reads each slider's name and
+      percentage and **Center**, and at the narrowest panel width the sliders, the **Center**
+      link and the note do not overflow or overlap.
+- [ ] Position is remembered: relaunch and it returns; the same wallpaper on another display and
+      another wallpaper on the same display keep their own; the lock screen and screen saver
+      (when enabled) draw it; the Mission Control picture is retaken after a move.
+- [ ] With **Video playback** on Native video preferred and a supported clip, the Position
+      block shows the native-player note and **Open Performance** and the video stays
+      centred; choosing Compatibility lets the sliders move it.
 
 ## Wallpaper switching
 

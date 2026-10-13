@@ -38,6 +38,9 @@ final class BridgeStore {
     /// display layout's recovery, a Focus restore), which the user did not ask for.
     @ObservationIgnored var onUserWallpaperRemoved: (@MainActor (_ wallpaperID: String, _ displayID: String) -> Void)?
     @ObservationIgnored var openPreview: (@MainActor (WallpaperPreviewSession.Selection) -> Void)?
+    /// Runs after a wallpaper was moved on a display and the move is saved, so whatever
+    /// shows a picture of the desktop can retake it. Not run when the bridge refused the move.
+    @ObservationIgnored var onDisplayFramingChanged: (@MainActor (_ wallpaperID: String, _ displayID: String) -> Void)?
     private(set) var hostWallpaperStates: [String: HostWallpaperState] = [:]
     @ObservationIgnored private var hostStartupTask: Task<Void, Never>?
     @ObservationIgnored var retryHostWallpaper: (@MainActor (String, UInt32) -> Void)?
@@ -696,6 +699,30 @@ final class BridgeStore {
             mode: mode
         )
         apply(bundle)
+    }
+
+    /// Moves a wallpaper on one display: each axis is a fraction from 0 (left, top) to 1
+    /// (right, bottom) of the room the display leaves around it, and an axis passed as `nil`
+    /// keeps its saved value. Like the scaling mode and unlike the scale factor, the running
+    /// scene follows and the position is saved at once, so Apply and Revert neither wait
+    /// for it nor undo it.
+    func setDisplayPositionAsync(
+        wallpaperId: String,
+        displayId: String,
+        panX: Double?,
+        panY: Double?
+    ) async throws {
+        beginWallpaperEdit(wallpaperId)
+        defer { endWallpaperEdit(wallpaperId) }
+        let bundle = try await bridge.setDisplayPosition(
+            wallpaperId: wallpaperId,
+            displayId: displayId,
+            panX: panX,
+            panY: panY
+        )
+        apply(bundle)
+        AppLog.debug("display position: \(wallpaperId) on \(displayId), x \(panX.map { String($0) } ?? "kept"), y \(panY.map { String($0) } ?? "kept")")
+        onDisplayFramingChanged?(wallpaperId, displayId)
     }
 
     func editScalingFactorAsync(wallpaperId: String, displayId: String, factor: Double) async throws {

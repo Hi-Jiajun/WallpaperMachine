@@ -427,6 +427,12 @@ below the saved frame rate, the field notes `Limited to {fps} fps by Performance
 settings` and can open Settings → Performance; the inspector's per-display
 frame-rate field shows the same note. Saved frame rates are never rewritten.
 
+The inspector's per-display sections also hold **Horizontal position**, **Vertical
+position** and **Center** for scene and video wallpapers: where the wallpaper sits on
+that display, saved at once, per wallpaper and per display (see
+[display position](wallpaper-properties.md#display-position)). They are not on the
+Settings → Displays page, and a mirror display is always centred.
+
 **Copy or swap wallpapers** under an independent display transfers its current
 wallpaper to another eligible screen or exchanges their assignments, and
 **Apply to all displays** in the inspector puts one wallpaper on every eligible

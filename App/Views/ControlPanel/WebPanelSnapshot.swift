@@ -643,11 +643,16 @@ extension WebPanelController {
       ?? (libraryError == dismissedLibraryError ? nil : libraryError)
       ?? (store.latestBridgeErrorRevision > dismissedErrorRevision
         ? store.latestBridgeErrorMessage : nil)
-    let options: Any? = store.wallpaperOptionsSnapshot.map {
-      Self.options(
-        $0, titles: titles, assets: measuredAssets(for: $0),
-        errors: propertyPathErrors[$0.wallpaperId] ?? [:],
-        delivery: store.webWallpaperDeliveryStatus?(), sceneMedia: store.sceneMediaAvailability?())
+    let options: Any? = store.wallpaperOptionsSnapshot.map { value in
+      // The displays macOS's own video player draws this wallpaper on, which cannot be moved.
+      let nativePlayerDisplays = Set(
+        settings.videoBackends.filter { $0.wallpaperId == value.wallpaperId && $0.backend == "native" }
+          .map(\.displayId))
+      return Self.options(
+        value, titles: titles, assets: measuredAssets(for: value),
+        errors: propertyPathErrors[value.wallpaperId] ?? [:],
+        delivery: store.webWallpaperDeliveryStatus?(), sceneMedia: store.sceneMediaAvailability?(),
+        nativePlayerDisplays: nativePlayerDisplays)
     }
     return [
       "version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
@@ -903,7 +908,8 @@ extension WebPanelController {
     _ value: BridgeWallpaperOptionsSnapshot, titles: ResolvedDisplayTitles,
     assets: [String: WebPanelPropertyAsset], errors: [String: String],
     delivery: WebWallpaperHost.DeliveryStatus? = nil,
-    sceneMedia: SystemMediaAvailability? = nil
+    sceneMedia: SystemMediaAvailability? = nil,
+    nativePlayerDisplays: Set<UInt32> = []
   ) -> [String: Any] {
     let null = NSNull()
     // Only a running host can say whether anything is being delivered. With no
@@ -951,10 +957,15 @@ extension WebPanelController {
         !$0.enabled && $0.dirty && $0.kind != .file && $0.kind != .directory
       },
       "displays": value.displayConfigurations.map { row -> [String: Any] in
-        [
+        let physicalID = ResolvedDisplayTitles.liveDisplayID(row.displayId, title: row.title)
+        return [
           "id": row.displayId, "title": titles.title(row.title, displayId: row.displayId),
           "enabled": row.enabled,
           "scalingMode": scaling(row.scalingMode), "scalingFactor": row.scalingFactor,
+          // Where the wallpaper sits on this display, as fractions of the room around it. The
+          // native video player draws a video centred whatever these say, so the page is told.
+          "panX": row.framing.panX, "panY": row.framing.panY,
+          "nativePlayer": physicalID.map { nativePlayerDisplays.contains($0) } ?? false,
           "fps": row.targetFps, "maxFps": row.maxFps,
         ]
       },
