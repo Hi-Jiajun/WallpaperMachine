@@ -213,6 +213,19 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   `PropertyScriptProgram::Evaluate` keeps the current value when a script throws,
   returns `undefined`, or returns an object for a boolean, so a hidden helper
   layer cannot be revealed by accident.
+- **User-bound image colour** — `SceneSchema.UserBoundImageColourTintsEveryLayerMaterialAndFollowsTheProperty`
+  and `.InstanceColourSurvivesUnlessARuntimeImageTakesTheSlot`. An image layer's
+  `color` of `{"user": …, "value": …}` is the property's value; `value` is only
+  its default, so a Workshop preset or a saved colour must replace it (issue #43:
+  a preset's black drew in the base's red). `ParseImageObj` resolves it once
+  before building `g_Color`/`g_Color4`, then `BindMaterialColor` feeds the layer's
+  own material, every effect pass and a compose layer's passthrough from one
+  value, keeping each `g_Color4` alpha. It is a listener, so it costs nothing per
+  frame and runs only when the property changes. A scripted `color` is
+  deliberately not bound: `DynamicValue` notifies on every update, so a binding
+  would overwrite what a script that writes `thisLayer.color` and returns nothing
+  just set. A layer whose placeholder a runtime image replaces drops a bound
+  colour as it drops an authored one.
 - **User properties and interactive scenes** — `applyUserProperties` runs once
   initially, then only for changed properties, after the whole property set has
   been refreshed. Exercise clock clicks and hidden-helper enter/leave through

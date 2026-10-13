@@ -374,6 +374,15 @@ void ApplyMaterialAlpha(SceneMaterial& material, float alpha) {
     values["g_Color4"] = color;
 }
 
+void ApplyMaterialColor(SceneMaterial& material, const Eigen::Vector3f& color) {
+    auto& values = material.customShader.constValues;
+    const auto color4 = values.find("g_Color4");
+    const float alpha = color4 != values.end() && color4->second.size() > 3
+                            ? color4->second[3] : 1.0f;
+    values["g_Color"] = std::array<float, 3> { color.x(), color.y(), color.z() };
+    values["g_Color4"] = std::array<float, 4> { color.x(), color.y(), color.z(), alpha };
+}
+
 ShaderValue ShaderValueFromDynamicValue(const DynamicValue& value) {
     switch (value.getType()) {
     case DynamicValue::Vec4: return ShaderValue(value.getVec4().data(), 4);
@@ -1551,6 +1560,18 @@ void SceneRuntimeContext::BindMaterialAlpha(std::shared_ptr<SceneMaterial> mater
     });
 }
 
+void SceneRuntimeContext::BindMaterialColor(std::vector<std::shared_ptr<SceneMaterial>> materials,
+                                            std::unique_ptr<DynamicValue> value) {
+    if (materials.empty() || value == nullptr) return;
+    RegisterDynamicValueListener(
+        std::move(value), [materials = std::move(materials)](const DynamicValue& current) {
+            const auto color = current.getVec3();
+            for (const auto& material : materials) {
+                if (material != nullptr) ApplyMaterialColor(*material, color);
+            }
+        });
+}
+
 std::shared_ptr<ScalarAnimationPlayback> SceneRuntimeContext::RegisterScalarAnimation(
     std::string_view layer_name, ScalarAnimation animation) {
     if (!animation.name.empty()) {
@@ -1975,12 +1996,7 @@ bool SceneRuntimeContext::SetNodeColor(std::string_view name, const Eigen::Vecto
     const auto node = m_nodes.find(std::string(name));
     if (node == m_nodes.end() || node->second == nullptr || node->second->Mesh() == nullptr ||
         node->second->Mesh()->Material() == nullptr) return false;
-    auto& values = node->second->Mesh()->Material()->customShader.constValues;
-    const auto color4 = values.find("g_Color4");
-    const float alpha = color4 != values.end() && color4->second.size() > 3
-                            ? color4->second[3] : 1.0f;
-    values["g_Color"] = std::array<float, 3> { color.x(), color.y(), color.z() };
-    values["g_Color4"] = std::array<float, 4> { color.x(), color.y(), color.z(), alpha };
+    ApplyMaterialColor(*node->second->Mesh()->Material(), color);
     return true;
 }
 

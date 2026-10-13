@@ -3287,7 +3287,13 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     auto registerImageNode = [&context, &wpimgobj, &spImgNode]() {
         context.layer_parent_ids[wpimgobj.id] = wpimgobj.parent_id;
     };
-    const auto registerImageAlphaAnimation = [&context, &wpimgobj, &runtime_name](std::shared_ptr<SceneMaterial> material) {
+    // A colour bound to a user property, and the materials it has to reach:
+    // every one that takes the layer's `g_Color4`, as its alpha does.
+    std::unique_ptr<DynamicValue>               user_color;
+    std::vector<std::shared_ptr<SceneMaterial>> user_color_materials;
+    const auto registerImageLayerMaterial = [&context, &wpimgobj, &runtime_name, &user_color,
+                                             &user_color_materials](std::shared_ptr<SceneMaterial> material) {
+        if (user_color != nullptr && material != nullptr) user_color_materials.push_back(material);
         RegisterLayerAlpha(context, runtime_name, wpimgobj.alpha_setting, wpimgobj.alpha,
                            std::move(material));
     };
@@ -3368,6 +3374,20 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         registerImageNode();
         runtime_node_registration.Commit();
         return;
+    }
+
+    // The scene file's colour is only the property's default: a preset or the
+    // user's own choice replaces it, so the layer is built with that value. A
+    // scripted colour is left alone; such scripts may write `thisLayer.color`
+    // themselves and return nothing.
+    if (context.scene->runtime != nullptr) {
+        if (const auto setting = wpimgobj.field_bindings.find("color");
+            setting != wpimgobj.field_bindings.end() && setting->contains("user") &&
+            ! setting->contains("script")) {
+            user_color = ResolveVec3Setting(*context.scene->runtime, *setting, runtime_name);
+            const auto color = user_color->getVec3();
+            wpimgobj.color   = { color.x(), color.y(), color.z() };
+        }
     }
 
     SceneMaterial     material;
@@ -3503,14 +3523,14 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             context.shader_updater->SetNodeData(
                 spImgNode.get(), material_slot_index, slot.shader_value_data);
             RegisterMaterialConstants(context, material_slot, slot.source, slot.shader_info, runtime_name);
-            registerImageAlphaAnimation(material_slot);
+            registerImageLayerMaterial(material_slot);
             RegisterNodeVideoTextureRuntime(context, runtime_name, material_slot.get());
         }
     } else {
         mesh.AddMaterial(std::move(material));
         RemapSubmeshesToMaterialSlot(mesh, 0);
         RegisterMaterialConstants(context, spMesh->MaterialSlotPtr(), wpimgobj.material, shaderInfo, runtime_name);
-        registerImageAlphaAnimation(spMesh->MaterialSlotPtr());
+        registerImageLayerMaterial(spMesh->MaterialSlotPtr());
         RegisterNodeVideoTextureRuntime(context, runtime_name, spMesh->Material());
     }
     spImgNode->AddMesh(spMesh);
@@ -3607,6 +3627,9 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                         passthrough_material, passthrough_wp_material, passthrough_shader_info);
                     auto passthrough_mesh = std::make_shared<SceneMesh>();
                     passthrough_mesh->AddMaterial(std::move(passthrough_material));
+                    if (user_color != nullptr) {
+                        user_color_materials.push_back(passthrough_mesh->MaterialSlotPtr());
+                    }
                     RegisterMaterialConstants(context,
                                               passthrough_mesh->MaterialSlotPtr(),
                                               passthrough_wp_material,
@@ -3755,7 +3778,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 }
                 spMesh->AddMaterial(std::move(material));
                 RegisterMaterialConstants(context, spMesh->MaterialSlotPtr(), wpmat, wpEffShaderInfo, runtime_name);
-                registerImageAlphaAnimation(spMesh->MaterialSlotPtr());
+                registerImageLayerMaterial(spMesh->MaterialSlotPtr());
                 spEffNode->AddMesh(spMesh);
 
                 context.shader_updater->SetNodeData(spEffNode.get(), svData);
@@ -3772,6 +3795,10 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     registerImageNode();
     runtime_node_registration.Commit();
     if (context.scene->runtime != nullptr) {
+        if (user_color != nullptr) {
+            context.scene->runtime->BindMaterialColor(std::move(user_color_materials),
+                                                      std::move(user_color));
+        }
         context.scene->runtime->RegisterLayerTemplate(
             wpimgobj.image,
             spImgNode,

@@ -198,6 +198,11 @@ public:
     // The flat shader reads `g_Alpha`, so the live value has to land there.
     void BindMaterialAlpha(std::shared_ptr<SceneMaterial> material,
                            std::unique_ptr<DynamicValue> value);
+    // A user-bound image `color` tints every material the layer draws with:
+    // its own and each effect pass. One value feeds them all, and the alpha in
+    // `g_Color4` is left to the alpha bindings.
+    void BindMaterialColor(std::vector<std::shared_ptr<SceneMaterial>> materials,
+                           std::unique_ptr<DynamicValue> value);
     std::shared_ptr<ScalarAnimationPlayback> RegisterScalarAnimation(std::string_view layer_name,
                                                                    ScalarAnimation animation);
     ScalarAnimationPlayback* FindScalarAnimation(std::string_view layer_name,

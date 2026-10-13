@@ -282,6 +282,7 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
         GET_JSON_NAME_VALUE_NOWARN(jConf, "passthrough", config.passthrough);
     }
     ParseDependencies(json, dependencies);
+    bool runtime_image_replaces_color = false;
     // A solid instance layer carries its own pass overrides next to the shared
     // model material: the textures, the user textures a scene binds by name —
     // `$mediaThumbnail` for the now-playing cover — and the combos the shader
@@ -307,7 +308,10 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
         // colour rather than guess at a slot that may still hold the
         // placeholder.
         if (replaces_placeholder) color = { 1.0f, 1.0f, 1.0f };
+        runtime_image_replaces_color = replaces_placeholder;
     }
     AbsorbFieldBindings(json, field_bindings);
+    // Nor does a colour bound to a user property tint the substituted image.
+    if (runtime_image_replaces_color && field_bindings.is_object()) field_bindings.erase("color");
     return true;
 }

@@ -1037,6 +1037,20 @@ TEST(SceneSchema, InstanceColourSurvivesUnlessARuntimeImageTakesTheSlot) {
     // layer is still a solid colour and dropping its tint would repaint it.
     EXPECT_EQ(layer(R"("backgroundimage")"),
               (std::array<float, 3> { 0.11765f, 0.11765f, 0.11765f }));
+
+    // A colour bound to a user property follows the same rule.
+    const auto bound = [&vfs](const char* usertexture) {
+        wpscene::WPImageObject image;
+        const auto             json = nlohmann::json::parse(
+            std::string(R"({"image":"image.json","id":7,
+              "color":{"user":"tint","value":"0.11765 0.11765 0.11765"},
+              "instance":{"id":42,"textures":["util/white"],"usertextures":[)") +
+            usertexture + "]}}");
+        EXPECT_TRUE(image.FromJson(json, vfs));
+        return image.field_bindings.contains("color");
+    };
+    EXPECT_FALSE(bound(R"({"name":"$mediaThumbnail","type":"system"})"));
+    EXPECT_TRUE(bound(R"("backgroundimage")"));
 }
 
 // A layer can be attached to its parent after something has already asked for
@@ -2407,6 +2421,121 @@ void main() {
     auto& final_node = camera->second->GetImgEffect()->FinalNode();
     final_node.UpdateTrans();
     EXPECT_NEAR(final_node.RenderTrans()(0, 3), 46.0, 1.0e-5);
+}
+
+// A layer colour bound to a user property is the property's value: a preset
+// or a saved choice replaces the scene file's default. It has to reach the
+// layer's own material and every effect pass, keep the layer's alpha, and
+// follow the property when it changes. A scripted colour is not a property.
+TEST(SceneSchema, UserBoundImageColourTintsEveryLayerMaterialAndFollowsTheProperty) {
+    fs::VFS vfs;
+    auto files = std::map<std::string, std::string> {
+        { "/image.json", R"({"width":64,"height":32,"material":"mat.json"})" },
+        { "/mat.json",
+          R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":["a.tex"]}]})" },
+        { "/effects/copy/effect.json",
+          R"({"name":"copy","passes":[{"material":"effect_mat.json","bind":[{"name":"previous","index":0}]}]})" },
+        { "/effect_mat.json",
+          R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":[null]}]})" },
+        { "/shaders/genericimage.vert",
+          R"(attribute vec3 a_Position;
+attribute vec2 a_TexCoord;
+varying vec2 v_TexCoord;
+void main() {
+  gl_Position = vec4(a_Position, 1.0);
+  v_TexCoord = a_TexCoord;
+}
+)" },
+        { "/shaders/genericimage.frag",
+          R"(uniform sampler2D g_Texture0;
+uniform vec4 g_Color4;
+varying vec2 v_TexCoord;
+void main() {
+  gl_FragColor = texture(g_Texture0, v_TexCoord) * g_Color4;
+}
+)" },
+        { "/materials/a.tex.tex", "" },
+    };
+    EXPECT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+    audio::SoundManager sound_manager(audio::SoundManager::OutputBackend::Null);
+    ProjectProperties   properties { { "tint", RuntimeScalarValue::String("0 0 1") } };
+    const std::string   scene = R"({
+      "camera": {"center":[0,0,0], "eye":[0,0,1], "up":[0,1,0]},
+      "general": {
+        "ambientcolor":[0.2,0.2,0.2], "skylightcolor":[0.3,0.3,0.3],
+        "clearcolor":[0,0,0], "cameraparallax":false,
+        "cameraparallaxamount":0, "cameraparallaxdelay":0,
+        "cameraparallaxmouseinfluence":0,
+        "orthogonalprojection":{"width":640,"height":360}
+      },
+      "objects": [
+        {"id":1,"name":"plain","image":"image.json","alpha":0.5,
+         "color":{"user":"tint","value":"0.9 0.15 0.27"},
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true},
+        {"id":2,"name":"with effect","image":"image.json","alpha":0.5,
+         "color":{"user":"tint","value":"0.9 0.15 0.27"},
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true,
+         "effects":[{"file":"effects/copy/effect.json","id":3,"visible":true}]},
+        {"id":4,"name":"scripted","image":"image.json","alpha":0.5,
+         "color":{"script":"export function update(value) { return new Vec3(0, 1, 0); }",
+                  "value":"0.9 0.15 0.27"},
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true}
+      ]
+    })";
+
+    auto parsed = WPSceneParser().Parse(SceneParseRequest {
+                                            .scene_id           = "user-bound-image-colour",
+                                            .project_properties = &properties,
+                                        },
+                                        scene,
+                                        vfs,
+                                        sound_manager);
+    ASSERT_NE(parsed, nullptr);
+    ASSERT_NE(parsed->runtime, nullptr);
+
+    const auto materials_of = [&parsed](std::string_view name) {
+        std::vector<SceneMaterial*> materials;
+        auto node = FindRootChildByName(*parsed, name);
+        if (node == nullptr || node->Mesh() == nullptr) return materials;
+        materials.push_back(node->Mesh()->Material());
+        if (const auto camera = parsed->cameras.find(node->Camera());
+            camera != parsed->cameras.end() && camera->second->HasImgEffect()) {
+            auto& layer = *camera->second->GetImgEffect();
+            for (std::size_t index = 0; index < layer.EffectCount(); ++index) {
+                for (auto& effect_node : layer.GetEffect(index)->nodes) {
+                    materials.push_back(effect_node.sceneNode->Mesh()->Material());
+                }
+            }
+        }
+        return materials;
+    };
+    const auto expect_colour = [&](std::string_view name, std::array<float, 3> rgb,
+                                   std::size_t expected_materials) {
+        SCOPED_TRACE(std::string(name));
+        const auto materials = materials_of(name);
+        ASSERT_EQ(materials.size(), expected_materials);
+        for (const auto* material : materials) {
+            const auto& values = material->customShader.constValues;
+            ASSERT_TRUE(values.contains("g_Color4"));
+            ASSERT_TRUE(values.contains("g_Color"));
+            for (std::size_t index = 0; index < 3; ++index) {
+                EXPECT_FLOAT_EQ(values.at("g_Color4")[index], rgb[index]);
+                EXPECT_FLOAT_EQ(values.at("g_Color")[index], rgb[index]);
+            }
+            EXPECT_FLOAT_EQ(values.at("g_Color4")[3], 0.5f);
+        }
+    };
+
+    expect_colour("plain", { 0.0f, 0.0f, 1.0f }, 1u);
+    expect_colour("with effect", { 0.0f, 0.0f, 1.0f }, 2u);
+    expect_colour("scripted", { 0.9f, 0.15f, 0.27f }, 1u);
+
+    parsed->runtime->ApplyProjectPropertyOverride(
+        { { "tint", RuntimeScalarValue::String("0.25 0.5 0.75") } });
+    parsed->runtime->Tick(1.0 / 60.0);
+    expect_colour("plain", { 0.25f, 0.5f, 0.75f }, 1u);
+    expect_colour("with effect", { 0.25f, 0.5f, 0.75f }, 2u);
+    EXPECT_EQ(parsed->runtime->scriptErrorCount(), 0u);
 }
 
 TEST(SceneSchema, PassthroughImageEffectBaseMeshUsesLayerLocalCardGeometry) {
