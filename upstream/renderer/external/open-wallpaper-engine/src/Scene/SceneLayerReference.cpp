@@ -71,7 +71,12 @@ void HarvestTextures(const nlohmann::json& node, int32_t consumer_id, const Laye
             for (const auto& item : node.at("dependencies")) {
                 if (! item.is_number_integer()) continue;
                 const auto source_id = item.get<int32_t>();
-                if (source_id == 0) continue;
+                // The editor lists the layers the object's textures name; older
+                // versions list the layer itself too, once for each name its own
+                // effects bind. An id carries no slot, so it cannot ask for the
+                // last frame, and the layer waits on nothing of its own: whatever
+                // it does sample of itself is a texture name, harvested above.
+                if (source_id == 0 || source_id == consumer_id) continue;
                 out.push_back(LayerTextureRef {
                     .consumer_id = consumer_id,
                     .source_id   = source_id,

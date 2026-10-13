@@ -453,7 +453,8 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   ancestor) has no passes in the graph: on both backends it holds no effect
   images, loads no textures and costs what a dropped layer costs. A
   script-driven visibility stays in the graph, and so does a hidden layer another
-  layer samples, with its ancestors. A script writing `visible` takes the layer
+  layer samples, with its ancestors; a layer named only in its own
+  `dependencies` is not one. A script writing `visible` takes the layer
   over: showing a left-out layer, or a property applied in place showing one,
   marks the graph mutated, the rebuilt graph draws it exactly as the property
   would, and a layer a script has written is never left out again, so blinking
@@ -533,6 +534,16 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
     audio-bar effect) logged `slot 0 (_rt_link_<id>) has no image` on the
     compatibility renderer. A self `_b` outside the layer's effects still
     refuses the scene.
+  - Older editors also list the layer in its own `dependencies`, once for each
+    self name its effects bind. A dependency names no slot, so it cannot ask
+    for the last frame, and a layer waits on nothing of its own; whatever it
+    does sample of itself is a texture name. The self entry is skipped: it
+    gives the layer no composite and keeps no hidden layer in the graph
+    (`ALayersOwnEffectReadsItsBufferANotItsComposite` and
+    `ALayersOwnEffectReadsItsBufferBAsTheImageItWorksOn` with and without it;
+    `HiddenLayers.ALayerItsPropertiesHideStaysOutOfTheGraphUntilSomethingShowsIt`).
+    Recorded, it drew the layer's last effect pass a second time every frame,
+    into a composite nobody sampled.
   - A linked composite's size is never folded into the material as a zero at
     parse time (the card padding divides by it and every texture coordinate of
     the consumer's card becomes `NaN`), and nothing stale is folded in its place:

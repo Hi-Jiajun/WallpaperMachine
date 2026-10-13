@@ -962,7 +962,9 @@ namespace
 /// Layer 7, an image and a text layer, with two effects that name the layer's
 /// own composite: the first, `first`, where it would take `previous`, the
 /// second, `second`, next to it. Both must read the image the chain is working
-/// on, and only another layer may make the layer produce its composite.
+/// on, and only another layer may make the layer produce its composite. Older
+/// editors also list the layer in its own `dependencies`, once for each name
+/// its effects bind; that does not make it a sampled layer either.
 void ExpectOwnEffectsReadTheChainInput(std::string_view first, std::string_view second) {
     constexpr std::string_view kBlendFrag = R"(uniform sampler2D g_Texture0;
 uniform sampler2D g_Texture1;
@@ -975,9 +977,14 @@ void main() {
         { "image", R"("image":"image.json")" },
         { "text", R"("text":"Wind","font":"Arial","pointsize":20,"origin":[32,16,0])" },
     } };
+    // { sampled elsewhere, listed in its own dependencies }
+    const std::array<std::pair<bool, bool>, 4> variants { {
+        { false, false }, { false, true }, { true, false }, { true, true },
+    } };
     for (const auto& [kind, layer] : layers) {
-        for (const bool sampled_elsewhere : { false, true }) {
-            SCOPED_TRACE(std::string(kind) + (sampled_elsewhere ? ", sampled elsewhere" : ""));
+        for (const auto& [sampled_elsewhere, self_dependency] : variants) {
+            SCOPED_TRACE(std::string(kind) + (sampled_elsewhere ? ", sampled elsewhere" : "") +
+                         (self_dependency ? ", in its own dependencies" : ""));
             auto files = CopyEffectFiles();
             files["/effects/blend/effect.json"] =
                 R"({"name":"blend","passes":[{"material":"materials/blend.json"}]})";
@@ -988,7 +995,8 @@ void main() {
             files["/linked_mat.json"] =
                 R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":["_rt_imageLayerComposite_7_a"]}]})";
             const std::string objects =
-                std::string(R"([{"id":7,"name":"outlined",)") + std::string(layer) + R"(,
+                std::string(R"([{"id":7,"name":"outlined",)") + std::string(layer) +
+                (self_dependency ? R"(,"dependencies":[7,7])" : "") + R"(,
                 "effects":[
                   {"file":"effects/copy/effect.json","visible":true,
                    "passes":[{"textures":[")" + std::string(first) + R"("]}]},
@@ -1103,6 +1111,8 @@ TEST(LayerTextureReference, ALayersOwnEffectReadsItsBufferBAsTheImageItWorksOn) 
 // they hide cannot appear before the next parse unless a script shows it. Its
 // passes, and the effect targets they would allocate, stay out of the graph
 // until then; a layer a script drives, or one another layer samples, stays in.
+// A layer whose own effect names it, and which the editor lists in its own
+// `dependencies` for that, is not sampled by another.
 TEST(HiddenLayers, ALayerItsPropertiesHideStaysOutOfTheGraphUntilSomethingShowsIt) {
     const ProjectProperties properties {
         { "light", RuntimeScalarValue::Bool(true) },
@@ -1129,7 +1139,15 @@ TEST(HiddenLayers, ALayerItsPropertiesHideStaysOutOfTheGraphUntilSomethingShowsI
          "visible":{"script":"export function update(value) { return value; }",
                     "user":"dark","value":true}},
         {"id":6,"name":"source","image":"image.json","visible":{"user":"dark","value":true}},
-        {"id":7,"name":"consumer","image":"linked.json","dependencies":[6]}
+        {"id":7,"name":"consumer","image":"linked.json","dependencies":[6]},
+        {"id":8,"name":"self-lit","image":"image.json","visible":{"user":"dark","value":true},
+         "dependencies":[8],
+         "effects":[{"file":"effects/copy/effect.json","visible":true,
+                     "passes":[{"textures":["_rt_imageLayerComposite_8_a"]}]}]},
+        {"id":9,"name":"self-lit-off","image":"image.json","visible":false,
+         "dependencies":[9],
+         "effects":[{"file":"effects/copy/effect.json","visible":true,
+                     "passes":[{"textures":["_rt_imageLayerComposite_9_b"]}]}]}
       ])"),
         vfs,
         sound);
@@ -1161,6 +1179,10 @@ TEST(HiddenLayers, ALayerItsPropertiesHideStaysOutOfTheGraphUntilSomethingShowsI
     EXPECT_EQ(passes_of(*graph, "scripted"), 1u)
         << "a layer whose script decides its visibility must stay in the graph";
     EXPECT_EQ(passes_of(*graph, "source"), 1u) << "a hidden layer another samples must still draw";
+    EXPECT_EQ(passes_of(*graph, "self-lit"), 0u)
+        << "a layer its properties hide was kept for its own effect";
+    EXPECT_EQ(passes_of(*graph, "self-lit-off"), 0u)
+        << "a hidden layer was kept for its own effect";
 
     // Showing a layer that is already in the graph changes nothing about it.
     EXPECT_FALSE(runtime.ConsumeSceneGraphMutationFlag());
