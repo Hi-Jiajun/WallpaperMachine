@@ -4,6 +4,7 @@
 #include "Runtime/SceneRuntimeContext.hpp"
 #include "Utils/Sha.hpp"
 #include "Utils/Logging.h"
+#include "Utils/TimeOfDay.hpp"
 
 #include <algorithm>
 #include <array>
@@ -1604,6 +1605,13 @@ JSValue JsEngineIsRunningInEditor(JSContext* context, JSValueConst, int, JSValue
     return JS_NewBool(context, false);
 }
 
+// `engine.timeOfDay` is read from the clock when a script asks for it, so the
+// many scripts that never look at the hour cost nothing extra per frame.
+JSValue JsEngineTimeOfDay(JSContext* context, JSValueConst, int, JSValueConst*) {
+    return JS_NewFloat64(context,
+                         LocalTimeOfDay(std::chrono::system_clock::now()).value_or(0.0));
+}
+
 JSValue JsRegisterAsset(JSContext* context, JSValueConst, int argc, JSValueConst* argv) {
     if (argc < 1) return JS_NewString(context, "");
     return JS_DupValue(context, argv[0]);
@@ -1647,6 +1655,14 @@ void PopulateEngineObject(JSContext* context, JSValue engine_object,
         context, engine_object, "frametime", JS_NewFloat64(context, host_context.frame_time));
     JS_SetPropertyStr(
         context, engine_object, "runtime", JS_NewFloat64(context, host_context.runtime_seconds));
+    const JSAtom time_of_day = JS_NewAtom(context, "timeOfDay");
+    JS_DefinePropertyGetSet(context,
+                            engine_object,
+                            time_of_day,
+                            JS_NewCFunction(context, JsEngineTimeOfDay, "timeOfDay", 0),
+                            JS_UNDEFINED,
+                            JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+    JS_FreeAtom(context, time_of_day);
     JS_SetPropertyStr(context,
                       engine_object,
                       "isRunningInEditor",

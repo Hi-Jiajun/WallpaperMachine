@@ -7,6 +7,7 @@
 #include "SpecTexs.hpp"
 #include "Core/ArrayHelper.hpp"
 #include "Utils/Algorism.h"
+#include "Utils/TimeOfDay.hpp"
 
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
@@ -33,20 +34,7 @@ constexpr std::string_view G_AUDIO_SPECTRUM64_RIGHT = "g_AudioSpectrum64Right";
 
 void WPShaderValueUpdater::FrameBegin() {
     for (auto& group : m_puppetAttachments) UpdatePuppetAttachments(group);
-    const auto now = m_wall_clock();
-    const auto seconds = std::chrono::system_clock::to_time_t(now);
-    std::tm local {};
-#if defined(_WIN32)
-    const bool has_local_time = localtime_s(&local, &seconds) == 0;
-#else
-    const bool has_local_time = localtime_r(&seconds, &local) != nullptr;
-#endif
-    if (has_local_time) {
-        const double fraction = std::chrono::duration<double>(
-            now - std::chrono::system_clock::from_time_t(seconds)).count();
-        m_dayTime = std::fmod(local.tm_hour * 3600.0 + local.tm_min * 60.0 + local.tm_sec + fraction,
-                             86400.0) / 86400.0;
-    }
+    if (const auto day_time = LocalTimeOfDay(m_wall_clock())) m_dayTime = *day_time;
     // A zero delay (authored as `cameraparallaxdelay: 0`) means no smoothing:
     // the cursor is followed at once, the limit of the ramp below. Dividing by
     // it made `t` NaN, which latched into the smoothed cursor and, through

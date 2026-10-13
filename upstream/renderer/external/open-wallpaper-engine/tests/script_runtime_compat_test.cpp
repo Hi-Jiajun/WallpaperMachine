@@ -11,6 +11,7 @@
 #include "Scene/include/Scene/SceneMesh.h"
 #include "Scripting/ScriptEngine.hpp"
 #include "Scripting/ScriptModuleSyntax.hpp"
+#include "Utils/TimeOfDay.hpp"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -1058,6 +1059,32 @@ export function update(value) {
 )JS");
     EXPECT_FLOAT_EQ(result.getFloat(), 50.0f + 50.0f * 100.0f + 3142.0f * 10000.0f +
                                            180.0f * 1000000000.0f);
+}
+
+// `engine.timeOfDay` is the local clock as a fraction of the day, the value
+// shaders read as `g_Daytime`. While it was missing, a blend amount a script
+// derived from the hour came out NaN and the effect drew its layer black.
+TEST(ScriptRuntimeCompat, EngineTimeOfDayFollowsTheLocalClock) {
+    ScriptEngine engine;
+    const auto   before = LocalTimeOfDay(std::chrono::system_clock::now());
+    const auto   result = EvaluateScalar(engine,
+                                       R"JS(
+export function update(value) { return engine.timeOfDay; }
+)JS");
+    const auto   after  = LocalTimeOfDay(std::chrono::system_clock::now());
+    ASSERT_TRUE(before.has_value() && after.has_value());
+
+    const double time_of_day = result.getFloat();
+    const double tolerance   = 1.0e-6;
+    EXPECT_GE(time_of_day, 0.0);
+    EXPECT_LE(time_of_day, 1.0);
+    if (*before <= *after) {
+        EXPECT_GE(time_of_day, *before - tolerance);
+        EXPECT_LE(time_of_day, *after + tolerance);
+    } else {
+        // Midnight passed while the script ran.
+        EXPECT_TRUE(time_of_day >= *before - tolerance || time_of_day <= *after + tolerance);
+    }
 }
 
 TEST(ScriptRuntimeCompat, WEColorHsv2RgbSupportsNamespaceImport) {

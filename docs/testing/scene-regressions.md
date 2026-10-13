@@ -603,6 +603,11 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
 - **Clocks** — `ShaderValueUpdaterCompat.DayTimeUniformFollowsLocalClockAndWrapsAtMidnight`
   injects a wall clock and checks `g_Daytime` and the compatible `g_DayTime`
   spelling as the local fraction of a day.
+  `ScriptRuntimeCompat.EngineTimeOfDayFollowsTheLocalClock` checks that
+  SceneScript's `engine.timeOfDay` is the same fraction (`Utils/TimeOfDay.hpp`
+  serves both). It is a getter that reads the clock only when a script asks.
+  While it was missing, scripts that blend day and night layers by the hour
+  computed `NaN` and drew the layer black.
 - **Raster caches and revisions** — text raster caches hold neutral glyph
   coverage. Color, brightness and alpha bindings reach uniforms, including text
   under effects, without relayout or uploads
