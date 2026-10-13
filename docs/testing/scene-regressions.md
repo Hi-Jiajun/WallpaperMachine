@@ -333,6 +333,15 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   `.CreateLayerDoesNotReloadAModelThatLoadsIntoALayerItCannotCopy`).
   Refusing it threw `Unable to create layer` from `init` and logged
   `createLayer unsupported template shape`.
+  `thisScene.destroyLayer` (a layer or its name) removes a layer a script
+  created: it leaves the scene graph and the runtime's registries at once, so the
+  layer object the script still holds reaches nothing and a second call answers
+  false, while the node is freed only once the graph has been rebuilt without it
+  (`ScriptRuntimeCompat.DestroyLayerRemovesALayerTheScriptCreated`,
+  `.ADestroyedLayerIsFreedOnlyOnceTheGraphNoLongerDrawsIt`). A layer from the
+  scene file, or one named by index, stays and the call answers false. Without
+  it, a script that rebuilds its layers when a setting changes threw
+  `not a function` before building the new set.
 - **Timeline events** — `ScriptRuntimeCompat.*Timeline*Event*`, `*Marker*`,
   `GlobalAnimationListenersRunOncePerMarkerWhateverIsBound`,
   `GlobalOnlyAnimationListenerSeesTheCurrentTickTime` and

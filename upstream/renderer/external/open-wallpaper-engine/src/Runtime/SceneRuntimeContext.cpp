@@ -1,5 +1,6 @@
 #include "Runtime/SceneRuntimeContext.hpp"
 
+#include "Interface/IShaderValueUpdater.h"
 #include "Runtime/DynamicValue.hpp"
 #include "Runtime/RuntimeImageSource.hpp"
 #include "Runtime/ScriptedDynamicValue.hpp"
@@ -504,6 +505,7 @@ SceneRuntimeContext::SceneRuntimeContext(SceneRuntimeBootstrap bootstrap)
 SceneRuntimeContext::~SceneRuntimeContext() { StopTextWorker(); }
 
 void SceneRuntimeContext::Tick(double frame_time) {
+    ReleaseRetiredLayers();
     m_host_context->frame_time = frame_time;
     m_host_context->runtime_seconds += frame_time;
     // Loading a script-created template can register more scripts. Newly added
@@ -1999,6 +2001,7 @@ std::string SceneRuntimeContext::CreateLayerFromTemplate(std::string_view reques
     }
 
     RegisterNode(generated_name, generated.get());
+    m_script_created_layers.insert(generated_name);
     RegisterNodeSize(generated_name, binding.size);
     m_node_template_paths[generated_name] = binding.canonical_path;
     if (generated->Mesh() != nullptr && generated->Mesh()->MaterialSlotPtr() != nullptr) {
@@ -2034,6 +2037,48 @@ std::string SceneRuntimeContext::CreateLayerFromTemplate(std::string_view reques
     }
     m_scene_graph_mutated = true;
     return generated_name;
+}
+
+bool SceneRuntimeContext::DestroyLayer(std::string_view name) {
+    const auto created = m_script_created_layers.find(std::string(name));
+    if (created == m_script_created_layers.end()) return false;
+    const std::string key = *created;
+    m_script_created_layers.erase(created);
+
+    const auto registered = m_nodes.find(key);
+    SceneNode* node       = registered != m_nodes.end() ? registered->second : nullptr;
+    UnregisterNode(key);
+    if (node == nullptr || node->Parent() == nullptr) return true;
+
+    auto&      siblings = node->Parent()->GetChildren();
+    const auto entry    = std::find_if(siblings.begin(), siblings.end(), [node](const auto& child) {
+        return child.get() == node;
+    });
+    if (entry == siblings.end()) return true;
+    m_retired_layers.push_back(*entry);
+    siblings.erase(entry);
+    m_scene_graph_mutated = true;
+    return true;
+}
+
+void SceneRuntimeContext::ReleaseRetiredLayers() {
+    if (m_retired_layers.empty() || m_scene_graph_mutated) return;
+    // Their copies of the template's material bindings write to materials
+    // nothing draws any more.
+    std::unordered_set<const SceneMaterial*> materials;
+    for (const auto& node : m_retired_layers) {
+        if (node->Mesh() != nullptr && node->Mesh()->MaterialSlotPtr() != nullptr) {
+            materials.insert(node->Mesh()->MaterialSlotPtr().get());
+        }
+        if (m_scene != nullptr && m_scene->shaderValueUpdater != nullptr) {
+            m_scene->shaderValueUpdater->ForgetNode(node.get());
+        }
+    }
+    std::erase_if(m_material_constants, [&materials](const MaterialConstantBinding& binding) {
+        const auto material = binding.material.lock();
+        return material != nullptr && materials.contains(material.get());
+    });
+    m_retired_layers.clear();
 }
 
 Eigen::Vector3f SceneRuntimeContext::NodeColor(std::string_view name) const {

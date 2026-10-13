@@ -257,6 +257,12 @@ public:
     std::string     CreateLayerFromTemplate(std::string_view requested_template_path,
                                             std::string_view current_layer_name,
                                             std::string_view script_workshop_id = {});
+    // Removes a layer `CreateLayerFromTemplate` made: it leaves the scene graph
+    // and every registry at once, so whatever a script still holds for it
+    // reaches nothing. The node itself is kept until the graph has been rebuilt
+    // without it, as the graph compiled before still points at it. A layer the
+    // scene file made, or an unknown name, is left alone and answers false.
+    bool            DestroyLayer(std::string_view name);
     Eigen::Vector3f NodeColor(std::string_view name) const;
     bool            SetNodeColor(std::string_view name, const Eigen::Vector3f& color);
     bool            SortNode(std::string_view name, int index);
@@ -471,6 +477,9 @@ private:
     void ApplyAnchoredNodeTransform(std::string_view name);
     void RefreshNodeTransformBindings(const std::string& name);
     void ApplyNodeTransform(SceneNode& node, NodeAlignmentBinding& binding, const Eigen::Vector2f& size);
+    /// Frees the layers `DestroyLayer` retired once the mutation they caused
+    /// has been consumed, that is once no compiled graph can still draw them.
+    void ReleaseRetiredLayers();
     void ApplyMaterialConstantBinding(MaterialConstantBinding& binding);
     void ApplySceneZoomAnimation();
     void ApplyCameraShots();
@@ -594,6 +603,11 @@ private:
     /// Guarded by `m_text_worker_mutex`, alongside the queues it describes.
     std::function<void()>                                          m_content_wake_handler;
     uint64_t                                                       m_next_generated_layer_id { 1 };
+    /// Names of the layers scripts created and have not destroyed.
+    std::unordered_set<std::string>                                m_script_created_layers;
+    /// Destroyed layers no longer in the scene graph, kept alive until
+    /// `ReleaseRetiredLayers` sees the graph rebuilt without them.
+    std::vector<std::shared_ptr<SceneNode>>                        m_retired_layers;
     /// Bounded: a wallpaper that requests on every cursor event while nothing
     /// drains must not grow this without limit, and the oldest request is the
     /// one a user has already stopped waiting for.
