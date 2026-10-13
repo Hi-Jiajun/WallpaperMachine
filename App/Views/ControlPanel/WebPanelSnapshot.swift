@@ -569,6 +569,7 @@ extension WebPanelController {
       "hotkeys": hotKeyRows,
       "hideAfterActivating": hidesAfterActivating,
       "inspectWebWallpapers": WebWallpaperInspection.isEnabled(defaults: defaults),
+      "livePropertyEdits": LivePropertyEditing.isEnabled(defaults: defaults),
       "lockScreenEnabled": lock?.isRequested ?? false, "lockScreenAvailable": lock != nil,
       "lockScreenBusy": lock?.isBusy ?? false, "lockScreenStatus": lock?.status
         ?? (LockScreenConfiguration.isSupportedBySystem

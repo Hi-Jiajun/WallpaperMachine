@@ -552,6 +552,12 @@ extension WebPanelController {
         defaults.set(try request.boolean("value"), forKey: Self.hideAfterActivatingKey)
       case "inspectWebWallpapers":
         WebWallpaperInspection.setEnabled(try request.boolean("value"), defaults: defaults)
+      case "livePropertyEdits":
+        let enabled = try request.boolean("value")
+        LivePropertyEditing.setEnabled(enabled, defaults: defaults)
+        // Turning it off puts the saved look back on what the displays were shown; the edits
+        // stay pending in the inspector.
+        if !enabled { await store.stopShowingPropertyEditsOnDesktopAsync() }
       case "workshopUpdateChecks":
         workshop.updates.checksAutomatically = try request.boolean("value")
       case "concurrentDownloads":

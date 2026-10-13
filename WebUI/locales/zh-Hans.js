@@ -688,6 +688,8 @@ export default {
   'Open Login Items…': '打开登录项…',
   'Keep windows in place when clicking the wallpaper': '点击壁纸时保持窗口不动',
   'Hide window after applying a wallpaper': '应用壁纸后隐藏窗口',
+  'Show property edits on the desktop as I make them': '在桌面上实时显示我所做的属性修改',
+  'While you edit a wallpaper’s properties, your displays follow each change before you press Apply changes, and Revert puts the saved look back. Pictures and options that switch an effect on or off still wait for Apply changes. The lock screen and the Mission Control picture keep the saved look until you apply.': '编辑壁纸的属性时，显示器会在你按下“应用修改”之前跟随每一项更改，“还原”会恢复已保存的外观。图片，以及用来开关某个效果的选项，仍要等到“应用修改”才会生效。锁定屏幕和调度中心的画面在你应用之前保持已保存的外观。',
   'Turns off macOS’s “Click wallpaper to reveal desktop” so clicks reach interactive wallpapers.': '关闭 macOS 的“点按墙纸以显示桌面”，让点击可以传到可交互的壁纸。',
   'Use the wallpaper as the macOS desktop picture': '将壁纸用作 macOS 桌面图片',
   'Mission Control and the moment before a wallpaper loads show a still frame of the wallpaper. Turn this off to leave macOS’s own wallpaper settings alone; your own picture comes back at once.': '调度中心以及壁纸加载前的片刻会显示壁纸的静态画面。关闭后，WallpaperMachine 不再改动 macOS 自己的壁纸设置，你自己的桌面图片会立即恢复。',

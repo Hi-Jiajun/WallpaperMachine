@@ -257,6 +257,22 @@ reuse, or visual behavior, which is why these items are manual.
       picture or file where the wallpaper has such a property: the preview keeps the old one and
       its status line asks for a reload; **Reload preview** shows the new one and clears the
       line. **Apply changes** still reloads the desktop wallpaper from the saved options.
+- [ ] Property edits on the desktop ([edits on the desktop](../features/wallpaper-properties.md#showing-edits-on-the-desktop)):
+      with **Show property edits on the desktop as I make them** off, change a slider on a
+      scene that is on a display: the desktop does not move until **Apply changes**. Turn it
+      on and drag the slider, pick a colour, flip a switch that shows a layer and pick a choice:
+      the desktop follows a moment after you stop (a layer that was hidden may cause one short
+      hitch), the inspector still says **Modified**, and a picture or an option that adds an
+      effect waits for **Apply changes**. **Revert**, **Restore all defaults** and a preset put
+      the desktop where they say. Repeat with two displays showing the wallpaper and with a
+      mirror: all of them follow. Edit, then close the panel without applying: the desktop keeps
+      showing the edit, and reopening the panel still shows it pending. Edit, then **Reapply**
+      the wallpaper, change the display arrangement or wake the Mac: the saved look returns and the
+      next edit shows the draft again. Edit, then turn the switch off in Settings: the saved look
+      returns. **Apply changes** still reloads the wallpaper. The lock screen and the Mission
+      Control picture show the saved look throughout (open Mission Control while an edit is on
+      show, and again after **Revert**, a Space change or a wake, which must not take the edit
+      into the picture).
 - [ ] Wallpaper position ([display position](../features/wallpaper-properties.md#display-position)):
       show a scene or video whose shape differs from the display with **Fill**, then drag
       **Horizontal position** and **Vertical position** across 0 to 100%. The visible part

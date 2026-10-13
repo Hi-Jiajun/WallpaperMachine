@@ -59,6 +59,10 @@ unattached `CAMetalLayer`s and injected notification and encoding services:
   fresh); a resume retakes only such displays; settling captures after a new
   wallpaper; periodic captures only while enabled and regardless of the floor;
   later captures skip displays that are not presenting.
+- Unsaved looks: a display that draws property edits nobody applied is asked for
+  nothing by a new wallpaper, a settle capture or a Space change, a frame already on
+  its way is dropped, the poster stays the saved look, and it is retaken once the
+  display draws the saved look again.
 - Refusals: a desktop that keeps refusing posters is left alone until the next
   Space change; a poster that reads back late is confirmed without counting a
   refusal; a failed Space neither blocks the others nor loses its old poster.
@@ -1099,6 +1103,21 @@ values for scene and Web payloads, frozen ids restored, key order not a change,
 invalid documents refused. `PropertyDraftHookTests` — every draft-changing call names
 its wallpaper after the change is stored, and a failed call announces nothing
 (`WallpaperPresetStoreTests` checks a preset's edits and apply do too).
+`LivePropertyEditingTests` — the desktop switch: off until chosen, either explicit value
+kept, kept per preference domain, announced on each write and out of backups.
+`WebPanelPropertyPreviewTests` — the panel's edits reaching the bridge's property preview
+through a double bridge and a wait the test ends by hand: one update per burst and none with
+the switch off, every kind of draft edit followed, a wait that outlives the switch dropped,
+Apply and Revert dropping the waiting update (and Apply's own text commits starting none),
+turning the switch off putting the saved look back on exactly the wallpapers that were shown
+an edit (not an applied or deleted one, and again after a refusal), videos and Web pages
+left alone, and a refused update logged rather than shown. The displays that may be drawing
+an edit (the ones showing the wallpaper and its mirrors, none while the update waits or the
+switch is off) are known until Revert, Apply, the switch or a deletion ends it, which also tells
+the app to take the desktop's picture again, and a wallpaper that could not be put back keeps
+them. `WebPanelGeneralSettingsTests`
+holds the setting action and snapshot key. The bridge's own bookkeeping is in the Rust
+`property_preview` tests ([renderer](renderer.md)).
 `WallpaperPreviewRequestTests` — installed-path bounds, symlink escape, stale
 manifests, resource checks, copying unapplied values without changing bridge
 state, and naming the pictures and files a preview holds. `WebWallpaperPreviewSurfaceTests`
@@ -1114,8 +1133,9 @@ combo types. Not covered: native window presentation, how the stage looks in a
 real window on a portrait or ultrawide display, scene or video first frames in
 that window, OS visibility events, and a real renderer taking the document in the
 preview window (the renderer's side is in
-[scene regressions](scene-regressions.md)); the visible follow is in the
-[manual smoke](manual-smoke.md).
+[scene regressions](scene-regressions.md)); the visible follow, and a desktop
+following an edit on one or several displays, a mirror, after Revert and with the switch
+turned off, are in the [manual smoke](manual-smoke.md) and have not been run.
 
 ## Steam
 

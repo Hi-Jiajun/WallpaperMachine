@@ -478,9 +478,11 @@ every scene that draws it, mirrors included, without applying them (the Revert a
 counterpart of `preview_display_position`). The document is built from the whole draft by the
 function that builds a scene descriptor's, except that a texture, a file and a folder keep their
 saved value, so it is what Apply would load. The call saves nothing, keeps the draft, bumps no
-generation and builds no snapshot; the lock-screen export and the Mission Control picture follow
-the saved configuration. The actor remembers the wallpapers it showed an edit on
-(`previewed_properties`, the document last shown to all of them, or nothing known after a
+generation and builds no snapshot; the lock-screen export follows the saved configuration, and
+the app keeps the Mission Control picture at the saved look by not taking it from a display that
+may be showing an edit (`DesktopWallpaperSync.showsUnsavedLook`) and by taking it again when the
+edit ends (`BridgeStore.onPropertyEditsOnDesktopEnded`). The actor remembers the wallpapers it
+showed an edit on (`previewed_properties`, the document last shown to all of them, or nothing known after a
 reconcile or a refused update): asking for what is shown, or for the saved look when that is
 shown, sends the engine nothing; `show` false and Revert (`cancel_wallpaper_options`) put the
 saved look back, and Apply forgets the mark because the scenes are opened again from the saved

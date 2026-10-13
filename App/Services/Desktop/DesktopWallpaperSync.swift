@@ -198,6 +198,11 @@ final class DesktopWallpaperSync {
     /// something new. Settling and periodic captures skip the others; a new
     /// wallpaper, a Space change and a wake still capture every surface.
     var canCapture: @MainActor (DesktopPosterSurface) -> Bool = { _ in true }
+    /// Whether a surface draws a look nobody saved, such as property edits shown before Apply
+    /// changes. Its frames are neither asked for nor taken as the poster, so Mission Control and
+    /// the moment before a wallpaper loads keep the saved look; the owner asks for a refresh when
+    /// the surface draws the saved look again. A frame already on its way is dropped on arrival.
+    var showsUnsavedLook: @MainActor (DesktopPosterSurface) -> Bool = { _ in false }
     /// Takes the poster again every `periodicRefreshInterval` while on.
     var refreshesPeriodically = false {
         didSet { if refreshesPeriodically != oldValue { schedulePeriodicCaptures() } }
@@ -376,7 +381,7 @@ final class DesktopWallpaperSync {
 
     private func requestFrame(for surface: DesktopPosterSurface) {
         let scope = scope(surface.display)
-        guard scope != .hold else { return }
+        guard scope != .hold, !showsUnsavedLook(surface) else { return }
         frameCenter.post(name: DesktopPosterNotification.request, object: surface.layer,
                          userInfo: ["context": scope.context ?? ""])
     }
@@ -468,7 +473,8 @@ final class DesktopWallpaperSync {
         guard !stopped, let layer = notification.object as? CALayer,
               let surface = surfaces().first(where: { $0.layer === layer }),
               let values = notification.userInfo,
-              let frame = DesktopPosterFrame(userInfo: values) else { return }
+              let frame = DesktopPosterFrame(userInfo: values),
+              !showsUnsavedLook(surface) else { return }
         let receivedScope = scope(surface.display)
         guard receivedScope != .hold,
               (values["context"] as? String ?? "") == (receivedScope.context ?? "") else { return }

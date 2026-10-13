@@ -106,6 +106,20 @@ Neither path resumes a paused video.
   share the 500 ms refresh interval, and a move the bridge refused requests nothing. The
   steps shown while a slider is being dragged are previews and request nothing; the release
   does.
+- **Property edits shown on a display.** With **Show property edits on the desktop as I
+  make them** on ([edits on the desktop](wallpaper-properties.md#showing-edits-on-the-desktop)),
+  a display that may be drawing an edit nobody applied is neither asked for a poster nor
+  taken one from, a frame already on its way included: the surface is read back from
+  what the scene draws, and the picture macOS keeps would show the edit. That holds
+  whatever asks (a Space change, the periodic setting, another wallpaper starting), so
+  Mission Control and the moment before a wallpaper loads keep the saved look
+  (`DesktopWallpaperSync.showsUnsavedLook`, from `BridgeStore.isShowingPropertyEdits(onDisplay:)`:
+  every display that shows a wallpaper whose edit was shown, a mirror too). Revert,
+  turning the choice off, **Apply changes** and deleting the wallpaper end it
+  (`BridgeStore.onPropertyEditsOnDesktopEnded`) and take the poster as a new wallpaper's
+  is taken, which also replaces a frame that was read just before the saved look came
+  back. A scene that loaded again meanwhile draws the saved look but stays held until the
+  edit ends, so its poster is older, never unsaved.
 - **A Space change or wake.** The existing poster is applied at once, so a new Space
   has one immediately. A fresh frame is requested only for a surface whose poster has
   aged (see the next item). Desktops that kept refusing posters are tried again, and

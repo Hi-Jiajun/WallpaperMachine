@@ -170,6 +170,39 @@ final class WebPanelGeneralSettingsTests: ControlPanelTestCase {
     XCTAssertEqual(try reported(third), true)
   }
 
+  /// Showing pending property edits on the desktop is the app's own preference: it starts off, the
+  /// panel stores it, reports it and takes nothing but a boolean for it.
+  func testLivePropertyEditsDefaultsOffRoundTripsAndRefusesNonBooleans() async throws {
+    let panel = try makePanel()
+    let controller = panel.makeController()
+    defer { controller.stop() }
+    func reported(_ controller: WebPanelController) throws -> Bool? {
+      let settings = try XCTUnwrap(controller.snapshot()["settings"] as? [String: Any])
+      return settings["livePropertyEdits"] as? Bool
+    }
+
+    XCTAssertEqual(try reported(controller), false, "The desktop keeps showing the saved look until the user opts in")
+    try await controller.perform("setting", body: ["key": "livePropertyEdits", "value": true])
+    XCTAssertTrue(LivePropertyEditing.isEnabled(defaults: panel.defaults))
+    XCTAssertEqual(try reported(controller), true)
+
+    for bad: Any in ["true", "yes", 1, NSNull()] {
+      do {
+        try await controller.perform("setting", body: ["key": "livePropertyEdits", "value": bad])
+        XCTFail("\(bad) must not be accepted for a switch")
+      } catch {}
+    }
+    XCTAssertTrue(LivePropertyEditing.isEnabled(defaults: panel.defaults), "A refused value leaves the saved one alone")
+
+    let reopened = panel.makeController()
+    defer { reopened.stop() }
+    XCTAssertEqual(try reported(reopened), true, "The choice must survive a relaunch")
+
+    try await reopened.perform("setting", body: ["key": "livePropertyEdits", "value": false])
+    XCTAssertFalse(LivePropertyEditing.isEnabled(defaults: panel.defaults))
+    XCTAssertEqual(try reported(reopened), false)
+  }
+
   /// The lock screen as the app finds it after a launch: asked for, or left off. It only starts and
   /// recovers; no publication, activation or monitor runs.
   private func lockScreen(requested: Bool) throws -> LockScreenWallpaperService {

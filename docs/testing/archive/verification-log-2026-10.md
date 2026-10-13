@@ -9,6 +9,16 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-13 — Native video host takes the switch hold
+
+A replacement clip's window opens with the picture it replaces over it and drops it on the clip's first frame; a replacement's admission is decided before the old surface stops. Targeted run only: the lane runs the full gate once, at its end.
+
+- `python3 scripts/test.py --only NativeVideoWallpaperHostTests` — exit 0; 98 passed (11 new)
+- `python3 scripts/test.py --only NativeVideoWallpaperHostTests --only WallpaperSwitchHoldTests --only WallpaperActivationRecoveryTests --only DesktopWallpaperTests` — exit 0; 225 passed
+- Mutation check — seven one-line breakages of `NativeVideoWallpaperHost` (no adopt, close before admission, no cancel on failure, no settle after hand-off, no release on first frame, no overtaken-pass guard, no release for a layer ready at birth) each failed between 1 and 5 of the host tests
+- Skipped: the full gate and `check_rust.py`/`check_renderer.py` (no Rust or renderer change in this commit), `NativeVideoPlayerMediaTests` (opt-in), any desktop run
+- Not established: that `isReadyForDisplay` alone is late enough that the veil does not come off a frame early on a real clip; the fade and the clip-to-clip, scene-to-clip and refusal switches on a real display ([manual smoke](../manual-smoke.md#wallpaper-switching))
+
 ## 2026-10-13 — Wallpaper switch hold for scene successors
 
 Commit 3 of the seamless-switch lane, built and tested in an isolated worktree on top of the layer-swap revert and layer announcement commits. Web pages and native-backend clips take the veil in the lane's next commits; this one carries it for scenes.

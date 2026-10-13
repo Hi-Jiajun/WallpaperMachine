@@ -238,9 +238,11 @@ moment it is picked). It goes to every scene that draws the wallpaper, mirrors i
 (they run a scene of their own), and to nothing for a video, a web page or a wallpaper
 no display shows. It saves nothing and leaves the draft alone, and it advances no
 generation and builds no snapshot, so a reconcile that is already under way is not made
-stale; the lock-screen export and the Mission Control picture follow the saved
-configuration. A scene that already shows the document, or whose saved look is asked for
-while it shows it, is not told again. The bridge keeps the wallpapers it showed an edit on
+stale; the lock-screen export follows the saved configuration, and the app keeps the
+Mission Control picture at the saved look by not taking it from a display that may be showing
+an edit and by taking it again when the edit ends
+([desktop picture](desktop-picture.md#when-a-poster-is-taken)). A scene that already shows the
+document, or whose saved look is asked for while it shows it, is not told again. The bridge keeps the wallpapers it showed an edit on
 (`previewed_properties`) so that **Revert** (`cancel_wallpaper_options`) puts the saved
 look back on those scenes before the draft is cancelled, and asks again if the engine
 refused: a refusal leaves the draft dirty. `show` false does the same restore without
@@ -249,6 +251,10 @@ saved configuration, and every reconcile and every refused update leaves the mar
 "may be showing a preview", which makes the next call send its document again instead of
 trusting the last one. Anything else that loads a scene again (a display change, waking)
 shows the saved look, and the next edit shows the draft again.
+
+The app asks for it from `BridgeStore` after each property edit while [the Settings
+switch](wallpaper-properties.md#showing-edits-on-the-desktop) is on; the preview window
+has its own scene and follows the draft whatever that switch says.
 
 ### Scene render optimisation
 

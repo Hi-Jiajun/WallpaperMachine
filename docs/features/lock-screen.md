@@ -115,7 +115,10 @@ WallpaperAgent abandons an extension that has not answered after about 31 second
 
 Enable **Settings → General → Screen saver → Use wallpaper as screen saver**. Each
 display follows its applied wallpaper and committed properties, including scene,
-video, web and still-image/pixiv projects. Choosing the native desktop video backend
+video, web and still-image/pixiv projects. Committed means saved: a property edit
+that the desktop only shows while it is made ([edits on the
+desktop](wallpaper-properties.md#showing-edits-on-the-desktop)) reaches the lock screen and
+the screen saver with **Apply changes**. Choosing the native desktop video backend
 does not exclude a video from native presentation.
 
 This control owns only the system's **Idle** selection. **Animate lock screen** owns

@@ -126,6 +126,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             store = created
             created.openPreview = { [weak self] selection in self?.showWallpaperPreview(selection) }
             created.onPropertyDraftChanged = { [weak self] id in self?.previewWindow?.session.propertiesDidChange(wallpaperID: id) }
+            created.showsPropertyEditsOnDesktop = { LivePropertyEditing.isEnabled() }
+            // A display that showed an edit was not asked for its picture; once it draws the saved
+            // look again, Mission Control gets the picture it missed.
+            created.onPropertyEditsOnDesktopEnded = { [weak self] in self?.schedulePosterRefresh() }
             AppLog.attach(created.bridge)
             // Reloading waits for a wallpaper being applied, so a page that lands meanwhile
             // appears once that finishes rather than failing.
@@ -1302,6 +1306,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             guard let policy = self?.presentationPolicy else { return true }
             return !policy.isSuspended
                 && !(UInt32(surface.display).map(policy.suspendedDisplayIDs.contains) ?? false)
+        }
+        // Property edits shown on a display before Apply changes stay out of the picture macOS shows.
+        sync.showsUnsavedLook = { [weak self] surface in
+            self?.store?.isShowingPropertyEdits(onDisplay: surface.display) ?? false
         }
         sync.refreshesPeriodically = PlaybackPreferences.shared.refreshesDesktopPicturePeriodically
         sync.start()

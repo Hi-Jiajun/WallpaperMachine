@@ -688,6 +688,8 @@ export default {
   'Open Login Items…': 'ログイン項目を開く…',
   'Keep windows in place when clicking the wallpaper': '壁紙をクリックしたときにウインドウを移動しない',
   'Hide window after applying a wallpaper': '壁紙を適用したあとにウインドウを隠す',
+  'Show property edits on the desktop as I make them': '壁紙のプロパティの編集をデスクトップに即時表示',
+  'While you edit a wallpaper’s properties, your displays follow each change before you press Apply changes, and Revert puts the saved look back. Pictures and options that switch an effect on or off still wait for Apply changes. The lock screen and the Mission Control picture keep the saved look until you apply.': '壁紙のプロパティを編集している間、「変更を適用」を押す前でも、ディスプレイが変更に追従します。「元に戻す」を押すと保存済みの見た目に戻ります。画像や、エフェクトのオン・オフを切り替えるオプションは、「変更を適用」を押すまで反映されません。ロック画面とMission Controlの画像は、適用するまで保存済みの見た目のままです。',
   'Turns off macOS’s “Click wallpaper to reveal desktop” so clicks reach interactive wallpapers.': 'macOSの「壁紙をクリックしてデスクトップを表示」をオフにして、クリックがインタラクティブな壁紙に届くようにします。',
   'Use the wallpaper as the macOS desktop picture': '壁紙をmacOSのデスクトップピクチャとして使用',
   'Mission Control and the moment before a wallpaper loads show a still frame of the wallpaper. Turn this off to leave macOS’s own wallpaper settings alone; your own picture comes back at once.': 'Mission Controlと壁紙の読み込み前の一瞬には、壁紙の静止画が表示されます。オフにすると、WallpaperMachineはmacOS自体の壁紙設定を変更せず、元のデスクトップピクチャがすぐに戻ります。',

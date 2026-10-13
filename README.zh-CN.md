@@ -76,7 +76,7 @@
 | [**预览**](docs/features/wallpaper-properties.md#live-preview) | 在单独的窗口中试看已安装的场景、视频或网页壁纸，使用当前选项和独立的播放控制，再决定是否更换桌面。滑块、颜色和开关会随你的调整即时显示。 |
 | [**创意工坊**](docs/features/workshop-downloads.md) | 实时的 Steam 创意工坊，浏览无需登录，还有[合集、每位作者的壁纸和你的订阅](docs/features/workshop-downloads.md#collections-authors-and-subscriptions)。下载在应用内进行，可同时下载多个，需要拥有 Wallpaper Engine 的 Steam 账户。已有壁纸的[更新](docs/features/workshop-downloads.md#updates)每天检查一次，一键安装。 |
 | [**pixiv**](docs/features/pixiv.md) | pixiv 的插画排行榜和标签搜索。作品的任意一页都能保存为静态壁纸；登录 pixiv 后可查看仅限会员的作品，账户允许的话还能查看 R-18 作品。 |
-| [**壁纸选项**](docs/features/wallpaper-properties.md#properties) | 作者提供的每一个选项，在你应用修改时保存；[命名的属性预设](docs/features/wallpaper-properties.md#property-presets)可以保留多个版本，并能导出或导入。 |
+| [**壁纸选项**](docs/features/wallpaper-properties.md#properties) | 作者提供的每一个选项，在你应用修改时保存；[命名的属性预设](docs/features/wallpaper-properties.md#property-presets)可以保留多个版本，并能导出或导入。设置中的一个可选开关能让桌面[在你调整时即时显示这些修改](docs/features/wallpaper-properties.md#showing-edits-on-the-desktop)。 |
 | [**音乐**](docs/features/audio-response.md) | 打开“音频响应”，为声音制作的壁纸就会随 Mac 播放的声音律动。打开“[媒体集成](docs/features/media-integration.md)”，带音乐显示的壁纸会显示正在播放的歌曲。 |
 | [**播放列表**](docs/features/playlists.md) | 让每台显示器轮流播放全部壁纸、收藏、它自己的列表或一个[本地合集](docs/features/control-panel.md#local-collections)，可按时间间隔更换，也可在每次解锁 Mac 时更换。可以调整列表顺序、保存命名的播放方案，或在白天和夜晚的壁纸之间切换。应用失败的壁纸会被暂时跳过。 |
 | [**显示器**](docs/features/control-panel.md#target-display) | 每台显示器都可以有自己的壁纸，也可以镜像另一台，缩放、位置、帧率和音量各自独立。[一次把同一张壁纸应用到所有显示器，复制或交换壁纸，并保存多屏壁纸方案](docs/features/display-layouts.md)，之后可从设置或“快捷指令”恢复各显示器的壁纸选择。 |

@@ -71,8 +71,10 @@ reloading: a slider, a colour, a switch, a choice, **Restore default**, **Restor
 all defaults**, **Revert** and a preset all change the draft, and the draft is what
 the preview shows. Text goes live when it is committed (Return, or leaving the field),
 not for each keystroke; text typed but not yet committed when the preview opened is
-in it, and the first edit afterwards shows the committed text instead. The edit never
-reaches the desktop, the saved options or the other previews.
+in it, and the first edit afterwards shows the committed text instead. The preview
+window never touches a display, the saved options or the other previews; the desktop
+follows the same edits only when [the Settings switch](#showing-edits-on-the-desktop)
+is on.
 
 The preview waits until the edits pause for 150 ms and then reads the draft once, so
 a drag, a burst of edits and a preset each cost one update, and an edit that arrives
@@ -222,6 +224,59 @@ takes effect on **Apply changes**, which reloads the scene; the picker stores th
 path, not a copy, so moving or deleting the file leaves that slot on the artwork
 the author shipped. A picture outside the app's own storage is not readable from
 the sandboxed lock-screen extension, which keeps the authored texture there.
+
+### Showing edits on the desktop
+
+**Settings → General → Startup & desktop → Show property edits on the desktop as I
+make them** lets the displays that draw a scene wallpaper follow its pending
+properties before **Apply changes**. It is off until the user turns it on, a choice
+kept on this Mac only (`WallpaperMachine.livePropertyEdits`, `LivePropertyEditing`)
+and left out of backups: the update runs inside the scene that is already playing
+instead of loading it again ([live property
+edits](scene-rendering.md#live-property-edits)), and the few things a scene reads
+only while it loads can differ from a fresh load. The default is
+`LivePropertyEditing.buildDefault`.
+
+With the switch on, a slider, a colour, a switch, a choice, **Restore default**,
+**Restore all defaults**, a preset's edits, text (on Return or leaving the field) and
+a chosen file are each followed by one update once the edits pause for 150 ms
+(`PropertyPreviewScheduler`), so a drag or a preset costs a display one update, and an
+edit that arrives while one is under way queues one more. The update is the
+bridge's `preview_wallpaper_properties(wallpaper_id, show)`: it shows the whole pending
+state on every scene that draws the wallpaper, mirrors included, so a restored default
+is back at the authored value. Turning the switch on shows nothing by itself; the next
+edit does.
+
+- A picture (a texture property), a file or a folder, and what a scene reads only
+  while it loads (an effect that a switch or choice builds or leaves out, the
+  material slot a picture picks) wait for **Apply changes**; the Settings note says
+  so. An edit that reveals a layer the scene left out of its render graph makes the
+  scene build the graph again once, as a script revealing the layer does, so that edit
+  can hitch briefly.
+- Nothing is saved. The edit stays pending and **Modified**, and the lock screen and the
+  screen saver keep the saved look ([lock screen](lock-screen.md#use-wallpaper-as-screen-saver)).
+  So does the Mission Control picture: it is not taken from a display while it shows an
+  edit, whatever asks for it, and it is taken again when Revert, turning the switch off or
+  **Apply changes** ends the edit ([when a poster is taken](desktop-picture.md#when-a-poster-is-taken)).
+- **Revert** puts the saved look back on the displays and then discards the edit; a
+  display that refuses leaves the edit, and Revert can be pressed again. **Apply
+  changes** is unchanged: it loads the wallpaper from the saved options, so the scene
+  still reloads once.
+- Anything else that loads the scene again (a display change, waking, Reapply,
+  switching the wallpaper) shows the saved look. The edit stays pending, and the next
+  edit shows it again.
+- Turning the switch off puts the saved look back on every wallpaper whose displays
+  were shown an edit; the edits stay pending in the inspector. A refusal is retried the
+  next time the switch is turned off.
+- Only scene wallpapers are shown. A video has no properties, and a Web wallpaper
+  receives its changed properties after **Apply changes**.
+- A refused update is logged (`properties: …`) and never shown as an alert, so an edit in
+  progress is not interrupted; the next edit tries again. Apply and Revert drop the
+  update that is waiting, and the edits Apply itself sends for text it was holding start
+  none.
+
+`BridgeStore.showsPropertyEditsOnDesktop` reads the choice for every edit, and
+`BridgeStore.stopShowingPropertyEditsOnDesktopAsync` is what turning it off runs.
 
 ### Property presets
 

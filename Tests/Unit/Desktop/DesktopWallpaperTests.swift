@@ -1139,6 +1139,41 @@ final class DesktopWallpaperTests: XCTestCase {
     }
 
     @MainActor
+    func testADisplayDrawingAnUnsavedLookKeepsItsPosterUntilItDrawsTheSavedLookAgain() async throws {
+        let rig = try FloorRig(root: root, displays: 2, floor: .seconds(60), settleDelays: [.milliseconds(20)])
+        defer { rig.finish() }
+        rig.workspace.pictures = [one: original("one"), external: original("external")]
+        try await postFrame(Data([1]), on: rig, display: 0)
+        try await postFrame(Data([2]), on: rig, display: 1)
+        let asked = rig.requests
+
+        // Display 1 draws an edit nobody saved. A new wallpaper elsewhere, its settle capture and
+        // a Space change ask display 2 and leave display 1 alone.
+        var unsaved = true
+        rig.sync.showsUnsavedLook = { unsaved && $0.display == "1" }
+        rig.sync.refresh()
+        try await waitUntil { rig.requests[1] == asked[1] + 2 }
+        rig.clock.advance(.seconds(100))
+        rig.spaceChanged()
+        try await waitUntil { rig.requests[1] == asked[1] + 3 }
+        XCTAssertEqual(rig.requests[0], asked[0], "no capture reads an edit nobody saved")
+
+        // A frame that was already on its way is dropped when it arrives.
+        let written = rig.workspace.writes.count
+        post(Data([9]), layer: rig.layers[0], center: rig.frames)
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(rig.workspace.writes.count, written)
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(rig.workspace.pictures[one]?.url)), Data([1]), "the saved look stays")
+
+        // The owner asks again once the display draws the saved look: the poster is retaken.
+        unsaved = false
+        rig.sync.refresh()
+        try await waitUntil { rig.requests[0] > asked[0] }
+        try await postFrame(Data([3]), on: rig, display: 0)
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(rig.workspace.pictures[one]?.url)), Data([3]))
+    }
+
+    @MainActor
     func testFrameThatCouldNotBeEncodedDoesNotMakeThePosterFresh() async throws {
         let encoder = FailingPosterEncoder()
         let rig = try FloorRig(root: root, floor: .seconds(60), encode: { try await encoder.encode($0) })
