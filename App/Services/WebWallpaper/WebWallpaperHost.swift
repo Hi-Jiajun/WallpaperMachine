@@ -27,6 +27,7 @@ extension UserAssetStore: WebWallpaperAssetSource {}
 final class WebWallpaperHost {
     private let fetch: @MainActor () async throws -> [BridgeWebWallpaper]
     private let screens: @MainActor () -> [(id: UInt32, frame: NSRect)]
+    private let refreshRate: @MainActor (UInt32) -> Int
     private let frameCenter: NotificationCenter
     private let imagePlacement: StillImagePlacementStore
     private var windows: [UInt32: any WebWallpaperSurface] = [:]
@@ -113,6 +114,7 @@ final class WebWallpaperHost {
     init(
         fetch: @escaping @MainActor () async throws -> [BridgeWebWallpaper],
         screens: (@MainActor () -> [(id: UInt32, frame: NSRect)])? = nil,
+        refreshRate: (@MainActor (UInt32) -> Int)? = nil,
         frameCenter: NotificationCenter = .default,
         counters: RuntimeCounters? = nil,
         audioPump: WebWallpaperAudioPump? = nil,
@@ -134,6 +136,7 @@ final class WebWallpaperHost {
         self.audioClock = audioClock
         self.contentRevision = contentRevision
         self.screens = screens ?? { Self.systemScreens() }
+        self.refreshRate = refreshRate ?? { Self.systemRefreshRate(displayID: $0) }
         self.frameCenter = frameCenter
         self.counters = counters ?? .shared
         self.audioPump = audioPump ?? WebWallpaperAudioPump(read: { nil })
@@ -168,6 +171,20 @@ final class WebWallpaperHost {
             guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return nil }
             return (number.uint32Value, screen.frame)
         }
+    }
+
+    static func systemRefreshRate(displayID: UInt32) -> Int {
+        NSScreen.screens.first {
+            ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == displayID
+        }?.maximumFramesPerSecond ?? 0
+    }
+
+    /// WebKit offers a page two cadences: near 60 fps, or the display's full
+    /// refresh. The wallpaper's frame rate is a ceiling, so the full refresh is
+    /// used only when that rate already reaches it; a display at 60 Hz or below
+    /// is drawn at its refresh either way.
+    nonisolated static func rendersAtDisplayRefresh(fps: UInt32, refreshRate: Int) -> Bool {
+        refreshRate > 60 && Int(fps) >= refreshRate
     }
 
     var activeDisplayIDs: Set<UInt32> { Set(windows.keys) }
@@ -367,8 +384,13 @@ final class WebWallpaperHost {
                 continue
             }
             guard !stopped, generation == applyGeneration else { return }
+            // Fixed when the web view is created, so a frame rate that crosses
+            // the display's refresh rebuilds the page.
+            let rendersAtDisplayRefresh = Self.rendersAtDisplayRefresh(
+                fps: wallpaper.fps, refreshRate: refreshRate(displayID))
             if let window = windows[displayID], window.page.canonicalEntryURL == canonicalEntry,
-               loadedProjectRevisions[displayID] == projectRevision {
+               loadedProjectRevisions[displayID] == projectRevision,
+               window.page.rendersAtDisplayRefresh == rendersAtDisplayRefresh {
                 if window.frame != frame {
                     window.setScreenFrame(frame)
                     changed = true
@@ -382,10 +404,11 @@ final class WebWallpaperHost {
                     kind: .desktopWeb, displayID: displayID, generation: surfaceGeneration)
                 let page = WebWallpaperPage(
                     projectURL: projectURL, entryFile: wallpaper.entryFile,
-                    surface: surface, counters: counters)
+                    surface: surface, counters: counters, rendersAtDisplayRefresh: rendersAtDisplayRefresh)
                 let load = AppLog.beginLoad("web", project: wallpaper.projectPath, detail: """
                     wallpaper \(wallpaper.wallpaperId) “\(wallpaper.title)” entry \(wallpaper.entryFile), \
-                    \(DiagnosticEnvironment.display(displayID)), fps \(wallpaper.fps), paused \(wallpaper.paused)
+                    \(DiagnosticEnvironment.display(displayID)), fps \(wallpaper.fps)\
+                    \(rendersAtDisplayRefresh ? " at display refresh" : ""), paused \(wallpaper.paused)
                     """)
                 page.logLoad = load
                 counters.record(.webPageCreated, for: surface)

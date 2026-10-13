@@ -25,6 +25,17 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-13 — Web wallpaper pointer and frame cadence (#45)
+
+Issue #45 reported the Colorful Fluid Animation web wallpaper (1748506393) sampling the cursor at 10–20 Hz on a 120 Hz screen. Measured on a 120 Hz MacBook Pro, macOS 27.0.1. Web wallpapers now draw at a display's full refresh when its effective frame rate reaches a refresh above 60 Hz.
+
+- Authorized live run, real hand movement over the bare desktop, temporary in-page probe (removed): cursor ~120/s → global monitor ~118/s (every move carried the window under the pointer) → page `mousemove` 60/s → the page's own loop 50/s. 10–20 Hz not reproduced.
+- Scratch WKWebView harness hosted like `WebWallpaperWindow`: WebKit coalesces hover to one move per rendering update (60/s on 120 Hz). With `PreferPageRenderingUpdatesNear60FPSEnabled` off at creation: 120 moves/s and 120 rAF/s. Flipping it on a live page (re-attach, hide/show, reload) had no effect.
+- Harness: a GPU-bound page drops pointer, rAF and its own loop together (13/s); a starved JS loop does not slow WebKit's pointer delivery; emulated audio splats had no effect.
+- `python3 scripts/test.py --only` WebWallpaper host/page/routing/recovery/suspension classes — 39 passed; mutation without the new reuse check fails `testFrameRateCrossingTheDisplayRefreshRebuildsThePage` as expected.
+- `python3 scripts/test.py` (isolated worktree) — Python script tests OK; 1355 native: 1341 passed, 14 skipped.
+- Not measured: the rebuilt page's 120 Hz cadence inside the real app (needs a 120 fps setting and a live run); the reporter's own machine.
+
 ## 2026-10-12 — Control panel stays closed at login (issue #41)
 
 - Change: ControlPanelLaunch reads the open-application Apple event's keyAELaunchedAsLogInItem; a login launch skips the startup panel unless the welcome guide is unfinished or BridgeStore failed to start.
@@ -118,11 +129,3 @@ Why MTLCompilerService recompiled Lucy (3521337568) after a launch despite warm 
 - No eviction or loss: 16 other wallpapers, a concurrent holder, a SIGKILLed holder, 3,400 entries (~45 MB) in one process.
 - App logs: every warm-cache compile gap (Winter 10:57, Lucy 11:17, Lofi Girl 12:14) was the Release build's first load of a wallpaper last loaded by `/Applications/WallpaperMachine.app`; same-copy repeats hit.
 - Native Metal admits Lucy and Lofi Girl, not Yae Miko (lighting) or Winter Nothingness (translation failure); MoltenVK 1.4.2 has no binary-archive option. Findings in features/performance.md, renderer.md and power-benchmark.md; links checked.
-
-## 2026-10-10 — Energy readout: static loading notice replaces switch detection
-
-- Change: the loading flag (switch detection, hidden grade and comparison) is removed; the Energy use row now always notes that right after a wallpaper is applied the figures include loading it. Per-wallpaper ratings still start no interval within 8 s of a presentation change.
-- Why: the user saw the flag miss a second apply. The readout samples only while Settings is open, so a switch made from another page, or a re-apply of the same wallpaper, was never seen.
-- Tests: targeted EnergyUsageMonitorTests, WallpaperEnergyRatingsTests, WebPanelEnergyUsageTests (24 passed); test_panel_localization OK; node --check WebUI/settings.js.
-- Full gate: python3 scripts/test.py — 1320 passed, 0 failed, 14 skipped (opt-in media and network layers).
-- Not verified: the note in the running panel (no screenshot taken).

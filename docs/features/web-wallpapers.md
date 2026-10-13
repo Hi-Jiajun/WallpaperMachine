@@ -125,6 +125,19 @@ separate web view with its own handler (see [architecture](../architecture.md#co
   selector is unavailable, the page keeps WebKit's default scheduling and the
   limitation is logged. This does not change the control panel or native
   screen-saver web surfaces.
+- **Frame rate.** The page is told the display's effective frame rate through
+  `applyGeneralProperties({ fps })`, and many pages pace their own loop by it.
+  WebKit draws a page near 60 fps even on a faster display, and it hands the page
+  one pointer move per drawn frame, so hover is held to that rate too. When the
+  effective rate reaches the refresh of a display above 60 Hz (the user chose, for
+  example, 120 on a 120 Hz display), `WebWallpaperHost` creates the page with
+  WebKit's `PreferPageRenderingUpdatesNear60FPSEnabled` feature off, and the page
+  then draws, and receives the pointer, at the full refresh. WebKit reads that
+  feature only when a web view is created, so a rate change that crosses the
+  refresh (the slider, or the battery frame rate taking over) rebuilds the page;
+  a change that stays on one side keeps the document. At the default rate nothing
+  changes. If the running WebKit no longer offers the feature, the page keeps the
+  default cadence and the limitation is logged once.
 - **Recovery.** A content process that keeps terminating is restarted on a windowed
   budget with exponential backoff rather than forever; the budget returns only
   after a document has run without interruption for the stable-run threshold.
@@ -241,6 +254,10 @@ never substitutes Pause for an unavailable mute.
 - Pointer events are mirrored, not captured: Finder still selects icons and
   rubber-bands, and a click on an icon reaches the page too. The middle button
   arrives without its button number.
+- A page sees at most one pointer move per frame it draws. Below a fast display's
+  full refresh, WebKit's own cadence near 60 fps applies (60 on a 120 Hz display,
+  whatever rate between 60 and 120 is chosen). A page that cannot keep up, such as
+  a heavy WebGL scene on a slower GPU, slows its pointer with its frames.
 - Nonzero WebAudio gain is not controlled by the native media-volume interface;
   whole-page Mute still applies where WebKit exposes it.
 

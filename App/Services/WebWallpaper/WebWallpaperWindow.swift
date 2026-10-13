@@ -105,6 +105,11 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
     /// Symlink-resolved entry path, used for identity only: two descriptors name
     /// the same page when this matches, whatever spelling the entry file used.
     let canonicalEntryURL: URL
+    /// Whether the page draws at its display's full refresh instead of WebKit's
+    /// default cadence near 60 fps. WebKit also hands a page one pointer move
+    /// per drawn frame, so this caps hover too. WebKit reads it only when the
+    /// web view is created, so it is fixed for the life of the page.
+    let rendersAtDisplayRefresh: Bool
     private(set) var isLoaded = false
     /// Increments on every `load()`. Async host calls carry the generation they
     /// were issued for, so a late completion cannot write into a newer document.
@@ -205,6 +210,26 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
     private static let simulateExit = NSSelectorFromString("_simulateMouseExit:")
     static var supportsHover: Bool { WKWebView.instancesRespond(to: simulateMove) }
     private static var hoverUnavailableLogged = false
+    private static var fullRefreshUnavailableLogged = false
+
+    /// WebKit keeps a page's rendering updates near 60 fps even on a faster
+    /// display. The switch is a WebKit feature flag with no public setter, so it
+    /// is reached through the same feature list Safari's developer settings
+    /// use. Returns false when the running WebKit no longer offers it.
+    private static func allowRenderingAboveNear60FPS(_ preferences: WKPreferences) -> Bool {
+        let featuresSelector = NSSelectorFromString("_features")
+        let setSelector = NSSelectorFromString("_setEnabled:forFeature:")
+        guard WKPreferences.responds(to: featuresSelector), preferences.responds(to: setSelector),
+              let features = WKPreferences.perform(featuresSelector)?.takeUnretainedValue() as? [NSObject],
+              let feature = features.first(where: {
+                  $0.value(forKey: "key") as? String == "PreferPageRenderingUpdatesNear60FPSEnabled"
+              })
+        else { return false }
+        typealias SetEnabled = @convention(c) (AnyObject, Selector, Bool, AnyObject) -> Void
+        unsafeBitCast(preferences.method(for: setSelector), to: SetEnabled.self)(
+            preferences, setSelector, false, feature)
+        return true
+    }
 
 
     /// The `load#N` of the log header written when this page was opened; its
@@ -219,6 +244,7 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         surface: RuntimeSurfaceKey = RuntimeSurfaceKey(kind: .desktopWeb, displayID: 0),
         counters: RuntimeCounters? = nil,
         persistentData: Bool = true,
+        rendersAtDisplayRefresh: Bool = false,
         recovery: RecoveryPolicy = RecoveryPolicy(),
         now: (@MainActor () -> ContinuousClock.Instant)? = nil,
         wait: (@Sendable (Duration) async throws -> Void)? = nil
@@ -228,6 +254,7 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         self.canonicalEntryURL = WebWallpaperProtocol.canonicalEntryURL(projectURL: projectURL, entryFile: entryFile)
             ?? self.entryURL.standardizedFileURL
         self.surface = surface
+        self.rendersAtDisplayRefresh = rendersAtDisplayRefresh
         self.counters = counters ?? .shared
         self.recovery = recovery
         self.now = now ?? { ContinuousClock.now }
@@ -246,6 +273,11 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         // tree. Media playback and capture are documented exceptions, which is
         // why suspension also suspends media explicitly.
         configuration.preferences.inactiveSchedulingPolicy = .suspend
+        if rendersAtDisplayRefresh && !Self.allowRenderingAboveNear60FPS(configuration.preferences)
+            && !Self.fullRefreshUnavailableLogged {
+            Self.fullRefreshUnavailableLogged = true
+            AppLog.warn("WebKit rendering-rate control unavailable; web wallpapers stay near 60 fps")
+        }
         let content = WKUserContentController()
         content.addUserScript(WKUserScript(source: WebWallpaperProtocol.hostScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         configuration.userContentController = content

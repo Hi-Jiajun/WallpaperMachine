@@ -30,6 +30,7 @@ final class WebWallpaperHostLifecycleTests: XCTestCase {
     var clock: TimeInterval = 0
     var revision: UInt64 = 0
     var refuseAudio = false
+    var refreshRate = 60
     var subscriptions: [Bool] = []
     var deliveryChanges = 0
   }
@@ -49,7 +50,7 @@ final class WebWallpaperHostLifecycleTests: XCTestCase {
       let model = model
       host = WebWallpaperHost(fetch: { [] },
         screens: { [(UInt32(7), NSRect(x: 0, y: 0, width: 320, height: 200))] },
-        audioPump: pump, setAudioSubscribed: { _, _, subscribed in
+        refreshRate: { _ in model.refreshRate }, audioPump: pump, setAudioSubscribed: { _, _, subscribed in
           model.subscriptions.append(subscribed)
           if model.refuseAudio && subscribed { throw CancellationError() }
         }, imagePlacement: StillImagePlacementStore(defaults: defaults, library: root),
@@ -180,6 +181,48 @@ final class WebWallpaperHostLifecycleTests: XCTestCase {
     fixture.model.revision += 1
     await fixture.host.apply([fixture.descriptor])
     XCTAssertEqual(fixture.model.surfaces.count, 2)
+  }
+
+  /// WebKit fixes a page's drawing cadence when its web view is created, so a
+  /// frame rate that reaches or leaves the display's refresh rebuilds the page,
+  /// and a change on the same side of it keeps the running document.
+  func testFrameRateCrossingTheDisplayRefreshRebuildsThePage() async throws {
+    let fixture = try Fixture()
+    defer { fixture.close() }
+    fixture.model.refreshRate = 120
+    var descriptor = fixture.descriptor
+    descriptor.fps = 60
+    await fixture.host.apply([descriptor])
+    let first = try XCTUnwrap(fixture.model.surfaces.last?.page)
+    try await wait { first.isLoaded }
+    descriptor.fps = 90
+    await fixture.host.apply([descriptor])
+    XCTAssertEqual(fixture.model.surfaces.map(\.page.rendersAtDisplayRefresh), [false])
+    descriptor.fps = 120
+    await fixture.host.apply([descriptor])
+    XCTAssertEqual(fixture.model.surfaces.map(\.page.rendersAtDisplayRefresh), [false, true])
+    let fast = try XCTUnwrap(fixture.model.surfaces.last?.page)
+    try await wait { fast.isLoaded }
+    descriptor.paused = true
+    await fixture.host.apply([descriptor])
+    XCTAssertEqual(fixture.model.surfaces.count, 2)
+    // A lower ceiling, such as the battery frame rate, must not leave the page
+    // drawing at the full refresh.
+    descriptor.fps = 30
+    await fixture.host.apply([descriptor])
+    XCTAssertEqual(fixture.model.surfaces.map(\.page.rendersAtDisplayRefresh), [false, true, false])
+  }
+
+  func testOnlyAFrameRateThatReachesAFastDisplaysRefreshDrawsAtIt() {
+    let cases: [(fps: UInt32, refresh: Int, expected: Bool)] = [
+      (60, 120, false), (119, 120, false), (120, 120, true), (144, 144, true), (90, 90, true),
+      (60, 60, false), (48, 48, false), (60, 0, false),
+    ]
+    for (fps, refresh, expected) in cases {
+      XCTAssertEqual(
+        WebWallpaperHost.rendersAtDisplayRefresh(fps: fps, refreshRate: refresh), expected,
+        "\(fps) fps on a \(refresh) Hz display")
+    }
   }
 
   func testAudioNeedsConfirmationAndSuccessfulDeliveryAndExpires() async throws {

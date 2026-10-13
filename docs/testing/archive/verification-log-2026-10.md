@@ -9,6 +9,14 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-10 — Energy readout: static loading notice replaces switch detection
+
+- Change: the loading flag (switch detection, hidden grade and comparison) is removed; the Energy use row now always notes that right after a wallpaper is applied the figures include loading it. Per-wallpaper ratings still start no interval within 8 s of a presentation change.
+- Why: the user saw the flag miss a second apply. The readout samples only while Settings is open, so a switch made from another page, or a re-apply of the same wallpaper, was never seen.
+- Tests: targeted EnergyUsageMonitorTests, WallpaperEnergyRatingsTests, WebPanelEnergyUsageTests (24 passed); test_panel_localization OK; node --check WebUI/settings.js.
+- Full gate: python3 scripts/test.py — 1320 passed, 0 failed, 14 skipped (opt-in media and network layers).
+- Not verified: the note in the running panel (no screenshot taken).
+
 ## 2026-10-10 — Energy readout: wallpaper loading flagged, measured switch cost
 
 - Change: readings whose window holds a sample within 8 s of a display's wallpaper changing (or of a rendering setting change) carry loading: shown with a note, no grade, battery share or comparison; a switch drops a comparison in progress. The rating recorder starts no interval within 8 s of a presentation change.

@@ -202,7 +202,8 @@ MacBook Pro, a MacBook Air or a 60 Hz external display, 48 on a 48 Hz one. A
 scene's cost follows its frame rate, and so does WindowServer's compositing share
 ([power benchmarking](../testing/power-benchmark.md#windowservers-share)). A higher
 rate is one choice away: the per-display slider still goes up to the display's
-refresh.
+refresh. Web wallpapers draw near 60 fps below that refresh and at the full
+refresh once the rate reaches it ([frame rate](web-wallpapers.md#runtime-shape)).
 
 The wallpaper config stores the rate as `frame_rate` in each `monitors` entry, and
 a mirror display stores it as `frame_rate` in its `[[monitor_settings]]` table. The
