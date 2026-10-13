@@ -190,7 +190,8 @@ effect an on/off or combo property builds or leaves out (every hidden effect
 would otherwise cost passes and memory). A preview of a document holds a
 load-only property at the value the scene read, for every layer that uses it, and
 reports it as deferred; only loading the scene applies it. A sound layer's volume
-binding is also read when the layer is created, and is not covered by that hold.
+is live too: a slider bound to it sets the stream's volume when the slider moves,
+and nothing else does, so a volume a script set stays until its own slider moves.
 
 ### Scene render optimisation
 

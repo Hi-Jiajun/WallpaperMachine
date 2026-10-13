@@ -450,8 +450,23 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   defers nothing. A scripted effect `visible`, an effect with a plain value, a
   property nothing reads and a live slider note nothing. One test builds the
   scene again with the new values to show the effect set and the slot texture
-  differ, which is why a running scene cannot take them. A sound layer's volume
-  binding is also read when the layer is created and is not noted here.
+  differ, which is why a running scene cannot take them.
+- **Sound layer volume follows its slider** — `project_property_preview_test`
+  (`SoundLayerVolume.*`, CPU only, a fake sound stream and a null-backend sound
+  manager, so no audio device is opened). `WPSoundParser::Parse` read a
+  slider-bound volume once, so a sound layer could not follow a property change.
+  `WPSoundParser::BindVolumeProperty` resolves the bound property like any other
+  slider setting (the authored volume while the project declares no such
+  property) and sets `WPSoundStream::SetVolume`, an atomic store the audio thread
+  already reads, so a sound layer is not load-only and costs nothing per frame.
+  The volume follows a property, clamps above full, and returns to the project's
+  own volume on the empty document, on a reset and after a saved choice, never to
+  the saved choice or to the volume the layer carries in the scene. An undeclared,
+  unnamed or non-numeric property leaves it alone. A document refreshes every
+  property, so only a change of the bound property moves the volume: an unrelated
+  edit does not undo a volume a script set with `SetSoundLayerVolume`. A released
+  stream is not touched, and the real `Parse` binds a user-bound volume and leaves
+  a plain number alone. Audible output on real hardware is not checked.
 - **Scene commits in headless tests** — `scene_schema_tests` helpers wait for
   posted work with a render-looper round trip (`beginSurfaceReconfigure`) and a
   main-looper one (installing a pointer callback replays from the main looper)

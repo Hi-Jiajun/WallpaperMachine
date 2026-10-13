@@ -553,8 +553,9 @@ pointer mapping follows the position.
 
 `project_property_preview_test` (CPU only, in the check) pins what a property
 document means to a running scene: the project's declared defaults with exactly the
-given values over them, whatever the scene loaded with, and which properties a
-scene reads only while it loads (a preview holds those at the loaded value). See
+given values over them, whatever the scene loaded with, which properties a
+scene reads only while it loads (a preview holds those at the loaded value), and
+that a sound layer's volume follows its slider. See
 [scene regressions](scene-regressions.md#scene-scripts-and-property-bindings).
 
 `unchanged_present_test` exercises Compatibility frames that would repeat the

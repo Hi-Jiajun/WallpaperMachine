@@ -24,9 +24,12 @@
 #include "Scene/include/Scene/SceneMaterial.h"
 #include "Scene/include/Scene/SceneMesh.h"
 #include "WPSceneParser.hpp"
+#include "WPSoundParser.hpp"
 #include "wpscene/WPMaterial.h"
+#include "wpscene/WPSoundObject.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <optional>
@@ -741,6 +744,181 @@ TEST(LoadOnlyProperties, AFreshParseWithTheNewValueDiffersWhichIsWhyItIsHeld) {
     EXPECT_TRUE(preview.changed.empty());
     EXPECT_EQ(BuiltEffects(*before->scene), effects);
     EXPECT_EQ(PictureTexture(*before), texture);
+}
+
+// A sound layer's volume is a slider like any other. It is read by a binding that
+// writes an atomic the audio thread already reads, so following a property costs
+// nothing per frame and needs no audio device to test.
+class FakeSoundStream final : public audio::SoundStream {
+public:
+    uint64_t NextPcmData(void*, uint32_t) override { return 0; }
+    void     PassDesc(const Desc&) override {}
+};
+
+std::shared_ptr<WPSoundStream> SilentStream(float volume) {
+    WPSoundStream::StreamFactory factory = [](const audio::SoundStream::Desc&) {
+        return std::make_shared<FakeSoundStream>();
+    };
+    return std::make_shared<WPSoundStream>(
+        std::vector<WPSoundStream::StreamFactory> { std::move(factory) },
+        WPSoundStream::Config { .volume = volume, .startsilent = true });
+}
+
+// What the project declares for the sound, and what a user saved over it.
+const ProjectProperties kSoundAuthored {
+    { "loudness", RuntimeScalarValue::Float(0.625f) },
+    { "other", RuntimeScalarValue::Float(1.0f) },
+};
+const ProjectProperties kSoundSaved {
+    { "loudness", RuntimeScalarValue::Float(0.125f) },
+};
+
+std::unique_ptr<SceneRuntimeContext> SoundRuntime(const ProjectProperties& saved) {
+    return CreateSceneRuntimeContext(SceneRuntimeBootstrap {
+        .project_properties          = MergeProjectProperties(kSoundAuthored, saved),
+        .authored_project_properties = kSoundAuthored,
+    });
+}
+
+TEST(SoundLayerVolume, FollowsTheBoundPropertyAndReturnsToTheAuthoredVolume) {
+    auto runtime = SoundRuntime(kSoundSaved);
+    ASSERT_NE(runtime, nullptr);
+    // The layer starts at some other volume than the layer's authored 0.4, and
+    // the saved choice is what the scene loads with.
+    auto stream = SilentStream(1.0f);
+    runtime->RegisterSoundLayer("music", stream);
+    WPSoundParser::BindVolumeProperty(*runtime, stream, "loudness", 0.4f);
+    EXPECT_EQ(runtime->SoundLayerVolume("music"), 0.125f);
+
+    runtime->ApplyProjectPropertyOverride({ { "loudness", RuntimeScalarValue::Float(0.2f) } });
+    EXPECT_EQ(runtime->SoundLayerVolume("music"), 0.2f);
+    EXPECT_EQ(stream->Volume(), 0.2f);
+
+    // A volume is never louder than full, whatever the slider is sent.
+    runtime->ApplyProjectPropertyOverride({ { "loudness", RuntimeScalarValue::Float(3.0f) } });
+    EXPECT_EQ(runtime->SoundLayerVolume("music"), 1.0f);
+
+    // The empty document is the project's own volume: not the saved choice the
+    // scene loaded with, and not the volume the layer carries in the scene.
+    runtime->ApplyProjectPropertyOverride({});
+    EXPECT_EQ(runtime->SoundLayerVolume("music"), 0.625f);
+
+    runtime->ApplyProjectPropertyOverride({ { "loudness", RuntimeScalarValue::Float(0.5f) } });
+    EXPECT_EQ(runtime->SoundLayerVolume("music"), 0.5f);
+    runtime->ResetProjectPropertyOverride();
+    EXPECT_EQ(runtime->SoundLayerVolume("music"), 0.625f);
+
+    // A preview moves it the same way and has nothing to defer.
+    const auto preview = runtime->PreviewProjectPropertyOverride(
+        { { "loudness", RuntimeScalarValue::Float(0.3f) } });
+    EXPECT_EQ(preview.changed, Names({ "loudness" }));
+    EXPECT_TRUE(preview.deferred.empty());
+    EXPECT_EQ(runtime->SoundLayerVolume("music"), 0.3f);
+}
+
+TEST(SoundLayerVolume, AnUndeclaredOrNonNumericPropertyLeavesTheVolumeAlone) {
+    // The project declares no such property: the layer keeps the volume it was
+    // authored with, as a fresh load would give it.
+    auto runtime = SoundRuntime({});
+    ASSERT_NE(runtime, nullptr);
+    auto stream = SilentStream(1.0f);
+    runtime->RegisterSoundLayer("music", stream);
+    WPSoundParser::BindVolumeProperty(*runtime, stream, "missing", 0.4f);
+    EXPECT_EQ(runtime->SoundLayerVolume("music"), 0.4f);
+    runtime->ApplyProjectPropertyOverride({ { "other", RuntimeScalarValue::Float(0.1f) } });
+    EXPECT_EQ(runtime->SoundLayerVolume("music"), 0.4f);
+
+    // No property named at all binds nothing.
+    auto unbound = SilentStream(0.7f);
+    runtime->RegisterSoundLayer("unbound", unbound);
+    WPSoundParser::BindVolumeProperty(*runtime, unbound, "", 0.4f);
+    runtime->ApplyProjectPropertyOverride({ { "loudness", RuntimeScalarValue::Float(0.1f) } });
+    EXPECT_EQ(runtime->SoundLayerVolume("unbound"), 0.7f);
+
+    // A choice or a switch is not a loudness, so the volume stays where it was.
+    auto words = CreateSceneRuntimeContext(SceneRuntimeBootstrap {
+        .project_properties = { { "loudness", RuntimeScalarValue::String("loud") } },
+    });
+    ASSERT_NE(words, nullptr);
+    auto spoken = SilentStream(0.9f);
+    words->RegisterSoundLayer("music", spoken);
+    WPSoundParser::BindVolumeProperty(*words, spoken, "loudness", 0.4f);
+    EXPECT_EQ(words->SoundLayerVolume("music"), 0.9f);
+    words->ApplyProjectPropertyOverride({ { "loudness", RuntimeScalarValue::Bool(true) } });
+    EXPECT_EQ(words->SoundLayerVolume("music"), 0.9f);
+    words->ApplyProjectPropertyOverride({ { "loudness", RuntimeScalarValue::Float(0.2f) } });
+    EXPECT_EQ(words->SoundLayerVolume("music"), 0.2f);
+    words->ApplyProjectPropertyOverride({ { "loudness", RuntimeScalarValue::String("quiet") } });
+    EXPECT_EQ(words->SoundLayerVolume("music"), 0.2f);
+}
+
+// Every document refreshes every property, changed or not. A volume a script set
+// stays until the slider it follows is what moves.
+TEST(SoundLayerVolume, AnUnchangedPropertyDoesNotUndoAVolumeAScriptSet) {
+    auto runtime = SoundRuntime({});
+    ASSERT_NE(runtime, nullptr);
+    auto stream = SilentStream(1.0f);
+    runtime->RegisterSoundLayer("music", stream);
+    WPSoundParser::BindVolumeProperty(*runtime, stream, "loudness", 0.4f);
+    ASSERT_EQ(runtime->SoundLayerVolume("music"), 0.625f);
+
+    ASSERT_TRUE(runtime->SetSoundLayerVolume("music", 0.9f));
+    runtime->ApplyProjectPropertyOverride({ { "other", RuntimeScalarValue::Float(0.5f) } });
+    EXPECT_EQ(runtime->SoundLayerVolume("music"), 0.9f);
+
+    runtime->ApplyProjectPropertyOverride({ { "loudness", RuntimeScalarValue::Float(0.25f) } });
+    EXPECT_EQ(runtime->SoundLayerVolume("music"), 0.25f);
+
+    ASSERT_TRUE(runtime->SetSoundLayerVolume("music", 0.9f));
+    runtime->ApplyProjectPropertyOverride({ { "loudness", RuntimeScalarValue::Float(0.25f) } });
+    EXPECT_EQ(runtime->SoundLayerVolume("music"), 0.9f);
+    runtime->ApplyProjectPropertyOverride({});
+    EXPECT_EQ(runtime->SoundLayerVolume("music"), 0.625f);
+}
+
+TEST(SoundLayerVolume, ADestroyedStreamIsNotTouched) {
+    auto runtime = SoundRuntime({});
+    ASSERT_NE(runtime, nullptr);
+    auto stream = SilentStream(1.0f);
+    std::weak_ptr<WPSoundStream> watcher = stream;
+    runtime->RegisterSoundLayer("music", stream);
+    WPSoundParser::BindVolumeProperty(*runtime, stream, "loudness", 0.4f);
+    stream.reset();
+    ASSERT_TRUE(watcher.expired()) << "the binding must not keep the stream alive";
+
+    EXPECT_EQ(runtime->ApplyProjectPropertyOverride(
+                  { { "loudness", RuntimeScalarValue::Float(0.2f) } }),
+              Names({ "loudness" }));
+    EXPECT_FALSE(runtime->HasSoundLayer("music"));
+}
+
+// The parser binds the layer it creates, from the volume the scene file writes as
+// `{"user": ..., "value": ...}`; a plain number is the author's and stays.
+TEST(SoundLayerVolume, ALoadedSoundLayerFollowsItsSliderAndAPlainOneDoesNot) {
+    auto runtime = SoundRuntime(kSoundSaved);
+    ASSERT_NE(runtime, nullptr);
+    fs::VFS             vfs;
+    audio::SoundManager sound { audio::SoundManager::OutputBackend::Null };
+    const auto          parse = [&](const char* json) {
+        wpscene::WPSoundObject object;
+        EXPECT_TRUE(object.FromJson(nlohmann::json::parse(json), vfs));
+        WPSoundParser::Parse(object, vfs, sound, runtime.get());
+    };
+    parse(R"({"name":"music","sound":["a.ogg"],"startsilent":true,
+              "volume":{"user":"loudness","value":0.4}})");
+    parse(R"({"name":"click","sound":["b.ogg"],"startsilent":true,"volume":0.75})");
+    ASSERT_TRUE(runtime->HasSoundLayer("music"));
+    ASSERT_TRUE(runtime->HasSoundLayer("click"));
+    EXPECT_EQ(runtime->SoundLayerVolume("music"), 0.125f);
+    EXPECT_EQ(runtime->SoundLayerVolume("click"), 0.75f);
+
+    runtime->ApplyProjectPropertyOverride({ { "loudness", RuntimeScalarValue::Float(0.5f) } });
+    EXPECT_EQ(runtime->SoundLayerVolume("music"), 0.5f);
+    EXPECT_EQ(runtime->SoundLayerVolume("click"), 0.75f);
+
+    runtime->ApplyProjectPropertyOverride({});
+    EXPECT_EQ(runtime->SoundLayerVolume("music"), 0.625f);
+    EXPECT_EQ(runtime->SoundLayerVolume("click"), 0.75f);
 }
 
 } // namespace
