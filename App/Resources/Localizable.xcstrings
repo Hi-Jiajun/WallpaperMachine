@@ -3053,6 +3053,30 @@
     "Play or Pause" : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Play or Pause"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "再生／一時停止"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "播放或暂停"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "播放或暫停"}}}
     },
+    "Mute Wallpapers" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Mute Wallpapers"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "壁紙を消音"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "壁纸静音"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "桌布靜音"}}}
+    },
+    "Unmute Wallpapers" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Unmute Wallpapers"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "壁紙の消音を解除"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "取消壁纸静音"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "取消桌布靜音"}}}
+    },
+    "Mute or Unmute Wallpapers" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Mute or Unmute Wallpapers"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "壁紙を消音／消音を解除"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "壁纸静音或取消静音"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "桌布靜音或取消靜音"}}}
+    },
+    "Silences every wallpaper without changing their saved sound settings." : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Silences every wallpaper without changing their saved sound settings."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "保存されたサウンド設定は変えずに、すべての壁紙を消音します。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "让所有壁纸静音，不更改它们已保存的声音设置。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "讓所有桌布靜音，不更改它們已儲存的聲音設定。"}}}
+    },
+    "Lets every wallpaper play its saved sound again after Mute Wallpapers." : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Lets every wallpaper play its saved sound again after Mute Wallpapers."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "「壁紙を消音」のあと、すべての壁紙が保存済みのサウンド設定で再び音を出すようにします。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "在“壁纸静音”之后，让每个壁纸按已保存的声音设置重新发声。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "在「桌布靜音」之後，讓每個桌布依已儲存的聲音設定重新發聲。"}}}
+    },
+    "Silences every wallpaper, or lets them play their saved sound again when they are already silenced." : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Silences every wallpaper, or lets them play their saved sound again when they are already silenced."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "すべての壁紙を消音します。すでに消音している場合は、保存済みのサウンド設定で再び音を出します。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "让所有壁纸静音；若已静音，则让它们按已保存的声音设置重新发声。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "讓所有桌布靜音；若已靜音，則讓它們依已儲存的聲音設定重新發聲。"}}}
+    },
+    "Mute or unmute wallpapers" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Mute or unmute wallpapers"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "壁紙の消音／消音解除"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "壁纸静音或取消静音"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "桌布靜音或取消靜音"}}}
+    },
+    "Mute or Unmute" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Mute or Unmute"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "消音／消音解除"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "静音或取消静音"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "靜音或取消靜音"}}}
+    },
     "A collection can’t be downloaded as one. Open it to download its wallpapers." : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "A collection can’t be downloaded as one. Open it to download its wallpapers."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "コレクションはまとめてダウンロードできません。コレクションを開いて、含まれる壁紙をダウンロードしてください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "合集无法整体下载。请打开合集，下载其中的壁纸。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "收藏集無法整個下載。請打開收藏集以下載其中的桌布。"}}}
     },

@@ -352,8 +352,12 @@ playlist changes are included; reapplying an unchanged assignment adds nothing.
 ### Menu bar, one display at a time
 
 With one display that can show its own wallpaper the menu bar keeps a flat list:
-Previous Wallpaper, Next Wallpaper, Random Wallpaper and Recently used act on that display. With two or
-more (enabled, independent and connected; a mirror or a disabled display is not
+Previous Wallpaper, Next Wallpaper, Random Wallpaper and Recently used act on that display. Above
+them, after Play/Pause, **Mute Wallpapers** silences every wallpaper at once and is ticked while it
+is on ([Mute all wallpapers](performance.md#playback)); it is one item for the whole Mac, shown
+the same way with two or more displays, and shown while it is on even with nothing playing so it can
+be turned off. With two or more
+(enabled, independent and connected; a mirror or a disabled display is not
 listed) the menu has one submenu per display, named as the panel names it and ordered
 the main display first, then left to right as the screens sit; screens with the same
 name get (2), (3). Each submenu holds that display's own Previous, Next, **Random Wallpaper**

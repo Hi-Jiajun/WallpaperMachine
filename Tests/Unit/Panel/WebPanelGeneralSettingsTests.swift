@@ -66,6 +66,69 @@ final class WebPanelGeneralSettingsTests: ControlPanelTestCase {
     XCTAssertNil(hotKeys.bindings[.randomWallpaper])
   }
 
+  /// The muting of every wallpaper is the app's own preference: the panel stores it, reports it
+  /// and takes nothing but a boolean for it.
+  func testMutingEveryWallpaperIsStoredReportedAndTakesOnlyABoolean() async throws {
+    let panel = try makePanel()
+    let playback = PlaybackPreferences(defaults: panel.defaults)
+    let controller = panel.makeController(playback: playback)
+    defer { controller.stop() }
+    func reported() throws -> Bool? {
+      let settings = try XCTUnwrap(controller.snapshot()["settings"] as? [String: Any])
+      return settings["wallpapersMuted"] as? Bool
+    }
+
+    XCTAssertEqual(try reported(), false, "Wallpapers keep their own sound until the user mutes them all")
+    try await controller.perform("setting", body: ["key": "wallpapersMuted", "value": true])
+    XCTAssertTrue(playback.wallpapersMuted)
+    XCTAssertEqual(try reported(), true)
+    XCTAssertTrue(
+      PlaybackPreferences(defaults: panel.defaults).wallpapersMuted, "The choice must survive a relaunch")
+
+    for bad: Any in ["true", "yes", 1, NSNull()] {
+      do {
+        try await controller.perform("setting", body: ["key": "wallpapersMuted", "value": bad])
+        XCTFail("\(bad) must not be accepted for a switch")
+      } catch {}
+    }
+    XCTAssertTrue(playback.wallpapersMuted, "A refused value leaves the saved one alone")
+
+    try await controller.perform("setting", body: ["key": "wallpapersMuted", "value": false])
+    XCTAssertFalse(playback.wallpapersMuted)
+    XCTAssertEqual(try reported(), false)
+  }
+
+  /// What the user reads and presses: the first row of Playback, ticked as the preference says, even
+  /// when the change comes from elsewhere (the menu bar, a link), and pressing it changes the preference.
+  func testTheMuteRowLeadsPlaybackAndFollowsThePreference() async throws {
+    try await withPanel { panel in
+      try await panel.finishWelcome()
+      panel.navigation.selection = .settings
+      panel.show()
+      try await panel.waitJS("powerProbe.received.at(-1)?.page === 'settings'")
+      _ = try await panel.js("document.querySelector('[data-section=\"performance\"]').click()")
+      let toggle = "document.querySelector('.settings-row[data-key=\"wallpapersMuted\"] input[type=\"checkbox\"]')"
+      try await panel.waitJS(toggle)
+
+      let first = try await panel.js(
+        "return document.querySelector('[data-key=\"performance-playback\"] .settings-row').dataset.key")
+      XCTAssertEqual(first as? String, "wallpapersMuted", "Muting everything leads the Playback group")
+      let initial = try await panel.js("return \(toggle).checked")
+      XCTAssertEqual(initial as? Bool, false)
+      let usable = try await panel.js("return !\(toggle).disabled")
+      XCTAssertEqual(usable as? Bool, true)
+
+      // Muted from the menu bar or a link: the open panel follows.
+      panel.controller.playback.wallpapersMuted = true
+      try await panel.waitJS("powerProbe.received.at(-1)?.settings?.wallpapersMuted === true")
+      try await panel.waitJS("\(toggle).checked")
+
+      _ = try await panel.js("\(toggle).click()")
+      try await panel.waitUntil(timeout: 10) { !panel.controller.playback.wallpapersMuted }
+      try await panel.waitJS("!\(toggle).checked")
+    }
+  }
+
   func testHidingAfterApplyingIsOffUntilTurnedOnAndPersists() async throws {
     let panel = try makePanel()
     let controller = panel.makeController()

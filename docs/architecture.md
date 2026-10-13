@@ -69,7 +69,10 @@ automation schedulers, the web and native-video wallpaper hosts, system media).
   its own wallpaper keeps the flat Previous / Next / Recently used, and two or more get a
   submenu each (main display first, then left to right) holding that display's own commands
   (Previous, Next, **Random Wallpaper**, Recently used),
-  **Remove from Display** or **Start Again**, and **Open in Control Panel**. Random Wallpaper
+  **Remove from Display** or **Start Again**, and **Open in Control Panel**. **Mute Wallpapers**
+  is one ticked item after Play/Pause in both layouts: it flips `PlaybackPreferences.wallpapersMuted`
+  (`AutomationCommand.toggleMute`) and takes no queue turn, since the presentation policy
+  hears the preference change and delivers it. Random Wallpaper
   is `AutomationCommand.random`, like a link, a Shortcuts action or a shortcut key: it takes the
   display's turn in `BridgeStore.commands` and picks from the library and favorites then
   (`BridgeStore.activateRandomWallpaperAsync`), with its round kept by `PlaylistStore`. `AppDelegate`
@@ -291,8 +294,10 @@ per-Space getter and setter through optional private CoreGraphics and HIServices
   settles, which the app delegate hands to `PlaylistScheduler.noteUnlock()` for playlists set
   to change when the Mac is unlocked ([playlists](features/playlists.md#each-time-the-mac-is-unlocked)).
   `AppRuleMonitor` and `OtherAudioMonitor` feed those conditions, and wallpaper audio is
-  suppressed separately (`setAudioSuppressed`) for a mute rule or other-app audio set to mute. Occlusion is per display
-  (`setDisplayPresentationSuspended`): one covered screen stops only its own decoding,
+  suppressed separately (`setAudioSuppressed`) for a mute rule, other-app audio set to mute or the
+  user's own mute of every wallpaper (`PlaybackPreferences.wallpapersMuted`). The bridge ORs that one
+  flag with each wallpaper's saved mute, so the user's mute never rewrites a saved sound setting.
+  Occlusion is per display (`setDisplayPresentationSuspended`): one covered screen stops only its own decoding,
   simulation and rendering, and a visible screen never resumes a covered one. Neither call returns a
   snapshot, yet both fold into every web and native video descriptor's `paused`, so `AppDelegate`
   has the web and native video hosts read the bridge again (`WallpaperHosts.reconcile`) once the

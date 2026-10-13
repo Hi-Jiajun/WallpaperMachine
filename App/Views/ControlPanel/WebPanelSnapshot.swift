@@ -513,6 +513,7 @@ extension WebPanelController {
       "lowBatteryThreshold": playback.lowBatteryThreshold,
       "batteryPercent": BatteryReading.read()?.percent as Any? ?? null,
       "playOnlyOnActiveDisplay": playback.playsOnlyOnActiveDisplay,
+      "wallpapersMuted": playback.wallpapersMuted,
       // The animated lock screen sets the desktop picture itself, so the choice waits for it.
       "writeDesktopPicture": playback.writesDesktopPicture,
       "desktopPictureLocked": lock?.locksDesktopPictureChoice ?? false,

@@ -633,6 +633,26 @@ final class WallpaperBackupTests: XCTestCase {
         }
     }
 
+    /// Muting every wallpaper is local to this Mac: a backup never carries it, and a package that
+    /// claims to cannot silence a Mac whose owner did not ask.
+    func testMutingEveryWallpaperIsNeitherBackedUpNorRestored() async throws {
+        let original = try fixture()
+        original.set(true, forKey: "WallpaperMachine.wallpapersMuted")
+        original.set(true, forKey: "WallpaperMachine.playOnlyOnActiveDisplay")
+        let export = try WallpaperBackupPreferences(defaults: original, domainName: domainName(for: original))
+        XCTAssertNotNil(export.values["WallpaperMachine.playOnlyOnActiveDisplay"], "a neighbouring playback choice is backed up")
+        XCTAssertNil(export.values["WallpaperMachine.wallpapersMuted"])
+
+        let live = try defaults()
+        try WallpaperBackupService(supportRoot: source).export(to: package, includeLibrary: true, preferences: export)
+        let service = WallpaperBackupService(supportRoot: destination)
+        try replaceManifestPreference("WallpaperMachine.playOnlyOnActiveDisplay", value: false)
+        XCTAssertNoThrow(try service.preview(package: package, preferences: .init(defaults: live, domainName: domainName(for: live))),
+                         "an allowed playback choice in the same package is fine")
+        try replaceManifestPreference("WallpaperMachine.wallpapersMuted", value: true)
+        XCTAssertThrowsError(try service.preview(package: package, preferences: .init(defaults: live, domainName: domainName(for: live))))
+    }
+
     func testStructuredPreferenceRejectionPreservesPendingAndLiveArchive() async throws {
         let original = try fixture()
         let live = try defaults()

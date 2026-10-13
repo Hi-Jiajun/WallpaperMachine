@@ -4,7 +4,7 @@
 opens on. It is a playback and quality page. Every engine control is applied
 through the bridge and the page re-renders from the snapshot the engine returns,
 so the page never shows a setting the engine did not accept. Playback choices
-that the app owns (other-app audio, display sleep, app rules) are stored in
+that the app owns (muting everything, other-app audio, display sleep, app rules) are stored in
 `PlaybackPreferences` and published on the same snapshot.
 
 Nothing on this page promises a measured power saving. A lower frame rate or
@@ -251,6 +251,7 @@ control for that part.
 
 | Setting | Values | Default |
 | --- | --- | --- |
+| Mute all wallpapers | On, Off | Off |
 | When windows cover the desktop | **Pause**, **Keep running** | Pause |
 | When another app plays sound | **Keep running**, **Mute**, **Pause** | Keep running |
 | When displays sleep | **Pause**, **Stop (free memory)** | Pause |
@@ -259,6 +260,26 @@ control for that part.
 | When the battery is low | **Keep running**, **Pause**, **Stop (free memory)**; the level is **10%**, **20%** or **30%** | Keep running, 20% |
 | In Low Power Mode | **Keep running**, **Pause**, **Stop (free memory)** | Keep running |
 | When the Mac is hot | **Keep running**, **Pause**, **Stop (free memory)** | Keep running |
+
+**Mute all wallpapers** is the user's own switch for silencing every wallpaper at
+once. The same switch is **Mute Wallpapers** in the menu bar (ticked while it is on,
+and offered while it is on whatever is playing, so it can always be turned off),
+`wallpapermachine://mute`, `unmute` and `togglemute`, the **Mute Wallpapers**,
+**Unmute Wallpapers** and **Mute or Unmute Wallpapers** actions in the Shortcuts app,
+and a shortcut key ([automation](automation.md)); all of them set
+`PlaybackPreferences.wallpapersMuted`. It never rewrites a wallpaper's saved **Mute
+audio** and volume or a display's. It is one more reason, in
+`WallpaperPresentationPolicy`, for the bridge's single audio-suppression flag, which
+the engine combines with each wallpaper's own mute, so a wallpaper plays only if
+neither says mute. It therefore composes with the mute app rules, the Focus filter and
+**When another app plays sound** instead of replacing them: turning it off while one
+of those still applies leaves the wallpapers silent. Turning it on changes nothing
+about presentation, so playback and playlists carry on, and a wallpaper applied while
+it is on starts silent. Turning it off lets each wallpaper play as it was saved. The
+choice is kept across relaunches and is local to this Mac, so a
+[backup](backup-restore.md) neither carries nor restores it: restoring one never
+silences a Mac. For Web wallpapers it has the same boundary as **Mute** below, and the
+lock-screen extension is always muted.
 
 **When windows cover the desktop** handles the case AppKit never reports as
 hidden. A zoomed (not full-screen) window leaves the strip under the translucent

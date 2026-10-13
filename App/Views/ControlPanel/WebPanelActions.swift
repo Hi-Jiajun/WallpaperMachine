@@ -545,6 +545,8 @@ extension WebPanelController {
         playback.writesDesktopPicture = writes
       case "playOnlyOnActiveDisplay":
         playback.playsOnlyOnActiveDisplay = try request.boolean("value")
+      case "wallpapersMuted":
+        playback.wallpapersMuted = try request.boolean("value")
       case "hideAfterActivating":
         defaults.set(try request.boolean("value"), forKey: Self.hideAfterActivatingKey)
       case "inspectWebWallpapers":

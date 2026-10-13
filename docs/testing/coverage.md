@@ -31,9 +31,11 @@ solar and DST boundaries, appearance selection, Focus recovery and manual
 precedence, editor round trips and preference validation, and the menu bar menu's
 layout (flat for one display, a submenu per display with every command naming its
 display, ordering and titles, Remove or Start Again, Random Wallpaper where something else
-can be chosen, which displays are listed), the `random` link and its pools, and the
-shortcut key for it. `WallpaperBackupTests`
-covers rule merging and local recovery-state rollback. What each covers, and what
+can be chosen, Mute Wallpapers after Play/Pause, ticked while muted and offered then with
+nothing playing, which displays are listed), the `random` link and its pools, the
+`mute`, `unmute` and `togglemute` links (which take no query) and the shortcut keys for them.
+`WallpaperBackupTests` covers rule merging and local recovery-state rollback, and that the
+mute of every wallpaper is neither exported nor accepted from a package. What each covers, and what
 needs the running app, is in [automation](../features/automation.md#verification).
 
 ## Desktop
@@ -149,7 +151,13 @@ on the desktop ([manual-smoke.md](manual-smoke.md)).
   `AppRuleMonitorTests`, `OtherAudioMonitorTests` — how sleep, lock, app rules
   and other-app audio compose (Stop beats Pause, Keep running ignores audio),
   defaults and corrupt stored values, running versus frontmost rules, and the
-  other-audio settle.
+  other-audio settle. The user's mute of every wallpaper is one more source of the single
+  audio-suppression flag: delivered at launch, silent without touching presentation, still held
+  by a mute rule or other-app audio when lifted, and released at teardown; its preference
+  defaults off, persists and announces one change. Its Settings switch (stored, reported,
+  boolean only, the first Playback row following the preference) is in
+  `WebPanelGeneralSettingsTests`. Whether sound really stops is not covered
+  (see [manual smoke](manual-smoke.md#audio-responsiveness)).
 - `SystemConditionMonitorTests` use injected Low Power Mode and thermal readings
   and a private notification center: Low Power Mode acts only once an action is
   chosen, only serious and critical heat counts, a Focus filter joins the other
@@ -899,8 +907,8 @@ follows the developer's in-app language choice.
   `WebPanelEnergyUsageTests` (sampling only while Settings is visible),
   `WebPanelExternalLinkTests` (every fixed link in `WebUI/*.js` passes the allowlist),
   `WebPanelGeneralSettingsTests` (the Login Items note and button, that returning
-  to the panel re-reads the status only while approval is pending, and the
-  desktop-picture switch with its lock),
+  to the panel re-reads the status only while approval is pending, the
+  desktop-picture switch with its lock, and the Mute all wallpapers switch),
   `WebPanelHiddenPropertyTests` (a property a visibility rule hides is not given
   to the page, its folder is not measured and its pending text is dropped),
   `WebPanelPerformanceSettingsTests` and `WebPanelSceneSettingsTests` (unknown,

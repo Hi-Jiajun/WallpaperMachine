@@ -92,7 +92,7 @@ export default {
   'Choose at least one weekday.': '请至少选择一周中的一天。',
   'Use wallpaper': '使用指定壁纸',
   'Use saved playlist': '使用已存播放列表',
-  'The Shortcuts app can control playback, go to the previous or next wallpaper, apply a wallpaper, saved playlist or property preset, and open this window. Siri and Spotlight can run these actions too.': '“快捷指令”可以控制播放、切换上一张或下一张壁纸、应用壁纸、已存播放列表或属性预设，以及打开此窗口。Siri 和聚焦也能运行这些操作。',
+  'The Shortcuts app can control playback, mute or unmute wallpapers, go to the previous or next wallpaper, apply a wallpaper, saved playlist or property preset, and open this window. Siri and Spotlight can run these actions too.': '“快捷指令”可以控制播放、让壁纸静音或取消静音、切换上一张或下一张壁纸、应用壁纸、已存播放列表或属性预设，以及打开此窗口。Siri 和聚焦也能运行这些操作。',
   'Links can run the same actions. Wallpaper and playlist actions accept display= for a specific screen; otherwise they use the target display. An apply link also accepts display=all, and Apply Wallpaper has an On all displays option, to use every display at once. Property presets affect their wallpaper on every display. Choose saved items by name in Shortcuts.': '链接可执行相同操作。壁纸和播放列表操作可用 display= 指定屏幕，省略时使用目标显示器。应用链接还支持 display=all，“应用壁纸”也有“所有显示器”选项，二者都会一次性使用所有显示器。属性预设会影响所有显示器上的对应壁纸。在“快捷指令”中可按名称选择已存项目。',
   'In System Settings → Focus, add the WallpaperMachine filter to pause, mute, stop or temporarily switch wallpapers. No Focus filter is in effect now.': '在“系统设置 → 专注模式”中添加 WallpaperMachine 过滤条件，即可暂停、静音、停止或临时切换壁纸。目前没有生效的专注模式过滤条件。',
   'Property preset': '属性预设',
@@ -1097,6 +1097,9 @@ export default {
   'Low battery level': '低电量阈值',
   'Applies only while the Mac runs on battery. It ends 5 points above the level you choose, or when you plug in. The battery is at {percent}% now.': '仅在 Mac 使用电池供电时生效。电量回升到所选阈值再高 5 个百分点，或接上电源后结束。目前电量为 {percent}%。',
   'When the battery is low, wallpapers pause or stop once the charge falls to the level you chose, and resume when you plug in or the charge recovers.': '电量低时，壁纸会在电量降到你所选的阈值后暂停或停止，并在你接上电源或电量回升后恢复。',
+  // Mute all wallpapers
+  'Mute all wallpapers': '所有壁纸静音',
+  'Silences every wallpaper without changing their saved sound or volume. It works together with the rules below.': '让所有壁纸静音，不更改它们已保存的声音或音量。它与下方的规则共同生效。',
   // Play only on the display in use
   'Only play on the display I’m using': '仅在我正在使用的显示器上播放',
   'The display your pointer is on keeps playing. The others pause a few seconds after you leave them and resume the moment you return. Your own Play and Pause are not changed.': '鼠标指针所在的显示器会继续播放。其他显示器会在指针离开几秒后暂停，指针回来后立即恢复。不会改动你自己的播放和暂停。',
@@ -1185,6 +1188,7 @@ export default {
   // Keyboard shortcuts and automation
   'Keyboard shortcuts': '键盘快捷键',
   'Play or pause wallpapers': '播放或暂停壁纸',
+  'Mute or unmute wallpapers': '壁纸静音或取消静音',
   'Next wallpaper': '下一张壁纸',
   'Random wallpaper': '随机壁纸',
   'Open the control panel': '打开控制面板',

@@ -493,6 +493,15 @@ closed lid has not been seen on a desktop
 - [ ] Play and pause music in another app and check shader, script and particle
       response.
 - [ ] Verify that mute affects wallpaper playback only.
+- [ ] With a scene, a video (Native and Compatibility) and a Web wallpaper that all make
+      sound, press **Mute Wallpapers** in the menu bar: every one goes silent at once while
+      the pictures keep playing, the item is ticked, and Settings → Performance → Playback
+      shows **Mute all wallpapers** on. Choose it again, or use `wallpapermachine://unmute`:
+      each wallpaper is audible again at the volume it had, and the wallpapers' own **Mute
+      audio** switches in Settings → Displays never changed. Apply another wallpaper while
+      muted: it starts silent. Add an app rule that mutes, turn **Mute all wallpapers** off
+      while that app runs: the wallpapers stay silent until the rule ends. Quit and reopen
+      while muted: the wallpapers start silent and the item is still ticked.
 - [ ] Verify that the final disabled or removed scene stops capture.
 - [ ] Verify that denied permission surfaces an error.
 

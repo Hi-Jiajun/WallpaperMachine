@@ -325,6 +325,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 appRuleActions: { appRules.actions.union(conditions.actions) },
                 otherAudioActive: { otherAudio.isActive },
                 otherAudioAction: { preferences.otherAudioAction },
+                // The user's own mute of every wallpaper, on top of the rules above and never
+                // written into any wallpaper's saved sound settings.
+                userMuted: { preferences.wallpapersMuted },
                 desktopCoveredAction: { preferences.desktopCoveredAction },
                 // Another display than the one the pointer is on, for those who chose to play only there.
                 inactiveDisplays: { known in
@@ -1553,6 +1556,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             playbackIsCurrent: playbackSnapshotCurrent,
             hasActiveWallpapers: !(store?.appSnapshot.activeWallpaperIds.isEmpty ?? true),
             paused: store?.appSnapshot.playbackState == .paused,
+            wallpapersMuted: PlaybackPreferences.shared.wallpapersMuted,
             displays: displays, canLockScreen: ScreenLock.isAvailable)
     }
 
@@ -1587,6 +1591,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             openControlPanel()
         case .playPause:
             togglePlayback()
+        case .toggleMute:
+            runAutomation(.toggleMute)
         case .previous(let display):
             runAutomation(.previous(display: display))
         case .next(let display):
@@ -1945,6 +1951,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 }
             }
             playbackSnapshotCurrent = true
+        case .mute, .unmute, .toggleMute:
+            // A preference, not a renderer command: the presentation policy hears the change and
+            // delivers it through its own serialized audio path, so this needs no queue turn.
+            let preferences = PlaybackPreferences.shared
+            let muted = command == .mute || (command == .toggleMute && !preferences.wallpapersMuted)
+            guard muted != preferences.wallpapersMuted else { return }
+            preferences.wallpapersMuted = muted
+            AppLog.info("all wallpapers \(muted ? "muted" : "unmuted")")
         case .previous(let display):
             let displayId = try automationDisplay(display, store: store)
             try await store.commands.run(slot: BridgeStore.activationSlot(displayId: displayId)) {

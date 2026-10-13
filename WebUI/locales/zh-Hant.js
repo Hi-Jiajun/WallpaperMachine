@@ -92,7 +92,7 @@ export default {
   'Choose at least one weekday.': '請至少選擇一週中的一天。',
   'Use wallpaper': '使用指定桌布',
   'Use saved playlist': '使用已存播放列表',
-  'The Shortcuts app can control playback, go to the previous or next wallpaper, apply a wallpaper, saved playlist or property preset, and open this window. Siri and Spotlight can run these actions too.': '「捷徑」可以控制播放、切換上一張或下一張桌布、套用桌布、已存播放列表或屬性預設，以及開啟此視窗。Siri 和 Spotlight 也能執行這些操作。',
+  'The Shortcuts app can control playback, mute or unmute wallpapers, go to the previous or next wallpaper, apply a wallpaper, saved playlist or property preset, and open this window. Siri and Spotlight can run these actions too.': '「捷徑」可以控制播放、讓桌布靜音或取消靜音、切換上一張或下一張桌布、套用桌布、已存播放列表或屬性預設，以及開啟此視窗。Siri 和 Spotlight 也能執行這些操作。',
   'Links can run the same actions. Wallpaper and playlist actions accept display= for a specific screen; otherwise they use the target display. An apply link also accepts display=all, and Apply Wallpaper has an On all displays option, to use every display at once. Property presets affect their wallpaper on every display. Choose saved items by name in Shortcuts.': '連結可執行相同操作。桌布和播放列表操作可用 display= 指定螢幕，省略時使用目標顯示器。套用連結還支援 display=all，「套用桌布」也有「所有顯示器」選項，兩者都會一次使用所有顯示器。屬性預設會影響所有顯示器上的對應桌布。在「捷徑」中可依名稱選擇已存項目。',
   'In System Settings → Focus, add the WallpaperMachine filter to pause, mute, stop or temporarily switch wallpapers. No Focus filter is in effect now.': '在「系統設定 → 專注模式」中新增 WallpaperMachine 過濾條件，即可暫停、靜音、停止或暫時切換桌布。目前沒有生效的專注模式過濾條件。',
   'Property preset': '屬性預設',
@@ -1097,6 +1097,9 @@ export default {
   'Low battery level': '低電量門檻',
   'Applies only while the Mac runs on battery. It ends 5 points above the level you choose, or when you plug in. The battery is at {percent}% now.': '僅在 Mac 使用電池供電時生效。電量回升到所選門檻再高 5 個百分點，或接上電源後結束。目前電量為 {percent}%。',
   'When the battery is low, wallpapers pause or stop once the charge falls to the level you chose, and resume when you plug in or the charge recovers.': '電量低時，桌布會在電量降到你所選的門檻後暫停或停止，並在你接上電源或電量回升後恢復。',
+  // Mute all wallpapers
+  'Mute all wallpapers': '所有桌布靜音',
+  'Silences every wallpaper without changing their saved sound or volume. It works together with the rules below.': '讓所有桌布靜音，不更改它們已儲存的聲音或音量。它會與下方的規則一併生效。',
   // Play only on the display in use
   'Only play on the display I’m using': '僅在我正在使用的顯示器上播放',
   'The display your pointer is on keeps playing. The others pause a few seconds after you leave them and resume the moment you return. Your own Play and Pause are not changed.': '游標所在的顯示器會繼續播放。其他顯示器會在游標離開幾秒後暫停，游標回來時立即恢復。不會變更你自己的播放與暫停操作。',
@@ -1185,6 +1188,7 @@ export default {
   // Keyboard shortcuts and automation
   'Keyboard shortcuts': '快速鍵',
   'Play or pause wallpapers': '播放或暫停桌布',
+  'Mute or unmute wallpapers': '桌布靜音或取消靜音',
   'Next wallpaper': '下一張桌布',
   'Random wallpaper': '隨機桌布',
   'Open the control panel': '打開控制面板',

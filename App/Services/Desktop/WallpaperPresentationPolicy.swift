@@ -45,7 +45,8 @@ enum GlobalPresentation: Comparable, Sendable {
 /// must stop that display's decoding and rendering, and must not stop a display
 /// the user is still looking at. Display sleep, session lock, app rules and
 /// other-app audio can also suspend or unload every display, and mute wallpaper
-/// audio, without touching that choice.
+/// audio, without touching that choice. The user's own mute of every wallpaper silences them
+/// as well, whatever the rules say, and leaves each wallpaper's saved sound alone.
 @MainActor
 final class WallpaperPresentationPolicy {
     typealias ApplyCompletion = @MainActor (Result<Void, Error>) -> Void
@@ -59,6 +60,7 @@ final class WallpaperPresentationPolicy {
     private let appRuleActions: @MainActor () -> Set<AppRuleAction>
     private let otherAudioActive: @MainActor () -> Bool
     private let otherAudioAction: @MainActor () -> OtherAudioAction
+    private let userMuted: @MainActor () -> Bool
     private let desktopCoveredAction: @MainActor () -> DesktopCoveredAction
     private let coveredDisplays: @MainActor () -> Set<UInt32>
     private let inactiveDisplays: @MainActor (Set<UInt32>) -> Set<UInt32>
@@ -98,7 +100,7 @@ final class WallpaperPresentationPolicy {
     private var deliveryInFlight = false
     /// Conditions under which no display at all can present, and how hard.
     private(set) var globalPresentation: GlobalPresentation = .running
-    /// Wallpaper audio held down by a mute rule or other-app audio.
+    /// Wallpaper audio held down by the user's mute of every wallpaper, a mute rule or other-app audio.
     private(set) var isAudioSuppressed = false
     /// Displays suspended on their own, by occlusion or a covered working area.
     private(set) var suspendedDisplayIDs: Set<UInt32> = []
@@ -155,6 +157,7 @@ final class WallpaperPresentationPolicy {
         appRuleActions: (@MainActor () -> Set<AppRuleAction>)? = nil,
         otherAudioActive: (@MainActor () -> Bool)? = nil,
         otherAudioAction: (@MainActor () -> OtherAudioAction)? = nil,
+        userMuted: (@MainActor () -> Bool)? = nil,
         desktopCoveredAction: (@MainActor () -> DesktopCoveredAction)? = nil,
         coveredDisplays: (@MainActor () -> Set<UInt32>)? = nil,
         inactiveDisplays: (@MainActor (Set<UInt32>) -> Set<UInt32>)? = nil,
@@ -174,6 +177,7 @@ final class WallpaperPresentationPolicy {
         self.appRuleActions = appRuleActions ?? { [] }
         self.otherAudioActive = otherAudioActive ?? { false }
         self.otherAudioAction = otherAudioAction ?? { .keepRunning }
+        self.userMuted = userMuted ?? { false }
         self.desktopCoveredAction = desktopCoveredAction ?? { .keepRunning }
         if let coveredDisplays {
             self.coveredDisplays = coveredDisplays
@@ -469,7 +473,10 @@ final class WallpaperPresentationPolicy {
         return strongest
     }
 
+    /// The user's mute holds on its own; the rules and other-app audio each hold too, so turning
+    /// the user's mute off while one of them still applies keeps the wallpapers silent.
     private func resolvedAudioSuppressed() -> Bool {
+        if userMuted() { return true }
         if appRuleActions().contains(.mute) { return true }
         return otherAudioActive() && otherAudioAction() == .mute
     }

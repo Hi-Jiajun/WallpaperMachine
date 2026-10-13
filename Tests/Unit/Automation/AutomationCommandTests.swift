@@ -29,6 +29,29 @@ final class AutomationCommandTests: XCTestCase {
         XCTAssertEqual(command("wallpapermachine://layout?id=desk"), .applyDisplayLayout(layoutID: "desk"))
     }
 
+    func testMuteLinksTakeNothingAndKeepTheirOwnMeaning() {
+        XCTAssertEqual(command("wallpapermachine://mute"), .mute)
+        XCTAssertEqual(command("wallpapermachine://unmute"), .unmute)
+        XCTAssertEqual(command("wallpapermachine://togglemute"), .toggleMute)
+        XCTAssertEqual(command("WallpaperMachine://ToggleMute"), .toggleMute, "scheme and command ignore case")
+        XCTAssertNotEqual(command("wallpapermachine://togglemute"), command("wallpapermachine://toggle"),
+                          "muting is not playing and pausing")
+    }
+
+    /// Muting is one global switch: a link that names a display, a volume or anything else must
+    /// not be read as the nearest thing it resembles, such as muting one display or setting a level.
+    func testMuteLinksRefuseWhatTheyDoNotTake() {
+        for link in [
+            "wallpapermachine://mute?display=primary", "wallpapermachine://mute?x=1", "wallpapermachine://mute?volume=0",
+            "wallpapermachine://unmute?display=primary", "wallpapermachine://unmute?id=1",
+            "wallpapermachine://togglemute?display=a", "wallpapermachine://togglemute?now=1",
+            "wallpapermachine://togglemute/extra", "wallpapermachine://toggle-mute",
+            "wallpapermachine://volume?level=0",
+        ] {
+            XCTAssertNil(command(link), link)
+        }
+    }
+
     func testRandomTakesAnOptionalDisplayAndPool() {
         XCTAssertEqual(command("wallpapermachine://random"), .random(display: nil, pool: .all))
         XCTAssertEqual(command("wallpapermachine://random?display=primary"), .random(display: "primary", pool: .all))

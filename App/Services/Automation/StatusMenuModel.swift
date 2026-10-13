@@ -12,6 +12,8 @@ enum StatusMenuModel {
     enum Command: Equatable {
         case openControlPanel
         case playPause
+        /// Mutes every wallpaper, or lets them play their own sound again; see `AutomationCommand.toggleMute`.
+        case toggleMute
         case previous(display: String)
         case next(display: String)
         /// A random wallpaper other than the one the display shows; see `AutomationCommand.random`.
@@ -53,6 +55,8 @@ enum StatusMenuModel {
         var playbackIsCurrent: Bool
         var hasActiveWallpapers: Bool
         var paused: Bool
+        /// Whether the user has muted every wallpaper.
+        var wallpapersMuted: Bool = false
         /// The displays a command can act on, in menu order (`orderedDisplays`); empty while
         /// the app starts or quits.
         var displays: [Display]
@@ -78,6 +82,10 @@ enum StatusMenuModel {
         if input.playbackIsCurrent, input.hasActiveWallpapers {
             let title = input.paused ? String(localized: "Play") : String(localized: "Pause")
             actions.append(.command(.playPause, title: title, checked: false))
+        }
+        // Ticked while muted, and offered then whatever is playing, so a mute can always be undone.
+        if input.wallpapersMuted || (input.playbackIsCurrent && input.hasActiveWallpapers) {
+            actions.append(.command(.toggleMute, title: String(localized: "Mute Wallpapers"), checked: input.wallpapersMuted))
         }
         if input.displays.count > 1 {
             actions += input.displays.map { .submenu(title: $0.title, entries: submenu(for: $0)) }

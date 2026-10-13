@@ -62,6 +62,39 @@ struct ToggleWallpaperPlaybackIntent: AppIntent {
     }
 }
 
+struct MuteWallpapersIntent: AppIntent {
+    static let title: LocalizedStringResource = "Mute Wallpapers"
+    static let description: IntentDescription? = IntentDescription(
+        "Silences every wallpaper without changing their saved sound settings.")
+
+    func perform() async throws -> some IntentResult {
+        try await AppAutomation.shared.perform(.mute)
+        return .result()
+    }
+}
+
+struct UnmuteWallpapersIntent: AppIntent {
+    static let title: LocalizedStringResource = "Unmute Wallpapers"
+    static let description: IntentDescription? = IntentDescription(
+        "Lets every wallpaper play its saved sound again after Mute Wallpapers.")
+
+    func perform() async throws -> some IntentResult {
+        try await AppAutomation.shared.perform(.unmute)
+        return .result()
+    }
+}
+
+struct ToggleWallpaperMuteIntent: AppIntent {
+    static let title: LocalizedStringResource = "Mute or Unmute Wallpapers"
+    static let description: IntentDescription? = IntentDescription(
+        "Silences every wallpaper, or lets them play their saved sound again when they are already silenced.")
+
+    func perform() async throws -> some IntentResult {
+        try await AppAutomation.shared.perform(.toggleMute)
+        return .result()
+    }
+}
+
 struct NextWallpaperIntent: AppIntent {
     static let title: LocalizedStringResource = "Next Wallpaper"
     static let description: IntentDescription? = IntentDescription(
@@ -172,6 +205,10 @@ struct WallpaperMachineShortcuts: AppShortcutsProvider {
             intent: ToggleWallpaperPlaybackIntent(),
             phrases: ["Play or pause \(.applicationName)", "Play or pause wallpapers in \(.applicationName)"],
             shortTitle: "Play or Pause", systemImageName: "playpause")
+        AppShortcut(
+            intent: ToggleWallpaperMuteIntent(),
+            phrases: ["Mute or unmute wallpapers in \(.applicationName)", "Mute wallpapers with \(.applicationName)"],
+            shortTitle: "Mute or Unmute", systemImageName: "speaker.slash")
         AppShortcut(
             intent: NextWallpaperIntent(),
             phrases: ["Next wallpaper in \(.applicationName)", "Change wallpaper with \(.applicationName)"],

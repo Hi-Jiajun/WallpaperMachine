@@ -5,10 +5,10 @@ appearance or Focus. Global keyboard shortcuts, actions in the Shortcuts app
 (and so Siri and Spotlight), and `wallpapermachine://` links run explicit
 commands (`AutomationCommand`)
 through `AppAutomation` into `AppDelegate.performAutomation`, which the menu bar's
-Previous, Next, Random Wallpaper, Recently used, Remove from Display and Start Again items use too (with
+Mute Wallpapers, Previous, Next, Random Wallpaper, Recently used, Remove from Display and Start Again items use too (with
 two or more displays the menu has a submenu for each, see
 [the menu bar](control-panel.md#menu-bar-one-display-at-a-time)). They only do what the
-menu bar and the panel already offer: play, pause, the previous, next or a random wallpaper,
+menu bar and the panel already offer: play, pause, mute or unmute every wallpaper, the previous, next or a random wallpaper,
 apply an installed wallpaper, copy a saved playlist to a display, apply a saved
 property preset, or open the window. Automatic selection uses the same serialized
 wallpaper commands and keeps manual choices until the next event.
@@ -82,6 +82,7 @@ and retained if restore rolls back.
 | Command | What it does |
 | --- | --- |
 | Play, Pause, Play or pause | Resumes or pauses every wallpaper, as the menu bar's Play/Pause does. |
+| Mute, Unmute, Mute or unmute | Silences every wallpaper, lets them play as they were saved, or switches whichever applies. It sets the local `wallpapersMuted` preference ([Mute all wallpapers](performance.md#playback)) and takes no turn in the command queue. It never changes a wallpaper's or display's saved mute and volume, and the mute app rules, Focus filters and other-app audio keep muting after Unmute while they apply. |
 | Previous wallpaper | Returns to an earlier successful switch on the chosen display; repeated requests keep walking back, skipping deleted or unsupported wallpapers. History is consumed only after Apply succeeds. |
 | Next wallpaper | Changes a display to its playlist's next when it rotates (see [playlists](playlists.md)), otherwise to the next playable wallpaper in library order. |
 | Random wallpaper | Changes a display to a wallpaper picked at random from all the wallpapers that can play, or from the favorites only, other than the one the display shows. The display's own round remembers what it has picked, so every wallpaper of the pool comes round before one repeats; the playlist's order and shuffle round are not touched ([Random Wallpaper](playlists.md#random-wallpaper)). It is the user's own choice, so a playlist gives way to it. A wallpaper the app is holding back after a crash is never picked. With no other wallpaper to choose from it fails with "There is no other wallpaper to choose from." instead of changing nothing quietly. |
@@ -107,7 +108,7 @@ the foot of the menu bar menu; the Shortcuts app shows its own.
 ## Keyboard shortcuts
 
 **Settings → General → Keyboard shortcuts** records one shortcut each for
-**Play or pause wallpapers**, **Previous wallpaper**, **Next wallpaper**, **Random wallpaper** (from every
+**Play or pause wallpapers**, **Mute or unmute wallpapers**, **Previous wallpaper**, **Next wallpaper**, **Random wallpaper** (from every
 wallpaper, on the target display) and **Open the control panel**.
 None is set until recorded, so the app never takes a combination another app
 expects. **Record…** takes the next key pressed in that row (Escape alone, or
@@ -126,17 +127,18 @@ are kept in the `WallpaperMachine.hotKeys` default.
 ## Shortcuts app, Siri and Spotlight
 
 App Intents in `App/Services/Automation/WallpaperIntents.swift` add **Pause
-Wallpapers**, **Resume Wallpapers**, **Play or Pause Wallpapers**, **Previous Wallpaper**, **Next
+Wallpapers**, **Resume Wallpapers**, **Play or Pause Wallpapers**, **Mute Wallpapers**,
+**Unmute Wallpapers**, **Mute or Unmute Wallpapers**, **Previous Wallpaper**, **Next
 Wallpaper**, **Random Wallpaper**, **Apply Wallpaper** (with the wallpaper chosen from, or searched in,
 the installed ones that can play), **Apply Saved Playlist**, **Apply Wallpaper
 Property Preset**, and **Open WallpaperMachine**. The latter two configuration
 actions and their searchable entities live in `WallpaperConfigurationIntents.swift`.
 That file also supplies **Apply Display Layout** with a saved-layout picker and
 no display parameter; the layout itself identifies its target screens.
-`WallpaperMachineShortcuts` offers play/pause, previous, next, random and the wallpaper,
+`WallpaperMachineShortcuts` offers play/pause, mute/unmute, previous, next, random and the wallpaper,
 playlist, property preset and display layout actions to Siri and Spotlight without
 building a shortcut ("Next wallpaper in WallpaperMachine", "Random wallpaper in
-WallpaperMachine", "Apply a wallpaper with WallpaperMachine"). The actions run in the app's own process; if it is not running,
+WallpaperMachine", "Mute wallpapers with WallpaperMachine", "Apply a wallpaper with WallpaperMachine"). The actions run in the app's own process; if it is not running,
 macOS starts it first.
 
 **Apply Wallpaper** also has an **On all displays** option, off by default, that
@@ -165,6 +167,9 @@ command is the host, and `display`, `id` and `page` are query values:
 wallpapermachine://play
 wallpapermachine://pause
 wallpapermachine://toggle
+wallpapermachine://mute
+wallpapermachine://unmute
+wallpapermachine://togglemute
 wallpapermachine://previous
 wallpapermachine://next
 wallpapermachine://next?display=primary
@@ -177,6 +182,9 @@ wallpapermachine://preset?id=PRESET_ID
 wallpapermachine://layout?id=LAYOUT_ID
 wallpapermachine://open?page=settings
 ```
+
+`mute`, `unmute` and `togglemute` take no query at all, like `play`, `pause` and `toggle`:
+there is no per-display or per-wallpaper mute link, and no link that sets a volume.
 
 `display=all` is accepted by `apply` only and cannot be a display's own selector
 (`primary`, a number or `identity:{…}`); `next`, `previous`, `random` and `playlist` treat it as
@@ -191,11 +199,12 @@ display names; Shortcuts supplies name-based pickers without requiring these IDs
 
 ## Verification
 
-Link parsing and refusals, including that removing a wallpaper has no link and what
-`random` takes (`AutomationCommandTests`, which also checks the pools: favorites that left
+Link parsing and refusals, including that removing a wallpaper has no link, that the mute
+links take nothing, and what `random` takes (`AutomationCommandTests`, which also checks the pools: favorites that left
 the library and wallpapers held back after a crash are never offered), the menu bar's
 layout (`StatusMenuModelTests`: the flat
-menu for one display, a submenu per display with every command naming its own display,
+menu for one display, Mute Wallpapers after Play/Pause, ticked while muted and offered then
+with nothing playing, a submenu per display with every command naming its own display,
 main display first then left to right, distinct titles, Remove becoming Start Again on
 an empty display, Random Wallpaper after Next and left out where nothing else can be
 chosen, ten recent entries with the current one ticked, and which displays
@@ -204,7 +213,9 @@ command queue (`WallpaperDisplayTransferIntegrationTests`: a round never repeats
 wallpaper on screen and shows each once, favorites only, a refused or failed pick
 leaving the round alone, the pick made when the display's turn comes), waiting for the app and failures
 reaching the caller (`AppAutomationTests`), hotkey preferences and the key-code and
-modifier mapping (`HotKeyPreferencesTests`, `GlobalHotKeysTests`), the planner, store and
+modifier mapping (`HotKeyPreferencesTests`, `GlobalHotKeysTests`), the mute preference and how it
+joins the audio suppression the bridge receives (`PlaybackPreferencesTests`,
+`PlaybackPolicyCompositionTests`; the Settings switch is in `WebPanelGeneralSettingsTests`), the planner, store and
 scheduler (`WallpaperAutomationPlannerTests`, `WallpaperAutomationStoreTests`,
 `WallpaperAutomationSchedulerTests`: weekday rules, simultaneous events, appearance
 choices, DST, solar offsets crossing midnight, absent polar events, catch-up and retry
@@ -218,4 +229,6 @@ The domain inventory is in [coverage](../testing/coverage.md).
 
 These tests do not verify how the menu draws with two or more real displays, a real press
 of a registered shortcut, the Shortcuts app, a link opened from a browser, actual Focus transitions, system appearance notifications,
-Siri/Spotlight registration, visible panel layout or desktop playback.
+Siri/Spotlight registration, visible panel layout, desktop playback, or that scene, video and
+Web wallpapers really go silent and come back through an audio output (the tests stop at the
+suppression the bridge receives).

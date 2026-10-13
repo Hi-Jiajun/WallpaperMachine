@@ -92,7 +92,7 @@ export default {
   'Choose at least one weekday.': '曜日を少なくとも1つ選択してください。',
   'Use wallpaper': '壁紙を指定',
   'Use saved playlist': '保存済みプレイリストを使用',
-  'The Shortcuts app can control playback, go to the previous or next wallpaper, apply a wallpaper, saved playlist or property preset, and open this window. Siri and Spotlight can run these actions too.': 'ショートカットで再生の操作、前後の壁紙への切り替え、壁紙・保存済みプレイリスト・プロパティプリセットの適用、このウインドウの表示ができます。SiriとSpotlightからも実行できます。',
+  'The Shortcuts app can control playback, mute or unmute wallpapers, go to the previous or next wallpaper, apply a wallpaper, saved playlist or property preset, and open this window. Siri and Spotlight can run these actions too.': 'ショートカットで再生の操作、壁紙の消音と消音解除、前後の壁紙への切り替え、壁紙・保存済みプレイリスト・プロパティプリセットの適用、このウインドウの表示ができます。SiriとSpotlightからも実行できます。',
   'Links can run the same actions. Wallpaper and playlist actions accept display= for a specific screen; otherwise they use the target display. An apply link also accepts display=all, and Apply Wallpaper has an On all displays option, to use every display at once. Property presets affect their wallpaper on every display. Choose saved items by name in Shortcuts.': 'リンクからも同じ操作を実行できます。壁紙とプレイリストはdisplay=で画面を指定でき、省略すると対象ディスプレイを使います。適用リンクはdisplay=allにも対応し、「壁紙を適用」には「すべてのディスプレイ」オプションがあり、どちらもすべてのディスプレイをまとめて使います。プロパティプリセットは、同じ壁紙を使うすべてのディスプレイに適用されます。保存した項目はショートカットで名前から選べます。',
   'In System Settings → Focus, add the WallpaperMachine filter to pause, mute, stop or temporarily switch wallpapers. No Focus filter is in effect now.': 'システム設定 → 集中モードでWallpaperMachineフィルタを追加すると、一時停止・消音・停止・壁紙の一時切り替えができます。現在有効なフィルタはありません。',
   'Property preset': 'プロパティプリセット',
@@ -1097,6 +1097,9 @@ export default {
   'Low battery level': 'バッテリー残量の基準',
   'Applies only while the Mac runs on battery. It ends 5 points above the level you choose, or when you plug in. The battery is at {percent}% now.': 'Macがバッテリー駆動の間だけ有効です。選んだ残量より5ポイント上がるか、電源に接続すると終了します。現在のバッテリー残量は{percent}%です。',
   'When the battery is low, wallpapers pause or stop once the charge falls to the level you chose, and resume when you plug in or the charge recovers.': 'バッテリー残量が少ないときは、残量が選んだレベルまで下がると壁紙が一時停止または停止し、電源に接続するか残量が回復すると再開します。',
+  // Mute all wallpapers
+  'Mute all wallpapers': 'すべての壁紙を消音',
+  'Silences every wallpaper without changing their saved sound or volume. It works together with the rules below.': '保存されているサウンドや音量の設定は変えずに、すべての壁紙を消音します。下のルールとあわせて機能します。',
   // Play only on the display in use
   'Only play on the display I’m using': '使用中のディスプレイでのみ再生',
   'The display your pointer is on keeps playing. The others pause a few seconds after you leave them and resume the moment you return. Your own Play and Pause are not changed.': 'ポインタがあるディスプレイは再生を続けます。ほかのディスプレイは、ポインタが離れて数秒後に一時停止し、戻るとすぐに再開します。手動での再生と一時停止は変更されません。',
@@ -1185,6 +1188,7 @@ export default {
   // Keyboard shortcuts and automation
   'Keyboard shortcuts': 'キーボードショートカット',
   'Play or pause wallpapers': '壁紙の再生／一時停止',
+  'Mute or unmute wallpapers': '壁紙の消音／消音解除',
   'Next wallpaper': '次の壁紙',
   'Random wallpaper': 'ランダムな壁紙',
   'Open the control panel': 'コントロールパネルを開く',

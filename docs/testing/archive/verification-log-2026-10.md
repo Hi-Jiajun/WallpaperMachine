@@ -9,6 +9,14 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-13 — Mission Control poster kept while fresh
+
+Commit `perf(desktop): stop retaking the Mission Control picture while the current one is fresh`: DesktopWallpaperSync retakes a surface's poster on a Space change, wake or resume only when it is older than 120 s or was taken before the wallpaper settled. Taken in a worktree; the full gate was not run here.
+
+- `python3 scripts/test.py --only DesktopWallpaperTests` — 62 passed of 62 (8 new tests for the freshness floor, one existing test now builds the sync with a zero floor). Three mutations each fail the expected tests: a poster never kept (4 failures), the settle rule ignored (1), Space scope ignored plus a failed encode left counting as fresh (2).
+- The same class plus WallpaperPresentationPolicyTests, PlaybackPolicyCompositionTests, WallpaperSpaceMonitorTests and WallpaperActivationRecoveryTests — 121 passed of 121.
+- Gap: what Mission Control shows after rapid Space swipes with an animated wallpaper, and whether WallpaperAgent's container stops growing, were not observed; headless tests use synthetic pixels, an in-memory workspace and an injected clock.
+
 ## 2026-10-13 — Power source read again on wake (resample)
 
 Commit `fix(power): read the power source again when the Mac wakes`: WallpaperBridge.resample_power_source() and PowerSourceResampler (wake plus a follow-up two seconds later). Taken in a worktree on top of the power watcher change (`perf(bridge): let the power watcher sleep until something happens`); the full gate was not run here.

@@ -26,6 +26,7 @@ final class PlaybackPreferencesTests: XCTestCase {
         XCTAssertEqual(preferences.lowBatteryThreshold, 20)
         XCTAssertFalse(preferences.refreshesDesktopPicturePeriodically, "The Mission Control picture refreshes on a timer only when chosen")
         XCTAssertFalse(preferences.playsOnlyOnActiveDisplay, "Every display plays unless the user asks otherwise")
+        XCTAssertFalse(preferences.wallpapersMuted, "Wallpapers keep their own sound until the user mutes them all")
         XCTAssertTrue(preferences.appRules.isEmpty)
     }
 
@@ -128,6 +129,32 @@ final class PlaybackPreferencesTests: XCTestCase {
 
         preferences.writesDesktopPicture = true
         XCTAssertTrue(PlaybackPreferences(defaults: defaults).writesDesktopPicture)
+        XCTAssertEqual(posts.value, 2)
+    }
+
+    func testMutingEveryWallpaperPersistsAndAnnouncesEachChangeOnce() {
+        let preferences = PlaybackPreferences(defaults: defaults)
+        preferences.lowBatteryThreshold = 30
+        let posts = ChangeCount()
+        let token = NotificationCenter.default.addObserver(
+            forName: PlaybackPreferences.didChangeNotification, object: preferences, queue: .main
+        ) { _ in posts.value += 1 }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        preferences.wallpapersMuted = true
+        XCTAssertTrue(preferences.wallpapersMuted)
+        XCTAssertEqual(posts.value, 1, "The presentation policy applies the mute from this notification")
+        XCTAssertTrue(PlaybackPreferences(defaults: defaults).wallpapersMuted, "The choice survives a relaunch")
+        XCTAssertEqual(PlaybackPreferences(defaults: defaults).lowBatteryThreshold, 30, "No other choice moved")
+        XCTAssertFalse(PlaybackPreferences(defaults: defaults).playsOnlyOnActiveDisplay)
+
+        preferences.wallpapersMuted = true
+        XCTAssertEqual(posts.value, 1, "Muting what is muted already is not a change")
+
+        preferences.wallpapersMuted = false
+        XCTAssertFalse(PlaybackPreferences(defaults: defaults).wallpapersMuted)
+        XCTAssertEqual(posts.value, 2)
+        preferences.wallpapersMuted = false
         XCTAssertEqual(posts.value, 2)
     }
 

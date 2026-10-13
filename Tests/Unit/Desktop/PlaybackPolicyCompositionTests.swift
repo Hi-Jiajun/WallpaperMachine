@@ -10,6 +10,7 @@ private final class CompositionProbe {
     var rules: Set<AppRuleAction> = []
     var otherAudio = false
     var otherAudioAction = OtherAudioAction.keepRunning
+    var userMuted = false
 }
 
 @MainActor
@@ -29,6 +30,7 @@ final class PlaybackPolicyCompositionTests: XCTestCase {
             appRuleActions: { probe.rules },
             otherAudioActive: { probe.otherAudio },
             otherAudioAction: { probe.otherAudioAction },
+            userMuted: { probe.userMuted },
             occlusionSettleDelay: .zero,
             applyGlobal: { presentation, completion in
                 probe.presentations.append(presentation)
@@ -99,6 +101,58 @@ final class PlaybackPolicyCompositionTests: XCTestCase {
         policy.evaluate()
         XCTAssertEqual(probe.audio.last, false)
         XCTAssertEqual(probe.presentations, [.suspended])
+    }
+
+    /// The user's own mute of every wallpaper is one more reason for the bridge's single
+    /// audio-suppression flag, not a replacement for the others: it silences without touching
+    /// presentation, and what else is muting keeps holding when it is lifted.
+    func testUserMuteComposesWithRulesAndOtherAudio() {
+        let probe = CompositionProbe()
+        probe.userMuted = true
+        let policy = makePolicy(probe)
+        policy.start()
+        defer { policy.stop() }
+        XCTAssertEqual(probe.audio, [true], "A mute that was already on at launch reaches the bridge")
+        XCTAssertTrue(policy.isAudioSuppressed)
+        XCTAssertTrue(probe.presentations.isEmpty, "Muting never pauses or unloads anything")
+        XCTAssertFalse(policy.isSuspended)
+
+        // A mute rule and other-app audio hold as well, so lifting the user's mute changes nothing.
+        probe.rules = [.mute]
+        probe.otherAudio = true
+        probe.otherAudioAction = .mute
+        policy.evaluate()
+        XCTAssertEqual(probe.audio, [true], "Already suppressed: no second delivery")
+        probe.userMuted = false
+        policy.evaluate()
+        XCTAssertEqual(probe.audio, [true], "The rule and the other audio still mute")
+        XCTAssertTrue(policy.isAudioSuppressed)
+
+        probe.rules = []
+        policy.evaluate()
+        XCTAssertTrue(policy.isAudioSuppressed, "Other-app audio alone still mutes")
+        probe.otherAudio = false
+        policy.evaluate()
+        XCTAssertEqual(probe.audio, [true, false], "Nothing mutes any more")
+        XCTAssertFalse(policy.isAudioSuppressed)
+
+        // And back on from silence, with no rule involved.
+        probe.userMuted = true
+        policy.evaluate()
+        XCTAssertEqual(probe.audio, [true, false, true])
+        XCTAssertTrue(probe.presentations.isEmpty)
+    }
+
+    func testTeardownRestoresSoundWhateverTheUserChose() {
+        let probe = CompositionProbe()
+        probe.userMuted = true
+        let policy = makePolicy(probe)
+        policy.start()
+        XCTAssertEqual(probe.audio, [true])
+
+        policy.stop()
+        XCTAssertEqual(probe.audio.last, false, "Teardown must never leave a surface muted")
+        XCTAssertFalse(policy.isAudioSuppressed)
     }
 
     func testKeepRunningIgnoresOtherAudio() {

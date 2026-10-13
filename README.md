@@ -83,7 +83,7 @@ Rather build it yourself? It takes two commands: see
 One window, four tabs: Discover, pixiv, Installed and Settings. The website runs that
 same interface on a demo library, so you can
 [try it in your browser](https://www.wallpapermachine.app/#app). Close the
-window and the app keeps running in the menu bar, where you can pause, resume
+window and the app keeps running in the menu bar, where you can pause, resume, mute
 or go to the previous, next or a random wallpaper, on each display separately when you have more than one. When it launches at login, it starts there
 without opening the window.
 
@@ -104,7 +104,7 @@ without opening the window.
 | [**Keep your setup**](docs/features/backup-restore.md#local-backup-and-restore) | Export settings and retained files, optionally the whole wallpaper library; preview conflicts before a recoverable restore at the next launch. Sign-ins and passwords stay on this Mac. |
 | [**Picture placement**](docs/features/wallpaper-properties.md#image-placement) | Drag, position and zoom imported pictures and saved pixiv pages separately for each display, without changing the original image. |
 | [**Out of sight, paused**](docs/architecture.md#desktop-wallpaper-windows-and-private-api-handling) | A covered display stops its own wallpaper, and sleep or lock pauses them all. [Playback rules](docs/features/performance.md#playback) can also pause or mute them while another app plays sound, while an app you choose is running or in front, when the battery is low, in Low Power Mode, when the Mac runs hot, or during a Focus. With several displays, you can also keep only the one you are using playing. Your own pause stays yours. |
-| [**Automation**](docs/features/automation.md) | Weekday and time schedules, local sunrise/sunset calculations, light/dark appearance choices, experimental [desktop Space choices](docs/features/spaces.md), and temporary Focus wallpapers or playlists. Keyboard shortcuts, Shortcuts, Siri, Spotlight and links can control playback, pick a random wallpaper, and apply wallpapers, saved playlists or property presets. |
+| [**Automation**](docs/features/automation.md) | Weekday and time schedules, local sunrise/sunset calculations, light/dark appearance choices, experimental [desktop Space choices](docs/features/spaces.md), and temporary Focus wallpapers or playlists. Keyboard shortcuts, Shortcuts, Siri, Spotlight and links can control playback, mute every wallpaper, pick a random wallpaper, and apply wallpapers, saved playlists or property presets. |
 | [**Lock screen**](docs/features/lock-screen.md) | Video and scene wallpapers can animate the lock screen too. Experimental and off by default. |
 | [**Screen saver**](docs/features/lock-screen.md#use-wallpaper-as-screen-saver) | Use each display’s applied scene, video, web or still wallpaper as its screen saver. Independent of lock-screen animation; experimental on macOS 26+. |
 

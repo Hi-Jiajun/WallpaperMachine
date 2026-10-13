@@ -49,9 +49,10 @@ final class StatusMenuModelTests: XCTestCase {
 
     private func input(
         displays: [StatusMenuModel.Display], current: Bool = true, active: Bool = true, paused: Bool = false,
-        canLock: Bool = true
+        muted: Bool = false, canLock: Bool = true
     ) -> StatusMenuModel.Input {
-        .init(playbackIsCurrent: current, hasActiveWallpapers: active, paused: paused, displays: displays, canLockScreen: canLock)
+        .init(playbackIsCurrent: current, hasActiveWallpapers: active, paused: paused, wallpapersMuted: muted,
+              displays: displays, canLockScreen: canLock)
     }
 
     private func titles(_ entries: [Entry]) -> [String] {
@@ -73,6 +74,7 @@ final class StatusMenuModelTests: XCTestCase {
             .command(.openControlPanel, checked: false),
             .separator,
             .command(.playPause, checked: false),
+            .command(.toggleMute, checked: false),
             .command(.previous(display: "primary"), checked: false),
             .command(.next(display: "primary"), checked: false),
             .submenu([
@@ -98,7 +100,7 @@ final class StatusMenuModelTests: XCTestCase {
         let entries = StatusMenuModel.entries(for: input(displays: []))
         XCTAssertEqual(shape(entries), [
             .command(.openControlPanel, checked: false), .separator,
-            .command(.playPause, checked: false), .command(.lockScreen, checked: false),
+            .command(.playPause, checked: false), .command(.toggleMute, checked: false), .command(.lockScreen, checked: false),
         ])
     }
 
@@ -112,6 +114,7 @@ final class StatusMenuModelTests: XCTestCase {
             .command(.openControlPanel, checked: false),
             .separator,
             .command(.playPause, checked: false),
+            .command(.toggleMute, checked: false),
             .submenu([
                 .command(.previous(display: "primary"), checked: false),
                 .command(.next(display: "primary"), checked: false),
@@ -134,7 +137,7 @@ final class StatusMenuModelTests: XCTestCase {
             ]),
             .command(.lockScreen, checked: false),
         ])
-        XCTAssertEqual(Array(titles(entries).dropFirst(2).prefix(2)), ["Main", "Side"], "each submenu is named for its display")
+        XCTAssertEqual(Array(titles(entries).dropFirst(3).prefix(2)), ["Main", "Side"], "each submenu is named for its display")
     }
 
     func testEveryCommandInASubmenuNamesTheSubmenusDisplay() {
@@ -146,7 +149,7 @@ final class StatusMenuModelTests: XCTestCase {
             switch command {
             case .previous(let id), .next(let id), .random(let id), .remove(let id), .openInPanel(let id),
                  .apply(_, let id), .startAgain(_, let id): return id
-            case .openControlPanel, .playPause, .lockScreen: return nil
+            case .openControlPanel, .playPause, .toggleMute, .lockScreen: return nil
             }
         }
         func allCommands(_ entries: [Entry]) -> [Command] {
@@ -179,6 +182,7 @@ final class StatusMenuModelTests: XCTestCase {
             .command(.openControlPanel, checked: false),
             .separator,
             .command(.playPause, checked: false),
+            .command(.toggleMute, checked: false),
             .command(.previous(display: "primary"), checked: false),
             .command(.next(display: "primary"), checked: false),
             .command(.random(display: "primary"), checked: false),
@@ -213,6 +217,60 @@ final class StatusMenuModelTests: XCTestCase {
         let inner = submenus(in: several)
         XCTAssertFalse(commands(in: inner[0]).contains(.random(display: "primary")), "this display shows the only wallpaper")
         XCTAssertTrue(commands(in: inner[1]).contains(.random(display: "7")), "the other display can still be changed")
+    }
+
+    // MARK: Mute Wallpapers
+
+    func testMuteWallpapersSitsAfterPlayPauseInTheFlatMenu() {
+        let entries = StatusMenuModel.entries(for: input(
+            displays: [display("primary", shows: "b", previous: true, next: true)]))
+        XCTAssertEqual(shape(entries), [
+            .command(.openControlPanel, checked: false),
+            .separator,
+            .command(.playPause, checked: false),
+            .command(.toggleMute, checked: false),
+            .command(.previous(display: "primary"), checked: false),
+            .command(.next(display: "primary"), checked: false),
+            .command(.lockScreen, checked: false),
+        ])
+    }
+
+    func testMuteWallpapersSitsAfterPlayPauseWithSeveralDisplaysToo() {
+        let entries = StatusMenuModel.entries(for: input(
+            displays: [display("primary", shows: "a", next: true), display("7", shows: "b", next: true)], muted: true))
+        let kinds = shape(entries)
+        XCTAssertEqual(Array(kinds.prefix(4)), [
+            .command(.openControlPanel, checked: false), .separator,
+            .command(.playPause, checked: false), .command(.toggleMute, checked: true),
+        ])
+        guard case .submenu = kinds[4] else { return XCTFail("the display submenus follow the mute item") }
+        XCTAssertEqual(commands(in: entries).filter { $0 == .toggleMute }.count, 1,
+                       "it is one global item, not one in every display's submenu")
+        XCTAssertTrue(submenus(in: entries).allSatisfy { !commands(in: $0).contains(.toggleMute) })
+    }
+
+    func testMuteWallpapersIsTickedWhileMuted() {
+        func checked(muted: Bool) -> Bool? {
+            for case .command(.toggleMute, _, let checked) in StatusMenuModel.entries(for: input(displays: [display("primary")], muted: muted)) {
+                return checked
+            }
+            return nil
+        }
+        XCTAssertEqual(checked(muted: false), false)
+        XCTAssertEqual(checked(muted: true), true)
+    }
+
+    /// A mute outlives what was playing when it was chosen, so the way to lift it must too.
+    func testMuteWallpapersStaysWhileMutedEvenWithNothingPlaying() {
+        func offered(active: Bool, current: Bool = true, muted: Bool) -> Bool {
+            shape(StatusMenuModel.entries(for: input(displays: [display("primary")], current: current, active: active, muted: muted)))
+                .contains { if case .command(.toggleMute, _) = $0 { return true } else { return false } }
+        }
+        XCTAssertTrue(offered(active: false, muted: true))
+        XCTAssertTrue(offered(active: false, current: false, muted: true), "a stale playback snapshot cannot hide it")
+        XCTAssertFalse(offered(active: false, muted: false), "nothing to silence")
+        XCTAssertFalse(offered(active: true, current: false, muted: false), "playback state from before a failure may be wrong")
+        XCTAssertTrue(offered(active: true, muted: false))
     }
 
     func testPlayPauseAppearsOnlyWithAFreshSnapshotAndActiveWallpapers() {

@@ -55,8 +55,8 @@ struct AppRule: Codable, Equatable, Identifiable, Sendable {
 
 /// UserDefaults-backed playback rules for display sleep, other-app audio, a
 /// covered desktop, Low Power Mode, a hot Mac, a low battery, playing only on the display in use
-/// and per-app pause, mute and stop, and whether the macOS desktop picture is written at all.
-/// Mutations post `didChangeNotification` once.
+/// and per-app pause, mute and stop, whether every wallpaper is muted, and whether the macOS
+/// desktop picture is written at all. Mutations post `didChangeNotification` once.
 @MainActor
 final class PlaybackPreferences {
     static let didChangeNotification = Notification.Name("WallpaperMachine.playbackPreferencesDidChange")
@@ -79,6 +79,7 @@ final class PlaybackPreferences {
     private static let periodicDesktopPictureKey = "WallpaperMachine.refreshDesktopPicturePeriodically"
     private static let writeDesktopPictureKey = "WallpaperMachine.writeDesktopPicture"
     private static let playOnlyOnActiveDisplayKey = "WallpaperMachine.playOnlyOnActiveDisplay"
+    private static let wallpapersMutedKey = "WallpaperMachine.wallpapersMuted"
 
     /// The charge levels the user can pick for the low-battery rule, in percent.
     nonisolated static let lowBatteryThresholds = [10, 20, 30]
@@ -146,6 +147,21 @@ final class PlaybackPreferences {
         get { defaults.bool(forKey: Self.playOnlyOnActiveDisplayKey) }
         set {
             defaults.set(newValue, forKey: Self.playOnlyOnActiveDisplayKey)
+            postChange()
+        }
+    }
+
+    /// Off by default. Silences every wallpaper, in addition to whatever a wallpaper's own saved
+    /// mute and volume say, which it never rewrites: turning it off lets each play as it was
+    /// saved. It composes with the mute app rules, Focus filters and other-app audio rather than
+    /// replacing them. Kept across relaunches, but local to this Mac and not part of a settings
+    /// backup, so restoring one never silences a Mac without its owner asking. Setting the value
+    /// it already has changes nothing and posts nothing.
+    var wallpapersMuted: Bool {
+        get { defaults.bool(forKey: Self.wallpapersMutedKey) }
+        set {
+            guard newValue != wallpapersMuted else { return }
+            defaults.set(newValue, forKey: Self.wallpapersMutedKey)
             postChange()
         }
     }

@@ -7,6 +7,12 @@ enum AutomationCommand: Equatable, Sendable {
     case play
     case pause
     case togglePlayback
+    /// Silences every wallpaper without changing their saved sound settings
+    /// (`PlaybackPreferences.wallpapersMuted`). `unmute` lets each play as it was saved, and
+    /// `toggleMute` does whichever the current state calls for.
+    case mute
+    case unmute
+    case toggleMute
     /// The next wallpaper on `display`, or on the panel's target display when nil.
     case next(display: String?)
     /// Walks back through successful switches on this display.
@@ -55,6 +61,7 @@ enum AutomationCommand: Equatable, Sendable {
     /// `page` are query items. Anything else answers nil rather than guessing.
     ///
     ///     wallpapermachine://toggle
+    ///     wallpapermachine://togglemute
     ///     wallpapermachine://next?display=primary
     ///     wallpapermachine://random?from=favorites
     ///     wallpapermachine://apply?id=3632513108
@@ -77,6 +84,9 @@ enum AutomationCommand: Equatable, Sendable {
         case "play" where values.isEmpty: self = .play
         case "pause" where values.isEmpty: self = .pause
         case "toggle" where values.isEmpty: self = .togglePlayback
+        case "mute" where values.isEmpty: self = .mute
+        case "unmute" where values.isEmpty: self = .unmute
+        case "togglemute" where values.isEmpty: self = .toggleMute
         case "next" where Set(values.keys).isSubset(of: ["display"]): self = .next(display: display)
         case "previous" where Set(values.keys).isSubset(of: ["display"]): self = .previous(display: display)
         case "random" where Set(values.keys).isSubset(of: ["display", "from"]):
