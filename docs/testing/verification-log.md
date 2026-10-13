@@ -25,6 +25,16 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-14 — Reduced quality under heat and live property edits: integrated gate
+
+The reduced-quality request (heat, Low Power Mode, low battery) and live property edits (preview window, optional desktop, live slider and colour drags), verified together on top of 51975a7f.
+
+- `python3 scripts/test.py` — exit 0 on the first run; Python 316 tests OK; Swift 2656 passed, 0 failed, 45 skipped of 2701 (media, asset and live-network opt-ins)
+- `python3 scripts/check_rust.py` — exit 0; core 305, bridge 596, core-integration 16, shader 551 passed; desktop window tests and corpus cases skipped
+- `python3 scripts/check_renderer.py` — exit 0; 753 passed, 6 skipped (local-asset cases), 0 failed; project_property_preview_test 23 passed; generated scenes 12 of 12 pixel-equal pooled versus isolated
+- `python3 scripts/build.py --renderer-only` — exit 0; regenerated bindings identical to the committed ones
+- Not verified: no desktop run. Frame rate and render scale following heat, Low Power Mode or low battery on a real Mac, energy saved by Reduced quality, a web page at a fast display's full refresh reloading when Reduced quality starts or ends, and the feel of live property edits on a running wallpaper
+
 ## 2026-10-13 — Follow sliders and colours while they are dragged
 
 A property's slider or colour picker now shows its value in the preview window and, with the Settings switch on, on the displays while the person is still dragging (propertyPreview, at most one step every 100 ms, one in flight), through a pending list on the bridge's wallpaper_preview and preview_wallpaper_properties; releasing saves through the normal property edit. Lane worktree, targeted runs only, not the bare full gate.
@@ -126,14 +136,3 @@ Commit 8 of the framing lane: while a Position slider is dragged the running wal
 - `python3 scripts/check_renderer.py` — exit 0; skipped: local-asset cases in `text_object_runtime_test`, `playback_gpu_test` and `metal_scene_draw_smoke` (no corpus)
 - `python3 scripts/test.py --only WebPanelDisplayPositionTests` and 13 neighbouring panel classes — 133 passed; the drag tests were broken one at a time (no interval, release not waiting for the step on its way, no settle on pointer-up, key presses previewing, a queued or saving preview) and each was caught
 - Not checked: the wallpaper following a real drag on a display, the 100 ms interval and the feel under load, the lock screen and Mission Control picture staying put during a drag, and `SceneRuntime::preview_framing` against a live renderer (see manual-smoke.md)
-
-## 2026-10-13 — Per-display wallpaper position
-
-Commit 7 of the framing lane: the inspector's Position sliders and Center for scene and video wallpapers. Commits 1-6 had already carried the position through the engine, the bridge and the lock-screen export; commit 8 follows the sliders live.
-
-- `python3 scripts/test.py --only WebPanelDisplayPositionTests` — exit 0; 10 passed
-- `python3 scripts/test.py` with 23 `--only` classes (the panel suites, UserCommandQueueTests, WallpaperActivationRecoveryTests, ActivationLogTests) — exit 0; 198 passed, 0 failed
-- Script tests (the 20 modules the gate runs first, run directly) — exit 0, including test_panel_localization: the ja, zh-Hans and zh-Hant catalogs carry the four new strings
-- Mutation checks — eleven deliberate breakages (dead change handler, sliders hidden for scenes, request naming no axis accepted, clamping instead of refusing, no scene/video and display check, no change notice, native flag for any backend, reset sending one axis, move not queued, both axes sent, native note dropped) each failed the new class, which passed again once they were undone
-- Not run: the bare `python3 scripts/test.py` gate, `check_rust.py` and `check_renderer.py` (no Rust or C++ change), a Release build
-- Unverified (desktop only): the wallpaper visibly moving under the sliders on a real display on both scene renderers, slider feel and layout at the narrowest panel width, VoiceOver reading, the Mission Control picture being retaken after a move
