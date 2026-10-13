@@ -21,7 +21,7 @@ use crate::{
     config::{AppConfig, MonitorCfg, MonitorRender, MonitorSettingsCfg, WallpaperConfig},
     display::{DisplayDescExt, DisplaySelectorExt, DisplaySnapshotExt},
     paths::BridgePaths,
-    project::{OverrideMapExt, ProjectModel, PropertyKind, PropertyValue},
+    project::{ProjectModel, PropertyKind, PropertyValue, scene_property_override_json},
 };
 
 pub struct ActivationInputs<'a> {
@@ -1050,32 +1050,9 @@ impl SceneDescBuilderExt for SceneDescBuilder {
             .map(|render| render.framing.to_scene())
             .unwrap_or_default();
         let property_override_json = if context.wallpaper.r#type.eq_ignore_ascii_case("scene") {
-            // The scene engine parses the project file itself, so a default
-            // this host supplied rather than read from that file reaches it
-            // only here. An unbound transport shortcut is exactly that: the
-            // author ships it empty and the button would otherwise resolve to
-            // nothing however the panel shows it. The user's own overrides go
-            // on top, so choosing no action still means no action.
-            let mut overrides = context
-                .model
-                .map(|model| {
-                    model
-                        .properties
-                        .iter()
-                        .filter(|property| property.default_is_host_supplied)
-                        .map(|property| (property.id.clone(), property.default_value.clone()))
-                        .collect::<BTreeMap<_, _>>()
-                })
-                .unwrap_or_default();
-            overrides.extend(
-                context
-                    .wallpaper
-                    .property_overrides
-                    .iter()
-                    .map(|(id, value)| (id.clone(), PropertyValue::from_json(value))),
-            );
-
-            (!overrides.is_empty()).then(|| overrides.to_override_json())
+            // Also the builder of the document a live preview shows, so what
+            // is previewed is what this loads.
+            scene_property_override_json(context.model, &context.wallpaper.property_overrides)
         } else {
             None
         };

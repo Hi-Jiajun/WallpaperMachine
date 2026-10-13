@@ -93,6 +93,12 @@ impl WallpaperOptionsDraft {
         &self.current
     }
 
+    /// What is saved, as opposed to the pending edits in [`Self::current`].
+    #[must_use]
+    pub fn committed(&self) -> &WallpaperConfig {
+        &self.committed
+    }
+
     #[must_use]
     pub fn is_dirty(&self, active_enabled_displays: &[SerializedSelector]) -> bool {
         self.current != self.committed || self.enabled_dirty(active_enabled_displays)
@@ -538,5 +544,30 @@ mod tests {
         };
 
         assert!(draft.requires_reconcile(&[]));
+    }
+
+    /// The saved configuration is what a cancelled edit falls back to, so it
+    /// must not move with the edits and must move on Apply.
+    #[test]
+    fn the_committed_config_ignores_pending_edits_until_they_are_applied() {
+        let model = ProjectModel::parse(
+            "100",
+            r#"{"type":"scene","title":"T","general":{"properties":{
+                "alpha":{"type":"slider","text":"Alpha","value":1,"min":0,"max":1}
+            }}}"#,
+        )
+        .unwrap();
+        let mut draft =
+            WallpaperOptionsDraft::from_committed(WallpaperConfig::new_for("100", "scene"));
+
+        draft.edit_property(&model, "alpha", PropertyValue::Number(0.5));
+
+        assert!(draft.committed().property_overrides.is_empty());
+        assert_eq!(draft.current().property_overrides.len(), 1);
+
+        let applied = draft.apply();
+
+        assert_eq!(draft.committed(), &applied);
+        assert_eq!(draft.committed().property_overrides.len(), 1);
     }
 }
