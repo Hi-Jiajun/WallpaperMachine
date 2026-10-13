@@ -25,6 +25,20 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-13 — Native Metal compatibility, cost and default
+
+Native Metal draws scene lights, previous-frame effects and steps with an unproduced input, culls and steps the host frame like Compatibility, shares target images, survives a pipeline-archive folder deleted mid-write, and becomes the default renderer with Compatibility as the per-scene fallback.
+
+- Admission, `metal_scene_draw_smoke` once per scene over the 60 local scene wallpapers: main 95dfb6bc 48/60 on Native Metal (8 history feedback, 4 dynamic lighting); this branch 60/60.
+- Same-harness parity, `MetalSceneDraw.LocalProjectsDrawTheSamePictureOnBothRenderers` with `WE_TEST_METAL_FRAMES=180 WE_TEST_RANDOM_SEED=1 WE_TEST_METAL_WARMUP_TICKS=40`: 57/60 identical (mean abs < 0.05/255), 3616389236 0.06 and 3675966045 0.26 (at most 0.1% of pixels), 3610485014 8.6 but differs from itself run to run.
+- Cost, `UnchangedPresent.LocalProjectEnergyIsMeasuredHeadlessly` (`WE_TEST_ENERGY_*`), 12 scenes at 3840x2160 and 60 FPS, C N N C, 2 x 15 s per renderer: process CPU time 21.6 -> 17.1 s (-21%, every scene lower), own command-buffer GPU time 59.5 -> 51.0 s (-14%), command buffers 3 -> 1 per frame, CPU energy -12%; Compatibility 50.1 and 57.8 FPS on 3226487183 and 3620484312, Native 60. Measured before the last rebase; whole-GPU energy unusable while other sessions drew.
+- Footprint, same test with 2 x 5 s windows on the rebased build: 18954 -> 18318 MB in total (-3.4%), 9 of 12 lower, none more than +6% (within run-to-run spread).
+- Target sharing: 3620484312 Native render targets 926 -> 247 MB with no blit added; `WALLPAPER_MACHINE_METAL_TARGET_SHARING=0` restores one image per target.
+- Archive crash: `MetalSceneDraw.AStoreFolderDeletedWhileItsArchiveIsWrittenCostsOnlyThatWrite` crashed 4 of 4 runs serialising beside the store and passes 4 of 4 with the fix; found as a SIGSEGV of `unchanged_present_test` in `check_renderer.py`.
+- Every commit's tree built and passed `metal_scene_draw_smoke`, `metal_backend_test`, `unchanged_present_test` and `layer_texture_reference_test`; after the rebase onto 18ddfbd8 the same four and `script_runtime_compat_test` pass.
+- `python3 scripts/check_rust.py` exit 0 (3 corpus/asset skips); `python3 scripts/check_renderer.py` exit 0 (env-gated local-project, energy, text-workshop and local-video skips); `python3 scripts/test.py` exit 0, 2564 passed, 45 skipped; all on 95dfb6bc plus this branch.
+- Not checked: a real display or the desktop, wallpapers outside the local library, the lock screen (still Compatibility). Seen only under parallel load and passing alone: `TextThatHasNotChangedIsNeitherLaidOutNorUploadedAgain`, `TheSkipPresentsTheSameVideoFramesInTheSameOrder`.
+
 ## 2026-10-13 — One depth rule for both scene renderers
 
 Native Metal dropped depth writes for translucent and additive materials and depth-tested into targets with no depth attachment; both renderers now take a draw's depth state from ResolveSceneDepthState. Wallpaper Engine's own translucent depth-tested font materials write depth, as Compatibility already did.
@@ -120,13 +134,3 @@ StatusMenuModel.DownloadActivity and WorkshopDownloadManager.inProgressTransfers
 - Every scripts/tests/test_*.py module run directly — 316 passed (the native catalog key `Downloads: %lld in progress, %lld%%` was confirmed against what the Swift compiler extracts for the literal)
 - Not run: the full `python3 scripts/test.py` gate, `python3 scripts/check_rust.py`, `python3 scripts/check_renderer.py` (no Rust, bridge or renderer change), Release build, any desktop run
 - Not covered: how the line draws and reads in the real menu, that it appears while a real SteamCMD transfer reports bytes, and that choosing it brings Discover forward; see manual-smoke "Download queue"
-
-## 2026-10-13 — Mute every wallpaper (menu bar, links, Shortcuts, shortcut key)
-
-PlaybackPreferences.wallpapersMuted, OR-ed into WallpaperPresentationPolicy's audio suppression (the bridge's audio_suppressed, which the engine ORs with each wallpaper's saved mute), reached from a ticked Mute Wallpapers menu item, wallpapermachine://mute, unmute and togglemute, three Shortcuts actions, a shortcut key and a Settings → Performance → Playback switch. Commit 9 of the desktop-menubar lane, checked in an isolated worktree on macOS 27.0.1; targeted runs only, not the full gate. No Rust, bridge or renderer change.
-
-- `python3 scripts/test.py --only PlaybackPolicyCompositionTests --only PlaybackPreferencesTests --only AutomationCommandTests --only HotKeyPreferencesTests --only StatusMenuModelTests --only WebPanelGeneralSettingsTests --only WallpaperBackupTests --only WallpaperPresentationPolicyTests` plus AppAutomationTests, GlobalHotKeysTests, WebPanelPerformanceSettingsTests, ControlPanelShellTests, WebPanelExternalLinkTests, WebPanelAssetsTests, ControlPanelAutomationTests, WallpaperActivationRecoveryTests, OtherAudioMonitorTests, AppRuleMonitorTests and SystemConditionMonitorTests — exit 0; 247 passed, 0 failed, 0 skipped
-- Mutation check: dropping the user mute from the policy, the muted arm of the menu item's condition, the unchanged-value guard in the preference and the Settings row each failed the tests written for them (5 failures); all were reverted
-- Every scripts/tests/test_*.py module run directly — 316 passed (the WebUI key check includes the new keys in ja, zh-Hans and zh-Hant)
-- Not run: the full `python3 scripts/test.py` gate, `python3 scripts/check_rust.py` and `python3 scripts/check_renderer.py` (no Rust, bridge or renderer change), Release build, any desktop run
-- Not covered: that scene, video (Native and Compatibility) and Web wallpapers really go silent and come back through an audio output (audio hardware needs an authorized desktop run; only the suppression delivered to the bridge is tested), how the ticked menu item draws and reads, Siri or Shortcuts listing the three actions, and a real shortcut key press; see manual-smoke "Audio responsiveness"

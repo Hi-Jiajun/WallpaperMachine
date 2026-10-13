@@ -9,6 +9,16 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-13 — Mute every wallpaper (menu bar, links, Shortcuts, shortcut key)
+
+PlaybackPreferences.wallpapersMuted, OR-ed into WallpaperPresentationPolicy's audio suppression (the bridge's audio_suppressed, which the engine ORs with each wallpaper's saved mute), reached from a ticked Mute Wallpapers menu item, wallpapermachine://mute, unmute and togglemute, three Shortcuts actions, a shortcut key and a Settings → Performance → Playback switch. Commit 9 of the desktop-menubar lane, checked in an isolated worktree on macOS 27.0.1; targeted runs only, not the full gate. No Rust, bridge or renderer change.
+
+- `python3 scripts/test.py --only PlaybackPolicyCompositionTests --only PlaybackPreferencesTests --only AutomationCommandTests --only HotKeyPreferencesTests --only StatusMenuModelTests --only WebPanelGeneralSettingsTests --only WallpaperBackupTests --only WallpaperPresentationPolicyTests` plus AppAutomationTests, GlobalHotKeysTests, WebPanelPerformanceSettingsTests, ControlPanelShellTests, WebPanelExternalLinkTests, WebPanelAssetsTests, ControlPanelAutomationTests, WallpaperActivationRecoveryTests, OtherAudioMonitorTests, AppRuleMonitorTests and SystemConditionMonitorTests — exit 0; 247 passed, 0 failed, 0 skipped
+- Mutation check: dropping the user mute from the policy, the muted arm of the menu item's condition, the unchanged-value guard in the preference and the Settings row each failed the tests written for them (5 failures); all were reverted
+- Every scripts/tests/test_*.py module run directly — 316 passed (the WebUI key check includes the new keys in ja, zh-Hans and zh-Hant)
+- Not run: the full `python3 scripts/test.py` gate, `python3 scripts/check_rust.py` and `python3 scripts/check_renderer.py` (no Rust, bridge or renderer change), Release build, any desktop run
+- Not covered: that scene, video (Native and Compatibility) and Web wallpapers really go silent and come back through an audio output (audio hardware needs an authorized desktop run; only the suppression delivered to the bridge is tested), how the ticked menu item draws and reads, Siri or Shortcuts listing the three actions, and a real shortcut key press; see manual-smoke "Audio responsiveness"
+
 ## 2026-10-13 — Random Wallpaper command
 
 A new AutomationCommand.random(display:pool:) with pools all and favorites, reached from the menu bar, wallpapermachine://random, a Shortcuts action and a shortcut key. Its pick comes from PlaylistStore.randomPick with a round of its own per display and pool (kept beside the shuffle rounds in WallpaperMachine.playlistRounds), and BridgeStore.activateRandomWallpaperAsync makes it in the display's turn of the command queue. Commit 8 of the desktop-menubar lane, checked in an isolated worktree on macOS 27.0.1; targeted runs only, not the full gate.
