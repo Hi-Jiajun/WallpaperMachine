@@ -1092,6 +1092,81 @@ TEST_F(MetalSceneDraw, TranslatedAuthorShaderCompilesAndDrawsTheScene)
     }
 }
 
+TEST_F(MetalSceneDraw, MatrixInversesOfEverySizeAreTranslatedAndDrawnExactly)
+{
+    // Naga's MSL writer has no `inverse`, so a stage that inverts a matrix --
+    // the stock perspective-warping effects undo `squareToQuad` in the vertex
+    // stage -- failed to translate and was dropped by this backend. Each size
+    // undoes its own matrix here and the residual is drawn a hundredfold: the
+    // card stays white only if every inverse is right, and one wrong cofactor
+    // sign drives its channel to black.
+    const auto directory = root_ / "inverse";
+    const auto project = WriteFixture(directory);
+    std::ofstream(directory / "shaders/metal_probe.vert") << R"(
+uniform mat4 g_ModelViewProjectionMatrix;
+attribute vec3 a_Position;
+attribute vec2 a_TexCoord;
+varying float v_Residual3;
+void main() {
+    mat3 warp = mat3(1.5, 0.25, 0.125, -0.5, 1.25, 0.375, 0.75, -0.25, 1.0);
+    vec3 a = vec3(0.3, -0.6, 0.9);
+    v_Residual3 = distance(inverse(warp) * (warp * a), a);
+    gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);
+}
+)";
+    std::ofstream(directory / "shaders/metal_probe.frag") << R"(
+varying float v_Residual3;
+void main() {
+    mat2 shear = mat2(1.25, -0.5, 0.75, 1.5);
+    mat4 frame = mat4(2.0, 0.25, -0.5, 0.125, 0.5, 1.5, 0.25, -0.25,
+                      -0.375, 0.5, 1.25, 0.5, 0.25, -0.75, 0.5, 1.0);
+    vec2 a = vec2(0.4, -0.7);
+    vec4 b = vec4(-0.2, 0.5, 0.8, -0.9);
+    float residual2 = distance(inverse(shear) * (shear * a), a);
+    float residual4 = distance(inverse(frame) * (frame * b), b);
+    gl_FragColor = vec4(vec3(1.0) - 100.0 * vec3(residual2, v_Residual3, residual4), 1.0);
+}
+)";
+    LoadedScene loaded;
+    std::string error;
+    ASSERT_TRUE(LoadScene(project, root_ / "inverse-cache", loaded, error)) << error;
+    auto* material = FirstMaterial(loaded.scene->sceneGraph.get());
+    ASSERT_NE(material, nullptr);
+    ASSERT_NE(material->customShader.shader, nullptr);
+    const auto* program = material->customShader.shader->metal_program.get();
+    ASSERT_NE(program, nullptr);
+    ASSERT_TRUE(program->error.empty()) << "metal translation failed: " << program->error;
+    const auto selection = SelectSceneBackend(*loaded.scene);
+    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+
+    @autoreleasepool {
+        CAMetalLayer* layer = [CAMetalLayer layer];
+        layer.device        = MTLCreateSystemDefaultDevice();
+        layer.pixelFormat   = MTLPixelFormatBGRA8Unorm;
+        layer.drawableSize  = CGSizeMake(384, 256);
+        MetalRender render;
+        ASSERT_TRUE(render.init(MetalRenderInitInfo {
+            .metal_layer = (__bridge void*)layer, .width = 384, .height = 256,
+            .render_width = 384, .render_height = 256, .display_scale_factor = 1.0,
+        }));
+        const auto graph = sceneToRenderGraph(*loaded.scene);
+        ASSERT_NE(graph, nullptr);
+        ASSERT_TRUE(render.compileRenderGraph(*loaded.scene, *graph)) << render.lastError();
+        ASSERT_TRUE(render.drawFrame(*loaded.scene)) << render.lastError();
+        std::vector<uint8_t> pixels;
+        uint32_t width = 0, height = 0;
+        ASSERT_TRUE(render.ReadRenderTargetForTests(
+            loaded.scene->ResolveRenderTargetName(SpecTex_Default), pixels, width, height));
+        ASSERT_GT(width, 0u);
+        ASSERT_GT(height, 0u);
+        const auto offset = ((height / 2) * width + width / 2) * 4;
+        EXPECT_GE(pixels[offset + 0], 250u) << "mat2 inverse is wrong";
+        EXPECT_GE(pixels[offset + 1], 250u) << "mat3 inverse is wrong";
+        EXPECT_GE(pixels[offset + 2], 250u) << "mat4 inverse is wrong";
+        render.destroy();
+    }
+}
+
 TEST_F(MetalSceneDraw, SingleSampleAlphaCoveragePreservesTransparentAndPartialPixels)
 {
     const auto project = WriteFixture(root_ / "coverage");

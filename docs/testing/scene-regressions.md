@@ -887,6 +887,24 @@ Rust regressions in `crates/shader/tests` (`legalize`, `preprocess`,
   shader family) and through array-parameter specialization, not just direct
   ones. A `float` element is one component, so a further subscript
   (`g_AudioSpectrum64Left[i / 4][i % 4]`) selects the element itself.
+- **Matrix `inverse` reaches Metal through a generated helper** — Naga's MSL
+  writer has no `inverse()`, so a stage that inverted a matrix failed native
+  translation (`metal translation of '<shader>' failed`), which dropped the
+  effect or sent the whole wallpaper to the compatibility renderer: the stock
+  `perspective` and `lightshafts` effects with any combos, and `reflection`,
+  `clouds` and `waterwaves` with `PERSPECTIVE=1`, which undo `squareToQuad` in
+  the vertex stage. The `compatibility_functions` strategy renames builtin
+  `inverse` calls to `_we_Inverse` and emits mat2/mat3/mat4
+  adjugate-over-determinant overloads behind `#ifdef _WE_POLYFILL_INVERSE`,
+  else `#define _we_Inverse inverse`.
+  `NagaCompiler` defines the macro only for MSL, so SPIR-V keeps `GLSL.std.450`
+  `MatrixInverse` and stays byte-identical, and no pipeline revision bump was
+  needed. A shader that declares its own `inverse` keeps it.
+  `matrix_inverse_of_every_square_size_compiles_to_metal_and_stays_native_in_spirv`
+  (`naga_metal`) covers translation and the unchanged SPIR-V;
+  `MetalSceneDraw.MatrixInversesOfEverySizeAreTranslatedAndDrawnExactly` draws
+  each size's round-trip residual on the native backend, where one wrong
+  cofactor sign turns its channel black.
 - **A sampler slot's `combo` answers whether the material bound a texture there**,
   which is not the same as whether the slot is bound. An annotation's `default`
   exists so an unused sampler still reads something sane; `WPSceneParser` binds
