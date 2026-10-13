@@ -199,8 +199,12 @@ tree; it does not resume playback the user paused. Web projects remain unsupport
 - Lock-screen animation replaces Desktop; screen-saver playback replaces Idle.
   Selection changes reload the wallpaper service, and unsupported per-display
   configurations are rejected rather than converted destructively.
-- Playback respects the pause and battery settings. The lock screen covering the
-  desktop does not pause it.
+- Playback respects the pause and battery settings, and the reduced-quality frame
+  rate that Low Power Mode, heat or a low battery can ask for. Only the frame rate
+  reaches the lock screen and the screen saver: the lock-screen export carries no
+  render scale, so they draw at the surface's own resolution whatever the render
+  scale is. The lock screen covering the desktop does not pause it. A change made
+  while the Mac is locked has not been exercised.
 - The extension answers the whole private wallpaper-service protocol, 21 requests on
   macOS 27.0. macOS drops the connection of an extension that cannot answer a request,
   or answers it with another reply type, and the service also sends requests

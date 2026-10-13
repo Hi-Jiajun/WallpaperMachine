@@ -150,7 +150,7 @@ full refresh), so a display moving to another refresh retunes the limit of a
 running page without a reload.
 
 The limit is the descriptor's `fps`, which already includes the Reduced-quality
-battery frame rate and the Performance cap ([frame-rate limit](performance.md#quality)).
+frame rate (from the battery, Low Power Mode, heat or a low battery) and the Performance cap ([frame-rate limit](performance.md#quality)).
 It is part of each document's script, so even the first `requestAnimationFrame`
 call of a page, a reload and a content-process restart are paced; a change on a
 running page (a Performance or power-source change) is sent together with
@@ -166,8 +166,10 @@ setting ([performance](performance.md#quality)) reaches a page as a multiplier o
 (`Shared/WebWallpaperProtocol.swift`) installs an accessor for the property only
 while the scale is below 1 and puts WebKit's own descriptor back when it returns to
 1, so a full-scale page runs on the native property. The scale is
-`BridgeWebWallpaper.renderScale`: the saved scale, or the battery profile's while
-Reduced quality is selected and the Mac is on battery, held to 50-100% for a page.
+`BridgeWebWallpaper.renderScale`: the saved scale; the battery profile's while
+Reduced quality is selected and the Mac is on battery; or the lower of the saved scale
+and the profile's while a reduced-quality request from Low Power Mode, heat or a low
+battery holds (and the stricter of the two when both do). It is held to 50-100% for a page.
 Like the frame-rate limit it is part of each document's script, so the very first
 read of a page, a reload and a content-process restart already see it. A change on
 a running page (a Performance or power-source change) is delivered without a reload
@@ -289,12 +291,18 @@ separate web view with its own handler (see [architecture](../architecture.md#co
   WebKit's `PreferPageRenderingUpdatesNear60FPSEnabled` feature off, and the page
   then draws, and receives the pointer, at the full refresh. WebKit reads that
   feature only when a web view is created, so a rate change that crosses the
-  refresh (the slider, or the battery frame rate taking over) rebuilds the page;
-  a change that stays on one side keeps the document. At the default rate nothing
-  changes. If the running WebKit no longer offers the feature, the page keeps the
-  default cadence and the limitation is logged once. The rebuilt page is a new
-  page like any other: it takes in the render scale, the pause, the frame limit and
-  the pointer rate of its cadence from the descriptor before it loads.
+  refresh (the slider, the battery frame rate taking over, or Reduced quality for
+  Low Power Mode, heat or a low battery beginning or ending) rebuilds the page;
+  a change that stays on one side keeps the document. Those three conditions come
+  and go on their own. A page drawing at the full refresh of a fast display reloads,
+  and loses whatever it kept in memory, each time one of them lowers its rate below
+  that refresh and again when it ends, and a Mac that hovers at the serious thermal
+  boundary does so at every crossing. Nothing holds the page at the cadence it was
+  created with or delays the rebuild, and the cost has not been measured. At the
+  default rate nothing changes. If the running WebKit no longer offers the feature,
+  the page keeps the default cadence and the limitation is logged once. The rebuilt
+  page is a new page like any other: it takes in the render scale, the pause, the
+  frame limit and the pointer rate of its cadence from the descriptor before it loads.
 - **Recovery.** A content process that keeps terminating is restarted on a windowed
   budget with exponential backoff rather than forever; the budget returns only
   after a document has run without interruption for the stable-run threshold.

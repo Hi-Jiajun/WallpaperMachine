@@ -1124,6 +1124,133 @@ final class ControlPanelShellTests: ControlPanelTestCase {
     }
   }
 
+  /// Reduced quality for Low Power Mode, a hot Mac and a low battery shares the battery profile's
+  /// scale and frame rate, so those rows follow any of the four choices, and the page names the
+  /// reason the quality is lower: heat first, then Low Power Mode, a low battery and the battery.
+  func testReducedQualityShowsItsProfileAndNamesItsCause() async throws {
+    try await withPanel { panel in
+      try await panel.finishWelcome()
+      let result = try await panel.js("""
+        const base = await window.webkit.messageHandlers.native.postMessage({action:'ready'});
+        const quiet = {...base.settings, renderScaleSupported:true, renderScale:0.75, preferredRenderScale:1,
+          batteryMode:'keepRunning', lowPowerModeAction:'keepRunning', thermalAction:'keepRunning',
+          lowBatteryAction:'keepRunning', batteryPercent:null, onBatteryPower:false, qualityThrottle:[]};
+        window.wallpaperUI.receive({...base, page:'settings', settings:quiet});
+        document.querySelector('[data-section="performance"]').click();
+        const look = overrides => {
+          window.wallpaperUI.receive({...base, page:'settings', settings:{...quiet, ...overrides}});
+          const key = name => document.querySelector(`[data-key="${name}"]`);
+          return {
+            profile: Boolean(key('battery-scale')) && Boolean(key('battery-fps')) && Boolean(document.querySelector('[data-setting="batteryTargetFps"]')),
+            cause: key('reduced-quality-state') ? key('reduced-quality-state').querySelector('.settings-status').dataset.cause : null,
+            status: key('reduced-quality-state')?.querySelector('.settings-status').textContent ?? null,
+            effective: key('render-scale-effective')?.querySelector('.settings-status').textContent ?? null,
+            thermalNote: document.getElementById('settings-note-thermal')?.textContent ?? null,
+          };
+        };
+        const offered = name => [...document.querySelectorAll(`select[data-setting="${name}"] option`)].map(option => option.value);
+        const out = {
+          none: look({}),
+          batteryMode: look({batteryMode:'reducedQuality'}),
+          lowPowerChosen: look({lowPowerModeAction:'reduceQuality'}),
+          heatChosen: look({thermalAction:'reduceQuality'}),
+          lowBatteryChosenWithoutABattery: look({lowBatteryAction:'reduceQuality'}),
+          lowBatteryChosen: look({lowBatteryAction:'reduceQuality', batteryPercent:50}),
+          heat: look({thermalAction:'reduceQuality', qualityThrottle:['heat']}),
+          lowPower: look({lowPowerModeAction:'reduceQuality', qualityThrottle:['lowPowerMode']}),
+          lowBattery: look({lowBatteryAction:'reduceQuality', batteryPercent:10, qualityThrottle:['lowBattery']}),
+          battery: look({batteryMode:'reducedQuality', onBatteryPower:true}),
+          heatAndLowPower: look({thermalAction:'reduceQuality', lowPowerModeAction:'reduceQuality', qualityThrottle:['lowPowerMode', 'heat']}),
+          heatAndBattery: look({thermalAction:'reduceQuality', batteryMode:'reducedQuality', onBatteryPower:true, qualityThrottle:['heat']}),
+        };
+        window.wallpaperUI.receive({...base, page:'settings', settings:{...quiet, batteryPercent:50}});
+        out.offered = {lowPowerModeAction:offered('lowPowerModeAction'), thermalAction:offered('thermalAction'),
+          lowBatteryAction:offered('lowBatteryAction'), batteryMode:offered('batteryMode'), displaySleepAction:offered('displaySleepAction')};
+        return out;
+        """) as? [String: Any]
+
+      let cases = try XCTUnwrap(result)
+      func look(_ name: String) throws -> [String: Any] {
+        try XCTUnwrap(cases[name] as? [String: Any], name)
+      }
+      XCTAssertEqual(try look("none")["profile"] as? Bool, false, "No reduced choice, no profile to edit")
+      XCTAssertNil(try look("none")["status"] as? String)
+      for name in ["batteryMode", "lowPowerChosen", "heatChosen", "lowBatteryChosen"] {
+        XCTAssertEqual(try look(name)["profile"] as? Bool, true, "\(name) chose Reduced quality")
+      }
+      XCTAssertEqual(
+        try look("lowBatteryChosenWithoutABattery")["profile"] as? Bool, false,
+        "A Mac without a battery never shows the low-battery choice, so it cannot ask for the profile")
+
+      // Chosen but nothing holds: the generic reading, and the scale is not claimed as reduced.
+      XCTAssertEqual(try look("heatChosen")["cause"] as? String, "")
+      XCTAssertEqual(try look("heat")["cause"] as? String, "heat")
+      XCTAssertEqual(try look("lowPower")["cause"] as? String, "lowPowerMode")
+      XCTAssertEqual(try look("lowBattery")["cause"] as? String, "lowBattery")
+      XCTAssertEqual(try look("battery")["cause"] as? String, "battery")
+      XCTAssertEqual(try look("heatAndLowPower")["cause"] as? String, "heat", "Heat is named before Low Power Mode")
+      XCTAssertEqual(try look("heatAndBattery")["cause"] as? String, "heat", "A throttle is named before the battery")
+
+      // Effective now fills the engine's scale and the saved one into whichever sentence names the
+      // cause, so a reading with a placeholder left in it or a missing value is the failure.
+      for name in ["heatChosen", "heat", "lowPower", "lowBattery", "battery"] {
+        let text = try XCTUnwrap(
+          try look(name)["effective"] as? String, "Effective now is shown while 75% differs from 100%")
+        XCTAssertTrue(text.contains("75%") && text.contains("100%"), text)
+        XCTAssertFalse(text.contains("{"), "\(name) left a placeholder unfilled: \(text)")
+        XCTAssertFalse(
+          try XCTUnwrap(try look(name)["status"] as? String, name).isEmpty, "\(name) says nothing about the quality in use")
+      }
+      for name in ["none", "heatChosen"] {
+        let note = try XCTUnwrap(try look(name)["thermalNote"] as? String, "\(name) shows the note for the heat row")
+        XCTAssertFalse(note.contains("{"), "\(name) left a placeholder unfilled: \(note)")
+      }
+
+      let offered = try XCTUnwrap(cases["offered"] as? [String: [String]])
+      for name in ["lowPowerModeAction", "thermalAction", "lowBatteryAction"] {
+        XCTAssertEqual(offered[name], ["keepRunning", "reduceQuality", "pause", "stop"], name)
+      }
+      XCTAssertEqual(
+        offered["batteryMode"], ["keepRunning", "reducedQuality", "pause"],
+        "The battery mode keeps its own name")
+      XCTAssertEqual(offered["displaySleepAction"], ["pause", "stop"])
+    }
+  }
+
+  /// A display's frame rate is held to the ceiling the engine reports, whatever lowered it, so the
+  /// note appears for a throttle as it did for the battery profile.
+  func testDisplayFrameRateNoteCountsTheThrottle() async throws {
+    try await withPanel { panel in
+      try await panel.finishWelcome()
+      let result = try await panel.js("""
+        const base = await window.webkit.messageHandlers.native.postMessage({action:'ready'});
+        const displays = [{...base.displays[0], id:'primary', enabled:true, fps:30, maxFps:60}];
+        const look = overrides => {
+          window.wallpaperUI.receive({...base, page:'settings', displays, settings:{...base.settings, ...overrides}});
+          return document.querySelector('[data-key="display-primary-fps-limit"]')?.textContent ?? null;
+        };
+        window.wallpaperUI.receive({...base, page:'settings', displays, settings:base.settings});
+        document.querySelector('[data-section="displays"]').click();
+        return {
+          unlimited: look({frameRateCap:null, effectiveFrameRateCap:null}),
+          below: look({frameRateCap:null, effectiveFrameRateCap:24, qualityThrottle:['heat']}),
+          equal: look({frameRateCap:null, effectiveFrameRateCap:30}),
+          above: look({frameRateCap:null, effectiveFrameRateCap:45}),
+          battery: look({frameRateCap:null, effectiveFrameRateCap:20, batteryMode:'reducedQuality', onBatteryPower:true}),
+        };
+        """) as? [String: Any]
+
+      let notes = try XCTUnwrap(result)
+      XCTAssertTrue(notes["unlimited"] is NSNull, "No ceiling, no note")
+      XCTAssertTrue(notes["equal"] is NSNull, "A ceiling that does not lower the rate is not a limit")
+      XCTAssertTrue(notes["above"] is NSNull)
+      XCTAssertTrue((notes["below"] as? String)?.contains("24") == true, "\(String(describing: notes["below"]))")
+      XCTAssertTrue(
+        (notes["battery"] as? String)?.contains("20") == true,
+        "The battery profile reaches the page through the same ceiling")
+    }
+  }
+
   /// A <select> yields a string, and Swift accepts only an integer in range, so the choice must
   /// cross the bridge as a number to reach the queue at all.
   func testDownloadsAtOnceChoiceReachesTheQueueAndSurvivesTheNextSnapshot() async throws {

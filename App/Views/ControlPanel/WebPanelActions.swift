@@ -1250,12 +1250,15 @@ extension WebPanelController {
   /// up to 64 MB of logs must not stall the panel.
   func exportDiagnostics(to destination: URL) async throws {
     let settings = store.settingsSnapshot
+    let throttle = Self.qualityThrottle(settings.qualityThrottle).joined(separator: ", ")
     var environment = DiagnosticEnvironment.current()
     environment.append("""
       settings: scene renderer \(settings.sceneRenderer), video backend \(settings.videoBackend), \
       render scale \(settings.renderScale) (preferred \(settings.preferredRenderScale)), battery mode \
       \(settings.batteryMode), frame-rate cap \(settings.frameRateCap.map(String.init) ?? "none"), on battery \
-      \(settings.onBatteryPower), verbose logging \(settings.verboseLogging)
+      \(settings.onBatteryPower), reduced quality for \(throttle.isEmpty ? "nothing" : throttle), effective \
+      frame-rate cap \(settings.effectiveFrameRateCap.map(String.init) ?? "none"), verbose logging \
+      \(settings.verboseLogging)
       """)
     for scene in settings.sceneRenderers {
       let mode = settings.sceneUpdateModes.first { $0.displayId == scene.displayId }?.mode
@@ -1291,11 +1294,16 @@ extension WebPanelController {
   static let batteryTargetFpsRange: ClosedRange<Double> = 1...240
   /// Settings that change how much rendering work runs now, so the energy readout
   /// restarts its window and compares before with after. Battery quality counts only
-  /// while it is in force, but restarting on it anyway costs a few seconds of readout.
+  /// while it is in force, and so does what a Low Power Mode, a hot Mac or a low battery
+  /// asks for, but restarting on them anyway costs a few seconds of readout. A condition
+  /// choice reaches the renderer a moment after it is made, through the presentation
+  /// policy; the restart only takes a baseline sample, and the figure compared is the
+  /// window that follows, so that moment is a small part of it.
   static let renderingSettings: Set<String> = [
     "batteryMode", "batteryRenderScale", "batteryTargetFps", "frameRateCap", "qualityPreset",
     "renderScale", "videoBackend", "contentPacing", "sharedVideoDecode", "sceneOptimization",
-    "sceneOnDemand", "sceneVideoPlaneSampling", "sceneRenderer",
+    "sceneOnDemand", "sceneVideoPlaneSampling", "sceneRenderer", "lowPowerModeAction",
+    "thermalAction", "lowBatteryAction",
   ]
 
   /// The engine owns the battery scale and frame rate as one value, so a single

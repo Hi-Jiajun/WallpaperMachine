@@ -300,7 +300,10 @@ picture shows between a window closing and the web page's window opening.
   paused or for a Space fault in a full-screen Space; repeated reports are
   throttled; only a new window number or a moved display starts a check.
 
-Not covered: the real Focus Settings pane and a real Low Power Mode; a real plug or
+Not covered: the real Focus Settings pane and a real Low Power Mode; a real thermal change
+or Low Power Mode driving Reduced quality through the monitor, policy and bridge to a
+running wallpaper, a change while the Mac is locked, the live layout of the Playback
+rows and how their sentences read in each language, and any power saving; a real plug or
 unplug during sleep, including whether `IOKit` answers correctly the moment the Mac
 wakes; a real discharge crossing the low-battery level, how often IOKit posts the
 power-source notification on this Mac, and how the two rows lay out in the live
@@ -923,7 +926,12 @@ follows the developer's in-app language choice.
   and does not overlap at the minimum width; the first-run guide, background
   focus isolation, Steam prompt focus, ownership notices and a revealed password
   that never reaches the HTML; settings keep drafts, disclosure and scroll across
-  snapshots; the Downloads-at-once choice reaches the queue; tabs stay usable
+  snapshots; the Performance profile rows follow any of the four Reduced quality choices
+  (not a low-battery choice on a Mac with no battery) and the Reduced quality line and
+  Effective now name the cause (heat, then Low Power Mode, a low battery, the battery),
+  the three condition menus offer Reduced quality and the battery mode and display
+  sleep do not, and a display's frame-rate note follows the engine's ceiling; the
+  Downloads-at-once choice reaches the queue; tabs stay usable
   after a render throws mid-send; Installed's filters and scroll offset return in a
   second page built over the same navigation, with a stale required tag dropped,
   and the `viewState` report is stored without a snapshot reply or push and an
@@ -1016,6 +1024,9 @@ follows the developer's in-app language choice.
   to the page, its folder is not measured and its pending text is dropped),
   `WebPanelPerformanceSettingsTests` and `WebPanelSceneSettingsTests` (unknown,
   non-boolean or non-numeric values are refused, out-of-range ones clamped; the
+  Reduced quality choice is accepted for Low Power Mode, heat and a low battery only, and
+  the battery mode's `reducedQuality` is refused for them; the snapshot carries the
+  frame-rate ceiling in force and the throttle causes; the
   Retry on a stopped scene refuses an id that names no enabled display, is
   disabled while it runs, and reloads that display (or, for a mirror, the display
   it mirrors) from a click on the real page),

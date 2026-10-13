@@ -156,7 +156,9 @@ the state as a disabled line. See [crash recovery](crash-recovery.md).
   - **Performance** opens with a live energy readout for the app, then quality
     (presets, frame-rate limit, render scale) directly beneath it, then playback
     (occlusion, other-app audio, display sleep, playing only on the display in use,
-    battery, low battery, Low Power Mode, heat, Focus, app rules). Video backend, scene controls and the experimental switches
+    battery, low battery, Low Power Mode, heat, Focus, app rules; the battery, low-battery,
+    Low Power Mode and heat choices can each lower quality instead of pausing, and the page names
+    which one is lowering it). Video backend, scene controls and the experimental switches
     stay under **Advanced**. See [Performance settings](performance.md). The
     inspector of an installed wallpaper adds its measured energy grade, and on a
     Mac with a battery its share of a charge per hour, once it has one
@@ -421,11 +423,13 @@ The top bar picker chooses which display Apply acts on. Disabled and mirrored
 displays are listed but not selectable, annotated `(disabled)` or `(mirrored)`.
 Per-display enablement, independent/mirror mode, mirror source, scaling, scale
 factor, frame rate, mute and volume live in **Settings → Displays**, beside each
-independent display's **Playlist** (see [playlists](playlists.md)). When a
-Performance cap, or the battery frame rate while reduced quality is in force, is
-below the saved frame rate, the field notes `Limited to {fps} fps by Performance
-settings` and can open Settings → Performance; the inspector's per-display
-frame-rate field shows the same note. Saved frame rates are never rewritten.
+independent display's **Playlist** (see [playlists](playlists.md)). When the frame-rate
+ceiling in force is below the saved frame rate, the field notes `Limited to {fps} fps
+by Performance settings` and can open Settings → Performance. The ceiling is the one the
+engine reports (`effectiveFrameRateCap`): the Performance cap lowered by the
+reduced-quality frame rate while that is in force, whether from the battery, Low Power
+Mode, heat or a low battery. The inspector's per-display frame-rate field shows the same
+note. Saved frame rates are never rewritten.
 
 The inspector's per-display sections also hold **Horizontal position**, **Vertical
 position** and **Center** for scene and video wallpapers: where the wallpaper sits on

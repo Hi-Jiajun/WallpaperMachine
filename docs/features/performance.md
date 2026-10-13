@@ -80,14 +80,19 @@ kernel's resource-coalition accounting (`CoalitionEnergySource`,
   has no such entry and shows no line.
 - **Before and after.** A Performance setting that changes rendering work
   (`WebPanelController.renderingSettings`: presets, frame-rate limit, render scale,
-  battery mode and quality, video backend, scene renderer and the scene and
+  battery mode and quality, what to do in Low Power Mode, when the Mac is hot and when
+  the battery is low, video backend, scene renderer and the scene and
   experimental switches) calls `EnergyUsageMonitor.settingChanged()` once the
   engine has accepted it. The window restarts, the row reads **Measuring…** with
   the last settled figure as **Before it**, and once four uncontended samples under
   the new setting exist it reads **Before your change: … Now: … (−N%)**. A second
   change before the first settled keeps the original "before". Without a settled,
   uncontended figure at the moment of the change there is no comparison. Leaving
-  Settings drops it.
+  Settings drops it. The three condition choices are stored, not sent: the renderer
+  hears of a change a moment later, when the presentation policy delivers it, so the
+  restart can land just ahead of the change. The restart only discards the old window,
+  and the figure compared is the window that follows, so that moment is a small part
+  of it.
 - **Cost.** One sample is about 3 ms of kernel calls (every coalition on the Mac
   is read for the contention check), taken off the main thread. Sampling runs only
   while the panel window is visible with Settings open; otherwise no timer exists.
@@ -119,7 +124,9 @@ delegate and reachable from the panel as `BridgeStore.wallpaperEnergyRatings`:
 - **When a sample is credited.** Every 30 seconds the recorder asks the app
   delegate for a `WallpaperEnergyContext`. There is none, and no sample is taken,
   unless presentation is running and playback is playing (no display sleep, lock,
-  app rule, other-audio, Low Power Mode, heat, low-battery, Focus-filter or battery pause), the
+  app rule, other-audio, Focus-filter or battery pause, and no Low Power Mode, heat or
+  low-battery pause or stop: choosing Reduced quality for those three keeps the
+  wallpaper playing, so its samples are credited under the lower ceiling and scale), the
   control panel is not on screen, no live preview window is open, no download is
   running SteamCMD or fetching a pixiv original, exactly one wallpaper is assigned
   across the displays that are not suspended (hidden, covered, or not the one in
@@ -136,9 +143,12 @@ delegate and reachable from the panel as `BridgeStore.wallpaperEnergyRatings`:
   either, so a switch's shader compiling and texture decoding are not rated as
   playback.
 - **Conditions.** The context records the displays showing it, the frame-rate
-  ceiling in force (the battery one included) and the effective render scale. A
+  ceiling in force (the reduced-quality one included, whichever reason holds it,
+  read from the engine's `effectiveFrameRateCap`) and the effective render scale. A
   measurement under other conditions replaces the rating rather than being averaged
-  in, so the line always names the settings it describes.
+  in, so the line always names the settings it describes. A Mac that moves in and
+  out of Reduced quality therefore replaces a wallpaper's rating each time, as
+  unplugging does.
 - **Averaging.** Intervals combine as a time-weighted mean. History is weighted as
   at most 30 minutes, so a rating follows a wallpaper whose cost changed. A rating
   is shown after two minutes of credited time.
@@ -180,15 +190,17 @@ extra top position. Every value up to the refresh (for example 119 and 120 on a
 120 Hz display) is a cap. The extra top position reads **No limit** and sends null
 (no cap): each display then runs at its own rate, 60 fps by default (below). The
 effective rate on a display is the minimum of the saved per-wallpaper rate, that
-display's refresh, the global cap, and the battery frame rate when reduced quality
-is in force. Saved per-wallpaper frame rates are never rewritten. When a
-Performance cap is below the saved rate, the inspector and **Settings → Displays**
-say so and offer **Open Performance**.
+display's refresh, the global cap, and the reduced-quality frame rate while reduced
+quality is in force, whatever the reason: the battery, Low Power Mode, heat or a low
+battery. Saved per-wallpaper frame rates are never rewritten. When the ceiling the
+engine reports in force (`effectiveFrameRateCap`, which already holds all of that)
+is below the saved rate, the inspector and **Settings → Displays** say so and offer
+**Open Performance**.
 
 For Web wallpapers a limit below the rate the page draws at (60, or the display's
 refresh when that is lower) is enforced on the page's `requestAnimationFrame`, so
-Low (30 fps), a lower cap, the battery frame rate and a per-wallpaper rate cut the
-page's drawing callbacks; a rate that reaches it is left to WebKit and a No limit
+Low (30 fps), a lower cap, the reduced-quality frame rate and a per-wallpaper rate cut
+the page's drawing callbacks; a rate that reaches it is left to WebKit and a No limit
 page keeps its native frames. It applies to a running page without a reload, except
 where a fast display's refresh is crossed and the page is rebuilt (below). Timers,
 video and CSS animation are not limited, and the energy effect has not been
@@ -206,7 +218,7 @@ resolution, not supersampling. For Web wallpapers the scale multiplies the page'
 that sizes its canvas or WebGL buffers from the ratio and rebuilds them on `resize`
 draws fewer pixels and WebKit stretches the result over the same area. It applies
 to a running page without a reload (the page gets one `resize` event) and is part of
-every new document from its first line, the battery scale included. A page that
+every new document from its first line, the reduced-quality scale included. A page that
 reads the ratio once keeps full resolution until it reloads, resolution media
 queries and frames the page embeds see the display's own ratio, and a page that
 mixes the ratio into its CSS pixel math can change layout; the energy effect has
@@ -220,8 +232,10 @@ clamped the same way) but does not quantize it to these tiers, so a hand-edited
 an extra leading option labelled `60% (from configuration)` and keeps it selected,
 rather than displaying a neighbouring tier the user never chose. Picking a tier
 replaces it. Whenever the effective `renderScale` differs from the saved
-`preferredRenderScale`, **Effective now** shows the scale the engine published; it
-names battery as the cause only while reduced quality is actually in force.
+`preferredRenderScale`, **Effective now** shows the scale the engine published. It
+names the cause only while reduced quality is actually in force: heat, Low Power
+Mode, a low battery or the battery, in that order when several hold. Otherwise it
+says only that the saved setting is not in effect.
 
 ### Default per-display frame rate
 
@@ -257,9 +271,9 @@ control for that part.
 | When displays sleep | **Pause**, **Stop (free memory)** | Pause |
 | Only play on the display I’m using | On, Off; shown with two or more displays | Off |
 | On battery | **Keep running**, **Reduced quality**, **Pause** | Keep running |
-| When the battery is low | **Keep running**, **Pause**, **Stop (free memory)**; the level is **10%**, **20%** or **30%** | Keep running, 20% |
-| In Low Power Mode | **Keep running**, **Pause**, **Stop (free memory)** | Keep running |
-| When the Mac is hot | **Keep running**, **Pause**, **Stop (free memory)** | Keep running |
+| When the battery is low | **Keep running**, **Reduced quality**, **Pause**, **Stop (free memory)**; the level is **10%**, **20%** or **30%** | Keep running, 20% |
+| In Low Power Mode | **Keep running**, **Reduced quality**, **Pause**, **Stop (free memory)** | Keep running |
+| When the Mac is hot | **Keep running**, **Reduced quality**, **Pause**, **Stop (free memory)**; Reduced quality still pauses when the Mac is very hot | Keep running |
 
 **Mute all wallpapers** is the user's own switch for silencing every wallpaper at
 once. The same switch is **Mute Wallpapers** in the menu bar (ticked while it is on,
@@ -374,12 +388,16 @@ whether the reconfigure restores it, is not established here: the tests drive th
 with scripted frame counters.
 
 **On battery** is one choice. **Keep running** leaves quality alone. **Pause**
-stops wallpapers until the Mac is plugged in. **Reduced quality** shows the battery
-render scale (100% / 75% / 50%, default 75%) and battery frame rate (1–240 fps,
-default 30) underneath, plus whether the Mac is on battery. Those two fields are
-sent together: changing one resends the other as the engine currently reports it.
-Reduced quality is in force only while that mode is selected and the Mac is on
-battery. A configuration saved with the former pause-on-battery switch maps to
+stops wallpapers until the Mac is plugged in. **Reduced quality** is the choice
+that makes the page show **Render scale when reduced** (100% / 75% / 50%, default
+75%) and **Frame rate when reduced** (1–240 fps, default 30) underneath, plus a
+**Reduced quality** line that says why quality is lower right now. This is one
+profile, shared: the same two fields serve **On battery** and the three conditions
+below, and the rows show whenever any of the four selects is on Reduced quality (the
+low-battery one only on a Mac with a battery). Those two fields are sent together:
+changing one resends the other as the engine currently reports it. For **On
+battery**, Reduced quality is in force only while that mode is selected and the Mac
+is on battery. A configuration saved with the former pause-on-battery switch maps to
 **Pause**, otherwise the former battery profile switch maps to **Reduced quality**.
 The power source is also read when the Mac wakes and again two seconds later,
 because a plug or unplug during sleep may not be reported; a change found that way
@@ -411,8 +429,50 @@ that hovers around it does not pause and resume the wallpapers over and over, an
 ends at once when you plug in, whatever the charge. Only the internal battery counts,
 never a UPS, and a reading that fails counts as not low. Like the other conditions it
 pauses or stops wallpapers without touching your own Play/Pause; **Stop** frees
-renderer memory and reloads the wallpapers when the rule ends. A Reduced quality choice
-is not offered for it.
+renderer memory and reloads the wallpapers when the rule ends.
+
+All three conditions also offer **Reduced quality**, which keeps the wallpapers
+playing instead of pausing them. While a chosen condition holds, the app asks the
+engine for the reduced-quality profile (the scale and frame rate described under
+**On battery**) on top of whatever the power source already asks, and hands your
+usual settings back when the last condition ends. The request is runtime-only: it
+is never saved, a restart begins without one, and nothing is polled for it (the
+conditions are observed as above).
+
+- **It only lowers.** The frame-rate ceiling is the lowest of your global cap and the
+  profile's rate, and with a condition holding the render scale is the lower of your
+  saved scale and the profile's, so a cap or scale you already set below the profile
+  stays where it is. When a condition and the battery profile hold together, the
+  stricter rule wins and quality never rises. On battery alone the profile's scale
+  is used as it is, as it always was, so a saved scale lower than the profile's is
+  raised to it there; that difference from the conditions was left as it is.
+- **Heat escalates.** Serious reduces. Critical reduces and also pauses the
+  wallpapers, because reducing is no longer enough; choosing Reduced quality is not
+  a promise never to pause, and the row's note says so. The fair ("warm") state is
+  ignored, as it is for **Pause** and **Stop**, which act from serious.
+- **It follows the cause.** **Effective now** and the **Reduced quality** line name
+  the cause (heat, Low Power Mode, a low battery or the battery, in that order when
+  several hold), and the frame-rate note on **Settings → Displays** counts the
+  reduced-quality frame rate whichever reason lowered it.
+- **Cost.** Each change of the render scale rebuilds a scene's render graph, the
+  same cost as unplugging the Mac with **On battery** set to Reduced quality, and
+  there is no hold-down: a Mac whose thermal state flaps at the serious boundary
+  would pay it each time, which is not measured. A Web wallpaper drawing at the full
+  refresh of a display above 60 Hz pays more: its cadence is fixed when the page is
+  created, so the lower rate reloads the page, with the loss of what it kept in
+  memory, and the end of the request reloads it again
+  ([frame rate](web-wallpapers.md#runtime-shape)). Nothing is added per frame.
+- **Saving.** The power saving of Reduced quality, here or on battery, has not been
+  measured, and nothing in the app or these docs claims one. The planned comparison
+  is a [power benchmark](../testing/power-benchmark.md#condition-matrix) of the same
+  content with the profile on and off. The matrix has no row for it yet and the
+  benchmark script no scenario, and the
+  [comparison rules](../testing/power-benchmark.md#comparison-rules) call a lowered
+  frame rate or scale a quality tier, not an equal-quality saving. It needs an
+  authorized desktop session.
+  Whether a change made while the Mac is locked, and a native-video clip whose target
+  rate changes (it may be offered natively again, as for any changed target rate),
+  behave as intended has likewise not been exercised on a Mac.
 
 A Focus can act on wallpapers through a Focus filter (`WallpaperFocusFilter`, an
 App Intents `SetFocusFilterIntent`): in System Settings → Focus → a Focus → Focus
@@ -430,6 +490,11 @@ permission.
 `SystemConditionMonitor` turns the playback conditions into rule actions that join
 the app rules' in `WallpaperPresentationPolicy`, so they pause, mute or stop
 wallpapers exactly as an app rule does and never change the user's own Play/Pause.
+A condition set to Reduced quality is not a rule action: the monitor reports it
+separately (`qualityReductions`) and the policy delivers it to the engine on its own
+channel (`setQualityThrottle`), so wallpapers keep presenting under the lower ceiling
+and scale ([architecture](../architecture.md)). Heat is the one exception, since a
+critical thermal state also contributes a pause.
 It only observes notifications (`NSProcessInfoPowerStateDidChange`,
 `ProcessInfo.thermalStateDidChangeNotification`, the preferences and the Focus
 filter); nothing is polled. The battery adds IOKit's power-source notification

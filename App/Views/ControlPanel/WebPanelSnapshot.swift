@@ -504,6 +504,10 @@ extension WebPanelController {
     // What Playback shows as in effect right now, beside the saved choices.
     let lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
     let thermalState = Self.thermalState(ProcessInfo.processInfo.thermalState)
+    // What the engine holds the frame rate to and why, so the page names the cause and does not
+    // work the ceiling out again.
+    let effectiveFrameRateCap: Any = settings.effectiveFrameRateCap.map { Int($0) } as Any? ?? null
+    let qualityThrottle = Self.qualityThrottle(settings.qualityThrottle)
     let focusAction = FocusFilterState.shared.selection?.target.kind.rawValue
       ?? FocusFilterState.shared.action?.rawValue ?? "keepRunning"
     // The charge is null on a Mac without an internal battery, which is how the page knows to
@@ -544,6 +548,7 @@ extension WebPanelController {
       "onBatteryPower": settings.onBatteryPower,
       "frameRateCap": settings.frameRateCap.map { Int($0) } as Any? ?? null,
       "frameRateCapMax": Self.frameRateCapMax(settings),
+      "effectiveFrameRateCap": effectiveFrameRateCap, "qualityThrottle": qualityThrottle,
       "displaySleepAction": playback.displaySleepAction.rawValue,
       "otherAudioAction": playback.otherAudioAction.rawValue,
       "desktopCoveredAction": playback.desktopCoveredAction.rawValue,
@@ -878,6 +883,17 @@ extension WebPanelController {
     case .serious: "serious"
     case .critical: "critical"
     @unknown default: "nominal"
+    }
+  }
+
+  /// The names the page knows the reduced-quality reasons by, in the order the bridge reports them.
+  static func qualityThrottle(_ causes: [BridgeQualityThrottleCause]) -> [String] {
+    causes.map { cause in
+      switch cause {
+      case .lowPowerMode: "lowPowerMode"
+      case .heat: "heat"
+      case .lowBattery: "lowBattery"
+      }
     }
   }
 

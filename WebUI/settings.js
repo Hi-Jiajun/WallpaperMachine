@@ -19,7 +19,9 @@ const batteryModes = [['keepRunning', 'Keep running'], ['reducedQuality', 'Reduc
 const otherAudioActions = [['keepRunning', 'Keep running'], ['mute', 'Mute'], ['pause', 'Pause']];
 const displaySleepActions = [['pause', 'Pause'], ['stop', 'Stop (free memory)']];
 const desktopCoveredActions = [['pause', 'Pause'], ['keepRunning', 'Keep running']];
-const systemConditionActions = [['keepRunning', 'Keep running'], ['pause', 'Pause'], ['stop', 'Stop (free memory)']];
+// Reduced quality keeps wallpapers playing at the battery profile's scale and frame rate instead of
+// pausing them. Low Power Mode, a hot Mac and a low battery offer it; display sleep and the rest do not.
+const systemConditionActions = [['keepRunning', 'Keep running'], ['reduceQuality', 'Reduced quality'], ['pause', 'Pause'], ['stop', 'Stop (free memory)']];
 // The charge levels the low-battery rule offers, in percent; Swift refuses any other.
 const lowBatteryLevels = [[10, '10%'], [20, '20%'], [30, '30%']];
 const focusActions = { keepRunning: 'Keep running', mute: 'Mute', pause: 'Pause', stop: 'Stop (free memory)', wallpaper: 'Use wallpaper', playlist: 'Use saved playlist' };
@@ -163,22 +165,48 @@ export function activeQualityPreset(settings) {
   return 'custom';
 }
 
-// Effective rate for the "limited by Performance" note: saved fps, the global
-// cap, and the battery cap while reduced quality is actually in force. Display
-// refresh is not a Performance setting, so it does not raise this note.
+// Effective rate for the "limited by Performance" note: the saved fps against the
+// ceiling the engine reports in force, which is the global cap lowered by the
+// reduced-quality frame rate while that holds, whatever the reason. Display refresh
+// is not a Performance setting, so it does not raise this note.
 export function performanceLimitedFps(saved, settings = {}) {
   const rate = finiteNumber(saved);
   if (rate == null) return null;
-  const limits = [];
-  const cap = storedFrameRateCap(settings);
-  if (cap != null) limits.push(cap);
-  if (settings.batteryMode === 'reducedQuality' && settings.onBatteryPower) {
-    const battery = finiteNumber(settings.batteryTargetFps);
-    if (battery != null) limits.push(battery);
+  const ceiling = settings.effectiveFrameRateCap == null ? null : finiteNumber(settings.effectiveFrameRateCap);
+  return ceiling != null && ceiling < rate ? ceiling : null;
+}
+
+// Why quality is lowered right now, most specific first: the reasons the engine
+// holds (heat, Low Power Mode, a low battery), then the battery mode, which the
+// engine reports as the power source rather than as a reason.
+const qualityCauseOrder = ['heat', 'lowPowerMode', 'lowBattery'];
+function qualityReducedBy(settings) {
+  const held = Array.isArray(settings.qualityThrottle) ? settings.qualityThrottle : [];
+  const causes = qualityCauseOrder.filter(cause => held.includes(cause));
+  if (settings.batteryMode === 'reducedQuality' && settings.onBatteryPower) causes.push('battery');
+  return causes;
+}
+
+// The sentences name the first cause only; every one is a direct t() call so the
+// localization check sees it.
+function qualityStatusText(cause) {
+  switch (cause) {
+    case 'heat': return t('The Mac is hot. Reduced quality is in use.');
+    case 'lowPowerMode': return t('Low Power Mode is on. Reduced quality is in use.');
+    case 'lowBattery': return t('The battery is low. Reduced quality is in use.');
+    case 'battery': return t('On battery. Reduced quality is in use.');
+    default: return t('Your usual quality settings are in use.');
   }
-  if (!limits.length) return null;
-  const effective = Math.min(rate, ...limits);
-  return effective < rate ? effective : null;
+}
+
+function qualityEffectiveText(cause, values) {
+  switch (cause) {
+    case 'heat': return t('{effective} while the Mac is hot. Your setting is {saved}.', values);
+    case 'lowPowerMode': return t('{effective} in Low Power Mode. Your setting is {saved}.', values);
+    case 'lowBattery': return t('{effective} while the battery is low. Your setting is {saved}.', values);
+    case 'battery': return t('{effective} on battery. Your setting is {saved}.', values);
+    default: return t('{effective}. Your setting of {saved} is not in effect right now.', values);
+  }
 }
 
 export function revealSettingsSection(section) {
@@ -387,8 +415,11 @@ function draw(view) {
   const scaleOverridden = Number(settings.renderScale) !== Number(settings.preferredRenderScale);
   const preferredScale = scaleValue(settings.preferredRenderScale);
   const batteryScale = scaleValue(settings.batteryRenderScale);
-  const batteryReduced = settings.batteryMode === 'reducedQuality';
-  const batteryActive = batteryReduced && Boolean(settings.onBatteryPower);
+  // The render scale and frame rate below are one profile, shared by every Reduced quality choice.
+  // A low-battery choice counts only on a Mac with a battery, which is where its select is offered.
+  const reducedChosen = settings.batteryMode === 'reducedQuality' || settings.lowPowerModeAction === 'reduceQuality'
+    || settings.thermalAction === 'reduceQuality' || (settings.batteryPercent != null && settings.lowBatteryAction === 'reduceQuality');
+  const reducedBy = qualityReducedBy(settings);
   const sessions = Number(settings.sharedVideoDecodeSessions) || 0;
   const consumers = Number(settings.sharedVideoDecodeConsumers) || 0;
   const displayName = (name, id) => name || t('Display {id}', { id });
@@ -487,22 +518,24 @@ function draw(view) {
     + row('other-audio', t('When another app plays sound'), select('otherAudioAction', t('When another app plays sound'), draft('otherAudioAction', settings.otherAudioAction || 'keepRunning'), localizedOptions(otherAudioActions), 'data-setting="otherAudioAction"', busy || unavailable), t('Mute silences scene and video wallpapers, and Web wallpapers when page-output mute is available. Pause applies to every wallpaper.'))
     + row('display-sleep', t('When displays sleep'), select('displaySleepAction', t('When displays sleep'), draft('displaySleepAction', settings.displaySleepAction || 'pause'), localizedOptions(displaySleepActions), 'data-setting="displaySleepAction"', busy || unavailable), t('Stop frees renderer memory and reloads the wallpaper when the display wakes. Pause keeps it loaded.'))
     + row('battery-mode', t('On battery'), select('batteryMode', t('On battery'), draft('batteryMode', settings.batteryMode || 'keepRunning'), localizedOptions(batteryModes), 'data-setting="batteryMode"', busy || unavailable), t('Reduced quality uses the scale and frame rate below instead of your usual quality settings. Pause stops wallpapers until you plug in.'))
-    + (batteryReduced ? row('battery-scale', t('Render scale on battery'), select('batteryRenderScale', t('Render scale on battery'), draft('batteryRenderScale', batteryScale), scaleOptions(batteryScale), 'data-setting="batteryRenderScale" data-number', busy || unavailable))
-      + row('battery-fps', t('Frame rate on battery'), `<input class="settings-number" data-key="batteryTargetFps" type="number" inputmode="numeric" aria-label="${e(t('Frame rate on battery'))}" min="1" max="240" step="1" value="${e(draft('batteryTargetFps', settings.batteryTargetFps))}" data-setting="batteryTargetFps"${disabled(busy || unavailable)}><span class="settings-unit">fps</span>`)
-      + row('battery-state', t('Power source'), `<span class="settings-status" role="status">${e(batteryActive ? t('On battery. Reduced quality is in use.') : settings.onBatteryPower ? t('On battery') : t('Plugged in. Your usual quality settings are in use.'))}</span>`, '', 'settings-readout') : '')
+    + (reducedChosen ? row('battery-scale', t('Render scale when reduced'), select('batteryRenderScale', t('Render scale when reduced'), draft('batteryRenderScale', batteryScale), scaleOptions(batteryScale), 'data-setting="batteryRenderScale" data-number', busy || unavailable), t('Every Reduced quality choice on this page uses this render scale and frame rate.'))
+      + row('battery-fps', t('Frame rate when reduced'), `<input class="settings-number" data-key="batteryTargetFps" type="number" inputmode="numeric" aria-label="${e(t('Frame rate when reduced'))}" min="1" max="240" step="1" value="${e(draft('batteryTargetFps', settings.batteryTargetFps))}" data-setting="batteryTargetFps"${disabled(busy || unavailable)}><span class="settings-unit">fps</span>`)
+      + row('reduced-quality-state', t('Reduced quality'), `<span class="settings-status" role="status" data-cause="${e(reducedBy[0] || '')}">${e(qualityStatusText(reducedBy[0]))}</span>`, '', 'settings-readout') : '')
     + (settings.batteryPercent != null
       ? row('low-battery', t('When the battery is low'), select('lowBatteryAction', t('When the battery is low'), draft('lowBatteryAction', settings.lowBatteryAction || 'keepRunning'), localizedOptions(systemConditionActions), 'data-setting="lowBatteryAction"', busy || unavailable), t('Applies only while the Mac runs on battery. It ends 5 points above the level you choose, or when you plug in. The battery is at {percent}% now.', { percent: settings.batteryPercent }))
         + (settings.lowBatteryAction && settings.lowBatteryAction !== 'keepRunning' ? row('low-battery-level', t('Low battery level'), select('lowBatteryThreshold', t('Low battery level'), draft('lowBatteryThreshold', settings.lowBatteryThreshold ?? 20), lowBatteryLevels, 'data-setting="lowBatteryThreshold" data-number', busy || unavailable)) : '')
       : '')
     + row('low-power', t('In Low Power Mode'), select('lowPowerModeAction', t('In Low Power Mode'), draft('lowPowerModeAction', settings.lowPowerModeAction || 'keepRunning'), localizedOptions(systemConditionActions), 'data-setting="lowPowerModeAction"', busy || unavailable), settings.lowPowerMode ? t('Low Power Mode is on now.') : t('Low Power Mode is off now.'))
-    + row('thermal', t('When the Mac is hot'), select('thermalAction', t('When the Mac is hot'), draft('thermalAction', settings.thermalAction || 'keepRunning'), localizedOptions(systemConditionActions), 'data-setting="thermalAction"', busy || unavailable), t('Applies while macOS reports the Mac as hot or very hot, which is when it starts slowing itself down. Right now it is {state}.', { state: t(thermalStates[settings.thermalState] || 'normal') }))
+    + row('thermal', t('When the Mac is hot'), select('thermalAction', t('When the Mac is hot'), draft('thermalAction', settings.thermalAction || 'keepRunning'), localizedOptions(systemConditionActions), 'data-setting="thermalAction"', busy || unavailable), settings.thermalAction === 'reduceQuality'
+      ? t('Reduced quality applies while the Mac is hot, and wallpapers pause if it becomes very hot. Right now it is {state}.', { state: t(thermalStates[settings.thermalState] || 'normal') })
+      : t('Applies while macOS reports the Mac as hot or very hot, which is when it starts slowing itself down. Right now it is {state}.', { state: t(thermalStates[settings.thermalState] || 'normal') }))
     + row('focus', t('Focus'), button(t('Open Focus Settings…'), 'openFocusSettings', {}, busy), settings.focusAction && settings.focusAction !== 'keepRunning' ? t('A Focus filter is in effect now: {action}.', { action: t(focusActions[settings.focusAction] || settings.focusAction) }) : t('In System Settings → Focus, add the WallpaperMachine filter to pause, mute, stop or temporarily switch wallpapers. No Focus filter is in effect now.'))
     + row('app-rules', t('App rules'), '', t('Pause, mute or stop wallpapers while a chosen app is running or in front.')) + disclosure('app-rules-editor', t('Edit…'), rulesEditor));
   const quality = group('performance-quality', t('Quality'),
     row('quality-preset', t('Preset'), `<div class="settings-segment" role="group" aria-label="${e(t('Quality preset'))}">${presetButtons}</div>`, t('Low, Medium and High set the frame-rate limit and render scale together. Custom means the current values match none of those.'))
     + row('frame-rate-cap', t('Frame rate limit'), `<input data-key="frameRateCap" type="range" aria-label="${e(t('Frame rate limit'))}" min="10" max="${capSlider.max}" step="1" value="${e(capDraft)}" data-setting="frameRateCap"${disabled(busy || unavailable)}><output class="settings-unit" data-value-for="frameRateCap">${e(frameRateCapReadout(capDraft, capSlider.max))}</output>`, t('At the top of the slider there is no limit, and each display runs at its own frame rate: up to 60 fps unless you chose more for it. A lower value caps every display; saved per-display frame rates are not rewritten.'))
     + row('render-scale', t('Internal render scale'), select('renderScale', t('Internal render scale'), draft('renderScale', preferredScale), scaleOptions(preferredScale), 'data-setting="renderScale" data-number', busy || unavailable || !scaleSupported), scaleSupported ? t('Renders at a lower resolution and scales the result to fill the same area. Size and position on screen don’t change.') : t('Not applicable to the wallpapers currently running'))
-    + (scaleSupported && scaleOverridden ? row('render-scale-effective', t('Effective now'), `<span class="settings-status" role="status">${e(batteryActive ? t('{effective} on battery. Your setting is {saved}.', { effective: percent(settings.renderScale), saved: percent(settings.preferredRenderScale) }) : t('{effective}. Your setting of {saved} is not in effect right now.', { effective: percent(settings.renderScale), saved: percent(settings.preferredRenderScale) }))}</span>`, '', 'settings-readout') : ''));
+    + (scaleSupported && scaleOverridden ? row('render-scale-effective', t('Effective now'), `<span class="settings-status" role="status">${e(qualityEffectiveText(reducedBy[0], { effective: percent(settings.renderScale), saved: percent(settings.preferredRenderScale) }))}</span>`, '', 'settings-readout') : ''));
   const sceneGroup = group('performance-scene', t('Scene wallpapers'),
     row('scene-renderer', t('Scene renderer'), select('sceneRenderer', t('Scene renderer'), draft('sceneRenderer', settings.sceneRenderer), localizedOptions(sceneRenderers), 'data-setting="sceneRenderer"', busy || unavailable), t('Unsupported scenes use Compatibility. Lock screen playback always uses Compatibility.'))
     + settingToggle('sceneOptimization', 'Scene render optimisation', false, `${t('Skips rendering work that wouldn’t change the picture, such as parts of a scene that stay the same. Resolution, frame rate and animation speed are unaffected. Works with both scene renderers. Turn it off to compare.')}${nativeSceneRunning ? ` ${t('How much can be skipped depends on the scene. If everything in it moves, nothing is skipped.')}` : ''}`)
@@ -531,6 +564,7 @@ function draw(view) {
       t('When the battery is low, wallpapers pause or stop once the charge falls to the level you chose, and resume when you plug in or the charge recovers.'),
       t('App rules pause, mute or stop wallpapers while a chosen app is running or in front. Your own Play and Pause are not changed.'),
       t('Low Power Mode, a hot Mac and a Focus filter work the same way: while they hold, wallpapers pause, mute or stop as you chose, and resume when they end. Stop frees renderer memory and reloads wallpapers afterwards.'),
+      t('In Low Power Mode, when the Mac is hot or when the battery is low, Reduced quality keeps wallpapers running at the lower render scale and frame rate instead of pausing them, and never goes above your own quality settings. If the Mac gets very hot, wallpapers pause instead. It promises no measured power saving.'),
       t('A quality preset sets the frame-rate limit and render scale together. The frame-rate limit caps every display without rewriting the frame rate saved for each wallpaper. Internal render scale sets how many pixels are rendered before the image is scaled to fit.'),
       t('Video playback picks a backend for each wallpaper. Native is used only for videos it supports; the rest play in Compatibility.'),
       t('Scene render optimisation reuses work inside a scene and produces the same picture. It only affects scene wallpapers.'),
