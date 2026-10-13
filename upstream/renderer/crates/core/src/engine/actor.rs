@@ -294,6 +294,20 @@ impl EngineActor {
         self.with_scene_mut(handle, |scene| scene.set_framing(framing))
     }
 
+    /// Moves the picture for a drag in progress. Nothing about the scene's
+    /// state changes, so unlike [`Self::set_framing`] there is no runtime state
+    /// to record and no snapshot to publish.
+    pub fn preview_framing(
+        &mut self,
+        handle: SceneHandle,
+        framing: crate::project::SceneFraming,
+    ) -> Result<(), EngineError> {
+        let runtime = self.state.scene_mut(handle)?;
+        let result = runtime.preview_framing(framing);
+        self.signal_pending_pointer_sample();
+        result
+    }
+
     pub fn set_fps(&mut self, handle: SceneHandle, fps: u32) -> Result<(), EngineError> {
         self.with_scene_mut(handle, |scene| scene.set_fps(fps))
     }
@@ -1154,6 +1168,18 @@ impl Message<messages::SetFraming> for EngineActor {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         self.with_snapshot_update(|actor| actor.set_framing(msg.handle, msg.framing))
+    }
+}
+
+impl Message<messages::PreviewFraming> for EngineActor {
+    type Reply = Result<(), EngineError>;
+
+    async fn handle(
+        &mut self,
+        msg: messages::PreviewFraming,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.preview_framing(msg.handle, msg.framing)
     }
 }
 

@@ -110,6 +110,11 @@ pub trait EngineFacade: Send + Sync + 'static {
     /// around it. Nothing is rebuilt, and the engine refuses a position that
     /// is not a fraction between 0 and 1.
     fn set_framing(&self, handle: SceneHandle, framing: SceneFraming) -> EngineFuture<()>;
+    /// Shows a scene at a position while a drag is under way, without making it
+    /// the scene's position: the renderer follows, the engine's stored state
+    /// does not, and a later `set_framing` commits it. The engine refuses a
+    /// position that is not a fraction between 0 and 1.
+    fn preview_framing(&self, handle: SceneHandle, framing: SceneFraming) -> EngineFuture<()>;
     fn set_fps(&self, handle: SceneHandle, fps: u32) -> EngineFuture<()>;
     /// Live-updates one scene's internal rasterization scale. Resizes render
     /// targets in place; it must not reparse the project or reopen video.
@@ -607,6 +612,11 @@ impl EngineFacade for RealEngineFacade {
     fn set_framing(&self, handle: SceneHandle, framing: SceneFraming) -> EngineFuture<()> {
         let engine = self.engine.clone();
         async move { engine.set_framing(handle, framing).await }.boxed()
+    }
+
+    fn preview_framing(&self, handle: SceneHandle, framing: SceneFraming) -> EngineFuture<()> {
+        let engine = self.engine.clone();
+        async move { engine.preview_framing(handle, framing).await }.boxed()
     }
 
     fn set_fps(&self, handle: SceneHandle, fps: u32) -> EngineFuture<()> {
@@ -1113,6 +1123,7 @@ pub struct FakeEngineFacade {
     scaling_mode_calls: Arc<ArcSwap<Vec<(SceneHandle, ScalingMode)>>>,
     scaling_factor_calls: Arc<ArcSwap<Vec<(SceneHandle, f64)>>>,
     framing_calls: Arc<ArcSwap<Vec<(SceneHandle, SceneFraming)>>>,
+    preview_framing_calls: Arc<ArcSwap<Vec<(SceneHandle, SceneFraming)>>>,
     framing_failure: Arc<ArcSwap<Option<String>>>,
     fps_calls: Arc<ArcSwap<Vec<(SceneHandle, u32)>>>,
     render_scale_calls: Arc<ArcSwap<Vec<(SceneHandle, f32)>>>,
@@ -1565,6 +1576,14 @@ impl FakeEngineFacade {
     #[must_use]
     pub fn framing_calls(&self) -> Vec<(SceneHandle, SceneFraming)> {
         load_log(&self.framing_calls)
+    }
+
+    /// Every position the fake was asked to show for a drag in progress, in
+    /// order. A preview moves nothing the fake stores, which is the point: it
+    /// is a call the bridge makes, not a change of the scene's position.
+    #[must_use]
+    pub fn preview_framing_calls(&self) -> Vec<(SceneHandle, SceneFraming)> {
+        load_log(&self.preview_framing_calls)
     }
 
     #[must_use]
@@ -2105,6 +2124,15 @@ impl EngineFacade for FakeEngineFacade {
             fake.update_direct_assignment_after_refresh(handle, |template| {
                 template.framing = framing;
             });
+            Ok(())
+        }
+        .boxed()
+    }
+
+    fn preview_framing(&self, handle: SceneHandle, framing: SceneFraming) -> EngineFuture<()> {
+        let fake = self.clone();
+        async move {
+            push_log(&fake.preview_framing_calls, (handle, framing));
             Ok(())
         }
         .boxed()

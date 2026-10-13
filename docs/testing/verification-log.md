@@ -25,6 +25,17 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-13 — Position sliders follow a drag
+
+Commit 8 of the framing lane: while a Position slider is dragged the running wallpaper follows through a non-saving preview call; the release is the ordinary move. Targeted runs in the lane's worktree; the bare full gate was not run, no desktop was opened and the app was not rebuilt there.
+
+- `cargo test --release -p wallpaper-core --lib framing` and `-p wallpaper-bridge --lib display_position` — pass (core 17 framing tests, bridge 24 position tests); each bridge mutation of the preview mark, the saved-axis base and the commit clearing was caught
+- `python3 scripts/check_rust.py` — exit 0; core 287, bridge 540, core integration and shader passed; six core tests excluded (desktop run, local wallpaper corpus)
+- `python3 scripts/build.py --renderer-only` — exit 0; `App/Bridge/Generated` regenerated (one method, `preview_display_position`)
+- `python3 scripts/check_renderer.py` — exit 0; skipped: local-asset cases in `text_object_runtime_test`, `playback_gpu_test` and `metal_scene_draw_smoke` (no corpus)
+- `python3 scripts/test.py --only WebPanelDisplayPositionTests` and 13 neighbouring panel classes — 133 passed; the drag tests were broken one at a time (no interval, release not waiting for the step on its way, no settle on pointer-up, key presses previewing, a queued or saving preview) and each was caught
+- Not checked: the wallpaper following a real drag on a display, the 100 ms interval and the feel under load, the lock screen and Mission Control picture staying put during a drag, and `SceneRuntime::preview_framing` against a live renderer (see manual-smoke.md)
+
 ## 2026-10-13 — Per-display wallpaper position
 
 Commit 7 of the framing lane: the inspector's Position sliders and Center for scene and video wallpapers. Commits 1-6 had already carried the position through the engine, the bridge and the lock-screen export; commit 8 follows the sliders live.
@@ -113,12 +124,3 @@ A new transfer request, WallpaperDisplayTransfer.Request.everywhere, expands ove
 - Every module under `scripts/tests/` passes, including the new WebUI catalog key in zh-Hans, zh-Hant and ja.
 - Mutation checks: with the main display no longer planned first, or the choice counted for no display when asked for, the matching transfer and integration tests fail and the rest pass. The first inspector test run failed because putting the displays back selects the wallpaper they showed, so the failure notice sat on a wallpaper the panel no longer showed; the panel now returns to the wallpaper it applied.
 - Not run: the full gate, a Release build, any desktop run. Unverified: a real two-monitor apply and rollback, the button in the narrow inspector, and Shortcuts showing the On all displays switch; the display set is a two-display test bridge. See the new row in manual-smoke.md.
-
-## 2026-10-13 — Rotate on unlock
-
-A third How often choice for rotating playlists, Each time the Mac is unlocked (DisplayPlaylist.trigger). The presentation policy reports the locked-to-unlocked edge of its corrected lock state; PlaylistScheduler answers it for every display that waits for it, once, within a 30 second window. Commit 5 of the desktop-menubar lane, checked in an isolated worktree on macOS 27.0.1.
-
-- `python3 scripts/test.py --only WallpaperPresentationPolicyTests --only PlaylistSchedulerTests --only PlaylistStoreTests --only PlaylistPlannerTests --only WebPanelPlaylistTests --only ControlPanelPlaybackToolsTests --only WallpaperBackupTests --only WallpaperAutomationSchedulerTests --only PlaybackPolicyCompositionTests --only ControlPanelAutomationTests --only ControlPanelHeldWallpaperTests` — 200 passed, 0 failed, 0 skipped
-- Every module under `scripts/tests/` passes, including the new WebUI catalog keys in zh-Hans, zh-Hant and ja.
-- Mutation checks: with Change now no longer answering a waiting unlock, or with the 30 second window never expiring, the matching scheduler test fails and the rest pass.
-- Not run: the full gate, a Release build, any desktop run. Unverified: the order of the operating system's unlock events against a display waking, an unlock with a second display re-enumerating, and the visible change after unlock; the scheduler logic runs under fakes. See the new row in manual-smoke.md.

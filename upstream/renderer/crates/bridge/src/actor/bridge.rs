@@ -33,7 +33,7 @@ use crate::{
             InitialFrameReady, InjectDisplayForTest, InjectSceneProjectForTest,
             InjectSceneWallpaperConfigForTest, InjectWallpaperForTest, PollMousePosition,
             GetNativeVideoWallpapers, ReconcileFailed, RefreshDisplays, RefreshLibrary,
-            ReleaseHeldWallpaper, RejectNativeVideo, RendererCounters,
+            PreviewDisplayPosition, ReleaseHeldWallpaper, RejectNativeVideo, RendererCounters,
             ReplaceLibraryForTest,
             ReplaceWallpaperConfigForTest, RestoreAllPropertyDefaults, RestorePropertyDefault,
             SelectWallpaper,
@@ -67,8 +67,8 @@ use crate::{
         BridgeWallpaperMutationBundle, BridgeWallpaperPreview, BridgeWebWallpaper, MousePollingControl,
     },
     config::{
-        AppConfig, ConfigStore, SceneRendererModeCfg, SerializedSelector, VideoBackendModeCfg,
-        WallpaperConfig,
+        AppConfig, ConfigStore, FramingCfg, SceneRendererModeCfg, SerializedSelector,
+        VideoBackendModeCfg, WallpaperConfig,
     },
     display::{DisplaySelectorExt, DisplaySnapshotExt},
     engine::{
@@ -82,7 +82,7 @@ use crate::{
         DirectoryMode, FileMedia, ProjectModel, ProjectProperty, PropertyKind, PropertyMetadata,
         PropertyValue,
     },
-    state::drafts::WallpaperOptionsDraft,
+    state::drafts::{WallpaperOptionsDraft, moved_framing, saved_framing},
 };
 
 const PRIMARY_DISPLAY_ID: &str = "primary";
@@ -116,6 +116,10 @@ pub struct BridgeActor<E: EngineFacade> {
     /// Which wallpapers were being opened, so one that killed the app twice
     /// in a row is held back. See [`LoadJournal`].
     load_journal: LoadJournal,
+    /// Scenes a position drag has shown at a position nobody committed, so
+    /// that finishing the drag back where it began still puts the renderer on
+    /// the saved position instead of being skipped as already held.
+    previewed_framing: HashSet<SceneHandle>,
 }
 
 /// What a reconcile needs to keep the load journal honest: the journal to
@@ -179,6 +183,7 @@ impl<E: EngineFacade> BridgeActorHandle<E> {
             paths,
             mouse_polling,
             load_journal,
+            previewed_framing: HashSet::new(),
         };
         actor.refresh_mouse_polling_policy();
 
@@ -4661,6 +4666,18 @@ impl<E: EngineFacade + Clone> Message<SetDisplayPosition> for BridgeActor<E> {
             .wallpaper_draft_mut(&msg.wallpaper_id)?
             .set_position_immediate(selector.clone(), msg.pan_x, msg.pan_y)?;
         if !update.changed {
+            // A drag that ended where it began saves nothing, yet the renderer
+            // may still be showing the last position it was previewed at.
+            if let Some(handle) = self
+                .display_handle(&msg.wallpaper_id, &selector)
+                .filter(|handle| self.previewed_framing.contains(handle))
+            {
+                self.engine
+                    .set_framing(handle, update.framing.to_scene())
+                    .await
+                    .map_err(|error| BridgeError::engine(error.to_string()))?;
+                self.previewed_framing.remove(&handle);
+            }
             return self.wallpaper_bundle(msg.wallpaper_id);
         }
 
@@ -4690,9 +4707,56 @@ impl<E: EngineFacade + Clone> Message<SetDisplayPosition> for BridgeActor<E> {
                 .set_framing(handle, update.framing.to_scene())
                 .await
                 .map_err(|error| BridgeError::engine(error.to_string()))?;
+            self.previewed_framing.remove(&handle);
         }
         self.bump_generation();
         self.wallpaper_bundle(msg.wallpaper_id)
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<PreviewDisplayPosition> for BridgeActor<E> {
+    type Reply = Result<(), BridgeError>;
+
+    /// Shows a wallpaper at a position on one display while a drag toward it
+    /// is under way, and keeps nothing.
+    ///
+    /// Only the renderer moves. The position is not saved, the generation does
+    /// not advance, no snapshot is built and the lock-screen export, which
+    /// comes from the saved configuration, does not change, so a drag editor
+    /// can send one per step. The drag ends with [`SetDisplayPosition`] for the
+    /// value the person settled on, which is what saves it. A display that is
+    /// gone, or that no scene of the engine draws (a video the native player
+    /// plays, a display turned off), has nothing to move and is not an error.
+    async fn handle(
+        &mut self,
+        msg: PreviewDisplayPosition,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        // Checked before anything is looked up, so a value that cannot be a
+        // position is refused whatever the display is doing.
+        moved_framing(FramingCfg::default(), msg.pan_x, msg.pan_y)?;
+        self.state.ensure_wallpaper_exists(&msg.wallpaper_id)?;
+        let displays = self.engine.display_snapshot();
+        let Ok(selector) = self.selector_for(&msg.display_id, &displays) else {
+            return Ok(());
+        };
+        let Some(handle) = self.display_handle(&msg.wallpaper_id, &selector) else {
+            return Ok(());
+        };
+        let saved = self
+            .state
+            .wallpaper_configs
+            .get(&msg.wallpaper_id)
+            .map_or_else(FramingCfg::default, |config| {
+                saved_framing(config, &selector)
+            });
+        let framing = moved_framing(saved, msg.pan_x, msg.pan_y)?;
+        self.engine
+            .preview_framing(handle, framing.to_scene())
+            .await
+            .map_err(|error| BridgeError::engine(error.to_string()))?;
+        self.previewed_framing.insert(handle);
+        Ok(())
     }
 }
 

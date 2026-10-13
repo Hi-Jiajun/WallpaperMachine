@@ -103,7 +103,9 @@ Neither path resumes a paused video.
 - **A wallpaper is moved on a display.** The inspector's Position sliders and **Center**
   change what the final pixels show, so a committed move requests the same capture as a
   new wallpaper (`BridgeStore.onDisplayFramingChanged`); moves that arrive close together
-  share the 500 ms refresh interval, and a move the bridge refused requests nothing.
+  share the 500 ms refresh interval, and a move the bridge refused requests nothing. The
+  steps shown while a slider is being dragged are previews and request nothing; the release
+  does.
 - **A Space change or wake.** The existing poster is applied at once, so a new Space
   has one immediately. A fresh frame is requested only for a surface whose poster has
   aged (see the next item). Desktops that kept refusing posters are tried again, and

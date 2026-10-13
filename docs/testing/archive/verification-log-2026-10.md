@@ -9,6 +9,15 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-13 — Rotate on unlock
+
+A third How often choice for rotating playlists, Each time the Mac is unlocked (DisplayPlaylist.trigger). The presentation policy reports the locked-to-unlocked edge of its corrected lock state; PlaylistScheduler answers it for every display that waits for it, once, within a 30 second window. Commit 5 of the desktop-menubar lane, checked in an isolated worktree on macOS 27.0.1.
+
+- `python3 scripts/test.py --only WallpaperPresentationPolicyTests --only PlaylistSchedulerTests --only PlaylistStoreTests --only PlaylistPlannerTests --only WebPanelPlaylistTests --only ControlPanelPlaybackToolsTests --only WallpaperBackupTests --only WallpaperAutomationSchedulerTests --only PlaybackPolicyCompositionTests --only ControlPanelAutomationTests --only ControlPanelHeldWallpaperTests` — 200 passed, 0 failed, 0 skipped
+- Every module under `scripts/tests/` passes, including the new WebUI catalog keys in zh-Hans, zh-Hant and ja.
+- Mutation checks: with Change now no longer answering a waiting unlock, or with the 30 second window never expiring, the matching scheduler test fails and the rest pass.
+- Not run: the full gate, a Release build, any desktop run. Unverified: the order of the operating system's unlock events against a display waking, an unlock with a second display re-enumerating, and the visible change after unlock; the scheduler logic runs under fakes. See the new row in manual-smoke.md.
+
 ## 2026-10-13 — Switch to stop writing the macOS desktop picture
 
 Settings › General › Use the wallpaper as the macOS desktop picture, on by default. Off, poster writes stop, the user's own picture is put back with the quit's verified restore, and a poster left behind is repaired at launch. Commit 1 of the desktop-menubar lane, checked in an isolated worktree on macOS 27.0.1.

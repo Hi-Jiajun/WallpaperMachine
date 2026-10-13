@@ -67,6 +67,8 @@ configuration version is unchanged. The extension reads the position, like the s
 mode, when it builds a renderer, so moving the picture publishes a new revision and
 replaces the renderer instead of updating the running one: the held frame stays
 beneath it until the new one arrives, and it takes a moment longer than on the desktop.
+The steps shown on the desktop while a Position slider is being dragged are not
+published; the lock screen follows the release.
 A position outside 0 to 1 is refused with the usual invalid-playback-configuration
 error rather than drawn somewhere else. Web wallpapers fill their page and carry no
 position, and a display that mirrors another is published centred, as on the desktop.

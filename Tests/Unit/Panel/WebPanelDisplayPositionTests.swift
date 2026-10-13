@@ -155,6 +155,105 @@ final class WebPanelDisplayPositionTests: XCTestCase {
     XCTAssertEqual(context.bridge.calls.map(\.panX), [0.4])
   }
 
+  // MARK: Drag previews
+
+  func testAPreviewShowsThePositionAndNeitherSavesItNorReportsAMove() async throws {
+    let context = Context()
+    defer { context.tearDown() }
+    var changes: [String] = []
+    context.store.onDisplayFramingChanged = { wallpaper, display in changes.append("\(wallpaper)@\(display)") }
+
+    try await context.controller.perform(
+      "displayPositionPreview", body: ["id": "scene-1", "displayID": "primary", "x": 0.25])
+    try await context.controller.perform(
+      "displayPositionPreview", body: ["id": "video-1", "displayID": "primary", "y": 0, "x": 1])
+
+    XCTAssertEqual(
+      context.bridge.previews,
+      [
+        .init(wallpaperID: "scene-1", displayID: "primary", panX: 0.25, panY: nil),
+        .init(wallpaperID: "video-1", displayID: "primary", panX: 1, panY: 0),
+      ],
+      "Each step reaches the bridge's preview alone, with the axis it moved")
+    XCTAssertTrue(context.bridge.calls.isEmpty, "A step is not a position the bridge keeps")
+    XCTAssertTrue(changes.isEmpty, "Nothing was moved for good, so nothing retakes the desktop picture")
+    let row = try context.rows().first
+    XCTAssertEqual(row?["panX"] as? Double, 0.2)
+    XCTAssertEqual(row?["panY"] as? Double, 0.8, "The page is still told where the wallpaper is saved")
+  }
+
+  func testAPreviewIsRefusedForWhatTheMoveItselfIsRefusedFor() async throws {
+    let context = Context()
+    defer { context.tearDown() }
+    let bad: [Any] = [-0.1, 1.1, true, "0.5", Double.nan, Double.infinity, NSNull(), [0.5]]
+
+    for value in bad {
+      await assertInvalid(
+        "x = \(value)",
+        {
+          try await context.controller.perform(
+            "displayPositionPreview",
+            body: ["id": "scene-1", "displayID": "primary", "x": value, "y": 0.5])
+        })
+    }
+    for body: [String: Any] in [
+      ["id": "scene-1", "displayID": "primary"],
+      ["id": "scene-1", "displayID": "primary", "z": 0.5],
+      ["id": "scene-1", "x": 0.5],
+    ] {
+      await assertInvalid { try await context.controller.perform("displayPositionPreview", body: body) }
+    }
+    do {
+      try await context.controller.perform(
+        "displayPositionPreview", body: ["id": "nope", "displayID": "primary", "x": 0.5])
+      XCTFail("A wallpaper the library no longer has must be refused")
+    } catch {}
+
+    XCTAssertTrue(
+      context.bridge.previews.isEmpty,
+      "A value outside the display must never reach the renderer, not even as a step")
+  }
+
+  func testAFailedPreviewReachesThePageAndMovesNothing() async throws {
+    let context = Context()
+    defer { context.tearDown() }
+    context.bridge.previewFailure = Refused()
+
+    do {
+      try await context.controller.perform(
+        "displayPositionPreview", body: ["id": "scene-1", "displayID": "primary", "x": 0.4])
+      XCTFail("The bridge's refusal must reach the page, which ignores it")
+    } catch is Refused {}
+
+    XCTAssertEqual(context.bridge.previews.count, 1)
+    XCTAssertTrue(context.bridge.calls.isEmpty)
+    XCTAssertEqual(try context.rows().first?["panX"] as? Double, 0.2)
+  }
+
+  func testAPreviewDoesNotWaitBehindTheCommandThatIsRunning() async throws {
+    let context = Context()
+    defer { context.tearDown() }
+    var release: CheckedContinuation<Void, Never>?
+    let running = Task { @MainActor in
+      await context.store.commands.run {
+        await withCheckedContinuation { release = $0 }
+      }
+    }
+    for _ in 0..<200 where release == nil { await Task.yield() }
+    XCTAssertNotNil(release, "The first command must be running before the step is sent")
+
+    try await context.controller.perform(
+      "displayPositionPreview", body: ["id": "scene-1", "displayID": "primary", "x": 0.4])
+
+    XCTAssertEqual(
+      context.bridge.previews.map(\.panX), [0.4],
+      "A step that waited for a wallpaper switch would reach the display long after the thumb moved on")
+    XCTAssertTrue(context.store.commands.waiting.isEmpty)
+
+    release?.resume()
+    _ = await running.value
+  }
+
   // MARK: Snapshot
 
   func testSnapshotGivesThePageEachDisplaysPositionAndWhetherANativePlayerDrawsIt() throws {
@@ -285,7 +384,196 @@ final class WebPanelDisplayPositionTests: XCTestCase {
     }
   }
 
+  func testADragShowsTheNewestStepAtMostOnceAHundredMillisecondsThenSavesOnRelease() async throws {
+    try await withPositionPanel { panel, bridge in
+      try await show(panel, Self.options("scene-1", .projectScene, rows: [Self.row("primary", "Studio Display (7 - Primary)")]))
+      let x = Self.slider("x")
+      try await panel.waitJS("document.querySelector('\(x)')")
+
+      // The delays the page asks its timers for while the drag is going on.
+      _ = try await panel.js("""
+        window.timerDelays = [];
+        const setTimer = window.setTimeout.bind(window);
+        window.setTimeout = (callback, delay, ...rest) => {
+          window.timerDelays.push(delay);
+          return setTimer(callback, delay, ...rest);
+        };
+        """)
+      // Five steps inside one animation frame: the first is shown at once, the rest are
+      // collapsed into the newest, which follows when the interval is up.
+      _ = try await panel.js(Self.drag(x, [31, 32, 33, 34, 35]))
+
+      try await panel.waitUntil { bridge.previews.count == 2 }
+      XCTAssertEqual(
+        bridge.previews,
+        [
+          .init(wallpaperID: "scene-1", displayID: "primary", panX: 0.31, panY: nil),
+          .init(wallpaperID: "scene-1", displayID: "primary", panX: 0.35, panY: nil),
+        ])
+      let delayed = try await panel.js("return window.timerDelays.filter(delay => delay > 0 && delay <= 100).length") as? Int
+      XCTAssertGreaterThanOrEqual(
+        delayed ?? 0, 1,
+        "The newest step waits out the interval since the last one instead of following the reply at once")
+      try await Task.sleep(for: .milliseconds(300))
+      XCTAssertEqual(bridge.previews.count, 2, "Nothing is sent while the thumb is still")
+      XCTAssertTrue(bridge.calls.isEmpty, "Dragging saves nothing")
+
+      _ = try await panel.js(Self.release(x))
+      try await panel.waitUntil { bridge.calls.count == 1 }
+      try await Task.sleep(for: .milliseconds(250))
+      XCTAssertEqual(
+        bridge.calls,
+        [.init(wallpaperID: "scene-1", displayID: "primary", panX: 0.35, panY: nil)],
+        "The release saves the value it settled on, once")
+      XCTAssertEqual(bridge.previews.count, 2, "and no step follows it")
+      try await panel.waitJS("document.querySelector('\(x)').value === '35'")
+    }
+  }
+
+  func testReleasingBeforeTheFollowingStepCancelsItAndSavesTheNewestValue() async throws {
+    try await withPositionPanel { panel, bridge in
+      try await show(panel, Self.options("scene-1", .projectScene, rows: [Self.row("primary", "Studio Display (7 - Primary)")]))
+      let x = Self.slider("x")
+      try await panel.waitJS("document.querySelector('\(x)')")
+
+      _ = try await panel.js(Self.drag(x, [31, 35]) + Self.release(x))
+
+      try await panel.waitUntil { bridge.calls.count == 1 }
+      try await Task.sleep(for: .milliseconds(300))
+      XCTAssertEqual(bridge.calls.map(\.panX), [0.35])
+      XCTAssertEqual(
+        bridge.previews.map(\.panX), [0.31],
+        "The step that was waiting for its turn is dropped: the release carries its value")
+    }
+  }
+
+  func testTheReleaseWaitsForTheStepStillOnItsWay() async throws {
+    try await withPositionPanel { panel, bridge in
+      try await show(panel, Self.options("scene-1", .projectScene, rows: [Self.row("primary", "Studio Display (7 - Primary)")]))
+      let x = Self.slider("x")
+      try await panel.waitJS("document.querySelector('\(x)')")
+      bridge.holdPreviews = true
+
+      _ = try await panel.js(Self.drag(x, [31, 35]) + Self.release(x))
+      try await panel.waitUntil { bridge.previews.count == 1 }
+      try await Task.sleep(for: .milliseconds(300))
+
+      XCTAssertTrue(
+        bridge.calls.isEmpty,
+        "A step the bridge has not answered could still land after the release if the release did not wait for it")
+      bridge.releasePreviews()
+      try await panel.waitUntil { bridge.calls.count == 1 }
+      XCTAssertEqual(bridge.calls.map(\.panX), [0.35])
+      XCTAssertEqual(bridge.previews.count, 1)
+    }
+  }
+
+  func testADragThatEndsWhereItBeganSavesThatValueEvenThoughNoChangeFires() async throws {
+    try await withPositionPanel { panel, bridge in
+      try await show(panel, Self.options("scene-1", .projectScene, rows: [Self.row("primary", "Studio Display (7 - Primary)")]))
+      let x = Self.slider("x")
+      try await panel.waitJS("document.querySelector('\(x)')")
+
+      // Out to 70% and back to the 20% it started at: the browser fires no change event for
+      // that, so the wallpaper would stay at the last step shown unless the release settles it.
+      _ = try await panel.js(Self.drag(x, [70]))
+      try await panel.waitUntil { bridge.previews.count == 1 }
+      _ = try await panel.js(Self.drag(x, [20], press: false))
+      try await panel.waitUntil { bridge.previews.count == 2 }
+      XCTAssertTrue(bridge.calls.isEmpty)
+      _ = try await panel.js("document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))")
+
+      try await panel.waitUntil { bridge.calls.count == 1 }
+      XCTAssertEqual(
+        bridge.calls,
+        [.init(wallpaperID: "scene-1", displayID: "primary", panX: 0.2, panY: nil)],
+        "The value the slider shows is sent, so the bridge can put the scene back")
+      XCTAssertEqual(bridge.previews.map(\.panX), [0.7, 0.2])
+    }
+  }
+
+  func testAPointerThatIsCancelledSavesTheLastStepShownAndNothingMoreAfterIt() async throws {
+    try await withPositionPanel { panel, bridge in
+      try await show(panel, Self.options("scene-1", .projectScene, rows: [Self.row("primary", "Studio Display (7 - Primary)")]))
+      let x = Self.slider("x")
+      try await panel.waitJS("document.querySelector('\(x)')")
+
+      _ = try await panel.js(Self.drag(x, [60]))
+      try await panel.waitUntil { bridge.previews.count == 1 }
+      _ = try await panel.js("document.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true }))")
+
+      try await panel.waitUntil { bridge.calls.count == 1 }
+      try await Task.sleep(for: .milliseconds(250))
+      XCTAssertEqual(bridge.calls.map(\.panX), [0.6])
+      XCTAssertEqual(bridge.previews.count, 1)
+      // The drag is over: another step on the slider without a press is a key press.
+      _ = try await panel.js(Self.drag(x, [61], press: false))
+      try await Task.sleep(for: .milliseconds(250))
+      XCTAssertEqual(bridge.previews.count, 1)
+    }
+  }
+
+  func testAKeyPressSavesAtOnceWithoutShowingAStepFirst() async throws {
+    try await withPositionPanel { panel, bridge in
+      try await show(panel, Self.options("scene-1", .projectScene, rows: [Self.row("primary", "Studio Display (7 - Primary)")]))
+      let x = Self.slider("x")
+      try await panel.waitJS("document.querySelector('\(x)')")
+
+      // An arrow key fires input and change together, with no pointer down.
+      _ = try await panel.js("""
+        const input = document.querySelector('\(x)');
+        input.value = '21';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        """)
+
+      try await panel.waitUntil { bridge.calls.count == 1 }
+      try await Task.sleep(for: .milliseconds(250))
+      XCTAssertEqual(bridge.calls.map(\.panX), [0.21])
+      XCTAssertTrue(bridge.previews.isEmpty, "A single step has nothing to follow")
+    }
+  }
+
+  func testEachSliderOfADisplayShowsItsOwnAxisAlone() async throws {
+    try await withPositionPanel { panel, bridge in
+      try await show(panel, Self.options("scene-1", .projectScene, rows: [Self.row("primary", "Studio Display (7 - Primary)")]))
+      let y = Self.slider("y")
+      try await panel.waitJS("document.querySelector('\(y)')")
+
+      _ = try await panel.js(Self.drag(y, [10]) + Self.release(y))
+
+      try await panel.waitUntil { bridge.calls.count == 1 }
+      XCTAssertEqual(bridge.previews, [.init(wallpaperID: "scene-1", displayID: "primary", panX: nil, panY: 0.1)])
+      XCTAssertEqual(bridge.calls, [.init(wallpaperID: "scene-1", displayID: "primary", panX: nil, panY: 0.1)])
+    }
+  }
+
   // MARK: Fixtures
+
+  private static func slider(_ axis: String) -> String {
+    "#inspector [data-change=\"displayPosition\"][data-axis=\"\(axis)\"]"
+  }
+
+  /// Presses the slider (unless `press` is false) and steps it through `percentages` as
+  /// consecutive input events, the way a pointer drag does.
+  private static func drag(_ slider: String, _ percentages: [Int], press: Bool = true) -> String {
+    """
+    const slider = document.querySelector('\(slider)');
+    \(press ? "slider.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, buttons: 1 }));" : "")
+    for (const value of \(percentages)) {
+      slider.value = String(value);
+      slider.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    """
+  }
+
+  /// The pointer comes up, and the browser then fires the slider's change event.
+  private static func release(_ slider: String) -> String {
+    """
+    document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+    document.querySelector('\(slider)').dispatchEvent(new Event('change', { bubbles: true }));
+    """
+  }
 
   private func show(_ panel: PanelFixture, _ options: BridgeWallpaperOptionsSnapshot) async throws {
     panel.store.librarySnapshot.wallpapers = [Self.entry(options.wallpaperId, options.kind)]
@@ -417,6 +705,33 @@ private final class PositionBridge: LayoutSnapshotBridge {
   @MainActor var calls: [Call] = []
   /// What the next move fails with, when a test needs the bridge to refuse it.
   @MainActor var failure: Error?
+  /// The positions shown for a drag in progress: they move nothing the double keeps.
+  @MainActor var previews: [Call] = []
+  @MainActor var previewFailure: Error?
+  /// While set, a preview is received but not answered until `releasePreviews()`, which is how a
+  /// test holds a step on its way.
+  @MainActor var holdPreviews = false
+  @MainActor private var heldPreviews: [CheckedContinuation<Void, Never>] = []
+
+  @MainActor func releasePreviews() {
+    holdPreviews = false
+    let held = heldPreviews
+    heldPreviews = []
+    for continuation in held { continuation.resume() }
+  }
+
+  override func previewDisplayPosition(
+    wallpaperId: String, displayId: String, panX: Double?, panY: Double?
+  ) async throws {
+    try await receivePreview(
+      Call(wallpaperID: wallpaperId, displayID: displayId, panX: panX, panY: panY))
+  }
+
+  @MainActor private func receivePreview(_ call: Call) async throws {
+    previews.append(call)
+    if holdPreviews { await withCheckedContinuation { heldPreviews.append($0) } }
+    if let previewFailure { throw previewFailure }
+  }
 
   override func setDisplayPosition(
     wallpaperId: String, displayId: String, panX: Double?, panY: Double?

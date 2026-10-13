@@ -739,3 +739,233 @@ async fn the_lock_screen_export_follows_a_position_at_once_but_not_an_unapplied_
     assert_eq!(exported(&rows, 1).framing, reported(0.1, 0.9));
     assert!((exported(&rows, 1).scaling_factor - 1.5).abs() <= f64::EPSILON);
 }
+
+async fn preview(
+    bridge: &WallpaperBridge,
+    pan_x: Option<f64>,
+    pan_y: Option<f64>,
+) -> Result<(), crate::BridgeError> {
+    bridge
+        .preview_display_position("100".into(), "1".into(), pan_x, pan_y)
+        .await
+}
+
+#[tokio::test]
+async fn a_preview_moves_the_live_scene_and_keeps_nothing() {
+    let (engine, _release) = new_engine();
+    let (bridge, root) = shown_on(&engine, &[1]).await;
+    let reconciles = engine.calls().len();
+    let exported = bridge.lock_screen_scenes().await.unwrap();
+    let file = wallpaper_file(root.path());
+    std::fs::remove_file(&file).unwrap();
+
+    for pan_x in [0.1, 0.2, 0.3] {
+        preview(&bridge, Some(pan_x), Some(0.8)).await.unwrap();
+    }
+
+    let handle = SceneHandle::new(1);
+    assert_eq!(
+        engine.preview_framing_calls(),
+        vec![
+            (handle, framing(0.1, 0.8)),
+            (handle, framing(0.2, 0.8)),
+            (handle, framing(0.3, 0.8)),
+        ],
+        "the scene on that display follows each step"
+    );
+    assert!(
+        engine.framing_calls().is_empty(),
+        "no step is a position the scene keeps"
+    );
+    assert!(!file.exists(), "no step is written");
+    assert_eq!(
+        bridge.lock_screen_scenes().await.unwrap(),
+        exported,
+        "the lock screen is not told about a drag"
+    );
+    assert_eq!(
+        option_rows(&bridge).await,
+        vec![(reported(0.5, 0.5), false)],
+        "the options still say where the wallpaper is saved"
+    );
+    bridge.refresh_displays().await.unwrap();
+    assert_eq!(
+        engine.calls().len(),
+        reconciles,
+        "a drag that was never finished leaves nothing for a reconcile to rebuild"
+    );
+    let scenes = scenes_after_restart(root.path(), &[1]).await;
+    assert_eq!(on_display(&scenes, 1).framing, SceneFraming::default());
+}
+
+#[tokio::test]
+async fn a_preview_names_one_axis_and_the_other_follows_the_saved_position() {
+    let (engine, _release) = new_engine();
+    let (bridge, _root) = shown_on(&engine, &[1]).await;
+    move_to(&bridge, Some(0.1), Some(0.9)).await.unwrap();
+
+    preview(&bridge, Some(0.4), None).await.unwrap();
+    preview(&bridge, None, Some(0.0)).await.unwrap();
+    preview(&bridge, None, None).await.unwrap();
+
+    let handle = SceneHandle::new(1);
+    assert_eq!(
+        engine.preview_framing_calls(),
+        vec![
+            (handle, framing(0.4, 0.9)),
+            (handle, framing(0.1, 0.0)),
+            (handle, framing(0.1, 0.9)),
+        ],
+        "an axis a drag does not move is the saved one, not the last previewed"
+    );
+}
+
+#[tokio::test]
+async fn a_preview_outside_the_display_is_refused_and_shows_nothing() {
+    let (engine, _release) = new_engine();
+    let (bridge, _root) = shown_on(&engine, &[1]).await;
+
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.01, 1.01] {
+        for (pan_x, pan_y) in [(Some(bad), None), (None, Some(bad)), (Some(0.9), Some(bad))] {
+            let error = preview(&bridge, pan_x, pan_y).await.unwrap_err();
+            assert_eq!(
+                error.kind(),
+                BridgeErrorKind::InvalidInput,
+                "{pan_x:?},{pan_y:?}"
+            );
+        }
+    }
+    let unknown = bridge
+        .preview_display_position("404".into(), "1".into(), Some(0.1), Some(0.1))
+        .await
+        .unwrap_err();
+    assert_eq!(unknown.kind(), BridgeErrorKind::InvalidInput);
+    assert!(engine.preview_framing_calls().is_empty());
+
+    // The edges themselves are positions.
+    preview(&bridge, Some(0.0), Some(1.0)).await.unwrap();
+    assert_eq!(
+        engine.preview_framing_calls(),
+        vec![(SceneHandle::new(1), framing(0.0, 1.0))]
+    );
+}
+
+#[tokio::test]
+async fn a_preview_for_a_display_no_scene_draws_is_not_an_error() {
+    let (engine, _release) = new_engine();
+    let (bridge, _root) = shown_in_every_kind(&engine).await;
+    // Only the scene on display 1 has a handle: the video on 2 is the native
+    // player's, and nothing on 3 (a web page) or 4 (a mirror) is a scene a
+    // position could move.
+    let mut snapshot: Vec<_> = (1..=4).map(identified_display).collect();
+    snapshot[0].handle = Some(SceneHandle::new(1));
+    engine.set_snapshot(snapshot);
+
+    for (wallpaper, display) in [("400", "2"), ("100", "2"), ("300", "3"), ("100", "99")] {
+        bridge
+            .preview_display_position(wallpaper.into(), display.into(), Some(0.2), Some(0.2))
+            .await
+            .unwrap_or_else(|error| panic!("{wallpaper} on {display}: {error:?}"));
+    }
+    assert!(
+        engine.preview_framing_calls().is_empty(),
+        "there was nothing to move"
+    );
+
+    bridge
+        .preview_display_position("100".into(), "1".into(), Some(0.2), Some(0.2))
+        .await
+        .unwrap();
+    assert_eq!(
+        engine.preview_framing_calls(),
+        vec![(SceneHandle::new(1), framing(0.2, 0.2))],
+        "the scene that does run still follows"
+    );
+}
+
+#[tokio::test]
+async fn finishing_a_drag_saves_the_value_and_commits_it_to_the_scene() {
+    let (engine, _release) = new_engine();
+    let (bridge, root) = shown_on(&engine, &[1]).await;
+    let handle = SceneHandle::new(1);
+
+    preview(&bridge, Some(0.1), None).await.unwrap();
+    preview(&bridge, Some(0.2), None).await.unwrap();
+    move_to(&bridge, Some(0.2), None).await.unwrap();
+
+    assert_eq!(engine.preview_framing_calls().len(), 2);
+    assert_eq!(
+        engine.framing_calls(),
+        vec![(handle, framing(0.2, 0.5))],
+        "the release is an ordinary commit, however many steps came before"
+    );
+    let scenes = scenes_after_restart(root.path(), &[1]).await;
+    assert_eq!(on_display(&scenes, 1).framing, framing(0.2, 0.5));
+
+    // The scene now holds the saved position, so saying it again is the
+    // ordinary no-op and not another word with the renderer.
+    move_to(&bridge, Some(0.2), None).await.unwrap();
+    assert_eq!(engine.framing_calls().len(), 1);
+}
+
+#[tokio::test]
+async fn a_drag_that_ends_where_it_began_puts_the_scene_back_without_saving() {
+    let (engine, _release) = new_engine();
+    let (bridge, root) = shown_on(&engine, &[1]).await;
+    move_to(&bridge, Some(0.3), Some(0.6)).await.unwrap();
+    let file = wallpaper_file(root.path());
+    std::fs::remove_file(&file).unwrap();
+    let handle = SceneHandle::new(1);
+
+    preview(&bridge, Some(0.9), None).await.unwrap();
+    // The release is at the position the wallpaper already had.
+    move_to(&bridge, Some(0.3), None).await.unwrap();
+
+    assert_eq!(
+        engine.framing_calls(),
+        vec![(handle, framing(0.3, 0.6)), (handle, framing(0.3, 0.6))],
+        "the scene was showing the last step, so the saved position is told to it again"
+    );
+    assert!(!file.exists(), "and nothing changed, so nothing is written");
+
+    // Once back, the same position again is the ordinary no-op.
+    move_to(&bridge, Some(0.3), None).await.unwrap();
+    assert_eq!(engine.framing_calls().len(), 2);
+}
+
+#[tokio::test]
+async fn a_scene_that_was_not_previewed_is_not_told_a_position_it_already_has() {
+    let (engine, _release) = new_engine();
+    let (bridge, _root) = shown_on(&engine, &[1, 2]).await;
+    move_to(&bridge, Some(0.3), Some(0.6)).await.unwrap();
+
+    // A drag on the other display must not make this one's repeat count.
+    bridge
+        .preview_display_position("100".into(), "2".into(), Some(0.9), None)
+        .await
+        .unwrap();
+    move_to(&bridge, Some(0.3), Some(0.6)).await.unwrap();
+
+    assert_eq!(engine.framing_calls().len(), 1);
+}
+
+#[tokio::test]
+async fn a_refused_release_keeps_the_drag_open_for_the_next_one() {
+    let (engine, _release) = new_engine();
+    let (bridge, root) = shown_on(&engine, &[1]).await;
+    move_to(&bridge, Some(0.3), Some(0.6)).await.unwrap();
+    let file = wallpaper_file(root.path());
+    std::fs::remove_file(&file).unwrap();
+    preview(&bridge, Some(0.9), None).await.unwrap();
+    engine.fail_next_framing();
+
+    let error = move_to(&bridge, Some(0.3), None).await.unwrap_err();
+    assert_eq!(error.kind(), BridgeErrorKind::Engine);
+    move_to(&bridge, Some(0.3), None).await.unwrap();
+
+    assert_eq!(
+        engine.framing_calls().len(),
+        3,
+        "the renderer never took the saved position, so the second release tries again"
+    );
+}

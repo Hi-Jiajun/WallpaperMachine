@@ -5,13 +5,17 @@ import Foundation
 /// A position is two fractions from 0 (left, top) to 1 (right, bottom) of the room the display
 /// leaves around the wallpaper. It is saved the moment it is sent and the running wallpaper
 /// follows, so it is not a draft and Apply has nothing to do with it.
+///
+/// While a slider is being dragged the page also sends `displayPositionPreview` for each step it
+/// shows: the wallpaper follows, but nothing is saved and nothing else hears of it. The release
+/// sends `displayPosition` for the value it settled on.
 @MainActor
 extension WebPanelController {
   func performDisplayPosition(_ action: String, request: WebPanelRequest) async throws -> Bool {
     let panX: Double?
     let panY: Double?
     switch action {
-    case "displayPosition":
+    case "displayPosition", "displayPositionPreview":
       // A slider sends only the axis it moved; the other keeps its saved value.
       panX = try request.optionalFraction("x")
       panY = try request.optionalFraction("y")
@@ -23,6 +27,14 @@ extension WebPanelController {
     }
     let id = try wallpaperID(request)
     let displayID = try request.string("displayID")
+    if action == "displayPositionPreview" {
+      // Not a command: it changes nothing a later command depends on, and queued behind a
+      // running activation it would reach the display long after the thumb had moved on. The
+      // page sends one at a time, and the bridge shows nothing for a display no scene draws.
+      try await store.previewDisplayPositionAsync(
+        wallpaperId: id, displayId: displayID, panX: panX, panY: panY)
+      return true
+    }
     // It changes what a display draws, so it takes its turn behind the user's other commands.
     try await store.commands.run {
       // Read once the command's turn comes, not when the slider was released: an activation

@@ -92,8 +92,16 @@ number instead of clamping it, saves the position at once and moves the scene th
 on that display without rebuilding it. Like the scaling mode, and unlike the scale factor,
 a position is not part of the options draft, so Apply does not wait for it, Cancel does
 not undo it and Apply reopens no scene because of it. Saying the position it already has
-writes nothing and tells the renderer nothing, and a renderer that refuses the move
-leaves the position saved for the next time the scene is built. The bridge reports the
+writes nothing and tells the renderer nothing (unless a drag showed that scene at another
+position first, see below), and a renderer that refuses the move leaves the position saved
+for the next time the scene is built. While a slider is dragged the app calls
+`preview_display_position` for the newest value: the running scene follows through
+`SceneRuntime::preview_framing`, which moves the renderer but leaves the runtime, its
+descriptor and the stored template as they were, so nothing is saved, no snapshot or
+generation changes, the lock-screen export stays at the saved position and a drag that is
+abandoned halfway leaves nothing for the next reconcile to rebuild. The bridge remembers
+the scenes it previewed, so a release at the saved position still tells the scene that
+position once; a display that is gone or that no engine scene draws is not an error. The bridge reports the
 position to the app in each display's row of the wallpaper options (a moved display also
 offers Restore defaults) and in the lock-screen and screen-saver export, which comes from
 the saved configuration and so never holds a draft. The export carries it for a scene and

@@ -182,7 +182,10 @@ Protocol, both directions:
   answered with either a fresh snapshot or an error string, except three that are acknowledged
   with `nil` at once and build no snapshot: the title-bar gestures `dragWindow` and
   `titleDoubleClick` (a drag must start on the mouse event that caused it) and `viewState`
-  (Installed's filters and scroll offsets, reported as they change). The reply to a page's first
+  (Installed's filters and scroll offsets, reported as they change), and one that is
+  acknowledged with `nil` once its bridge call returns: `displayPositionPreview`, a Position
+  slider's step while it is dragged, which keeps nothing, builds no snapshot, raises no panel
+  error and reaches the bridge outside the user-command queue. The reply to a page's first
   `ready` can also carry `restoreViewState`, the last stored report
   ([reopening the panel](features/control-panel.md#reopening-the-panel)).
   `WebPanelController.receive` rejects any message that is not from the main frame of the

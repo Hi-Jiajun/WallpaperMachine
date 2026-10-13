@@ -725,6 +725,25 @@ final class BridgeStore {
         onDisplayFramingChanged?(wallpaperId, displayId)
     }
 
+    /// Shows a wallpaper at a position on one display while a slider is still being dragged:
+    /// the running scene follows, but nothing is saved, no snapshot changes and nothing that
+    /// reacts to a move (the Mission Control picture, the lock screen) is told. The drag ends
+    /// with ``setDisplayPositionAsync(wallpaperId:displayId:panX:panY:)``, which is what keeps
+    /// the position. Axes are read as there; a display no scene draws is not an error.
+    func previewDisplayPositionAsync(
+        wallpaperId: String,
+        displayId: String,
+        panX: Double?,
+        panY: Double?
+    ) async throws {
+        try await bridge.previewDisplayPosition(
+            wallpaperId: wallpaperId,
+            displayId: displayId,
+            panX: panX,
+            panY: panY
+        )
+    }
+
     func editScalingFactorAsync(wallpaperId: String, displayId: String, factor: Double) async throws {
         beginWallpaperEdit(wallpaperId)
         defer { endWallpaperEdit(wallpaperId) }

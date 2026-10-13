@@ -953,9 +953,15 @@ follows the developer's in-app language choice.
   names the native player. The page, offscreen: a scene draws the two sliders and **Center** at the
   saved percentages, a change event posts the moved axis alone and the page follows the bridge's
   answer, a web wallpaper draws none, and a video drawn by the native player shows its note beside
-  sliders that stay enabled. Not covered: that the wallpaper visibly moves on a display, the slider's feel,
-  the layout at the narrowest width, VoiceOver and the Mission Control picture being retaken
-  (all on [manual-smoke.md](manual-smoke.md)).
+  sliders that stay enabled. The drag: `displayPositionPreview` reaches the bridge's preview alone
+  (never the move, never `onDisplayFramingChanged`), is refused for what the move is refused for,
+  does not wait behind a running command and passes a refusal to the page; in the page, five quick
+  steps of a pointer drag show the first at once and the newest after the interval, the release saves
+  the newest once and cancels a step still waiting, it waits for the step already on its way, a drag
+  that ends on its starting value or a cancelled pointer still saves the last value shown, and a key
+  press saves without showing a step. Not covered: that the wallpaper visibly moves on a display, the
+  slider's feel and the 100 ms interval under load, the layout at the narrowest width, VoiceOver and the
+  Mission Control picture being retaken (all on [manual-smoke.md](manual-smoke.md)).
 - `ControlPanelWindowSizingTests` — size floor, key-view loop, full-screen layout
   keeping navigation reachable and restoring windowed bounds, WebKit's color
   picker anchor following its control, the move-to-active-Space collection

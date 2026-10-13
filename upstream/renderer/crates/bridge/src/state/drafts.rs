@@ -22,6 +22,45 @@ pub struct PositionUpdate {
     pub changed: bool,
 }
 
+/// Where `config` saves the wallpaper on the display `selector` names: the
+/// centre for a display nobody positioned.
+#[must_use]
+pub fn saved_framing(config: &WallpaperConfig, selector: &SerializedSelector) -> FramingCfg {
+    config
+        .monitors
+        .iter()
+        .find(|render| &render.selector == selector)
+        .map_or_else(FramingCfg::default, |render| render.framing)
+}
+
+/// `saved` with the axes that were given; an axis left as `None` keeps its
+/// saved value, so a horizontal drag never disturbs the vertical position.
+///
+/// # Errors
+///
+/// Returns an error when an axis is not a finite fraction between 0 and 1: a
+/// position outside the display is a request this API refuses instead of
+/// quietly moving it to an edge.
+pub fn moved_framing(
+    saved: FramingCfg,
+    pan_x: Option<f64>,
+    pan_y: Option<f64>,
+) -> Result<FramingCfg, BridgeError> {
+    if [pan_x, pan_y]
+        .into_iter()
+        .flatten()
+        .any(|pan| !(0.0..=1.0).contains(&pan))
+    {
+        return Err(BridgeError::invalid_input(
+            "position must be a fraction between 0 and 1",
+        ));
+    }
+    Ok(FramingCfg {
+        pan_x: pan_x.unwrap_or(saved.pan_x),
+        pan_y: pan_y.unwrap_or(saved.pan_y),
+    })
+}
+
 #[derive(Clone, Debug)]
 pub struct WallpaperOptionsDraft {
     committed: WallpaperConfig,
@@ -331,26 +370,8 @@ impl WallpaperOptionsDraft {
         pan_x: Option<f64>,
         pan_y: Option<f64>,
     ) -> Result<PositionUpdate, BridgeError> {
-        if [pan_x, pan_y]
-            .into_iter()
-            .flatten()
-            .any(|pan| !(0.0..=1.0).contains(&pan))
-        {
-            return Err(BridgeError::invalid_input(
-                "position must be a fraction between 0 and 1",
-            ));
-        }
-
-        let saved = self
-            .committed
-            .monitors
-            .iter()
-            .find(|render| render.selector == selector)
-            .map_or_else(FramingCfg::default, |render| render.framing);
-        let framing = FramingCfg {
-            pan_x: pan_x.unwrap_or(saved.pan_x),
-            pan_y: pan_y.unwrap_or(saved.pan_y),
-        };
+        let saved = saved_framing(&self.committed, &selector);
+        let framing = moved_framing(saved, pan_x, pan_y)?;
         if framing == saved {
             return Ok(PositionUpdate {
                 config: self.committed.clone(),

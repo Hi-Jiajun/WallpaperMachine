@@ -797,6 +797,25 @@ public protocol WallpaperBridgeProtocol : AnyObject {
     func pollMousePosition() async throws 
     
     /**
+     * Shows a wallpaper at a position on one display while a drag toward it
+     * is under way, and keeps nothing: the running scene follows, but the
+     * position is not saved, no snapshot changes and the lock screen and
+     * screen saver are not told, so a page can call it for every step of a
+     * drag. `pan_x` and `pan_y` are read as for `set_display_position`.
+     * The drag must end with `set_display_position` for the value it
+     * settled on, which saves it (and puts the scene back at the saved
+     * position when that is where the drag ended). A display that is gone or
+     * that no scene draws, such as one the native video player plays, has
+     * nothing to move and is not an error.
+     *
+     * # Errors
+     *
+     * Returns an error when the wallpaper id is unknown, an axis is not a
+     * finite fraction between 0 and 1, or the live engine update fails.
+     */
+    func previewDisplayPosition(wallpaperId: String, displayId: String, panX: Double?, panY: Double?) async throws 
+    
+    /**
      * # Errors
      *
      * Returns an error when display refresh fails.
@@ -2057,6 +2076,40 @@ open func pollMousePosition()async throws  {
                 uniffi_wallpaper_bridge_fn_method_wallpaperbridge_poll_mouse_position(
                     self.uniffiClonePointer()
                     
+                )
+            },
+            pollFunc: ffi_wallpaper_bridge_rust_future_poll_void,
+            completeFunc: ffi_wallpaper_bridge_rust_future_complete_void,
+            freeFunc: ffi_wallpaper_bridge_rust_future_free_void,
+            liftFunc: { $0 },
+            errorHandler: FfiConverterTypeBridgeError.lift
+        )
+}
+    
+    /**
+     * Shows a wallpaper at a position on one display while a drag toward it
+     * is under way, and keeps nothing: the running scene follows, but the
+     * position is not saved, no snapshot changes and the lock screen and
+     * screen saver are not told, so a page can call it for every step of a
+     * drag. `pan_x` and `pan_y` are read as for `set_display_position`.
+     * The drag must end with `set_display_position` for the value it
+     * settled on, which saves it (and puts the scene back at the saved
+     * position when that is where the drag ended). A display that is gone or
+     * that no scene draws, such as one the native video player plays, has
+     * nothing to move and is not an error.
+     *
+     * # Errors
+     *
+     * Returns an error when the wallpaper id is unknown, an axis is not a
+     * finite fraction between 0 and 1, or the live engine update fails.
+     */
+open func previewDisplayPosition(wallpaperId: String, displayId: String, panX: Double?, panY: Double?)async throws  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wallpaper_bridge_fn_method_wallpaperbridge_preview_display_position(
+                    self.uniffiClonePointer(),
+                    FfiConverterString.lower(wallpaperId),FfiConverterString.lower(displayId),FfiConverterOptionDouble.lower(panX),FfiConverterOptionDouble.lower(panY)
                 )
             },
             pollFunc: ffi_wallpaper_bridge_rust_future_poll_void,
@@ -9884,6 +9937,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_poll_mouse_position() != 3037) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_preview_display_position() != 55563) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_refresh_displays() != 55592) {

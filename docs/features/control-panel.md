@@ -429,7 +429,8 @@ frame-rate field shows the same note. Saved frame rates are never rewritten.
 
 The inspector's per-display sections also hold **Horizontal position**, **Vertical
 position** and **Center** for scene and video wallpapers: where the wallpaper sits on
-that display, saved at once, per wallpaper and per display (see
+that display, followed live while a slider is dragged and saved when it is released, per
+wallpaper and per display (see
 [display position](wallpaper-properties.md#display-position)). They are not on the
 Settings → Displays page, and a mirror display is always centred.
 

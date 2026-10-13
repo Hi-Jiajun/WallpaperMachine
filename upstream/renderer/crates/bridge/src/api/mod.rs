@@ -73,7 +73,7 @@ use crate::{
             RestorePropertyDefault,
             SelectWallpaper,
             SetAudioResponseEnabled, SetDisplayConfigEnabled, SetDisplayEnabled, SetDisplayMode,
-            SetDisplayPosition, SetDisplayPresentationSuspended,
+            PreviewDisplayPosition, SetDisplayPosition, SetDisplayPresentationSuspended,
             SetFilter, SetGlobalPlayback, SetLaunchAtLogin, SetMirrorMuted, SetMirrorScalingFactor,
             SetMirrorScalingMode, SetMirrorTarget, SetMirrorTargetFps, SetMirrorVolume, SetMuted,
             SetAudioSuppressed, SetBatteryMode, SetBatteryQualityProfile, SetContentPacingEnabled,
@@ -870,6 +870,14 @@ impl EngineFacade for ArcEngineFacade {
         self.0.set_framing(handle, framing)
     }
 
+    fn preview_framing(
+        &self,
+        handle: SceneHandle,
+        framing: wallpaper_core::project::SceneFraming,
+    ) -> Pin<Box<dyn Future<Output = Result<(), wallpaper_core::EngineError>> + Send>> {
+        self.0.preview_framing(handle, framing)
+    }
+
     fn set_fps(
         &self,
         handle: SceneHandle,
@@ -1381,6 +1389,38 @@ impl WallpaperBridge {
     ) -> Result<BridgeWallpaperMutationBundle, BridgeError> {
         self.actor
             .ask(SetDisplayPosition {
+                wallpaper_id,
+                display_id,
+                pan_x,
+                pan_y,
+            })
+            .await
+    }
+
+    /// Shows a wallpaper at a position on one display while a drag toward it
+    /// is under way, and keeps nothing: the running scene follows, but the
+    /// position is not saved, no snapshot changes and the lock screen and
+    /// screen saver are not told, so a page can call it for every step of a
+    /// drag. `pan_x` and `pan_y` are read as for `set_display_position`.
+    /// The drag must end with `set_display_position` for the value it
+    /// settled on, which saves it (and puts the scene back at the saved
+    /// position when that is where the drag ended). A display that is gone or
+    /// that no scene draws, such as one the native video player plays, has
+    /// nothing to move and is not an error.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the wallpaper id is unknown, an axis is not a
+    /// finite fraction between 0 and 1, or the live engine update fails.
+    pub async fn preview_display_position(
+        &self,
+        wallpaper_id: String,
+        display_id: String,
+        pan_x: Option<f64>,
+        pan_y: Option<f64>,
+    ) -> Result<(), BridgeError> {
+        self.actor
+            .ask(PreviewDisplayPosition {
                 wallpaper_id,
                 display_id,
                 pan_x,

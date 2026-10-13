@@ -133,6 +133,13 @@ pub struct SetFraming {
     pub framing: SceneFraming,
 }
 
+/// Shows a position without making it the scene's: the renderer follows, the
+/// stored runtime state does not.
+pub struct PreviewFraming {
+    pub handle: SceneHandle,
+    pub framing: SceneFraming,
+}
+
 pub struct SetFps {
     pub handle: SceneHandle,
     pub fps: u32,

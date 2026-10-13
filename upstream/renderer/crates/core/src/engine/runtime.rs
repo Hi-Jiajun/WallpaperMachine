@@ -602,6 +602,20 @@ impl SceneRuntime {
         Ok(())
     }
 
+    /// Shows the presented wallpaper at `framing` without making that its
+    /// position: the renderer moves, the runtime and its descriptor do not.
+    ///
+    /// A drag editor calls this for every step of a drag and ends it with
+    /// [`Self::set_framing`]. Keeping the committed value out of it means a
+    /// drag that is abandoned halfway leaves the live descriptor equal to the
+    /// saved configuration, so the next reconcile finds nothing to rebuild and
+    /// a renderer rebuild goes back to the committed position instead of
+    /// keeping a half-finished one.
+    pub fn preview_framing(&mut self, framing: SceneFraming) -> Result<(), EngineError> {
+        self.pointer_input.delivery.invalidate();
+        self.renderer.set_framing(framing)
+    }
+
     pub fn set_fps(&mut self, fps: u32) -> Result<(), EngineError> {
         self.renderer.set_target_fps(fps)?;
         self.desc.fps = fps;

@@ -248,11 +248,14 @@ reuse, or visual behavior, which is why these items are manual.
 - [ ] Wallpaper position ([display position](../features/wallpaper-properties.md#display-position)):
       show a scene or video whose shape differs from the display with **Fill**, then drag
       **Horizontal position** and **Vertical position** across 0 to 100%. The visible part
-      slides on the display without the wallpaper restarting, once on each scene renderer
-      (Compatibility and Native Metal preferred) and with Compatibility video playback. With
-      **Fit** and a **Scale factor** below 1 the picture slides inside the bars. **Center**
-      puts it back and is disabled while both sliders read 50%. With **Stretch** at a factor
-      of 1, or a wallpaper that exactly fits, nothing moves.
+      follows the thumb while it is dragged, smoothly enough to steer by, and slides on the
+      display without the wallpaper restarting, once on each scene renderer
+      (Compatibility and Native Metal preferred) and with Compatibility video playback.
+      Releasing keeps it where it stopped, a drag back to where it began returns to that
+      position, and the lock screen and the Mission Control picture do not change until the
+      release. With **Fit** and a **Scale factor** below 1 the picture slides inside the
+      bars. **Center** puts it back and is disabled while both sliders read 50%. With
+      **Stretch** at a factor of 1, or a wallpaper that exactly fits, nothing moves.
 - [ ] The Position sliders by keyboard and screen reader: arrow keys on a focused slider move
       it a step at a time and keep the focus, VoiceOver reads each slider's name and
       percentage and **Center**, and at the narrowest panel width the sliders, the **Center**

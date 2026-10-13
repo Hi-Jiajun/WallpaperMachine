@@ -381,6 +381,23 @@ cargo test -p shader --test pipeline -- --nocapture
   already carries it and a restart loads it; the lock-screen export carries a scene's
   and a natively played video's saved position, centres a web page and a mirror, and
   follows a position at once while an unapplied scale factor stays out of it.
+- `wallpaper-core` and `wallpaper-bridge` drag previews (`cargo test --release -p
+  wallpaper-core --lib framing`; `cargo test --release -p wallpaper-bridge --lib
+  display_position`): `WallpaperEngine::preview_framing` refuses an invalid position
+  before it asks the actor and forwards a valid one. `preview_display_position` tells
+  the fake engine's preview call once per step with the display's live handle, and
+  writes no file, changes neither the lock-screen export nor the options, leaves nothing
+  for a display refresh to rebuild, and a restart still opens the scene centred; an axis
+  left out follows the saved position, not the last step; a position outside 0 to 1, NaN,
+  an infinity and an unknown wallpaper are refused with nothing shown, while a display
+  no engine scene draws (a native video, a disabled display, a web page, a mirror or an
+  unknown display) is not an error. The release is an ordinary `set_display_position`
+  that saves and clears the preview mark; a drag that ends at the saved position puts the
+  scene back once without writing, a scene on another display is not told, and a
+  refused release keeps the mark for the next try. These are fake-engine tests:
+  `SceneRuntime::preview_framing` leaving the runtime's descriptor and stored template
+  alone (so an abandoned drag leaves nothing to rebuild) is by construction and is
+  covered, with the picture itself, only by a desktop run.
 - `wallpaper_background`: renders unattached production Metal layers over a white
   bitmap with no drawable, before and after a resize and after recreation. Every
   pixel must be opaque black. Its harness runs on the process's main thread; no

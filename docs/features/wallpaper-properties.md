@@ -248,7 +248,20 @@ draft. A slider sends its value when it is released, or at each keyboard step, a
 only the axis that moved, so a horizontal drag never disturbs the vertical position.
 The running wallpaper follows without restarting, and the position is saved at once
 for that wallpaper on that display. **Apply changes** does not wait for it and
-**Revert** does not undo it. **Center** puts both axes at 50% and is disabled while
+**Revert** does not undo it.
+
+While a slider is being dragged with the pointer the wallpaper also follows the thumb,
+showing the newest value about every 100 ms and one step at a time. Those steps are
+only shown: nothing is saved, the lock screen, the screen saver and the Mission Control
+picture hear nothing, the panel does not redraw, and the saved position is what the
+display's options keep reporting. The release is the ordinary move above and is sent
+after the step still on its way has been answered, so the last step cannot land after
+it. A drag that ends where it began still puts the wallpaper back at the saved
+position, and so does a cancelled pointer or a window that loses focus mid-drag. A
+refused step is ignored and the release reports its own error. If the panel closes
+mid-drag the wallpaper may stay at the last step shown until the next move or until
+the scene is rebuilt, which returns it to the saved position; nothing was saved. Key
+presses and VoiceOver adjustments have no drag to follow and are saved at once. **Center** puts both axes at 50% and is disabled while
 they already are. A request outside 0 to 100% or not a number is refused instead of
 being moved to the nearest edge. The command waits its turn behind the user's other
 commands, such as a wallpaper switch still running. After a move the Mission Control
