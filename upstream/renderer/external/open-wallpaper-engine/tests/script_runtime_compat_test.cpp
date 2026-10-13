@@ -910,6 +910,13 @@ export function update(value) {
   var ok = 0;
   if (typeof engine.isRunningInEditor === 'function' && engine.isRunningInEditor() === false) ok += 1;
   if (typeof engine.isScreensaver === 'function' && engine.isScreensaver() === false) ok += 1;
+  if (typeof engine.isWallpaper === 'function' && engine.isWallpaper() === true) ok += 1;
+  var isScreensaver = engine.isScreensaver;
+  engine.isScreensaver = function() { return true; };
+  if (engine.isWallpaper() === false) ok += 1;
+  engine.isScreensaver = isScreensaver;
+  if (typeof engine.isDesktopDevice === 'function' && engine.isDesktopDevice() === true) ok += 1;
+  if (typeof engine.isMobileDevice === 'function' && engine.isMobileDevice() === false) ok += 1;
   if (input.cursorPosition.x === 0.25 && input.cursorPosition.y === 0.75) ok += 1;
   if (input.cursorWorldPosition.x === 480 && input.cursorWorldPosition.y === 270) ok += 1;
   if (input.cursorLocalPosition && input.cursorLocalPosition.x === 480) ok += 1;
@@ -927,7 +934,7 @@ export function update(value) {
 
     const auto result = program->Evaluate(host, DynamicValue(0.0f));
     ASSERT_NE(result, nullptr);
-    EXPECT_FLOAT_EQ(result->getFloat(), 8.0f);
+    EXPECT_FLOAT_EQ(result->getFloat(), 12.0f);
 }
 
 TEST(ScriptRuntimeCompat, ThrowingOneShotTimeoutDoesNotFireAgainOrBlockLaterTimers) {

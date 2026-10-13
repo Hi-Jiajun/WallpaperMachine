@@ -244,6 +244,15 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
     contains the offset; `SetNodeAlignment` keeps the existing anchor mode. The
     double offset shows only on layers whose scale or origin is dynamic, which is
     why a static-origin/scripted-scale case is in the test.
+- **Host queries on `engine`** — `ScriptRuntimeCompat.UpstreamConsoleInputAndEngineCompatibilityStubsAreCallable`.
+  The `IEngine` queries Wallpaper Engine documents are functions a script can
+  call: `isRunningInEditor()` and `isScreensaver()` return `false`,
+  `isDesktopDevice()` `true`, `isMobileDevice()` `false`, and `isWallpaper()`
+  returns `!engine.isScreensaver()` (the test swaps `isScreensaver` to check that
+  it follows). A missing one throws "not a function" and aborts the script's
+  `init` or `update`. All but `isRunningInEditor` (a native function) are defined
+  in `AppendCommonHostBootstrap`, which runs once per shared script context,
+  never per frame.
 - **Layer parents and scripted alpha** — `ScriptRuntimeCompat.LayerGetParent*`
   and `.LayerAlpha*`. `getParent()` is how an icon script reads its group;
   without it the whole `update` throws every frame. `layer.alpha` must reach
