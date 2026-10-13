@@ -9,6 +9,15 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-13 — Apply a wallpaper to every display
+
+A new transfer request, WallpaperDisplayTransfer.Request.everywhere, expands over the eligible displays when it is planned (main display first), so it keeps copy and swap's preflight, re-plan after preparing and verified rollback. Entry points: the inspector's Apply to all displays, apply?id=…&display=all and Apply Wallpaper's On all displays. Commit 6 of the desktop-menubar lane, checked in an isolated worktree on macOS 27.0.1.
+
+- `python3 scripts/test.py --only WallpaperDisplayTransferTests --only WallpaperDisplayTransferIntegrationTests --only AutomationCommandTests --only ControlPanelDisplayLayoutTests --only WallpaperReapplyPanelTests --only AppAutomationTests --only ControlPanelLibraryTests --only WebPanelGeneralSettingsTests --only ControlPanelAutomationTests --only WallpaperActivationRecoveryTests --only ActivationLogTests --only WorkshopApplyOnArrivalTests --only ControlPanelShellTests --only WallpaperBackupTests` — 191 passed, 0 failed, 0 skipped
+- Every module under `scripts/tests/` passes, including the new WebUI catalog key in zh-Hans, zh-Hant and ja.
+- Mutation checks: with the main display no longer planned first, or the choice counted for no display when asked for, the matching transfer and integration tests fail and the rest pass. The first inspector test run failed because putting the displays back selects the wallpaper they showed, so the failure notice sat on a wallpaper the panel no longer showed; the panel now returns to the wallpaper it applied.
+- Not run: the full gate, a Release build, any desktop run. Unverified: a real two-monitor apply and rollback, the button in the narrow inspector, and Shortcuts showing the On all displays switch; the display set is a two-display test bridge. See the new row in manual-smoke.md.
+
 ## 2026-10-13 — Rotate on unlock
 
 A third How often choice for rotating playlists, Each time the Mac is unlocked (DisplayPlaylist.trigger). The presentation policy reports the locked-to-unlocked edge of its corrected lock state; PlaylistScheduler answers it for every display that waits for it, once, within a 30 second window. Commit 5 of the desktop-menubar lane, checked in an isolated worktree on macOS 27.0.1.

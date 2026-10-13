@@ -25,6 +25,17 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-13 — Robustness, web, video, lock-screen and panel port: integrated gate
+
+105 commits of independently implemented reliability, web-host, native-video, lock-screen, power, Workshop, playlist, menu-bar, switch-hold and per-display position work, verified together on one tree on top of 20f44470 (the per-commit entries record each area's targeted runs).
+
+- `python3 scripts/test.py` — exit 0 on the second run; Python 316 tests OK; Swift 2564 passed, 0 failed, 45 skipped of 2609. The first run had one failure, ControlPanelLibraryTests.testHoldAndDragSelectsARunOfTilesWithoutWindow, under load from another build; the class passed alone (17/17) and the sweep code is unchanged by this work
+- `python3 scripts/check_rust.py` — exit 0; core 293, bridge 542, core-integration 15, shader 534 passed; desktop window tests and corpus smoke cases skipped
+- `python3 scripts/check_renderer.py` — exit 0; 708 gtest cases passed, 4 skipped (local-asset cases), 0 failed; no --project corpus, so authored-reference compatibility is not verified
+- `python3 scripts/build.py --configuration Release` — exit 0; regenerated bindings identical to the committed ones
+- Commits that change the bridge API or move test helpers were each compiled on their own with `scripts/test.py --only` at that commit
+- Not verified: no desktop run. The switch-hold picture during a wallpaper change, wake and stall repair, the lock screen, menu-bar submenus, the position controls on real displays, native-video layout on real displays and live Steam downloads still need an authorized desktop check
+
 ## 2026-10-13 — Position sliders follow a drag
 
 Commit 8 of the framing lane: while a Position slider is dragged the running wallpaper follows through a non-saving preview call; the release is the ordinary move. Targeted runs in the lane's worktree; the bare full gate was not run, no desktop was opened and the app was not rebuilt there.
@@ -115,12 +126,3 @@ The menu bar menu gets a submenu per display when two or more displays can show 
 - `python3 -m unittest discover -s scripts/tests -p test_panel_localization.py` — OK (6 tests); the three new native strings are in all four languages
 - Not run: the full `python3 scripts/test.py` gate, `python3 scripts/check_renderer.py` (no Rust, bridge or renderer change), Release build, any desktop run
 - Not covered: how the NSMenu draws, orders and reads (VoiceOver) with two or more real displays, and Remove then Start Again on real displays; see manual-smoke "The menu bar with two displays"
-
-## 2026-10-13 — Apply a wallpaper to every display
-
-A new transfer request, WallpaperDisplayTransfer.Request.everywhere, expands over the eligible displays when it is planned (main display first), so it keeps copy and swap's preflight, re-plan after preparing and verified rollback. Entry points: the inspector's Apply to all displays, apply?id=…&display=all and Apply Wallpaper's On all displays. Commit 6 of the desktop-menubar lane, checked in an isolated worktree on macOS 27.0.1.
-
-- `python3 scripts/test.py --only WallpaperDisplayTransferTests --only WallpaperDisplayTransferIntegrationTests --only AutomationCommandTests --only ControlPanelDisplayLayoutTests --only WallpaperReapplyPanelTests --only AppAutomationTests --only ControlPanelLibraryTests --only WebPanelGeneralSettingsTests --only ControlPanelAutomationTests --only WallpaperActivationRecoveryTests --only ActivationLogTests --only WorkshopApplyOnArrivalTests --only ControlPanelShellTests --only WallpaperBackupTests` — 191 passed, 0 failed, 0 skipped
-- Every module under `scripts/tests/` passes, including the new WebUI catalog key in zh-Hans, zh-Hant and ja.
-- Mutation checks: with the main display no longer planned first, or the choice counted for no display when asked for, the matching transfer and integration tests fail and the rest pass. The first inspector test run failed because putting the displays back selects the wallpaper they showed, so the failure notice sat on a wallpaper the panel no longer showed; the panel now returns to the wallpaper it applied.
-- Not run: the full gate, a Release build, any desktop run. Unverified: a real two-monitor apply and rollback, the button in the narrow inspector, and Shortcuts showing the On all displays switch; the display set is a two-display test bridge. See the new row in manual-smoke.md.
