@@ -51,7 +51,8 @@ never reconciles the desktop.
 The inspector's compact **General configuration** section holds mute, volume,
 [Audio response](audio-response.md), and media integration. **Audio and media
 status** expands to show their explanations and delivery status. **Displays**
-follows, collapsed, with per-display playback configuration, then **Collections**.
+follows with per-display playback configuration, open when the wallpaper is on a
+display and collapsed otherwise, then **Collections**.
 **Wallpaper properties** comes last, with the wallpaper's authored controls in their
 original order, so a long property list never pushes the shorter sections out of
 reach. General, display and property disclosures retain their state across
