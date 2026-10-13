@@ -302,6 +302,132 @@ final class WallpaperDisplayTransferIntegrationTests: XCTestCase {
         XCTAssertEqual(removed, ["primary=c"])
     }
 
+    // MARK: Random Wallpaper
+
+    private func randomWallpaper(
+        on display: String = "primary", from pool: AutomationCommand.RandomPool = .all, favorites: Set<String> = [],
+        playlists: PlaylistStore
+    ) async throws {
+        try await store.activateRandomWallpaperAsync(displayId: display, pool: pool, favorites: favorites, playlists: playlists)
+    }
+
+    /// Three picks in a row show every wallpaper once: the display never repeats what it shows,
+    /// and the round remembers what was picked.
+    func testRandomWallpaperGoesThroughTheLibraryBeforeRepeatingOne() async throws {
+        let playlists = PlaylistStore(defaults: try TemporaryDefaults.make(for: self).defaults)
+        var chosen: [String] = []
+        store.onUserWallpaperChoice = { id, display in chosen.append("\(display)=\(id)") }
+        var shown = ["a"]
+
+        for _ in 0..<6 {
+            try await randomWallpaper(playlists: playlists)
+            let now = try XCTUnwrap(bridge.assignments["primary"])
+            XCTAssertNotEqual(now, shown.last, "the wallpaper that was on the display is never picked again at once")
+            shown.append(now)
+        }
+
+        XCTAssertEqual(Set(shown[1...3]), ["a", "b", "c"], "the first round")
+        XCTAssertEqual(Set(shown[4...6]), ["a", "b", "c"], "the second round")
+        XCTAssertEqual(bridge.assignments["secondary"], "b", "only the named display changes")
+        XCTAssertEqual(chosen, shown.dropFirst().map { "primary=\($0)" }, "each pick is the user's own choice")
+        XCTAssertFalse(store.commands.isBusy)
+    }
+
+    func testRandomWallpaperDrawsFromTheFavoritesOnly() async throws {
+        let playlists = PlaylistStore(defaults: try TemporaryDefaults.make(for: self).defaults)
+        try await randomWallpaper(from: .favorites, favorites: ["a", "c"], playlists: playlists)
+        XCTAssertEqual(bridge.assignments["primary"], "c", "a is on screen, b is not a favorite")
+        XCTAssertEqual(playlists.randomRounds, ["primary|favorites": ["c"]], "the pools keep their own rounds")
+        try await randomWallpaper(from: .favorites, favorites: ["a", "c"], playlists: playlists)
+        XCTAssertEqual(bridge.assignments["primary"], "a")
+        XCTAssertTrue(playlists.randomRounds.isEmpty, "every favorite has been shown, so the round starts over")
+    }
+
+    func testRandomWallpaperWithNothingElseToChooseFromChangesNothing() async throws {
+        let playlists = PlaylistStore(defaults: try TemporaryDefaults.make(for: self).defaults)
+        var chosen = 0; store.onUserWallpaperChoice = { _, _ in chosen += 1 }
+        for (pool, favorites) in [(AutomationCommand.RandomPool.favorites, Set(["a"])), (.favorites, Set<String>())] {
+            do {
+                try await randomWallpaper(from: pool, favorites: favorites, playlists: playlists)
+                XCTFail("picked a wallpaper from \(favorites)")
+            } catch let error as WallpaperActionError {
+                XCTAssertEqual(error.message, String(localized: "There is no other wallpaper to choose from."))
+            }
+        }
+        XCTAssertTrue(bridge.applications.isEmpty)
+        XCTAssertEqual(bridge.assignments, ["primary": "a", "secondary": "b"])
+        XCTAssertEqual(chosen, 0)
+        XCTAssertTrue(playlists.randomRounds.isEmpty)
+        XCTAssertFalse(store.commands.isBusy, "a refusal gives the display's turn back")
+    }
+
+    func testRandomWallpaperNeverReopensAWallpaperHeldBackAfterACrash() async throws {
+        bridge.held = ["b", "c"]
+        try await store.refreshAllAsync()
+        let playlists = PlaylistStore(defaults: try TemporaryDefaults.make(for: self).defaults)
+        do {
+            try await randomWallpaper(playlists: playlists)
+            XCTFail("picked a held wallpaper")
+        } catch is WallpaperActionError {}
+        XCTAssertTrue(bridge.applications.isEmpty)
+
+        bridge.held = ["b"]
+        try await store.refreshAllAsync()
+        try await randomWallpaper(playlists: playlists)
+        XCTAssertEqual(bridge.assignments["primary"], "c")
+    }
+
+    func testAFailedRandomPickTakesNothingOutOfTheRound() async throws {
+        let playlists = PlaylistStore(defaults: try TemporaryDefaults.make(for: self).defaults)
+        bridge.failOnce = "primary=c"
+        do {
+            try await randomWallpaper(from: .favorites, favorites: ["a", "c"], playlists: playlists)
+            XCTFail("the apply was meant to fail")
+        } catch {}
+        XCTAssertEqual(bridge.assignments["primary"], "a")
+        XCTAssertTrue(playlists.randomRounds.isEmpty, "c was never shown")
+        XCTAssertFalse(store.commands.isBusy)
+
+        try await randomWallpaper(from: .favorites, favorites: ["a", "c"], playlists: playlists)
+        XCTAssertEqual(bridge.assignments["primary"], "c")
+    }
+
+    /// "Another wallpaper" is measured from what the display shows when its turn comes, so a
+    /// switch asked for first is not undone by a pick made as if it had not happened.
+    func testRandomWallpaperIsPickedWhenTheDisplaysTurnComes() async throws {
+        let playlists = PlaylistStore(defaults: try TemporaryDefaults.make(for: self).defaults)
+        var release: CheckedContinuation<Void, Never>?
+        bridge.beforeApply = {
+            self.bridge.beforeApply = nil
+            await withCheckedContinuation { release = $0 }
+        }
+        let switching = Task { try await store.commands.run(slot: BridgeStore.activationSlot(displayId: "primary")) {
+            try await store.activateWallpaperAsync(id: "c", displayId: "primary", origin: .user)
+        } }
+        while release == nil { await Task.yield() }
+
+        let random = Task { try await self.randomWallpaper(from: .favorites, favorites: ["a", "c"], playlists: playlists) }
+        while store.commands.waiting.isEmpty { await Task.yield() }
+        release?.resume()
+        try await switching.value
+        try await random.value
+
+        XCTAssertEqual(bridge.assignments["primary"], "a",
+                       "c was on the display when the pick was made, so the other favorite is the one chosen")
+    }
+
+    func testRandomWallpaperOnAMirroredOrDisabledDisplayIsRefused() async throws {
+        let playlists = PlaylistStore(defaults: try TemporaryDefaults.make(for: self).defaults)
+        bridge.mirrors = ["secondary": "primary"]
+        try await store.refreshAllAsync()
+        do { try await randomWallpaper(on: "secondary", playlists: playlists); XCTFail("a mirror holds no wallpaper of its own") } catch {}
+        bridge.mirrors = [:]; bridge.eligible = ["primary"]
+        try await store.refreshAllAsync()
+        do { try await randomWallpaper(on: "secondary", playlists: playlists); XCTFail("a disabled display cannot be changed") } catch {}
+        XCTAssertTrue(bridge.applications.isEmpty)
+        XCTAssertTrue(playlists.randomRounds.isEmpty)
+    }
+
     func testRemovingFromAMirroredOrDisabledDisplayIsRefused() async throws {
         bridge.mirrors = ["secondary": "primary"]
         try await store.refreshAllAsync()

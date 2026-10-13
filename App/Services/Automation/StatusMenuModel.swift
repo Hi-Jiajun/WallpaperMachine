@@ -3,8 +3,8 @@ import Foundation
 /// What the menu bar menu offers, decided without AppKit so the branching can be tested.
 ///
 /// A Mac with one display (or one that can show its own wallpaper) keeps the flat menu:
-/// Previous, Next and Recently used act on that display. With two or more, each display gets
-/// a submenu with its own commands, so any of them can be changed without opening the panel.
+/// Previous, Next, Random Wallpaper and Recently used act on that display. With two or more, each
+/// display gets a submenu with its own commands, so any of them can be changed without opening the panel.
 /// `AppDelegate` gathers the `Input` and turns the entries into `NSMenuItem`s; the update,
 /// error and Exit items stay there.
 enum StatusMenuModel {
@@ -14,6 +14,8 @@ enum StatusMenuModel {
         case playPause
         case previous(display: String)
         case next(display: String)
+        /// A random wallpaper other than the one the display shows; see `AutomationCommand.random`.
+        case random(display: String)
         case apply(wallpaper: String, display: String)
         case remove(display: String)
         case startAgain(wallpaper: String, display: String)
@@ -39,6 +41,9 @@ enum StatusMenuModel {
         var wallpaperID: String?
         var canPrevious: Bool
         var canNext: Bool
+        /// Whether the library holds a wallpaper that can play, is not held back and is not the
+        /// one this display shows.
+        var canRandom: Bool = false
         /// Wallpapers used on this display, newest use first, that are still in the library.
         var recent: [Recent]
     }
@@ -129,7 +134,8 @@ enum StatusMenuModel {
 
     // MARK: Building blocks
 
-    /// Previous, Next and Recently used for one display; each appears only when it can act.
+    /// Previous, Next, Random Wallpaper and Recently used for one display; each appears only
+    /// when it can act.
     private static func navigation(for display: Display) -> [Entry] {
         var items: [Entry] = []
         if display.canPrevious {
@@ -137,6 +143,9 @@ enum StatusMenuModel {
         }
         if display.canNext {
             items.append(.command(.next(display: display.id), title: String(localized: "Next Wallpaper"), checked: false))
+        }
+        if display.canRandom {
+            items.append(.command(.random(display: display.id), title: String(localized: "Random Wallpaper"), checked: false))
         }
         let recent = display.recent.prefix(recentLimit)
         if !recent.isEmpty {

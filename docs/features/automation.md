@@ -5,10 +5,10 @@ appearance or Focus. Global keyboard shortcuts, actions in the Shortcuts app
 (and so Siri and Spotlight), and `wallpapermachine://` links run explicit
 commands (`AutomationCommand`)
 through `AppAutomation` into `AppDelegate.performAutomation`, which the menu bar's
-Previous, Next, Recently used, Remove from Display and Start Again items use too (with
+Previous, Next, Random Wallpaper, Recently used, Remove from Display and Start Again items use too (with
 two or more displays the menu has a submenu for each, see
 [the menu bar](control-panel.md#menu-bar-one-display-at-a-time)). They only do what the
-menu bar and the panel already offer: play, pause, the previous or next wallpaper,
+menu bar and the panel already offer: play, pause, the previous, next or a random wallpaper,
 apply an installed wallpaper, copy a saved playlist to a display, apply a saved
 property preset, or open the window. Automatic selection uses the same serialized
 wallpaper commands and keeps manual choices until the next event.
@@ -84,6 +84,7 @@ and retained if restore rolls back.
 | Play, Pause, Play or pause | Resumes or pauses every wallpaper, as the menu bar's Play/Pause does. |
 | Previous wallpaper | Returns to an earlier successful switch on the chosen display; repeated requests keep walking back, skipping deleted or unsupported wallpapers. History is consumed only after Apply succeeds. |
 | Next wallpaper | Changes a display to its playlist's next when it rotates (see [playlists](playlists.md)), otherwise to the next playable wallpaper in library order. |
+| Random wallpaper | Changes a display to a wallpaper picked at random from all the wallpapers that can play, or from the favorites only, other than the one the display shows. The display's own round remembers what it has picked, so every wallpaper of the pool comes round before one repeats; the playlist's order and shuffle round are not touched ([Random Wallpaper](playlists.md#random-wallpaper)). It is the user's own choice, so a playlist gives way to it. A wallpaper the app is holding back after a crash is never picked. With no other wallpaper to choose from it fails with "There is no other wallpaper to choose from." instead of changing nothing quietly. |
 | Apply a wallpaper | Applies an installed wallpaper, named by its id (its folder name in the library). |
 | Apply a wallpaper to all displays | Applies an installed wallpaper to every enabled independent display in one step: all of them change or none does, and each is put back as it was after a failure. Refuses a wallpaper with unapplied edits. See [Apply to every display](display-layouts.md#apply-to-every-display). |
 | Apply saved playlist | Copies a saved plan to the chosen display and starts it when playback can run. |
@@ -92,7 +93,7 @@ and retained if restore rolls back.
 | Open | Brings up the control panel, on Installed, Discover, pixiv or Settings when named. |
 | Remove from display | Menu bar only, with no link: takes whatever the named display shows off it and leaves it empty, so its playlist waits ([a display you cleared](playlists.md#a-display-you-cleared)). It takes the display's turn in the command queue and removes what the display shows then; an empty display is left as it is. |
 
-Previous, Next, Apply Wallpaper and Apply Saved Playlist act on the panel's target display unless a display is named, and
+Previous, Next, Random Wallpaper, Apply Wallpaper and Apply Saved Playlist act on the panel's target display unless a display is named, and
 only an enabled display showing its own wallpaper can be switched. Switches share
 the display's command slot with the panel, so the latest request for a display
 wins; an automatic change (a playlist, a rule, an update reload) never replaces
@@ -106,7 +107,8 @@ the foot of the menu bar menu; the Shortcuts app shows its own.
 ## Keyboard shortcuts
 
 **Settings → General → Keyboard shortcuts** records one shortcut each for
-**Play or pause wallpapers**, **Previous wallpaper**, **Next wallpaper** and **Open the control panel**.
+**Play or pause wallpapers**, **Previous wallpaper**, **Next wallpaper**, **Random wallpaper** (from every
+wallpaper, on the target display) and **Open the control panel**.
 None is set until recorded, so the app never takes a combination another app
 expects. **Record…** takes the next key pressed in that row (Escape alone, or
 moving focus away, gives up); the key must be held with ⌘, ⌥ or ⌃, except F13
@@ -125,23 +127,26 @@ are kept in the `WallpaperMachine.hotKeys` default.
 
 App Intents in `App/Services/Automation/WallpaperIntents.swift` add **Pause
 Wallpapers**, **Resume Wallpapers**, **Play or Pause Wallpapers**, **Previous Wallpaper**, **Next
-Wallpaper**, **Apply Wallpaper** (with the wallpaper chosen from, or searched in,
+Wallpaper**, **Random Wallpaper**, **Apply Wallpaper** (with the wallpaper chosen from, or searched in,
 the installed ones that can play), **Apply Saved Playlist**, **Apply Wallpaper
 Property Preset**, and **Open WallpaperMachine**. The latter two configuration
 actions and their searchable entities live in `WallpaperConfigurationIntents.swift`.
 That file also supplies **Apply Display Layout** with a saved-layout picker and
 no display parameter; the layout itself identifies its target screens.
-`WallpaperMachineShortcuts` offers play/pause, previous, next and the wallpaper,
+`WallpaperMachineShortcuts` offers play/pause, previous, next, random and the wallpaper,
 playlist, property preset and display layout actions to Siri and Spotlight without
-building a shortcut ("Next wallpaper in WallpaperMachine", "Apply a wallpaper with
-WallpaperMachine"). The actions run in the app's own process; if it is not running,
+building a shortcut ("Next wallpaper in WallpaperMachine", "Random wallpaper in
+WallpaperMachine", "Apply a wallpaper with WallpaperMachine"). The actions run in the app's own process; if it is not running,
 macOS starts it first.
 
 **Apply Wallpaper** also has an **On all displays** option, off by default, that
 applies the wallpaper to every enabled independent display instead of one; it wins
 over a chosen **Display**.
 
-**Previous Wallpaper**, **Next Wallpaper**, **Apply Wallpaper** and **Apply Saved
+**Random Wallpaper** also has a **Choose from** option, **All wallpapers** by default or
+**Favorites**, for the pool it draws from.
+
+**Previous Wallpaper**, **Next Wallpaper**, **Random Wallpaper**, **Apply Wallpaper** and **Apply Saved
 Playlist** have an optional **Display** picker.
 It lists connected, enabled independent displays using the same stable identities
 as the panel; leaving it empty keeps the panel-target behavior. Execution checks
@@ -163,6 +168,8 @@ wallpapermachine://toggle
 wallpapermachine://previous
 wallpapermachine://next
 wallpapermachine://next?display=primary
+wallpapermachine://random
+wallpapermachine://random?display=primary&from=favorites
 wallpapermachine://apply?id=3632513108
 wallpapermachine://apply?id=3632513108&display=all
 wallpapermachine://playlist?id=PLAN_ID&display=primary
@@ -172,8 +179,9 @@ wallpapermachine://open?page=settings
 ```
 
 `display=all` is accepted by `apply` only and cannot be a display's own selector
-(`primary`, a number or `identity:{…}`); `next`, `previous` and `playlist` treat it as
-an unknown display and fail.
+(`primary`, a number or `identity:{…}`); `next`, `previous`, `random` and `playlist` treat it as
+an unknown display and fail. `random` takes `from=all` (the default) or `from=favorites`, in
+any case; any other value, or a name given twice, is refused rather than guessed at.
 
 A link with an unknown command, a query value the command does not take, a value
 given twice, or a path is ignored and logged rather than guessed at. A browser
@@ -183,12 +191,18 @@ display names; Shortcuts supplies name-based pickers without requiring these IDs
 
 ## Verification
 
-Link parsing and refusals, including that removing a wallpaper has no link
-(`AutomationCommandTests`), the menu bar's layout (`StatusMenuModelTests`: the flat
+Link parsing and refusals, including that removing a wallpaper has no link and what
+`random` takes (`AutomationCommandTests`, which also checks the pools: favorites that left
+the library and wallpapers held back after a crash are never offered), the menu bar's
+layout (`StatusMenuModelTests`: the flat
 menu for one display, a submenu per display with every command naming its own display,
 main display first then left to right, distinct titles, Remove becoming Start Again on
-an empty display, ten recent entries with the current one ticked, and which displays
-count), waiting for the app and failures
+an empty display, Random Wallpaper after Next and left out where nothing else can be
+chosen, ten recent entries with the current one ticked, and which displays
+count), Random Wallpaper's round (`PlaylistStoreTests`) and its pick through the real
+command queue (`WallpaperDisplayTransferIntegrationTests`: a round never repeats the
+wallpaper on screen and shows each once, favorites only, a refused or failed pick
+leaving the round alone, the pick made when the display's turn comes), waiting for the app and failures
 reaching the caller (`AppAutomationTests`), hotkey preferences and the key-code and
 modifier mapping (`HotKeyPreferencesTests`, `GlobalHotKeysTests`), the planner, store and
 scheduler (`WallpaperAutomationPlannerTests`, `WallpaperAutomationStoreTests`,

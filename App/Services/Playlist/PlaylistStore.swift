@@ -35,6 +35,11 @@ final class PlaylistStore {
     /// across launches (`WallpaperMachine.playlistRounds`), so a relaunch neither repeats what it
     /// just showed nor starts over halfway through. Run state, left out of backups.
     private(set) var recent: [String: [String]] = [:]
+    /// What Random Wallpaper has picked of each pool on each display this round, filed under
+    /// `<display>|<pool>`, so every wallpaper of the pool comes round before one repeats. It is
+    /// kept apart from `recent`: a display's own playlist round and its Random round never
+    /// disturb each other. Saved with the shuffle rounds, and left out of backups the same way.
+    private(set) var randomRounds: [String: [String]] = [:]
     private(set) var revisions: [String: UInt64] = [:]
     struct SkippedWallpaper: Equatable {
         let message: String
@@ -59,7 +64,9 @@ final class PlaylistStore {
         nextChange = stored.mapValues { Date(timeIntervalSince1970: $0) }
         let heldDisplays = defaults.dictionary(forKey: Self.holdsKey) as? [String: String] ?? [:]
         holds = heldDisplays.compactMapValues(Hold.init(rawValue:))
-        recent = Self.savedRounds(in: defaults, for: playlists)
+        let saved = Self.savedRounds(in: defaults)
+        recent = Self.shuffleRounds(in: saved, for: playlists)
+        randomRounds = Self.randomRounds(in: saved)
     }
 
     func playlist(for display: String) -> DisplayPlaylist {
@@ -150,6 +157,12 @@ final class PlaylistStore {
             recent[display]?.removeAll(where: gone.contains)
             roundsChanged = roundsChanged || recent[display] != before
         }
+        for key in randomRounds.keys {
+            let before = randomRounds[key]
+            randomRounds[key]?.removeAll(where: gone.contains)
+            if randomRounds[key]?.isEmpty == true { randomRounds[key] = nil }
+            roundsChanged = roundsChanged || randomRounds[key] != before
+        }
         for display in skipped.keys {
             skipped[display] = skipped[display]?.filter { !gone.contains($0.key) }
         }
@@ -200,6 +213,36 @@ final class PlaylistStore {
     func recordPick(_ id: String, on display: String, candidates: [String]) {
         recent[display] = PlaylistPlanner.remember(id, in: recent[display] ?? [], candidates: candidates)
         if playlist(for: display).order == .shuffle { persistRounds() }
+    }
+
+    /// The wallpaper Random Wallpaper puts on `display` after `current`: any of `candidates`
+    /// but the one on screen and the ones this pool has already supplied this round, so every
+    /// wallpaper comes round before one repeats. Nil when there is no other wallpaper to pick.
+    /// Nothing is remembered until `recordRandomPick` says the pick was shown.
+    func randomPick<Random: RandomNumberGenerator>(
+        on display: String, pool: AutomationCommand.RandomPool, from candidates: [String], after current: String?,
+        using random: inout Random
+    ) -> String? {
+        PlaylistPlanner.next(
+            after: current, in: candidates, order: .shuffle,
+            recent: randomRounds[Self.randomKey(display, pool)] ?? [], using: &random)
+    }
+
+    func randomPick(
+        on display: String, pool: AutomationCommand.RandomPool, from candidates: [String], after current: String?
+    ) -> String? {
+        var random = SystemRandomNumberGenerator()
+        return randomPick(on: display, pool: pool, from: candidates, after: current, using: &random)
+    }
+
+    /// Remembers that Random Wallpaper showed `id` from `pool` on `display`; see
+    /// `PlaylistPlanner.remember(_:in:candidates:)`. Saved at once, without a notification:
+    /// nothing on screen depends on it.
+    func recordRandomPick(_ id: String, on display: String, pool: AutomationCommand.RandomPool, candidates: [String]) {
+        let key = Self.randomKey(display, pool)
+        let round = PlaylistPlanner.remember(id, in: randomRounds[key] ?? [], candidates: candidates)
+        randomRounds[key] = round.isEmpty ? nil : round
+        persistRounds()
     }
 
     func plan(id: String) -> PlaylistPlan? {
@@ -308,24 +351,32 @@ final class PlaylistStore {
         NotificationCenter.default.post(name: Self.didChangeNotification, object: self)
     }
 
-    /// A shuffle round as it is saved. The signature names what the round was drawn from, so a
-    /// round is only picked up again for the same source, collection and order: the playlist's
-    /// `revisions` start at zero on every launch and cannot say that.
+    /// A round as it is saved. The signature names what the round was drawn from, so a round is
+    /// only picked up again for the same source, collection and order (a shuffled playlist) or
+    /// the same pool (Random): the playlist's `revisions` start at zero on every launch and
+    /// cannot say that.
     private struct Round: Codable, Equatable {
         var signature: String
         var ids: [String]
     }
 
     /// The saved rounds, in a wrapper with default-tolerant decoding so a build that keeps more
-    /// than shuffle rounds can add a field without migrating this one.
+    /// kinds of round can add a field without migrating the others, and an older build ignores
+    /// the ones it does not know.
     private struct SavedRounds: Codable {
         var playlists: [String: Round] = [:]
+        /// Random Wallpaper's, filed under `<display>|<pool>`.
+        var random: [String: Round] = [:]
 
-        init(playlists: [String: Round] = [:]) { self.playlists = playlists }
+        init(playlists: [String: Round] = [:], random: [String: Round] = [:]) {
+            self.playlists = playlists
+            self.random = random
+        }
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             playlists = (try? container.decodeIfPresent([String: Round].self, forKey: .playlists)) ?? [:]
+            random = (try? container.decodeIfPresent([String: Round].self, forKey: .random)) ?? [:]
         }
     }
 
@@ -333,13 +384,25 @@ final class PlaylistStore {
         "\(playlist.source.rawValue)|\(playlist.collectionID ?? "")|\(playlist.order.rawValue)"
     }
 
+    private static func randomKey(_ display: String, _ pool: AutomationCommand.RandomPool) -> String {
+        "\(display)|\(pool.rawValue)"
+    }
+
+    /// The pool a Random round is filed under: what follows the last bar of its key. A display
+    /// id may hold bars of its own, a pool's name never does.
+    private static func randomPool(ofKey key: String) -> AutomationCommand.RandomPool? {
+        key.lastIndex(of: "|").flatMap { AutomationCommand.RandomPool(rawValue: String(key[key.index(after: $0)...])) }
+    }
+
+    private static func savedRounds(in defaults: UserDefaults) -> SavedRounds {
+        defaults.data(forKey: roundsKey).flatMap { try? JSONDecoder().decode(SavedRounds.self, from: $0) } ?? SavedRounds()
+    }
+
     /// The rounds worth picking up again: a display that rotates in shuffle order over the same
     /// source and collection it was saved under. Anything else (an edited, switched-off or gone
     /// display, or a playlist restored from a backup) starts a fresh round. Wallpapers that left
     /// the library need no pruning here: the planner ignores them and the next pick drops them.
-    private static func savedRounds(in defaults: UserDefaults, for playlists: [String: DisplayPlaylist]) -> [String: [String]] {
-        guard let data = defaults.data(forKey: roundsKey),
-              let saved = try? JSONDecoder().decode(SavedRounds.self, from: data) else { return [:] }
+    private static func shuffleRounds(in saved: SavedRounds, for playlists: [String: DisplayPlaylist]) -> [String: [String]] {
         var rounds: [String: [String]] = [:]
         for (display, round) in saved.playlists {
             guard let playlist = playlists[display], playlist.mode == .rotate, playlist.order == .shuffle,
@@ -349,8 +412,20 @@ final class PlaylistStore {
         return rounds
     }
 
-    /// Writes the rounds of the displays that shuffle, and the whole key away when none do.
-    /// Posts nothing: a pick already posts through the date of the next change.
+    /// Random rounds need no playlist to hang on, only a pool the build still knows, so a round
+    /// filed under a pool this build does not have (or under a different signature) is dropped.
+    private static func randomRounds(in saved: SavedRounds) -> [String: [String]] {
+        var rounds: [String: [String]] = [:]
+        for (key, round) in saved.random {
+            guard let pool = randomPool(ofKey: key), round.signature == pool.rawValue, !round.ids.isEmpty else { continue }
+            rounds[key] = Array(round.ids.suffix(roundLimit))
+        }
+        return rounds
+    }
+
+    /// Writes the rounds of the displays that shuffle and Random Wallpaper's, and the whole key
+    /// away when there are none. Posts nothing: a pick already posts through the date of the
+    /// next change, and a Random pick changes nothing the panel shows.
     private func persistRounds() {
         var rounds: [String: Round] = [:]
         for (display, ids) in recent where !ids.isEmpty {
@@ -358,9 +433,14 @@ final class PlaylistStore {
             guard playlist.mode == .rotate, playlist.order == .shuffle else { continue }
             rounds[display] = Round(signature: Self.signature(of: playlist), ids: Array(ids.suffix(Self.roundLimit)))
         }
-        if rounds.isEmpty {
+        var random: [String: Round] = [:]
+        for (key, ids) in randomRounds where !ids.isEmpty {
+            guard let pool = Self.randomPool(ofKey: key) else { continue }
+            random[key] = Round(signature: pool.rawValue, ids: Array(ids.suffix(Self.roundLimit)))
+        }
+        if rounds.isEmpty, random.isEmpty {
             if defaults.object(forKey: Self.roundsKey) != nil { defaults.removeObject(forKey: Self.roundsKey) }
-        } else if let data = try? JSONEncoder().encode(SavedRounds(playlists: rounds)) {
+        } else if let data = try? JSONEncoder().encode(SavedRounds(playlists: rounds, random: random)) {
             defaults.set(data, forKey: Self.roundsKey)
         }
     }

@@ -25,6 +25,17 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-13 — Random Wallpaper command
+
+A new AutomationCommand.random(display:pool:) with pools all and favorites, reached from the menu bar, wallpapermachine://random, a Shortcuts action and a shortcut key. Its pick comes from PlaylistStore.randomPick with a round of its own per display and pool (kept beside the shuffle rounds in WallpaperMachine.playlistRounds), and BridgeStore.activateRandomWallpaperAsync makes it in the display's turn of the command queue. Commit 8 of the desktop-menubar lane, checked in an isolated worktree on macOS 27.0.1; targeted runs only, not the full gate.
+
+- `python3 scripts/test.py --only AutomationCommandTests --only PlaylistStoreTests --only PlaylistPlannerTests --only HotKeyPreferencesTests --only StatusMenuModelTests --only WallpaperDisplayTransferIntegrationTests --only WebPanelGeneralSettingsTests` — exit 0; 105 passed, 0 failed, 0 skipped
+- `python3 scripts/test.py --only AppAutomationTests --only GlobalHotKeysTests --only PlaylistSchedulerTests --only WebPanelPlaylistTests --only WallpaperBackupTests --only ControlPanelPlaybackToolsTests --only ControlPanelShellTests --only WebPanelAssetsTests --only ActivationLogTests --only WallpaperActivationRecoveryTests` — exit 0; 172 passed, 0 failed, 0 skipped
+- Mutation check: dropping the held-wallpaper exclusion and recording a pick before it was applied each failed the integration test written for it; both were reverted
+- Every scripts/tests/test_*.py module run directly — all passed (the WebUI key check includes the two new keys in ja, zh-Hans and zh-Hant)
+- Not run: the full `python3 scripts/test.py` gate, `python3 scripts/check_rust.py` and `python3 scripts/check_renderer.py` (no Rust, bridge or renderer change), Release build, any desktop run
+- Not covered: how the menu item draws and reads, a real shortcut key press, Siri or Shortcuts listing the action and its Choose from option, and how a random pick looks on real displays; see manual-smoke "The menu bar with two displays"
+
 ## 2026-10-13 — Menu bar: control each display
 
 The menu bar menu gets a submenu per display when two or more displays can show their own wallpaper (StatusMenuModel), with Remove from Display, Start Again and Open in Control Panel; one display keeps the flat menu. Lane worktree, targeted run only, not the full gate.
@@ -105,14 +116,3 @@ Commit `perf(desktop): stop retaking the Mission Control picture while the curre
 - `python3 scripts/test.py --only DesktopWallpaperTests` — 62 passed of 62 (8 new tests for the freshness floor, one existing test now builds the sync with a zero floor). Three mutations each fail the expected tests: a poster never kept (4 failures), the settle rule ignored (1), Space scope ignored plus a failed encode left counting as fresh (2).
 - The same class plus WallpaperPresentationPolicyTests, PlaybackPolicyCompositionTests, WallpaperSpaceMonitorTests and WallpaperActivationRecoveryTests — 121 passed of 121.
 - Gap: what Mission Control shows after rapid Space swipes with an animated wallpaper, and whether WallpaperAgent's container stops growing, were not observed; headless tests use synthetic pixels, an in-memory workspace and an injected clock.
-
-## 2026-10-13 — Power source read again on wake (resample)
-
-Commit `fix(power): read the power source again when the Mac wakes`: WallpaperBridge.resample_power_source() and PowerSourceResampler (wake plus a follow-up two seconds later). Taken in a worktree on top of the power watcher change (`perf(bridge): let the power watcher sleep until something happens`); the full gate was not run here.
-
-- `cargo test -p wallpaper-bridge --lib power` — exit 0; 32 passed (7 new resample tests). Two mutations (resample never processed; unreadable source delivered) each fail the expected tests.
-- `python3 scripts/build.py --renderer-only` — exit 0; App/Bridge/Generated diff limited to resamplePowerSource and its checksum.
-- `python3 scripts/test.py --only PowerSourceResamplerTests` plus SystemConditionMonitorTests, PlaybackPolicyCompositionTests, WallpaperSpaceMonitorTests, WallpaperActivationRecoveryTests, WebPanelPerformanceSettingsTests — 56 passed of 56 (7 new). Removing the cancellation guard and stop()'s cancel together fails 2 tests; removing the start() guard fails 1.
-- `python3 scripts/check_rust.py` — exit 0; bridge 401 passed, core 224 passed; local-corpus shader cases skipped.
-- `python3 scripts/check_renderer.py` — exit 0; skipped: 4 asset-dependent cases (text_object_runtime_test x2, playback_gpu_test, metal_scene_draw_smoke).
-- Gap: a real plug or unplug during sleep, and whether IOKit answers correctly at the instant of wake, were not exercised; headless tests prove the repair logic and idempotence only.

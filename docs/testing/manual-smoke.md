@@ -417,6 +417,11 @@ unit-tested; how the menu draws and reads on real screens is not.
 - [ ] In the second display's submenu choose **Next Wallpaper** and an entry under
       **Recently used**: only that display changes, whichever display the panel targets,
       and the entry for what it shows is ticked.
+- [ ] Choose **Random Wallpaper** in each display's submenu a few times: only that display
+      changes, never to the wallpaper it already shows, and after as many choices as the
+      library has wallpapers each has come round once. With one wallpaper in the library the
+      item is not offered. A shortcut key recorded for **Random wallpaper** in Settings →
+      General does the same on the panel's target display.
 - [ ] Choose **Remove from Display** on one display: it empties and the other keeps its
       wallpaper. Its submenu now offers **Start Again**; choosing it brings back the
       wallpaper that was removed. With a Rotate playlist on that display, wait past the

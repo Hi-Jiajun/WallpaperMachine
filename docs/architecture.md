@@ -67,8 +67,12 @@ automation schedulers, the web and native-video wallpaper hosts, system media).
   wallpaper-navigation actions, **Lock Screen** and Exit. `StatusMenuModel`
   (`App/Services/Automation/`) decides the layout without AppKit: one display that can show
   its own wallpaper keeps the flat Previous / Next / Recently used, and two or more get a
-  submenu each (main display first, then left to right) holding that display's own commands,
-  **Remove from Display** or **Start Again**, and **Open in Control Panel**. `AppDelegate`
+  submenu each (main display first, then left to right) holding that display's own commands
+  (Previous, Next, **Random Wallpaper**, Recently used),
+  **Remove from Display** or **Start Again**, and **Open in Control Panel**. Random Wallpaper
+  is `AutomationCommand.random`, like a link, a Shortcuts action or a shortcut key: it takes the
+  display's turn in `BridgeStore.commands` and picks from the library and favorites then
+  (`BridgeStore.activateRandomWallpaperAsync`), with its round kept by `PlaylistStore`. `AppDelegate`
   gathers its input (`statusMenuInput`), renders the entries and runs the chosen command
   through `AppAutomation`, so a menu choice shares the display's queue slot with the panel
   and a failure shows at the foot of the menu. Lock Screen calls the private

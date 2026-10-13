@@ -1533,11 +1533,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             let wallpapers = Dictionary(store.librarySnapshot.wallpapers.filter(\.supported).map { ($0.id, $0.title) },
                                         uniquingKeysWith: { first, _ in first })
             let available = Set(wallpapers.keys)
+            // The menu's Random Wallpaper draws from every wallpaper that can play and is not held
+            // back, so it acts on a display when something other than what it shows is among them.
+            let randomPool = AutomationCommand.RandomPool.all.candidates(
+                library: Array(available), favorites: [], held: Set(store.heldWallpaperIDs))
             displays = StatusMenuModel.orderedDisplays(candidates, mainDisplay: screens.first?.id).map { candidate in
-                StatusMenuModel.Display(
-                    id: candidate.id, title: candidate.title, wallpaperID: store.shownWallpaperID(on: candidate.id),
+                let shown = store.shownWallpaperID(on: candidate.id)
+                return StatusMenuModel.Display(
+                    id: candidate.id, title: candidate.title, wallpaperID: shown,
                     canPrevious: store.previousWallpaperID(displayId: candidate.id) != nil,
                     canNext: canActivateNextWallpaper(store: store, displayId: candidate.id),
+                    canRandom: randomPool.contains { $0 != shown },
                     recent: store.history.recent(on: candidate.id, available: available).map {
                         StatusMenuModel.Recent(id: $0, title: wallpapers[$0] ?? $0)
                     })
@@ -1588,6 +1594,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                   canActivateNextWallpaper(store: store, displayId: display)
             else { return }
             runAutomation(.next(display: display))
+        case .random(let display):
+            runAutomation(.random(display: display, pool: .all))
         case .apply(let id, let display), .startAgain(let id, let display):
             runAutomation(.apply(wallpaperID: id, display: display))
         case .remove(let display):
@@ -1960,6 +1968,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 guard let id = store.nextWallpaperID(displayId: displayId) else { return }
                 try await store.activateWallpaperAsync(id: id, displayId: displayId, origin: .user)
             }
+        case .random(let display, let pool):
+            // The pick is made when the display's turn comes; see `activateRandomWallpaperAsync`.
+            try await store.activateRandomWallpaperAsync(
+                displayId: try automationDisplay(display, store: store), pool: pool,
+                favorites: Self.favoriteWallpaperIDs(), playlists: .shared)
         case .apply(let id, let display):
             let displayId = try automationDisplay(display, store: store)
             guard store.librarySnapshot.wallpapers.contains(where: { $0.id == id }) else {

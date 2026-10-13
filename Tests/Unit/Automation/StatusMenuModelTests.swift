@@ -41,10 +41,10 @@ final class StatusMenuModelTests: XCTestCase {
 
     private func display(
         _ id: String, title: String? = nil, shows wallpaper: String? = nil, previous: Bool = false, next: Bool = false,
-        recent: [String] = []
+        random: Bool = false, recent: [String] = []
     ) -> StatusMenuModel.Display {
         .init(id: id, title: title ?? "Display \(id)", wallpaperID: wallpaper, canPrevious: previous, canNext: next,
-              recent: recent.map { .init(id: $0, title: "Wallpaper \($0)") })
+              canRandom: random, recent: recent.map { .init(id: $0, title: "Wallpaper \($0)") })
     }
 
     private func input(
@@ -139,12 +139,12 @@ final class StatusMenuModelTests: XCTestCase {
 
     func testEveryCommandInASubmenuNamesTheSubmenusDisplay() {
         let entries = StatusMenuModel.entries(for: input(displays: ["1", "2", "3"].map {
-            display($0, shows: $0 == "2" ? nil : "a", previous: true, next: true, recent: ["a", "b"])
+            display($0, shows: $0 == "2" ? nil : "a", previous: true, next: true, random: true, recent: ["a", "b"])
         }))
 
         func displayOf(_ command: Command) -> String? {
             switch command {
-            case .previous(let id), .next(let id), .remove(let id), .openInPanel(let id),
+            case .previous(let id), .next(let id), .random(let id), .remove(let id), .openInPanel(let id),
                  .apply(_, let id), .startAgain(_, let id): return id
             case .openControlPanel, .playPause, .lockScreen: return nil
             }
@@ -167,6 +167,52 @@ final class StatusMenuModelTests: XCTestCase {
         }
         XCTAssertEqual(commands(in: entries).compactMap(displayOf), [],
                        "the flat Previous, Next and Recently used are gone")
+    }
+
+    // MARK: Random Wallpaper
+
+    func testTheFlatMenuOffersRandomWallpaperAfterNextAndBeforeRecentlyUsed() {
+        let entries = StatusMenuModel.entries(for: input(
+            displays: [display("primary", shows: "b", previous: true, next: true, random: true, recent: ["b"])]))
+
+        XCTAssertEqual(shape(entries), [
+            .command(.openControlPanel, checked: false),
+            .separator,
+            .command(.playPause, checked: false),
+            .command(.previous(display: "primary"), checked: false),
+            .command(.next(display: "primary"), checked: false),
+            .command(.random(display: "primary"), checked: false),
+            .submenu([.command(.apply(wallpaper: "b", display: "primary"), checked: true)]),
+            .command(.lockScreen, checked: false),
+        ])
+    }
+
+    func testEverySubmenuOffersRandomWallpaperAfterNext() {
+        let entries = StatusMenuModel.entries(for: input(displays: [
+            display("primary", shows: "a", previous: true, next: true, random: true, recent: ["a"]),
+            display("7", shows: nil, next: true, random: true),
+        ]))
+
+        let inner = submenus(in: entries)
+        XCTAssertEqual(inner.count, 2)
+        XCTAssertEqual(commands(in: inner[0]), [
+            .previous(display: "primary"), .next(display: "primary"), .random(display: "primary"),
+            .remove(display: "primary"), .openInPanel(display: "primary"),
+        ])
+        XCTAssertEqual(commands(in: inner[1]), [.next(display: "7"), .random(display: "7"), .openInPanel(display: "7")],
+                       "an empty display can be given a random wallpaper")
+    }
+
+    func testRandomWallpaperIsLeftOutWhereThereIsNothingElseToChooseFrom() {
+        let flat = StatusMenuModel.entries(for: input(displays: [display("primary", shows: "a", next: true, random: false)]))
+        XCTAssertFalse(shape(flat).contains(.command(.random(display: "primary"), checked: false)))
+
+        let several = StatusMenuModel.entries(for: input(displays: [
+            display("primary", shows: "a", random: false), display("7", shows: "b", random: true),
+        ]))
+        let inner = submenus(in: several)
+        XCTAssertFalse(commands(in: inner[0]).contains(.random(display: "primary")), "this display shows the only wallpaper")
+        XCTAssertTrue(commands(in: inner[1]).contains(.random(display: "7")), "the other display can still be changed")
     }
 
     func testPlayPauseAppearsOnlyWithAFreshSnapshotAndActiveWallpapers() {

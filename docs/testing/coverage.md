@@ -30,7 +30,9 @@ is linked from the domain; the shared limits are collected at the end.
 solar and DST boundaries, appearance selection, Focus recovery and manual
 precedence, editor round trips and preference validation, and the menu bar menu's
 layout (flat for one display, a submenu per display with every command naming its
-display, ordering and titles, Remove or Start Again, which displays are listed). `WallpaperBackupTests`
+display, ordering and titles, Remove or Start Again, Random Wallpaper where something else
+can be chosen, which displays are listed), the `random` link and its pools, and the
+shortcut key for it. `WallpaperBackupTests`
 covers rule merging and local recovery-state rollback. What each covers, and what
 needs the running app, is in [automation](../features/automation.md#verification).
 
@@ -940,7 +942,8 @@ signed-in answers and the real sign-in page are not covered
 `PlaylistStoreTests` (persistence, custom intervals, the trigger defaulting for older
 records and starting a fresh wait, reordering, plans copied
 across displays and detached on manual edit, cleanup when wallpapers or
-collections go, a shuffle round kept across a relaunch and dropped with its playlist),
+collections go, a shuffle round kept across a relaunch and dropped with its playlist,
+Random Wallpaper's own round per display and pool, kept apart from the playlist's),
 `PlaylistSchedulerTests` (fake clock, library and activation;
 no renderer: failure cooldowns, paused catch-up, a newer manual command
 outranking a failed automatic switch, a rotation yielding to a waiting Apply, a manual choice holding a

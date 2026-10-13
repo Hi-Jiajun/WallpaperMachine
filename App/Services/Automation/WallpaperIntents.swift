@@ -90,6 +90,40 @@ struct PreviousWallpaperIntent: AppIntent {
     }
 }
 
+/// Where Random Wallpaper draws from.
+enum RandomWallpaperSource: String, AppEnum {
+    case all, favorites
+
+    static let typeDisplayRepresentation: TypeDisplayRepresentation = "Choose from"
+    static let caseDisplayRepresentations: [RandomWallpaperSource: DisplayRepresentation] = [
+        .all: "All wallpapers", .favorites: "Favorites",
+    ]
+
+    var pool: AutomationCommand.RandomPool {
+        switch self {
+        case .all: .all
+        case .favorites: .favorites
+        }
+    }
+}
+
+struct RandomWallpaperIntent: AppIntent {
+    static let title: LocalizedStringResource = "Random Wallpaper"
+    static let description: IntentDescription? = IntentDescription(
+        "Changes a chosen display to a random wallpaper other than the one it shows, or the target display when none is chosen.")
+
+    @Parameter(title: "Display")
+    var display: WallpaperDisplayEntity?
+
+    @Parameter(title: "Choose from", default: .all)
+    var source: RandomWallpaperSource
+
+    func perform() async throws -> some IntentResult {
+        try await AppAutomation.shared.perform(.random(display: display?.id, pool: source.pool))
+        return .result()
+    }
+}
+
 struct ApplyWallpaperIntent: AppIntent {
     static let title: LocalizedStringResource = "Apply Wallpaper"
     static let description: IntentDescription? = IntentDescription(
@@ -142,6 +176,10 @@ struct WallpaperMachineShortcuts: AppShortcutsProvider {
             intent: NextWallpaperIntent(),
             phrases: ["Next wallpaper in \(.applicationName)", "Change wallpaper with \(.applicationName)"],
             shortTitle: "Next Wallpaper", systemImageName: "forward")
+        AppShortcut(
+            intent: RandomWallpaperIntent(),
+            phrases: ["Random wallpaper in \(.applicationName)", "Pick a random wallpaper with \(.applicationName)"],
+            shortTitle: "Random Wallpaper", systemImageName: "shuffle")
         AppShortcut(
             intent: ApplyWallpaperIntent(),
             phrases: ["Apply a wallpaper with \(.applicationName)"],

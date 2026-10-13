@@ -41,7 +41,8 @@ names the build (`ClientPaths.buildStamp`).
   playlist rotation, an automatic rule or a Space or Focus rule that comes round to the
   wallpaper leaves the hold and the strike count alone, so the rotation cannot reopen the
   wallpaper that crashed the app each time it reaches it: that display stays empty and the
-  banner says why. Apply is as careful as Try again: if the engine refuses, the wallpaper
+  banner says why. **Random Wallpaper** is a user's choice, so it never picks a held
+  wallpaper, or chance would release the hold. Apply is as careful as Try again: if the engine refuses, the wallpaper
   stays held, and if the app dies while it loads, the next launch holds it again.
 - A hold on a wallpaper that no display is assigned to is kept but not shown; the banner
   returns if the wallpaper is assigned again.

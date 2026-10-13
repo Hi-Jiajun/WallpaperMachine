@@ -352,12 +352,13 @@ playlist changes are included; reapplying an unchanged assignment adds nothing.
 ### Menu bar, one display at a time
 
 With one display that can show its own wallpaper the menu bar keeps a flat list:
-Previous Wallpaper, Next Wallpaper and Recently used act on that display. With two or
+Previous Wallpaper, Next Wallpaper, Random Wallpaper and Recently used act on that display. With two or
 more (enabled, independent and connected; a mirror or a disabled display is not
 listed) the menu has one submenu per display, named as the panel names it and ordered
 the main display first, then left to right as the screens sit; screens with the same
-name get (2), (3). Each submenu holds that display's own Previous, Next and Recently
-used (the wallpaper on the display is ticked), then **Remove from Display** while it
+name get (2), (3). Each submenu holds that display's own Previous, Next, **Random Wallpaper**
+(a random wallpaper other than the one it shows, from the whole library; left out when no
+other wallpaper can play) and Recently used (the wallpaper on the display is ticked), then **Remove from Display** while it
 shows a wallpaper or **Start Again** once it is empty (it applies the wallpaper that
 was removed, the newest in the display's history, and is left out when the display has
 none), then **Open in Control Panel**, which makes that display the panel's target.

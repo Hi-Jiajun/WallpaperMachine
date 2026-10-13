@@ -50,4 +50,16 @@ final class HotKeyPreferencesTests: XCTestCase {
         XCTAssertEqual(Set(HotKeyAction.allCases.map(\.identifier)).count, HotKeyAction.allCases.count)
         XCTAssertFalse(HotKeyAction.allCases.contains { $0.identifier == 0 })
     }
+
+    func testTheRandomShortcutPicksFromEveryWallpaperOnTheTargetDisplay() throws {
+        XCTAssertTrue(HotKeyAction.allCases.contains(.randomWallpaper))
+        XCTAssertEqual(HotKeyAction.randomWallpaper.command, .random(display: nil, pool: .all))
+        XCTAssertEqual(HotKeyAction.randomWallpaper.identifier, 5)
+        XCTAssertEqual(HotKeyAction(rawValue: "randomWallpaper"), .randomWallpaper, "the name a saved shortcut and a backup use")
+
+        let preferences = HotKeyPreferences(defaults: defaults)
+        try preferences.set(playPause, for: .randomWallpaper)
+        XCTAssertEqual(HotKeyPreferences(defaults: defaults).bindings[.randomWallpaper], playPause)
+        XCTAssertThrowsError(try preferences.set(playPause, for: .nextWallpaper), "it shares the one-action-per-combination rule")
+    }
 }

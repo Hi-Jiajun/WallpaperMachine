@@ -29,6 +29,46 @@ final class AutomationCommandTests: XCTestCase {
         XCTAssertEqual(command("wallpapermachine://layout?id=desk"), .applyDisplayLayout(layoutID: "desk"))
     }
 
+    func testRandomTakesAnOptionalDisplayAndPool() {
+        XCTAssertEqual(command("wallpapermachine://random"), .random(display: nil, pool: .all))
+        XCTAssertEqual(command("wallpapermachine://random?display=primary"), .random(display: "primary", pool: .all))
+        XCTAssertEqual(command("wallpapermachine://random?from=favorites"), .random(display: nil, pool: .favorites))
+        XCTAssertEqual(command("wallpapermachine://random?display=a&from=all"), .random(display: "a", pool: .all))
+        XCTAssertEqual(command("wallpapermachine://RANDOM?from=Favorites&display=identity%3A%7B%7D"),
+                       .random(display: "identity:{}", pool: .favorites), "the command and the pool ignore case")
+        XCTAssertEqual(command("wallpapermachine://random?display=all"), .random(display: "all", pool: .all),
+                       "all is not a display here; running it reports an unknown display")
+    }
+
+    /// A pick is made at random, so a link that names a wallpaper, an unknown pool or anything
+    /// else must not be read as the nearest thing it resembles.
+    func testRandomRefusesWhatItDoesNotTake() {
+        for link in [
+            "wallpapermachine://random?from=weekly", "wallpapermachine://random?from=all&from=favorites",
+            "wallpapermachine://random?id=1", "wallpapermachine://random?from=", "wallpapermachine://random?display=a&display=b",
+            "wallpapermachine://random?from=favorites&volume=1", "wallpapermachine://random/extra",
+            "wallpapermachine://random?from=collection",
+        ] {
+            XCTAssertNil(command(link), link)
+        }
+    }
+
+    func testAPoolOffersTheWallpapersThatCanPlayInLibraryOrder() {
+        let library = ["d", "a", "c", "b"]
+        XCTAssertEqual(AutomationCommand.RandomPool.all.candidates(library: library, favorites: ["a", "x"], held: []), library)
+        XCTAssertEqual(AutomationCommand.RandomPool.favorites.candidates(library: library, favorites: ["a", "b", "x"], held: []),
+                       ["a", "b"], "a favorite that left the library is not offered")
+        XCTAssertEqual(AutomationCommand.RandomPool.favorites.candidates(library: library, favorites: [], held: []), [])
+    }
+
+    /// A pick is the user's own choice and so releases a wallpaper the app is holding back after
+    /// a crash: chance must not be able to reopen it.
+    func testAHeldBackWallpaperIsNeverOffered() {
+        let library = ["a", "b", "c"]
+        XCTAssertEqual(AutomationCommand.RandomPool.all.candidates(library: library, favorites: [], held: ["b"]), ["a", "c"])
+        XCTAssertEqual(AutomationCommand.RandomPool.favorites.candidates(library: library, favorites: ["b", "c"], held: ["b"]), ["c"])
+    }
+
     /// `all` means every display only on an apply link; the other commands still take a display's
     /// own selector and report an unknown one when they run.
     func testAllIsNotADisplayForAnyOtherCommand() {

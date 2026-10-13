@@ -32,6 +32,40 @@ final class WebPanelGeneralSettingsTests: ControlPanelTestCase {
     return Panel(defaults: defaults, root: root, workshop: workshop)
   }
 
+  /// The Settings row, the action that records the key and the one that clears it all take the
+  /// action by its name, so a new shortcut action needs no panel code of its own.
+  func testTheRandomWallpaperShortcutIsListedRecordedAndCleared() async throws {
+    let panel = try makePanel()
+    let hotKeys = HotKeyPreferences(defaults: panel.defaults)
+    let controller = WebPanelController(
+      store: BridgeStore(bridge: WallpaperBridge(noPointer: .init())), navigation: ControlPanelNavigation(),
+      workshop: panel.workshop, defaults: panel.defaults, appLanguage: .english(), hotKeys: hotKeys)
+    defer { controller.stop() }
+    func rows() throws -> [[String: Any]] {
+      let settings = try XCTUnwrap(controller.snapshot()["settings"] as? [String: Any])
+      return try XCTUnwrap(settings["hotkeys"] as? [[String: Any]])
+    }
+    func shortcut() throws -> String? {
+      try rows().first { $0["id"] as? String == "randomWallpaper" }?["shortcut"] as? String
+    }
+
+    let ids = try rows().compactMap { $0["id"] as? String }
+    let next = try XCTUnwrap(ids.firstIndex(of: "nextWallpaper"))
+    XCTAssertEqual(ids.firstIndex(of: "randomWallpaper"), next + 1, "it is listed after Next wallpaper")
+    XCTAssertNil(try shortcut(), "no shortcut is taken until one is recorded")
+
+    try await controller.perform(
+      "hotkeySet",
+      body: ["id": "randomWallpaper", "code": "KeyR", "command": true, "option": true, "control": true, "shift": false])
+    XCTAssertEqual(hotKeys.bindings[.randomWallpaper]?.label, try shortcut())
+    XCTAssertNotNil(try shortcut())
+    XCTAssertEqual(HotKeyPreferences(defaults: panel.defaults).bindings[.randomWallpaper], hotKeys.bindings[.randomWallpaper])
+
+    try await controller.perform("hotkeyClear", body: ["id": "randomWallpaper"])
+    XCTAssertNil(try shortcut())
+    XCTAssertNil(hotKeys.bindings[.randomWallpaper])
+  }
+
   func testHidingAfterApplyingIsOffUntilTurnedOnAndPersists() async throws {
     let panel = try makePanel()
     let controller = panel.makeController()

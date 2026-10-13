@@ -107,8 +107,8 @@ A wallpaper you apply to a rotating display is also left alone for a while: the
 rotation's next change waits at least `min(interval, 5 minutes)` from your choice
 (`PlaylistScheduler.noteManualChoice`), so a change that was a minute away does
 not replace it. Any wallpaper you apply yourself counts: the panel's Apply, one
-from the menu bar's recently used list or **Previous**, a link, Shortcuts action
-or shortcut key that applies one, a display layout or a copy to another display,
+from the menu bar's recently used list, **Previous** or **Random Wallpaper**, a link,
+Shortcuts action or shortcut key that applies one, a display layout or a copy to another display,
 and applying the wallpaper already on screen. A deadline further away than that is
 never shortened, so a long interval keeps its rhythm, and a paused display whose
 deadline already passed is pushed back too, so it does not swap the moment
@@ -195,6 +195,29 @@ by hand, **Change now**, or a wallpaper put on the display by anyone else while 
 is open counts as the display's answer to that unlock. An unlock that no display waits for
 is forgotten, so choosing the setting later never acts on an unlock that is over.
 
+## Random Wallpaper
+
+**Random Wallpaper** is a command, not a playlist mode: the menu bar (after **Next
+Wallpaper**, for the display whose menu it is), a `wallpapermachine://random` link, the
+Shortcuts app and an optional shortcut key change a display to a random wallpaper other
+than the one it shows ([automation](automation.md#commands)). It draws from every
+wallpaper that can play, or from the favorites only (`from=favorites`, **Choose from** in
+Shortcuts), and never from one the app is holding back after a crash
+([crash recovery](crash-recovery.md)). It does not need the display to have a playlist,
+and it leaves a playlist's settings, order and next-change date alone.
+
+Like a shuffled playlist it goes through the whole pool before it repeats a wallpaper, but
+it keeps a round of its own for each display and pool, so Random never uses up or restarts
+a shuffled playlist's round and the other way round. **Next Wallpaper** is unchanged: the
+playlist's order for a display that rotates, otherwise the next one in the library. A pick
+is the user's own choice, so it holds a rotation back for a few minutes like any wallpaper
+chosen by hand and lifts a hold left by removing the wallpaper
+([a display you cleared](#a-display-you-cleared)). The pick is made when the display's turn
+in the command queue comes, from whatever the display shows then, and the round only
+remembers a pick once it has been shown, so one that failed to load can come up again. When
+the pool holds nothing but the wallpaper on screen, the command fails with a message
+instead of changing nothing; the menu leaves **Random Wallpaper** out in that case.
+
 ## Storage
 
 `PlaylistStore` keeps every display's playlist in the `WallpaperMachine.playlists`
@@ -216,6 +239,13 @@ or restoring a backup that replaced the playlist starts a fresh round. Editing a
 keeps the round, and deleting a wallpaper drops it from the round. A finished round is
 not saved, an in-order rotation saves nothing, and a round holds at most 2,048
 wallpapers (the newest). It is run state like the hold: it is not part of a backup.
+
+[Random Wallpaper](#random-wallpaper)'s rounds are kept in the same default, in a `random`
+field filed under `<display>|<pool>` (`primary|all`, `primary|favorites`), each with its pool as
+its signature, so a round filed under a pool this build does not have is ignored. They are saved as
+soon as a pick is shown, need no playlist, are dropped when a wallpaper is deleted, and a
+finished round or a round of nothing is not saved. They use the same 2,048-wallpaper cap and are
+left out of a backup too.
 
 ## Code
 
@@ -256,7 +286,11 @@ snapshot). `WallpaperPresentationPolicyTests` checks the unlock edge: once per u
 when the notification was missed, after a wake or a user switch, and never at start or
 stop. `WallpaperBackupTests` checks that a backup carries the trigger and rejects an
 unknown one.
-`WallpaperDisplayTransferIntegrationTests` checks that only the user's removal reports
+`PlaylistStoreTests` also covers Random Wallpaper's round: no repeat of the wallpaper on screen
+and every wallpaper once per round (over many seeds), surviving a relaunch, one round per display
+and pool, separate from the playlist round, kept without a playlist, pruned and capped, and ignored
+when unreadable or filed under an unknown pool. `WallpaperDisplayTransferIntegrationTests` checks
+that only the user's removal reports
 one, not a delete or a reload, and that the menu bar's removal clears only the named
 display, waits behind a switch asked for first and refuses a mirrored or disabled display. `ControlPanelPlaybackToolsTests` drives reorder buttons
 and drag/drop in an offscreen panel, including an edit made while a drag is in

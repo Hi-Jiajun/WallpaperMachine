@@ -1067,6 +1067,30 @@ final class BridgeStore {
         }
     }
 
+    /// Changes `displayId` to a random wallpaper of `pool` other than the one it shows, as
+    /// **Random Wallpaper** does. The pick is made when the display's turn in the command queue
+    /// comes, so it is measured from what the display shows then, and it is the user's own
+    /// choice (a playlist gives way to it, and it is a manual choice for the rotation's grace).
+    /// `playlists` remembers the pick only once it has been shown, so a pick that failed to
+    /// apply takes nothing out of the round. Throws when the pool holds no other wallpaper.
+    func activateRandomWallpaperAsync(
+        displayId: String, pool: AutomationCommand.RandomPool, favorites: Set<String>, playlists: PlaylistStore
+    ) async throws {
+        try await commands.run(slot: Self.activationSlot(displayId: displayId)) {
+            try validateActivationTarget(displayId)
+            let candidates = pool.candidates(
+                library: librarySnapshot.wallpapers.filter(\.supported).map(\.id),
+                favorites: favorites, held: Set(heldWallpaperIDs))
+            guard let id = playlists.randomPick(
+                on: displayId, pool: pool, from: candidates, after: shownWallpaperID(on: displayId))
+            else {
+                throw WallpaperActionError(message: String(localized: "There is no other wallpaper to choose from."))
+            }
+            try await activateWallpaperAsync(id: id, displayId: displayId, origin: .user)
+            playlists.recordRandomPick(id, on: displayId, pool: pool, candidates: candidates)
+        }
+    }
+
     /// The wallpaper `displayId` shows of its own, nil when it is empty or mirrors another display
     /// (a mirror holds no assignment of its own).
     func shownWallpaperID(on displayId: String) -> String? {
