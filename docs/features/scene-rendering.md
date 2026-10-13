@@ -30,26 +30,41 @@ place of the outcome.
 
 Native Metal draws image layers, text layers, sprite-sheet animation,
 two-dimensional puppets, two-dimensional sprite, sprite-trail, rope and rope-trail
-particles, perspective cameras for those layer types, ordinary effect chains and
-scene post-processing, layers that read an image another layer produced earlier in
-the same frame, images the runtime replaces while the scene plays, and BGRA or
-8-bit NV12 video textures — the latter either converted once per frame or, with
+particles, 3D models and skyboxes, perspective cameras, scene lights, ordinary
+effect chains and scene post-processing, layers that read an image another layer
+produced in the same frame, effects that read the previous frame (a motion-blur
+trail, a fluid or ripple simulation), images the runtime replaces while the scene
+plays, and BGRA or 8-bit NV12 video textures — the latter either converted once per
+frame or, with
 [**Direct video plane sampling**](performance.md#direct-video-plane-sampling) on,
-sampled by the layer's own shader. Lit particles, 3D models, dynamic lighting, history-feedback effects, HDR or 10-bit
-video, plain video wallpapers and shaders that do not translate fall back as a
-whole scene. Compatibility additionally instantiates leaf `.mdl` model objects,
-activates the scene's perspective camera, honours material `depthtest` /
-`depthwrite` / `cullmode` on a depth attachment for the default target and keeps
-authored `scene.lights`; Native Metal refuses those scenes as a whole until it grows
-the same depth, perspective and lighting path. Both renderers apply a material's
-depth state the same way: a pass depth-tests only into a target with a depth
-attachment (a scene with a perspective camera or models), and every other pass
-draws in painter's order. A material writes depth as authored whatever its
-blending, as Wallpaper Engine's own translucent depth-tested font materials expect,
-so a translucent or additive layer that asks to write depth hides what is drawn
-behind it afterwards, its transparent texels included; a pass that does not
-depth-test writes none. `input.cursorWorldPosition` stays 2D
-(`z = 0`), so a scripted orbit drag may not match Wallpaper Engine.
+sampled by the layer's own shader. A scene falls back as a whole for HDR or 10-bit
+video, a plain video wallpaper, a shader that does not translate, particle geometry
+in a layout it does not recognise (lit particles among them), a depth compare other
+than less-or-equal, a multisampled target, an effect that samples a depth buffer, or
+a layer that reads its own previous frame (its `_b` composite, bound anywhere but its
+own effects).
+`input.cursorWorldPosition` stays 2D (`z = 0`), so a scripted orbit drag may not
+match Wallpaper Engine.
+
+Scene lighting is the author's own shader reading the light positions and
+premultiplied colours, which both renderers fill from the scene's lights the same
+way. Both renderers apply a material's depth state and cull mode the same way: a
+pass into a depth-attached target (a model, a skybox, a scene with a perspective
+camera) takes its material's depth test, depth write and cull mode, against the same
+front faces, and every other pass draws in painter's order and culls nothing. A
+material writes depth as authored whatever its blending, as Wallpaper Engine's own
+translucent depth-tested font materials expect, so a translucent or additive layer
+that asks to write depth hides what is drawn behind it afterwards, its transparent
+texels included; a pass that does not depth-test writes none. A target the frame
+reads before it writes it keeps its own image from one frame to the next on both
+renderers, so the reader sees exactly the previous frame; a scene with such a loop
+is never called still while it runs. Translating to the Metal shading language
+turns GLSL's `inverse`, which Metal has no built-in for, into helper functions, so
+the stock perspective, reflection, water, light-shaft and cursor-ripple effects
+translate. A step that samples an image nothing in the scene produces (a layer
+texture whose layer draws no composite) is skipped on Native Metal exactly as
+Compatibility skips it, instead of sending the scene to Compatibility; an image that
+exists and does not load still does.
 
 Puppets and rope geometry behave the same on both renderers. A puppet is deformed
 by its author's own skinning shader, and its pose comes from the one animation

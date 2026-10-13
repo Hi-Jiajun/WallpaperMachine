@@ -409,6 +409,7 @@ protected:
     {
         vulkan::SetSceneOptimizationEnabled(true);
         SetSceneOnDemandEnabled(false);
+        SetSceneRendererPreference(SceneRendererPreference::Compatibility);
         RendererCounters::SetEnabled(false);
         std::error_code ignored;
         std::filesystem::remove_all(root_, ignored);
@@ -690,8 +691,9 @@ TEST_F(UnchangedPresent, AStaticSceneStopsPresentingOnceEveryPassIsReused)
 // "Update only when the scene changes": a history loop keeps changing the
 // picture with nothing else changing -- a trail keeps fading, an accumulation
 // keeps converging -- so it must keep the clock running although no shader
-// reads the time, with pixel reuse off and on. The same card without the loop
-// is the control: it goes idle, so the loop is what keeps the clock.
+// reads the time, with pixel reuse off and on, on either renderer. The same
+// card without the loop is the control: it goes idle, so the loop is what
+// keeps the clock.
 TEST_F(UnchangedPresent, AHistoryLoopKeepsTheClockRunningWithoutATimeUniform)
 {
     SetSceneOnDemandEnabled(true);
@@ -700,17 +702,24 @@ TEST_F(UnchangedPresent, AHistoryLoopKeepsTheClockRunningWithoutATimeUniform)
         const char* name;
         bool        history;
         bool        optimise;
+        bool        native;
     };
-    for (const auto& run : { Case { "still card", false, true },
-                             Case { "history loop, reuse off", true, false },
-                             Case { "history loop, reuse on", true, true } }) {
+    for (const auto& run : { Case { "still card", false, true, false },
+                             Case { "history loop, reuse off", true, false, false },
+                             Case { "history loop, reuse on", true, true, false },
+                             Case { "still card, native", false, true, true },
+                             Case { "history loop, native", true, true, true } }) {
         SCOPED_TRACE(run.name);
         vulkan::SetSceneOptimizationEnabled(run.optimise);
+        SetSceneRendererPreference(run.native ? SceneRendererPreference::NativeMetalPreferred
+                                              : SceneRendererPreference::Compatibility);
         const auto scene = root_ / (std::string(run.name) + " scene");
         const auto project = run.history ? WriteHistoryScene(scene) : WriteStaticScene(scene);
         RunningWallpaper running(project, root_ / (std::string(run.name) + " run"));
         ASSERT_TRUE(running.WaitForFirstFrame()) << "the scene never reached the surface";
-        ASSERT_EQ(running.wallpaper().sceneBackendSelection().backend, SceneBackend::LegacyVulkan);
+        ASSERT_EQ(running.wallpaper().sceneBackendSelection().backend,
+                  run.native ? SceneBackend::NativeMetal : SceneBackend::LegacyVulkan)
+            << running.wallpaper().sceneBackendSelection().fallback_reason;
         std::this_thread::sleep_for(600ms);
 
         const uint32_t reasons = running.wallpaper().sceneDemandReasons();

@@ -23,7 +23,24 @@ device.
   refused; a puppet under an effect chain is judged by the chain's final mesh,
   and only on the chain's last node. An unused perspective camera does not
   reject; a supported layer that names a perspective camera, or an active
-  perspective camera with supported layers, is accepted.
+  perspective camera with supported layers, is accepted. Scene lights are
+  accepted (`MetalCapability.ASceneWithLightsIsAccepted`), and so is a graph
+  that reads a target before it writes it
+  (`MetalGraph.ReadingATargetThatIsOnlyWrittenLaterIsAcceptedAsHistory`).
+- **Lighting** — `MetalSceneDraw.ASceneLightReachesTheAuthorsLightingUniforms`:
+  a point light's premultiplied colour (colour x intensity x radius squared)
+  and position reach the author's `g_LightsColorPremultiplied` and
+  `g_LightsPosition` through the shared value updater, read back as pixels.
+- **Previous-frame reads** — `MetalSceneDraw.ALayerReadingThePreviousFrameSeesExactlyThePreviousFrame`:
+  a card sampling `_rt_MipMappedFrameBuffer` sees the cleared buffer on the
+  first frame and the frame before on every later one, byte-identical with
+  scene optimisation off and on, and the loop is reported as `Feedback` demand
+  so updating only on change cannot stop a trail mid-fade.
+- **An input nothing produces** — `MetalSceneDraw.AStepSamplingAnImageNothingProducesIsSkippedLikeOnCompatibility`:
+  a step whose sampled slot the graph left without a name (a layer texture
+  whose layer draws no composite) neither draws nor clears, as on
+  Compatibility, instead of refusing the scene. An image that has a name and
+  does not load still sends the whole scene to Compatibility.
 - **Face culling** — `MetalSceneDraw.ADepthTestedDrawCullsTheSameFacesAsCompatibility`:
   a card under a perspective camera, turned towards and away, with back, front
   and no culling and with and without a depth attachment, drawn by both
@@ -433,10 +450,11 @@ device.
 - **A history loop is never called still** — `UnchangedPresent.AHistoryLoopKeepsTheClockRunningWithoutATimeUniform`:
   a layer sampling a target the graph fills only after it has drawn (the fixture
   uses `_rt_MipMappedFrameBuffer`; a motion-blur trail or an accumulation is the
-  same shape) keeps changing the picture with no time uniform. The compatibility
-  backend reports `Feedback` for a `carriesPreviousFrame` target its compiled
-  graph reads or writes, so the clock keeps running with pixel reuse off and on,
-  while the same card without the loop goes idle.
+  same shape) keeps changing the picture with no time uniform. Both backends
+  report `Feedback` for a `carriesPreviousFrame` target their compiled graph
+  reads or writes, so the clock keeps running (Compatibility with pixel reuse off
+  and on, Native Metal with it on), while the same card without the loop goes
+  idle on either.
 - **Geometry rewritten on an event** — `SceneDemandMapping.GeometryRewrittenOnAnEventIsNotAReasonToKeepDrawing`
   in `static_subgraph_cache_test`: `EventMesh` and `DynamicMesh` must both cost a
   target its cacheability and must differ at the scene level. Collapsing them

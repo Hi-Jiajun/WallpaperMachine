@@ -661,7 +661,12 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
     exempt (the frame's prepass clears it first). `RenderTargetLifetime.OnlyTargetsReadBeforeTheFrameWritesThemKeepTheirOwnImage`
     and `.CarriedOverKeysAreTheOnesReadBeforeTheirFirstWrite` cover the graph,
     `PlaybackGPU.CarriedTargetsShareTheirImageWithNoOtherTarget` the reservation.
-    It costs exactly those buffers' memory.
+    It costs exactly those buffers' memory. Native Metal keeps every carried-over
+    target in an image of its own for the life of the graph, so it draws these too
+    (`MetalSceneDraw.ALayerReadingThePreviousFrameSeesExactlyThePreviousFrame`:
+    the first frame reads the cleared buffer, each later one the frame before,
+    byte-identical with scene optimisation off and on), and reports the loop as
+    a reason to keep the clock running.
 - **Render-target reuse correctness** — `static_subgraph_cache_test` (reuse
   verdicts, copy elision, alias resolution, and `OnlyWritersOfCacheableTargetsAreSampled`:
   both backends sample only the passes `Plan` reads, and an unsampled pass cannot

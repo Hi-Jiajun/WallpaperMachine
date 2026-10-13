@@ -215,6 +215,51 @@ std::filesystem::path WriteFeedbackFixture(const std::filesystem::path& root)
     return project;
 }
 
+/// A small card of the probe tile and, apart from it, an echo card that
+/// shows the scene's previous frame through `_rt_MipMappedFrameBuffer`. The
+/// graph fills that buffer from the frame's output after the echo has read
+/// it, so what the echo samples is always the frame before.
+std::filesystem::path WriteHistoryFixture(const std::filesystem::path& root)
+{
+    const auto project = WriteFixture(root);
+    const std::map<std::string, std::string> files {
+        { "models/small.json", R"({"width":96,"height":64,"material":"materials/tile.json"})" },
+        { "models/echo.json", R"({"width":192,"height":128,"material":"materials/echo.json"})" },
+        { "materials/echo.json",
+          R"({"passes":[{"shader":"history_echo","blending":"translucent","cullmode":"nocull",)"
+          R"("depthtest":"disabled","depthwrite":"disabled","textures":["_rt_MipMappedFrameBuffer"]}]})" },
+        { "shaders/history_echo.vert",
+          "uniform mat4 g_ModelViewProjectionMatrix;\n"
+          "attribute vec3 a_Position;\n"
+          "attribute vec2 a_TexCoord;\n"
+          "varying vec2 v_TexCoord;\n"
+          "void main() {\n"
+          "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+          "  v_TexCoord = a_TexCoord;\n"
+          "}\n" },
+        { "shaders/history_echo.frag",
+          "uniform sampler2D g_Texture0;\n"
+          "varying vec2 v_TexCoord;\n"
+          "void main() {\n"
+          "  gl_FragColor = vec4(texture(g_Texture0, v_TexCoord).rgb, 1.0);\n"
+          "}\n" },
+        { "layout.json",
+          R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+          R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0.0,0.0,0.0],)"
+          R"("cameraparallax":false,"orthogonalprojection":{"width":384,"height":256}},)"
+          R"("objects":[{"id":1,"name":"tile","image":"models/small.json","origin":[64,208,0],)"
+          R"("scale":[1,1,1],"angles":[0,0,0],"visible":true},)"
+          R"({"id":2,"name":"echo","image":"models/echo.json","origin":[272,80,0],)"
+          R"("scale":[1,1,1],"angles":[0,0,0],"visible":true}]})" },
+    };
+    for (const auto& [name, contents] : files) {
+        const auto path = root / name;
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream(path) << contents;
+    }
+    return project;
+}
+
 struct LoadedScene
 {
     fs::VFS                vfs;
@@ -6546,6 +6591,153 @@ TEST_F(MetalSceneDraw, AFeedbackCopyTradesTexturesAndDrawsTheSamePicture)
     EXPECT_GT(lensed, 500u) << "no lens shows the card it was drawn over";
 }
 
+TEST_F(MetalSceneDraw, ASceneLightReachesTheAuthorsLightingUniforms)
+{
+    // Lighting in a scene is its author's shader reading the light arrays. The
+    // card writes the first light's premultiplied colour (colour x intensity x
+    // radius squared) and its x position, so the drawn pixel is those values.
+    const auto project = WriteFixture(root_ / "lit");
+    std::ofstream(root_ / "lit/shaders/metal_probe.frag")
+        << "uniform vec4 g_LightsColorPremultiplied[3];\n"
+           "uniform vec4 g_LightsPosition[4];\n"
+           "varying vec2 v_TexCoord;\n"
+           "void main() {\n"
+           "  gl_FragColor = vec4(g_LightsColorPremultiplied[0].rg, g_LightsPosition[0].x / 400.0, 1.0);\n"
+           "}\n";
+    std::ofstream(root_ / "lit/layout.json")
+        << R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+           R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0.0,0.0,0.0],)"
+           R"("cameraparallax":false,"orthogonalprojection":{"width":384,"height":256}},)"
+           R"("objects":[{"id":1,"name":"tile","image":"models/tile.json","origin":[192,128,0],)"
+           R"("scale":[1,1,1],"angles":[0,0,0],"visible":true},)"
+           R"({"id":2,"name":"lamp","light":"point","color":"1 0.5 0","intensity":0.5,"radius":1,)"
+           R"("origin":"100 64 300","angles":"0 0 0","scale":"1 1 1","visible":true}]})";
+    LoadedScene loaded;
+    std::string error;
+    ASSERT_TRUE(LoadScene(project, root_ / "lit-cache", loaded, error)) << error;
+    ASSERT_EQ(loaded.scene->lights.size(), 1u);
+    const auto selection = SelectSceneBackend(*loaded.scene);
+    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+
+    @autoreleasepool {
+        id<MTLDevice> device  = MTLCreateSystemDefaultDevice();
+        CAMetalLayer* layer   = [CAMetalLayer layer];
+        layer.device          = device;
+        layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+        layer.drawableSize    = CGSizeMake(384, 256);
+        layer.framebufferOnly = NO;
+
+        MetalRender         render;
+        MetalRenderInitInfo info {
+            .metal_layer          = (__bridge void*)layer,
+            .width                = 384,
+            .height               = 256,
+            .render_width         = 384,
+            .render_height        = 256,
+            .display_scale_factor = 1.0,
+        };
+        ASSERT_TRUE(render.init(info)) << render.lastError();
+        auto graph = sceneToRenderGraph(*loaded.scene);
+        ASSERT_NE(graph, nullptr);
+        ASSERT_TRUE(render.compileRenderGraph(*loaded.scene, *graph)) << render.lastError();
+        render.UpdateCameraFillMode(*loaded.scene, FillMode::ASPECTFIT);
+        AdvanceSceneFrame(render, *loaded.scene);
+        const auto rgba = ReadOutput(render, *loaded.scene);
+        render.destroy();
+
+        // The canvas centre is inside the card.
+        ASSERT_EQ(rgba.size(), 384u * 256u * 4u);
+        const std::size_t centre = (128u * 384u + 192u) * 4u;
+        EXPECT_NEAR(rgba[centre + 0], 128, 2) << "the light's red did not reach the shader";
+        EXPECT_NEAR(rgba[centre + 1], 64, 2) << "the light's green did not reach the shader";
+        EXPECT_NEAR(rgba[centre + 2], 64, 2) << "the light's position did not reach the shader";
+    }
+}
+
+TEST_F(MetalSceneDraw, AStepSamplingAnImageNothingProducesIsSkippedLikeOnCompatibility)
+{
+    // The overlay samples the composite of an object that is a layer by id
+    // but never draws one -- a light here, a hidden text layer in the wild.
+    // The graph finds no producer and leaves the slot without a name. The
+    // compatibility backend then neither draws nor clears that step, every
+    // frame; refusing the whole scene for it would send a wallpaper to a
+    // renderer that draws exactly the same picture.
+    const auto project = WriteFixture(root_ / "unproduced");
+    std::ofstream(root_ / "unproduced/models/overlay.json")
+        << R"({"width":128,"height":96,"material":"materials/overlay.json"})";
+    std::ofstream(root_ / "unproduced/materials/overlay.json")
+        << R"({"passes":[{"shader":"overlay_sample","blending":"translucent","cullmode":"nocull",)"
+           R"("depthtest":"disabled","depthwrite":"disabled","textures":["_rt_imageLayerComposite_3_a"]}]})";
+    std::ofstream(root_ / "unproduced/shaders/overlay_sample.vert")
+        << "uniform mat4 g_ModelViewProjectionMatrix;\n"
+           "attribute vec3 a_Position;\n"
+           "attribute vec2 a_TexCoord;\n"
+           "varying vec2 v_TexCoord;\n"
+           "void main() {\n"
+           "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+           "  v_TexCoord = a_TexCoord;\n"
+           "}\n";
+    std::ofstream(root_ / "unproduced/shaders/overlay_sample.frag")
+        << "uniform sampler2D g_Texture0;\n"
+           "varying vec2 v_TexCoord;\n"
+           "void main() {\n"
+           "  gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0) - texture(g_Texture0, v_TexCoord) * 0.0;\n"
+           "}\n";
+    std::ofstream(root_ / "unproduced/layout.json")
+        << R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+           R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0.0,0.0,0.0],)"
+           R"("cameraparallax":false,"orthogonalprojection":{"width":384,"height":256}},)"
+           R"("objects":[{"id":1,"name":"tile","image":"models/tile.json","origin":[192,128,0],)"
+           R"("scale":[1,1,1],"angles":[0,0,0],"visible":true},)"
+           R"({"id":2,"name":"overlay","image":"models/overlay.json","origin":[192,128,0],)"
+           R"("scale":[1,1,1],"angles":[0,0,0],"visible":true},)"
+           R"({"id":3,"name":"lamp","light":"point","color":"1 1 1","intensity":1,"radius":1,)"
+           R"("origin":"0 0 300","angles":"0 0 0","scale":"1 1 1","visible":true}]})";
+    LoadedScene loaded;
+    std::string error;
+    ASSERT_TRUE(LoadScene(project, root_ / "unproduced-cache", loaded, error)) << error;
+    const auto selection = SelectSceneBackend(*loaded.scene);
+    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+
+    @autoreleasepool {
+        id<MTLDevice> device  = MTLCreateSystemDefaultDevice();
+        CAMetalLayer* layer   = [CAMetalLayer layer];
+        layer.device          = device;
+        layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+        layer.drawableSize    = CGSizeMake(384, 256);
+        layer.framebufferOnly = NO;
+
+        MetalRender         render;
+        MetalRenderInitInfo info {
+            .metal_layer          = (__bridge void*)layer,
+            .width                = 384,
+            .height               = 256,
+            .render_width         = 384,
+            .render_height        = 256,
+            .display_scale_factor = 1.0,
+        };
+        ASSERT_TRUE(render.init(info)) << render.lastError();
+        auto graph = sceneToRenderGraph(*loaded.scene);
+        ASSERT_NE(graph, nullptr);
+        ASSERT_TRUE(render.compileRenderGraph(*loaded.scene, *graph)) << render.lastError();
+        render.UpdateCameraFillMode(*loaded.scene, FillMode::ASPECTFIT);
+        for (int frame = 0; frame < 2; ++frame) AdvanceSceneFrame(render, *loaded.scene);
+        const auto rgba = ReadOutput(render, *loaded.scene);
+        render.destroy();
+
+        // The overlay covers the canvas centre; the tile beneath it shows,
+        // with its constant 0.25 blue, and no overlay white anywhere.
+        ASSERT_EQ(rgba.size(), 384u * 256u * 4u);
+        const std::size_t centre = (128u * 384u + 192u) * 4u;
+        EXPECT_NEAR(rgba[centre + 2], 64, 2) << "the tile under the skipped step is missing";
+        std::size_t white = 0;
+        for (std::size_t i = 0; i + 3 < rgba.size(); i += 4) {
+            if (rgba[i] == 255 && rgba[i + 1] == 255 && rgba[i + 2] == 255) ++white;
+        }
+        EXPECT_EQ(white, 0u) << "the step with no input was drawn";
+    }
+}
+
 TEST_F(MetalSceneDraw, ThePointerSmoothingStepsOnceForEachFrameTheHostDraws)
 {
     // `FrameBegin` steps the parallax cursor's smoothing by one frame time; the
@@ -6609,6 +6801,98 @@ TEST_F(MetalSceneDraw, ThePointerSmoothingStepsOnceForEachFrameTheHostDraws)
         // 0.5 + 0.5 / 60 = 0.5083, 129.6 of 255; stepped twice it is 0.5247.
         EXPECT_NEAR(rgba[centre + 0], 130, 1)
             << "the pointer smoothing did not step exactly once for the frame";
+    }
+}
+
+TEST_F(MetalSceneDraw, ALayerReadingThePreviousFrameSeesExactlyThePreviousFrame)
+{
+    // History: the echo samples a buffer the graph fills only after the echo
+    // has drawn, so frame N shows frame N-1. That buffer is the target's own
+    // image for as long as the graph lives. The first frame must see the
+    // cleared buffer, not this frame's tile, and every later frame must see
+    // the frame before -- with scene optimisation off and on, which plans the
+    // copies and the reuse table differently around the same loop.
+    struct RestoreOptimization
+    {
+        bool was { wallpaper::vulkan::SceneOptimizationEnabled() };
+        ~RestoreOptimization() { wallpaper::vulkan::SetSceneOptimizationEnabled(was); }
+    } restore;
+
+    // The tile's constant blue, 0.25, which nothing else in the fixture draws.
+    const auto tile_pixels = [](const std::vector<uint8_t>& rgba) {
+        std::size_t count = 0;
+        for (std::size_t i = 0; i + 3 < rgba.size(); i += 4) {
+            if (rgba[i + 2] >= 56 && rgba[i + 2] <= 72) ++count;
+        }
+        return count;
+    };
+
+    std::map<bool, std::vector<std::vector<uint8_t>>> frames;
+    for (const bool optimise : { false, true }) {
+        SCOPED_TRACE(optimise ? "optimisation on" : "optimisation off");
+        wallpaper::vulkan::SetSceneOptimizationEnabled(optimise);
+        const std::string name    = optimise ? "history-on" : "history-off";
+        const auto        project = WriteHistoryFixture(root_ / name);
+        LoadedScene       loaded;
+        std::string       error;
+        ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+        const auto selection = SelectSceneBackend(*loaded.scene);
+        ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+
+        @autoreleasepool {
+            id<MTLDevice> device  = MTLCreateSystemDefaultDevice();
+            CAMetalLayer* layer   = [CAMetalLayer layer];
+            layer.device          = device;
+            layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+            layer.drawableSize    = CGSizeMake(384, 256);
+            layer.framebufferOnly = NO;
+
+            MetalRender         render;
+            MetalRenderInitInfo info {
+                .metal_layer          = (__bridge void*)layer,
+                .width                = 384,
+                .height               = 256,
+                .render_width         = 384,
+                .render_height        = 256,
+                .display_scale_factor = 1.0,
+            };
+            ASSERT_TRUE(render.init(info)) << render.lastError();
+            auto graph = sceneToRenderGraph(*loaded.scene);
+            ASSERT_NE(graph, nullptr);
+            ASSERT_TRUE(render.compileRenderGraph(*loaded.scene, *graph)) << render.lastError();
+            render.UpdateCameraFillMode(*loaded.scene, FillMode::ASPECTFIT);
+
+            // Nothing in the fixture moves, so only the loop can keep it
+            // changing; the clock must not be allowed to stop on it.
+            EXPECT_TRUE(render.ShaderUpdateDemandReasons() &
+                        wallpaper::vulkan::DynamicReason::Feedback);
+
+            for (int frame = 0; frame < 4; ++frame) {
+                AdvanceSceneFrame(render, *loaded.scene);
+                frames[optimise].push_back(ReadOutput(render, *loaded.scene));
+            }
+            render.destroy();
+        }
+
+        const auto& drawn = frames[optimise];
+        ASSERT_EQ(drawn.size(), 4u);
+        // Frame 0 reads the cleared buffer. Had the echo read this frame's
+        // own picture it would already hold the tile, and frame 1 would add
+        // nothing to it.
+        const auto alone = tile_pixels(drawn[0]);
+        EXPECT_GT(alone, 3000u) << "the tile itself was not drawn";
+        // Frame 1 shows frame 0 at half size: the tile once more, a quarter of
+        // its area.
+        EXPECT_GT(tile_pixels(drawn[1]), alone + alone / 8)
+            << "the echo did not show the previous frame's tile";
+        // Frame 2 shows frame 1, which already held an echo of its own; once
+        // the echo's echo is below a pixel the picture stops changing.
+        EXPECT_GE(tile_pixels(drawn[2]), tile_pixels(drawn[1]));
+        EXPECT_NE(drawn[1], drawn[2]) << "frame 2 did not read frame 1";
+    }
+
+    for (std::size_t frame = 0; frame < frames[true].size(); ++frame) {
+        EXPECT_EQ(frames[true][frame], frames[false][frame]) << "frame " << frame;
     }
 }
 

@@ -1334,6 +1334,11 @@ struct MetalRender::Impl
         NSUInteger                         index_element_size { sizeof(uint16_t) };
         std::vector<SceneMesh::DrawRange>  draw_ranges;
         uint32_t                           vertex_count { 0 };
+        /// A texture slot the shader samples names nothing: the render graph
+        /// found no producer for it (a layer texture whose layer draws no
+        /// composite). The compatibility backend then neither draws nor clears
+        /// the step, every frame, and neither does this one.
+        bool                               unproduced_input { false };
 
         // ---- geometry the runtime rewrites every frame (particles)
         /// True when the mesh behind this pass is dynamic. Everything below is
@@ -1602,6 +1607,9 @@ struct MetalRender::Impl
     /// The uniform write, the geometry upload and the encoder all ask this one
     /// question, so they cannot disagree about a pass.
     bool passDraws(std::size_t index) const;
+    /// Whether the step's clear applies this frame. A step the compatibility
+    /// backend drops for an input nothing produces drops its clear with it.
+    bool passClears(std::size_t index) const;
     /// Decides which copies are replaced by a trade of textures. Called after
     /// the reuse table is built, because a reused image must keep its texture.
     void planFeedbackSwaps();
@@ -2404,6 +2412,7 @@ bool MetalRender::Impl::passDraws(std::size_t index) const
 {
     const auto& pass = prepared[index];
     if (pass.kind != MetalPassKind::CustomShader || pass.pipeline == nil) return false;
+    if (pass.unproduced_input) return false;
     const auto& desc = descriptions[index];
     return desc.visibility_node == nullptr || desc.visibility_node->EffectiveVisible() ||
            (desc.visibility_node->MustProduce() && ! desc.target_key.empty() &&
@@ -2522,7 +2531,13 @@ bool MetalRender::Impl::feedbackReaderRenders(std::size_t index) const
 {
     const auto reader = feedback_swaps[index].reader;
     if (reader < static_skip.size() && static_skip[reader] != 0) return false;
-    return passDraws(reader) || descriptions[reader].load_action == MetalLoadAction::Clear;
+    return passDraws(reader) || passClears(reader);
+}
+
+bool MetalRender::Impl::passClears(std::size_t index) const
+{
+    if (descriptions[index].load_action != MetalLoadAction::Clear) return false;
+    return index >= prepared.size() || ! prepared[index].unproduced_input;
 }
 
 void MetalRender::Impl::tradeFeedbackTextures(std::size_t index)
@@ -2656,8 +2671,21 @@ bool MetalRender::Impl::prepareDraw(Scene& scene, std::size_t index, PreparedPas
         if (! desc.texture_keys[slot].empty()) message += ": " + desc.texture_keys[slot];
         return fail(std::move(message));
     };
+    out.unproduced_input = false;
     for (std::size_t i = 0; i < desc.texture_keys.size(); ++i) {
         if (! out.texture_slots[i].bound()) continue;
+        // No name at all is not an image that failed to load here: nothing in
+        // the scene was going to produce it, on either renderer. A name that
+        // does not load is still a whole-scene fallback below.
+        if (desc.texture_keys[i].empty()) {
+            if (! out.unproduced_input) {
+                LOG_INFO("metal render: %s samples slot %zu, which nothing in the scene produces; "
+                         "the step is skipped as on the compatibility renderer",
+                         material->name.c_str(), i);
+            }
+            out.unproduced_input = true;
+            continue;
+        }
         id<MTLSamplerState> sampler = nil;
         id<MTLTexture> texture = resolveTexture(scene, desc.texture_keys[i], &sampler);
         // A video texture has no frame yet at compile time, which is not a
@@ -3467,6 +3495,16 @@ void MetalRender::Impl::computeDemandReasons(Scene& scene, rg::RenderGraph& grap
         case MetalPassKind::Clear:
         case MetalPassKind::Virtual: break;
         case MetalPassKind::Unsupported: understood_every_pass = false; break;
+        }
+    }
+
+    // A target the frame reads before it writes it hands each frame's result
+    // to the next: a trail keeps fading and an accumulation keeps converging
+    // with nothing else changing, so the clock has to keep running for it.
+    for (const auto& [name, target] : scene.renderTargets) {
+        if (target.carriesPreviousFrame && targets.contains(name)) {
+            reasons |= vulkan::DynamicReason::Feedback;
+            break;
         }
     }
 
@@ -4539,7 +4577,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
             // the graph decided. Without one it needs no render pass at all,
             // and the target keeps what the passes before it left there.
             const bool draws  = impl.passDraws(i);
-            const bool clears = desc.load_action == MetalLoadAction::Clear;
+            const bool clears = impl.passClears(i);
             if (! draws && ! clears) {
                 if (desc.generate_mipmaps) {
                     close_pass();
