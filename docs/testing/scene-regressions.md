@@ -232,6 +232,17 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   projected input (`WE_TEST_INPUT_JSON`, `WE_TEST_CLICK_*`), not by forcing
   overlay alpha. A closed author menu and an audio-driven wave with no audio are
   not evidence that a rendered frame has exercised either feature.
+- **User-switched effects** — `RenderGraph.parsedEffectVisibilityFollowsTheBoundUserProperty`
+  (`rendergraph_smoke`, image layers) and
+  `TextObjectRuntime.TextEffectVisibilityFollowsTheBoundUserProperty`. An
+  effect's `visible` bound to a user property (`{"user": "toggle", "value":
+  false}`, or a combo `condition`) holds the editor's value only as a default: the parser builds the effect when the
+  property's current value says so, by the layer-visibility rule
+  (`ResolveBoolSetting`), and keeps the authored value for a property the project
+  does not declare. A settings change reloads the scene, so this is decided at
+  parse time with no per-frame cost; a scripted effect `visible` keeps its
+  authored value. Reading only the default left colour modes and effect toggles
+  in customizable wallpapers doing nothing.
 - **Alignment anchors under dynamic transforms** — `SceneSchema.ImageAlignmentAnchorSurvivesScriptedOriginAndScale`,
   `ScriptRuntimeCompat.RotatedAnchoredLayerTurnsAboutItsAnchor` and
   `.ScriptedRingBarsHangOutwardFromTheirCircle`, plus `nodes.txt` translate diffs

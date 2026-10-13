@@ -126,6 +126,10 @@ bool WPImageEffect::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
     if(this->IsEffectBlacklisted(filePath)) {
         //hide blacklisted effects
         visible = false;
+    } else if (json.contains("visible")) {
+        const auto& setting = json.at("visible");
+        if (setting.is_object() && setting.contains("user") && ! setting.contains("script"))
+            visible_setting = setting;
     }
 	GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
     nlohmann::json jEffect;

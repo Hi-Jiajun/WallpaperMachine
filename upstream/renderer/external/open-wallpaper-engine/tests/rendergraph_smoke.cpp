@@ -1673,6 +1673,112 @@ void main() {
     }
 }
 
+// The materials of every effect the parser built for the scene's layers.
+std::vector<std::string> parsedEffectMaterials(wallpaper::Scene& scene) {
+    std::vector<std::string> names;
+    for (auto& [camera_name, camera] : scene.cameras) {
+        (void)camera_name;
+        if (! camera->HasImgEffect()) continue;
+        auto& layer = *camera->GetImgEffect();
+        for (std::size_t i = 0; i < layer.EffectCount(); ++i) {
+            for (const auto& node : layer.GetEffect(i)->nodes) {
+                if (node.sceneNode == nullptr || node.sceneNode->Mesh() == nullptr) continue;
+                if (const auto* material = node.sceneNode->Mesh()->Material())
+                    names.push_back(material->name);
+            }
+        }
+    }
+    std::sort(names.begin(), names.end());
+    return names;
+}
+
+TEST(RenderGraph, parsedEffectVisibilityFollowsTheBoundUserProperty) {
+    // An effect's `visible` bound to a user property stores the editor's value
+    // only as a default; the property's current value decides, as for a layer.
+    wallpaper::fs::VFS vfs;
+    auto files = std::map<std::string, std::string> {
+        { "/models/util/solidlayer.json",
+          R"({"material":"materials/util/solidlayer.json"})" },
+        { "/materials/util/solidlayer.json",
+          R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":["solid.tex"]}]})" },
+        { "/shaders/genericimage.vert",
+          R"(attribute vec3 a_Position;
+attribute vec2 a_TexCoord;
+varying vec2 v_TexCoord;
+void main() {
+  gl_Position = vec4(a_Position, 1.0);
+  v_TexCoord = a_TexCoord;
+}
+)" },
+        { "/shaders/genericimage.frag",
+          R"(uniform sampler2D g_Texture0;
+varying vec2 v_TexCoord;
+void main() {
+  gl_FragColor = texture(g_Texture0, v_TexCoord);
+}
+)" },
+        { "/materials/solid.tex.tex", "" },
+    };
+    // A material is named after its shader, so each effect gets its own.
+    for (const std::string name : { "toggled", "chosen", "unchosen", "unbound" }) {
+        files["/effects/" + name + "/effect.json"] =
+            R"({"name":")" + name + R"(","passes":[{"material":"materials/effects/)" + name +
+            R"(.json"}]})";
+        files["/materials/effects/" + name + ".json"] =
+            R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"effects/)" +
+            name + R"(","textures":[null]}]})";
+        files["/shaders/effects/" + name + ".vert"] = files.at("/shaders/genericimage.vert");
+        files["/shaders/effects/" + name + ".frag"] = files.at("/shaders/genericimage.frag");
+    }
+    REQUIRE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+
+    const std::string scene_json = R"({
+      "camera": {"center":[0,0,0], "eye":[0,0,1], "up":[0,1,0]},
+      "general": {
+        "ambientcolor":[0.2,0.2,0.2], "skylightcolor":[0.3,0.3,0.3],
+        "clearcolor":[0,0,0], "cameraparallax":false,
+        "cameraparallaxamount":0, "cameraparallaxdelay":0,
+        "cameraparallaxmouseinfluence":0,
+        "orthogonalprojection":{"width":640,"height":360}
+      },
+      "objects": [
+        {"id":930,"name":"customizable","image":"models/util/solidlayer.json",
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"size":[64,64],"visible":true,
+         "effects":[
+           {"file":"effects/toggled/effect.json","id":931,
+            "visible":{"user":"toggle","value":false}},
+           {"file":"effects/chosen/effect.json","id":932,
+            "visible":{"user":{"name":"mode","condition":"2"},"value":false}},
+           {"file":"effects/unchosen/effect.json","id":933,
+            "visible":{"user":{"name":"mode","condition":"1"},"value":true}},
+           {"file":"effects/unbound/effect.json","id":934,
+            "visible":{"user":"missing","value":true}}
+         ]}
+      ]
+    })";
+
+    wallpaper::audio::SoundManager sound_manager(wallpaper::audio::SoundManager::OutputBackend::Null);
+    wallpaper::WPSceneParser       parser;
+
+    // Without properties the scene file's values are all there is.
+    auto authored = parser.Parse("effect-visibility-authored", scene_json, vfs, sound_manager);
+    REQUIRE(authored != nullptr);
+    REQUIRE((parsedEffectMaterials(*authored) ==
+             std::vector<std::string> { "effects/unbound", "effects/unchosen" }));
+
+    const wallpaper::ProjectProperties properties {
+        { "toggle", wallpaper::RuntimeScalarValue::Bool(true) },
+        { "mode", wallpaper::RuntimeScalarValue::String("2") },
+    };
+    auto chosen = parser.Parse(
+        wallpaper::SceneParseRequest {
+            .scene_id = "effect-visibility-chosen", .project_properties = &properties },
+        scene_json, vfs, sound_manager);
+    REQUIRE(chosen != nullptr);
+    REQUIRE((parsedEffectMaterials(*chosen) ==
+             std::vector<std::string> { "effects/chosen", "effects/toggled", "effects/unbound" }));
+}
+
 TEST(RenderGraph, linkedEffectSourceFallsBackToBaseTargetWhenEffectsFailToLoad) {
     wallpaper::fs::VFS vfs;
     auto files = std::map<std::string, std::string> {

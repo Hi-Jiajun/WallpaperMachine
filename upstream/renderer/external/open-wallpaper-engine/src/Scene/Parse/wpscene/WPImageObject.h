@@ -51,6 +51,10 @@ public:
     int32_t                      id;
     std::string                  name;
     bool                         visible { true };
+    /// `visible` as written when a user property decides it: `visible` above
+    /// is then only the editor's default, which the parser replaces with the
+    /// property's current value. Null for a fixed or scripted visibility.
+    nlohmann::json               visible_setting;
     int32_t                      version;
     std::vector<WPMaterial>      materials;
     std::vector<WPMaterialPass>  passes;

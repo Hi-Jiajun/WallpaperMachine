@@ -849,6 +849,72 @@ TEST(TextObjectRuntime, ParserRoutesTextObjectEffectsThroughImageEffectLayer) {
     EXPECT_FLOAT_EQ(updates.at("g_Time")[0], 0.5f);
 }
 
+TEST(TextObjectRuntime, TextEffectVisibilityFollowsTheBoundUserProperty) {
+    // The scene file's `value` is the editor's default; the property decides.
+    fs::VFS vfs;
+    std::map<std::string, std::string> files;
+    for (const std::string name : { "chosen", "unchosen" }) {
+        files["/effects/" + name + "/effect.json"] =
+            R"({"name":")" + name + R"(","passes":[{"material":"materials/effects/)" + name +
+            R"(.json"}]})";
+        files["/materials/effects/" + name + ".json"] =
+            R"({"passes":[{"shader":"effects/)" + name + R"(","textures":[null]}]})";
+        files["/shaders/effects/" + name + ".vert"] =
+            "layout(binding = 1) uniform mat4 g_ModelViewProjectionMatrix;\n"
+            "in vec3 a_Position;\n"
+            "in vec2 a_TexCoord;\n"
+            "out vec2 v_TexCoord;\n"
+            "void main() { gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0); v_TexCoord = a_TexCoord; }\n";
+        files["/shaders/effects/" + name + ".frag"] =
+            "uniform sampler2D g_Texture0;\n"
+            "in vec2 v_TexCoord;\n"
+            "void main() { gl_FragColor = texture(g_Texture0, v_TexCoord); }\n";
+    }
+    MountAssets(vfs, files);
+    audio::SoundManager sound_manager;
+    WPSceneParser       parser;
+    ProjectProperties   properties {
+        { "glow", RuntimeScalarValue::Bool(true) },
+        { "style", RuntimeScalarValue::String("2") },
+    };
+    SceneParseRequest request {
+        .scene_id           = "text-effect-user-visibility",
+        .project_properties = &properties,
+    };
+
+    auto scene = parser.Parse(request,
+                              MinimalSceneObjects(R"JSON([
+            {
+              "id": 1,
+              "name": "caption",
+              "text": "hello",
+              "font": "Arial",
+              "pointsize": 20,
+              "origin": "0 0 0",
+              "size": "200 40",
+              "visible": true,
+              "effects": [
+                {"file": "effects/chosen/effect.json", "id": 2,
+                 "visible": {"user": "glow", "value": false}},
+                {"file": "effects/unchosen/effect.json", "id": 3,
+                 "visible": {"user": {"name": "style", "condition": "1"}, "value": true}}
+              ]
+            }
+          ])JSON"),
+                              vfs,
+                              sound_manager);
+
+    ASSERT_NE(scene, nullptr);
+    auto* text = FindRootChild(*scene, "caption");
+    ASSERT_NE(text, nullptr);
+    ASSERT_TRUE(scene->cameras.contains(text->Camera()));
+    auto& layer = *scene->cameras.at(text->Camera())->GetImgEffect();
+    ASSERT_EQ(layer.EffectCount(), 1u);
+    const auto* material = layer.GetEffect(0)->nodes.front().sceneNode->Mesh()->Material();
+    ASSERT_NE(material, nullptr);
+    EXPECT_EQ(material->name, "effects/chosen");
+}
+
 TEST(TextObjectRuntime, RuntimeTextEffectTargetsResizeWithTextRasterSize) {
     fs::VFS vfs;
     MountAssets(vfs,

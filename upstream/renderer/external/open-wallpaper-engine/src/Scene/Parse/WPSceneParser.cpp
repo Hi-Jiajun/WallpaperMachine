@@ -1694,8 +1694,25 @@ void RegisterLayerAlpha(ParseContext& context, std::string_view runtime_name,
     }
 }
 
+// An effect a user property switches on or off is built only when the
+// property's current value -- a preset or the user's choice, by the same rule
+// as a layer's visibility -- says so. The scene file's value is the editor's
+// default. A property change reloads the scene, so deciding here suffices.
+void ResolveUserEffectVisibility(ParseContext& context,
+                                 std::vector<wpscene::WPImageEffect>& effects,
+                                 std::string_view runtime_name) {
+    if (context.scene->runtime == nullptr) return;
+    for (auto& effect : effects) {
+        if (effect.visible_setting.is_null()) continue;
+        effect.visible =
+            ResolveBoolSetting(*context.scene->runtime, effect.visible_setting, runtime_name)
+                ->getBool();
+    }
+}
+
 void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
     const auto runtime_name = TextRuntimeName(context, obj);
+    ResolveUserEffectVisibility(context, obj.effects, runtime_name);
     auto       text         = JsonStringOrObjectValue(obj.text, "text");
     const auto font_key     = JsonStringOrObjectValue(obj.font, {});
     const auto anchor       = TextAnchorForObject(obj);
@@ -3204,6 +3221,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     auto& vfs = *context.vfs;
 
     const bool isCompose = (wpimgobj.image == "models/util/composelayer.json");
+    ResolveUserEffectVisibility(context, wpimgobj.effects, runtime_name);
 
     // coloBlendMode load passthrough manaully
     bool color_blend_passthrough = false;
