@@ -47,6 +47,11 @@ enum GlobalPresentation: Comparable, Sendable {
 /// other-app audio can also suspend or unload every display, and mute wallpaper
 /// audio, without touching that choice. The user's own mute of every wallpaper silences them
 /// as well, whatever the rules say, and leaves each wallpaper's saved sound alone.
+///
+/// A third channel, beside presentation and audio, carries the conditions that chose Reduced
+/// quality (`QualityReduction`): wallpapers keep presenting, only at a lower frame-rate ceiling
+/// and render scale. It is decided and acknowledged on its own, never changes
+/// `globalPresentation` or `suspendedDisplayIDs`, and is released on `stop()`.
 @MainActor
 final class WallpaperPresentationPolicy {
     typealias ApplyCompletion = @MainActor (Result<Void, Error>) -> Void
@@ -65,12 +70,14 @@ final class WallpaperPresentationPolicy {
     private let coveredDisplays: @MainActor () -> Set<UInt32>
     private let inactiveDisplays: @MainActor (Set<UInt32>) -> Set<UInt32>
     private let screenLayout: @MainActor () -> [NSRect]
+    private let requestedQualityReductions: @MainActor () -> Set<QualityReduction>
     /// Owned only when neither surfaces nor coverage were injected.
     private let probes: WallpaperCoverageProbes?
     private let occlusionSettleDelay: Duration
     private let counters: RuntimeCounters
     private let applyGlobal: @MainActor (GlobalPresentation, @escaping ApplyCompletion) -> Void
     private let applyAudio: @MainActor (Bool, @escaping ApplyCompletion) -> Void
+    private let applyQuality: @MainActor (Set<QualityReduction>, @escaping ApplyCompletion) -> Void
     private let applyDisplay: @MainActor (UInt32, Bool, @escaping ApplyCompletion) -> Void
 
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
@@ -88,6 +95,8 @@ final class WallpaperPresentationPolicy {
     private var settle: Task<Void, Never>?
     private var appliedGlobal: GlobalPresentation? = .running
     private var appliedAudio: Bool? = false
+    /// What the bridge was last told to reduce for; it starts unthrottled. Nil after a failed delivery.
+    private var appliedQuality: Set<QualityReduction>? = []
     /// Acknowledged state per display. A display with no entry has never been
     /// told anything, so it is presenting.
     private var appliedDisplays: [UInt32: Bool] = [:]
@@ -102,6 +111,8 @@ final class WallpaperPresentationPolicy {
     private(set) var globalPresentation: GlobalPresentation = .running
     /// Wallpaper audio held down by the user's mute of every wallpaper, a mute rule or other-app audio.
     private(set) var isAudioSuppressed = false
+    /// The conditions asking for the reduced-quality profile, whatever presentation does.
+    private(set) var qualityReductions: Set<QualityReduction> = []
     /// Displays suspended on their own, by occlusion or a covered working area.
     private(set) var suspendedDisplayIDs: Set<UInt32> = []
 
@@ -162,10 +173,12 @@ final class WallpaperPresentationPolicy {
         coveredDisplays: (@MainActor () -> Set<UInt32>)? = nil,
         inactiveDisplays: (@MainActor (Set<UInt32>) -> Set<UInt32>)? = nil,
         screenLayout: (@MainActor () -> [NSRect])? = nil,
+        qualityReductions: (@MainActor () -> Set<QualityReduction>)? = nil,
         occlusionSettleDelay: Duration = .seconds(1),
         counters: RuntimeCounters? = nil,
         applyGlobal: @escaping @MainActor (GlobalPresentation, @escaping ApplyCompletion) -> Void,
         applyAudio: (@MainActor (Bool, @escaping ApplyCompletion) -> Void)? = nil,
+        applyQuality: (@MainActor (Set<QualityReduction>, @escaping ApplyCompletion) -> Void)? = nil,
         applyDisplay: @escaping @MainActor (UInt32, Bool, @escaping ApplyCompletion) -> Void
     ) {
         self.workspaceCenter = workspaceCenter
@@ -192,10 +205,12 @@ final class WallpaperPresentationPolicy {
         }
         self.inactiveDisplays = inactiveDisplays ?? { _ in [] }
         self.screenLayout = screenLayout ?? { Self.systemScreenLayout() }
+        requestedQualityReductions = qualityReductions ?? { [] }
         self.occlusionSettleDelay = occlusionSettleDelay
         self.counters = counters ?? .shared
         self.applyGlobal = applyGlobal
         self.applyAudio = applyAudio ?? { _, completion in completion(.success(())) }
+        self.applyQuality = applyQuality ?? { _, completion in completion(.success(())) }
         self.applyDisplay = applyDisplay
     }
 
@@ -283,6 +298,7 @@ final class WallpaperPresentationPolicy {
         suspendedDisplayIDs.removeAll()
         globalPresentation = .running
         isAudioSuppressed = false
+        qualityReductions = []
         deliverPending()
     }
 
@@ -401,6 +417,7 @@ final class WallpaperPresentationPolicy {
         }
         let presentation = resolvedPresentation()
         let audio = resolvedAudioSuppressed()
+        let quality = requestedQualityReductions()
         let current = currentSurfaces()
         let hidden = Set(current.filter { !$0.isVisible }.map(\.displayID))
         let known = Set(current.map(\.displayID))
@@ -426,7 +443,7 @@ final class WallpaperPresentationPolicy {
         }
 
         if presentation != globalPresentation {
-            commitPlayback(presentation: presentation, audio: audio)
+            commitPlayback(presentation: presentation, audio: audio, quality: quality)
             return
         }
         let audioChanged = audio != isAudioSuppressed
@@ -434,6 +451,7 @@ final class WallpaperPresentationPolicy {
             isAudioSuppressed = audio
             AppLog.info("wallpaper audio \(audio ? "suppressed" : "restored")")
         }
+        let qualityChanged = adopt(quality: quality)
         // Resume instantly; delay only occlusion-driven suspension so a Space
         // switch or a Mission Control pass does not freeze a visible wallpaper.
         let revealed = suspendedDisplayIDs.subtracting(hidden)
@@ -460,7 +478,7 @@ final class WallpaperPresentationPolicy {
             let stillHidden = Set(self.currentSurfaces().filter { !$0.isVisible }.map(\.displayID))
             self.commitHidden(newlyHidden.intersection(stillHidden))
         }
-        if audioChanged { deliverPending() }
+        if audioChanged || qualityChanged { deliverPending() }
     }
 
     private func resolvedPresentation() -> GlobalPresentation {
@@ -491,7 +509,7 @@ final class WallpaperPresentationPolicy {
         return otherAudioActive() && otherAudioAction() == .mute
     }
 
-    private func commitPlayback(presentation: GlobalPresentation, audio: Bool) {
+    private func commitPlayback(presentation: GlobalPresentation, audio: Bool, quality: Set<QualityReduction>) {
         if presentation != globalPresentation {
             globalPresentation = presentation
             AppLog.info("presentation \(presentation.logLabel)")
@@ -500,7 +518,19 @@ final class WallpaperPresentationPolicy {
             isAudioSuppressed = audio
             AppLog.info("wallpaper audio \(audio ? "suppressed" : "restored")")
         }
+        adopt(quality: quality)
         deliverPending()
+    }
+
+    /// Takes the conditions' current request as the decision, and says whether it changed.
+    @discardableResult
+    private func adopt(quality: Set<QualityReduction>) -> Bool {
+        guard quality != qualityReductions else { return false }
+        qualityReductions = quality
+        AppLog.info(quality.isEmpty
+            ? "wallpaper quality restored"
+            : "wallpaper quality reduced for \(quality.sorted().map(\.logLabel).joined(separator: ", "))")
+        return true
     }
 
     private func commitHidden(_ hidden: Set<UInt32>) {
@@ -517,7 +547,7 @@ final class WallpaperPresentationPolicy {
     private func deliverPending() {
         guard !deliveryInFlight else { return }
         // The global condition is the coarser one, so it goes first. Audio
-        // follows, then per-display occlusion, one acknowledgement at a time.
+        // and quality follow, then per-display occlusion, one acknowledgement at a time.
         if appliedGlobal != globalPresentation {
             let presentation = globalPresentation
             let resumes = isRunning && presentation == .running && appliedGlobal != .running
@@ -551,6 +581,21 @@ final class WallpaperPresentationPolicy {
                     return
                 }
                 appliedAudio = suppressed
+                deliverPending()
+            }
+            return
+        }
+        if appliedQuality != qualityReductions {
+            let reductions = qualityReductions
+            deliveryInFlight = true
+            applyQuality(reductions) { [self] result in
+                deliveryInFlight = false
+                guard case .success = result else {
+                    // Kept pending like the others: a later evaluation sends it again.
+                    appliedQuality = nil
+                    return
+                }
+                appliedQuality = reductions
                 deliverPending()
             }
             return

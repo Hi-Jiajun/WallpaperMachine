@@ -100,7 +100,7 @@ Missing, empty and non-file video entries are rejected before any change; an
 original synthetic H.264 Matroska clip applies through Apply and Apply changes
 with either backend preference; decoder failures keep the error and leave the
 library usable for retry; history changes only after a successful activation;
-playback-environment changes (suspend/resume, unload/reload, audio) and library
+playback-environment changes (suspend/resume, unload/reload, audio, reduced quality) and library
 refreshes wait for an in-flight apply and the reverse, while explicit Pause still
 interrupts; the first-wallpaper support prompt follows only a successful
 downloaded activation; only the user's own activation reports a manual choice,
@@ -216,8 +216,15 @@ picture shows between a window closing and the web page's window opening.
   defaults and corrupt stored values (the battery mode's `reducedQuality` is not a
   condition choice), the stored Reduced quality choice of the three system conditions
   that is never a rule action, running versus frontmost rules, and the
-  other-audio settle. The user's mute of every wallpaper is one more source of the single
-  audio-suppression flag: delivered at launch, silent without touching presentation, still held
+  other-audio settle. The quality channel is one more delivery beside presentation and audio:
+  a reduction reaches the bridge on its own without suspending anything, an unchanged set is
+  not sent again, a refused request or release is sent again by the next evaluation (and not
+  inside the same one), `stop()` releases it, and it waits for the global acknowledgement and
+  follows it without depending on it. A real `SystemConditionMonitor` wired to the policy covers
+  the chain for heat: serious reduces, critical also pauses without sending the reduction
+  again, cooling to serious resumes and keeps it, and nominal releases it. The store call and
+  the app delegate's closure are thin forwarders and are not tested on their own. The user's
+  mute of every wallpaper is one more source of the single audio-suppression flag: delivered at launch, silent without touching presentation, still held
   by a mute rule or other-app audio when lifted, and released at teardown; its preference
   defaults off, persists and announces one change. Its Settings switch (stored, reported,
   boolean only, the first Playback row following the preference) is in

@@ -335,6 +335,15 @@ per-Space getter and setter through optional private CoreGraphics and HIServices
   suppressed separately (`setAudioSuppressed`) for a mute rule, other-app audio set to mute or the
   user's own mute of every wallpaper (`PlaybackPreferences.wallpapersMuted`). The bridge ORs that one
   flag with each wallpaper's saved mute, so the user's mute never rewrites a saved sound setting.
+  A third channel, beside presentation and audio, carries the conditions that chose Reduced quality
+  (`SystemConditionMonitor.qualityReductions`) to the bridge as `setQualityThrottle`: wallpapers keep
+  presenting under the reduced-quality profile's frame-rate ceiling and render scale for as long as
+  any cause holds. It is decided and acknowledged on its own, after presentation and audio and before
+  the displays, never alters `globalPresentation` or the suspended displays, is sent again by the
+  next evaluation after a refusal, and is released by `stop()`. Like the audio flag it takes
+  `BridgeStore`'s playback-environment lane, so an automatic change waits for an in-flight Apply
+  instead of invalidating it; the snapshot it returns reaches the hosts, the lock-screen export and
+  the energy recorder through `onSnapshotApplied`, as a frame-rate cap change does.
   Occlusion is per display (`setDisplayPresentationSuspended`): one covered screen stops only its own decoding,
   simulation and rendering, and a visible screen never resumes a covered one. Neither call returns a
   snapshot, yet both fold into every web and native video descriptor's `paused`, so `AppDelegate`

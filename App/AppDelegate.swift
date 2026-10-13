@@ -357,6 +357,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 inactiveDisplays: { known in
                     preferences.playsOnlyOnActiveDisplay ? activeDisplay.inactive(among: known) : []
                 },
+                // Conditions that chose Reduced quality instead of a rule action.
+                qualityReductions: { conditions.qualityReductions },
                 applyGlobal: { [weak self] presentation, completion in
                     guard let self, let store = self.store,
                           !self.shutdownInProgress, !self.shutdownComplete else {
@@ -428,6 +430,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                             completion(.success(()))
                         } catch {
                             AppLog.error("audio suppress failed: \(error.localizedDescription)")
+                            completion(.failure(error))
+                        }
+                    }
+                },
+                applyQuality: { [weak self] reductions, completion in
+                    guard let self, let store = self.store,
+                          !self.shutdownInProgress, !self.shutdownComplete else {
+                        completion(.failure(CancellationError()))
+                        return
+                    }
+                    // The snapshot this returns reaches the hosts, the lock-screen export and the
+                    // energy recorder through `onSnapshotApplied`, as a frame-rate cap change does.
+                    Task {
+                        do {
+                            try await store.setQualityThrottleAsync(reductions)
+                            completion(.success(()))
+                        } catch {
+                            AppLog.error("quality throttle failed: \(error.localizedDescription)")
                             completion(.failure(error))
                         }
                     }
@@ -737,9 +757,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             return nil
         }
         let settings = store.settingsSnapshot
-        let reduced = settings.batteryMode == .reducedQuality && settings.onBatteryPower
-        let cap = [settings.frameRateCap, reduced ? settings.batteryTargetFps : nil]
-            .compactMap { $0 }.min()
         let connected = Set(WebWallpaperHost.systemScreens().map(\.id))
         let liveDisplays = Dictionary(store.monitorInformationSnapshot.rows.compactMap { row in
             ResolvedDisplayTitles.liveDisplayID(row.displayId, title: row.title)
@@ -751,7 +768,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             },
             suspendedDisplays: policy.suspendedDisplayIDs,
             nativeVideoDisplays: nativeVideoHost?.activeDisplayIDs ?? [],
-            frameRateCap: cap, renderScale: settings.renderScale,
+            frameRateCap: settings.effectiveFrameRateCap, renderScale: settings.renderScale,
             resolveDisplay: { liveDisplays[$0] })
     }
 

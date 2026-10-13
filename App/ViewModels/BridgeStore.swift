@@ -885,6 +885,19 @@ final class BridgeStore {
         }
     }
 
+    /// Asks the bridge to run every wallpaper at the reduced-quality profile for as long as
+    /// `reductions` is not empty, on top of the battery mode the user saved. The bridge keeps
+    /// it for this run only and lowers frame rate and render scale live, without pausing or
+    /// rebuilding anything. Like the audio flag it is an automatic change of the environment,
+    /// so it waits for an in-flight Apply instead of invalidating it.
+    func setQualityThrottleAsync(_ reductions: Set<QualityReduction>) async throws {
+        try await updatePlaybackEnvironment {
+            let bundle = try await bridge.setQualityThrottle(
+                causes: reductions.sorted().map(\.bridgeCause))
+            apply(bundle)
+        }
+    }
+
     /// Names the language a wallpaper's own label tables are read in. The bridge keeps it only
     /// for this run, so the app sends it at launch and again whenever the language changes.
     /// An inspector that is already open is read again, so its labels change with the language
@@ -1303,6 +1316,17 @@ final class BridgeStore {
            message != latestBridgeErrorMessage {
             latestBridgeErrorMessage = message
             latestBridgeErrorRevision &+= 1
+        }
+    }
+}
+
+extension QualityReduction {
+    /// The reason the bridge is told about.
+    var bridgeCause: BridgeQualityThrottleCause {
+        switch self {
+        case .heat: .heat
+        case .lowPowerMode: .lowPowerMode
+        case .lowBattery: .lowBattery
         }
     }
 }

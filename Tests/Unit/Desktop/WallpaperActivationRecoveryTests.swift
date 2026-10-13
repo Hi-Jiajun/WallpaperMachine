@@ -935,6 +935,7 @@ private func XCTAssertThrowsErrorAsync(
 
 private enum PlaybackEnvironmentChange: CaseIterable {
     case displays, suspend, resume, suspendDisplay, resumeDisplay, unload, reload, mute, unmute
+    case qualityThrottle
 
     @MainActor
     func perform(on store: BridgeStore) async throws {
@@ -948,6 +949,7 @@ private enum PlaybackEnvironmentChange: CaseIterable {
         case .reload: try await store.setPresentationUnloadedAsync(false)
         case .mute: try await store.setAudioSuppressedAsync(true)
         case .unmute: try await store.setAudioSuppressedAsync(false)
+        case .qualityThrottle: try await store.setQualityThrottleAsync([.heat])
         }
     }
 }
@@ -1007,6 +1009,10 @@ private final class ApplyFailureBridge: WallpaperBridge {
     }
 
     override func setAudioSuppressed(suppressed: Bool) async throws -> BridgeSnapshotBundle {
+        try await changeEnvironment()
+    }
+
+    override func setQualityThrottle(causes: [BridgeQualityThrottleCause]) async throws -> BridgeSnapshotBundle {
         try await changeEnvironment()
     }
 
