@@ -83,6 +83,16 @@ device.
   included. On a real scene, `WE_TEST_METAL_PROJECTS` prints render passes and
   blits per frame and CPU per `drawFrame`, and its PPM must stay byte-identical to
   a build without the change.
+- **Shared target images** — `MetalSceneDraw.TargetsThatAreNeverAliveTogetherShareImagesAndDrawTheSamePicture`:
+  traded copies of the scene (two lenses, scene optimisation on) and the effect
+  buffers of two layers drawn one after the other (optimisation off, so nothing is
+  pinned) are drawn with sharing off and on (`MetalRender::SetTargetSharingForTests`);
+  with it on the targets must take fewer bytes, every frame must be
+  byte-identical, and the copies must still be traded rather than blitted. Only a
+  target whose first touch in a frame is a clear that runs, that no copy writes or
+  reads, and that is not carried over, pinned, mip-mapped, depth-attached or the
+  output shares; a pooled copy gives its image back only after its last reader is
+  encoded, and an abandoned frame puts every pooled name back.
 - **Feedback copies** — `MetalSceneDraw.AFeedbackCopyTradesTexturesAndDrawsTheSamePicture`:
   two lenses that each sample `_rt_FullFrameBuffer` over a card, drawn with scene
   optimisation off (the graph's copies are made) and on (the image and its copy

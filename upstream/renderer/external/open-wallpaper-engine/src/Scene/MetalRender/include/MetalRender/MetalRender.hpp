@@ -241,6 +241,11 @@ public:
     /// device's own counter is process-wide and moves with the drawable pool.
     [[nodiscard]] uint64_t RenderTargetBytesForTests() const;
 
+    /// Whether render targets whose lifetimes in a frame do not overlap share
+    /// one image, for graphs compiled from now on. On unless
+    /// `WALLPAPER_MACHINE_METAL_TARGET_SHARING=0`; process-wide, test-only.
+    static void SetTargetSharingForTests(bool enabled);
+
     /// How many shader sources this process has handed to the Metal compiler.
     ///
     /// Test-only, and process-wide rather than per renderer: what it exists to

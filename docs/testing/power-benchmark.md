@@ -312,6 +312,7 @@ decode-correctness defect.
 |---|---|---|
 | Settings → Performance → Advanced → Experimental → Content pacing (`experimental.content_pacing`) | Tick at the configured ceiling | Pace video to its observed content rate |
 | `WALLPAPER_MACHINE_FEEDBACK_COPIES=1` | Native Metal trades textures for a copy a layer only makes to read the image it draws into | Every such copy is made as a copy; the picture is byte-identical either way |
+| `WALLPAPER_MACHINE_METAL_TARGET_SHARING=0` | Native Metal lets targets never alive together share images, and traded copies share a small set | Every target keeps an image of its own; the picture is byte-identical either way, the target memory is not |
 | Settings → Performance → Advanced → Video playback (`video_backend` in the app config) | Compatibility: every wallpaper on the scene engine | Native video preferred: eligible plain local videos on the platform player |
 
 `WALLPAPER_MACHINE_CONTENT_PACING=1` switches content pacing on in headless

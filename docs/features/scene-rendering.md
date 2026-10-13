@@ -464,6 +464,20 @@ same filter applies when a toggle reallocates targets.
 This applies to scenes drawn with **Native Metal preferred**; the Compatibility
 backend already requests its targets from the cache as passes prepare them.
 
+Native Metal also lets targets that are never alive at the same time share one
+image, as Compatibility's cache pools them. A target qualifies when its first touch
+in every frame is a clear that really happens, nothing copies into or out of it,
+and it is not carried into the next frame, pinned for reuse, mip-mapped,
+depth-attached or the scene output; targets of one shape whose spans of passes do
+not overlap then take turns on an image. Copies of the picture so far that a layer
+reads (a lens, a blend mode over the screen) are traded rather than blitted, and the
+traded copies of one source share a small set of images: each copy takes one when it
+runs and gives it back once its last reader has drawn, so a scene with forty such
+copies keeps two or three images instead of forty-one, with no extra blit. A scene
+that draws over the whole screen many times holds about a quarter of the target
+memory it did. `WALLPAPER_MACHINE_METAL_TARGET_SHARING=0` gives every target its own
+image again, for comparison or to read each target's own pixels after a frame.
+
 The lock-screen extension keeps its renderer paused while unlocked or asleep to
 avoid a cold reload on wake; see [lock-screen memory tradeoff](lock-screen.md#how-the-surface-behaves).
 The desktop renderer still needs the textures and render targets of the active

@@ -6896,6 +6896,116 @@ TEST_F(MetalSceneDraw, ALayerReadingThePreviousFrameSeesExactlyThePreviousFrame)
     }
 }
 
+TEST_F(MetalSceneDraw, TargetsThatAreNeverAliveTogetherShareImagesAndDrawTheSamePicture)
+{
+    // Two cases share images: traded copies of the scene (each lens reads a
+    // copy of the picture so far, alive only until the lens has drawn) and
+    // effect buffers of layers drawn one after the other. With sharing on,
+    // fewer bytes of targets must hold exactly the same frames as with every
+    // target in an image of its own, and the copies must still be traded
+    // rather than blitted. Scene optimisation is on for the lenses and off for
+    // the effects, whose static results it would otherwise pin.
+    struct RestoreSwitches
+    {
+        bool optimise { wallpaper::vulkan::SceneOptimizationEnabled() };
+        ~RestoreSwitches()
+        {
+            wallpaper::vulkan::SetSceneOptimizationEnabled(optimise);
+            MetalRender::SetTargetSharingForTests(true);
+        }
+    } restore;
+
+    const auto effect_fixture = [this](const std::filesystem::path& root) {
+        const auto project = WriteFixture(root);
+        std::filesystem::create_directories(root / "effects");
+        std::ofstream(root / "effects/halve.json")
+            << R"({"name":"halve green","passes":[{"material":"materials/halve.json"}]})";
+        std::ofstream(root / "materials/halve.json")
+            << R"({"passes":[{"shader":"halve_green","blending":"translucent","cullmode":"nocull",)"
+               R"("depthtest":"disabled","depthwrite":"disabled","textures":[null]}]})";
+        std::ofstream(root / "shaders/halve_green.vert")
+            << "uniform mat4 g_ModelViewProjectionMatrix;\n"
+               "attribute vec3 a_Position;\n"
+               "attribute vec2 a_TexCoord;\n"
+               "varying vec2 v_TexCoord;\n"
+               "void main() {\n"
+               "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+               "  v_TexCoord = a_TexCoord;\n"
+               "}\n";
+        std::ofstream(root / "shaders/halve_green.frag")
+            << "uniform sampler2D g_Texture0;\n"
+               "varying vec2 v_TexCoord;\n"
+               "void main() {\n"
+               "  gl_FragColor = texture(g_Texture0, v_TexCoord) * vec4(1.0, 0.5, 1.0, 1.0);\n"
+               "}\n";
+        const std::string effects =
+            R"("effects":[{"file":"effects/halve.json","visible":true},{"file":"effects/halve.json","visible":true}])";
+        std::ofstream(root / "layout.json")
+            << R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+               R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0.0,0.0,0.0],)"
+               R"("cameraparallax":false,"orthogonalprojection":{"width":384,"height":256}},)"
+               R"("objects":[{"id":1,"name":"left","image":"models/tile.json","origin":[120,128,0],)"
+               R"("scale":[0.5,0.5,1],"angles":[0,0,0],"visible":true,)" + effects + "},"
+               R"({"id":2,"name":"right","image":"models/tile.json","origin":[264,128,0],)"
+               R"("scale":[0.5,0.5,1],"angles":[0,0,0],"visible":true,)" + effects + "}]}";
+        return project;
+    };
+
+    for (const bool lenses : { true, false }) {
+        SCOPED_TRACE(lenses ? "traded copies" : "effect buffers");
+        wallpaper::vulkan::SetSceneOptimizationEnabled(lenses);
+        std::map<bool, std::vector<std::vector<uint8_t>>>    frames;
+        std::map<bool, uint64_t>                              bytes;
+        std::map<bool, MetalRender::FrameEncodeCountsForTests> counts;
+        for (const bool share : { false, true }) {
+            MetalRender::SetTargetSharingForTests(share);
+            const std::string name =
+                std::string(lenses ? "share-lens-" : "share-effect-") + (share ? "on" : "off");
+            const auto  project = lenses ? WriteFeedbackFixture(root_ / name)
+                                         : effect_fixture(root_ / name);
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal);
+            @autoreleasepool {
+                CAMetalLayer* layer   = [CAMetalLayer layer];
+                layer.device          = MTLCreateSystemDefaultDevice();
+                layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+                layer.drawableSize    = CGSizeMake(384, 256);
+                layer.framebufferOnly = NO;
+                MetalRender         render;
+                MetalRenderInitInfo info {
+                    .metal_layer          = (__bridge void*)layer,
+                    .width                = 384,
+                    .height               = 256,
+                    .render_width         = 384,
+                    .render_height        = 256,
+                    .display_scale_factor = 1.0,
+                };
+                ASSERT_TRUE(render.init(info)) << render.lastError();
+                auto graph = sceneToRenderGraph(*loaded.scene);
+                ASSERT_NE(graph, nullptr);
+                ASSERT_TRUE(render.compileRenderGraph(*loaded.scene, *graph)) << render.lastError();
+                render.UpdateCameraFillMode(*loaded.scene, FillMode::ASPECTFIT);
+                for (int frame = 0; frame < 3; ++frame) {
+                    AdvanceSceneFrame(render, *loaded.scene);
+                    frames[share].push_back(ReadOutput(render, *loaded.scene));
+                }
+                bytes[share]  = render.RenderTargetBytesForTests();
+                counts[share] = render.LastFrameEncodeCountsForTests();
+                render.destroy();
+            }
+        }
+        EXPECT_LT(bytes[true], bytes[false]) << "no target gave its image up";
+        EXPECT_EQ(counts[true].blit_passes, counts[false].blit_passes)
+            << "sharing turned a traded copy into a blit";
+        ASSERT_EQ(frames[true].size(), frames[false].size());
+        for (std::size_t frame = 0; frame < frames[true].size(); ++frame) {
+            EXPECT_EQ(frames[true][frame], frames[false][frame]) << "frame " << frame;
+        }
+    }
+}
+
 TEST_F(MetalSceneDraw, InterleavedFeedbackCopiesPreserveEachReadersImage)
 {
     struct RestoreOptimization
