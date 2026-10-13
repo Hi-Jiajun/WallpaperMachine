@@ -4344,7 +4344,11 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
         id<MTLBuffer> uniforms = impl.uniform_rings[impl.frame_slot];
         auto*         uniform_base = static_cast<uint8_t*>(uniforms.contents);
 
-        if (scene.shaderValueUpdater != nullptr) scene.shaderValueUpdater->FrameBegin();
+        // `FrameBegin` is the host's, once per frame before it draws, as for
+        // the compatibility backend: it steps the parallax cursor's smoothing
+        // by the frame time and places puppet attachments. Calling it here as
+        // well stepped the smoothing twice per frame, so the parallax on this
+        // backend chased the cursor twice as fast.
         for (std::size_t i = 0; i < impl.prepared.size(); ++i) {
             auto&       pass = impl.prepared[i];
             const auto& desc = impl.descriptions[i];

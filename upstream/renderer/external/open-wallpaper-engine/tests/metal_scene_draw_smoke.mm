@@ -1474,6 +1474,9 @@ TEST_F(MetalSceneDraw, ParentedCardsStayJoinedWhileParallaxMovesAndReverses)
             // and local effect targets must not receive parallax a second time.
             for (float cursor : {0.5f, 1.0f, 1.0f, 0.0f, 0.0f, 0.5f}) {
                 scene.shaderValueUpdater->MouseInput(cursor, 1.0f - cursor);
+                // The host's per-frame step, which carries the cursor into
+                // the smoothed position the parallax reads.
+                scene.shaderValueUpdater->FrameBegin();
                 ASSERT_TRUE(render.drawFrame(scene)) << render.lastError();
                 std::vector<uint8_t> pixels;
                 uint32_t width = 0, height = 0;
@@ -3603,6 +3606,8 @@ void AdvanceSceneFrame(MetalRender& render, Scene& scene)
         scene.runtime->Tick(1.0 / 60.0);
         scene.runtime->PumpTextLayerCache();
     }
+    // The host's per-frame step, as `SceneWallpaper`'s draw does it.
+    if (scene.shaderValueUpdater != nullptr) scene.shaderValueUpdater->FrameBegin();
     EXPECT_TRUE(render.drawFrame(scene)) << render.lastError();
     scene.PassFrameTime(1.0 / 60.0);
 }
@@ -6098,6 +6103,9 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                             << render.lastError();
                     }
                 }
+                if (loaded.scene->shaderValueUpdater != nullptr) {
+                    loaded.scene->shaderValueUpdater->FrameBegin();
+                }
                 const double cpu_before = ThreadCpuMilliseconds();
                 ASSERT_TRUE(render.drawFrame(*loaded.scene))
                     << "frame " << frame << ": " << render.lastError();
@@ -6470,6 +6478,72 @@ TEST_F(MetalSceneDraw, AFeedbackCopyTradesTexturesAndDrawsTheSamePicture)
         if (drawn[i + 2] >= 185 && drawn[i + 2] <= 197) ++lensed;
     }
     EXPECT_GT(lensed, 500u) << "no lens shows the card it was drawn over";
+}
+
+TEST_F(MetalSceneDraw, ThePointerSmoothingStepsOnceForEachFrameTheHostDraws)
+{
+    // `FrameBegin` steps the parallax cursor's smoothing by one frame time; the
+    // host calls it once per frame before drawing, on either backend. The card
+    // shows the smoothed pointer's x as red. With a 1 s delay the first 1/60 s
+    // frame moves it a sixtieth of the way from the centre to the cursor at
+    // the right edge; a backend that stepped it again inside its own frame
+    // would draw it nearer the cursor than the compatibility backend does.
+    const auto project = WriteFixture(root_ / "pointer");
+    std::ofstream(root_ / "pointer/shaders/metal_probe.frag")
+        << "uniform vec2 g_PointerPosition;\n"
+           "varying vec2 v_TexCoord;\n"
+           "void main() {\n"
+           "  gl_FragColor = vec4(g_PointerPosition.x, 0.0, 0.25, 1.0);\n"
+           "}\n";
+    std::ofstream(root_ / "pointer/layout.json")
+        << R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+           R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0.0,0.0,0.0],)"
+           R"("cameraparallax":true,"cameraparallaxdelay":1.0,"cameraparallaxamount":0.0,)"
+           R"("cameraparallaxmouseinfluence":0.0,"orthogonalprojection":{"width":384,"height":256}},)"
+           R"("objects":[{"id":1,"name":"tile","image":"models/tile.json","origin":[192,128,0],)"
+           R"("scale":[1,1,1],"angles":[0,0,0],"visible":true}]})";
+    LoadedScene loaded;
+    std::string error;
+    ASSERT_TRUE(LoadScene(project, root_ / "pointer-cache", loaded, error)) << error;
+    ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal);
+
+    @autoreleasepool {
+        id<MTLDevice> device  = MTLCreateSystemDefaultDevice();
+        CAMetalLayer* layer   = [CAMetalLayer layer];
+        layer.device          = device;
+        layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+        layer.drawableSize    = CGSizeMake(384, 256);
+        layer.framebufferOnly = NO;
+
+        MetalRender         render;
+        MetalRenderInitInfo info {
+            .metal_layer          = (__bridge void*)layer,
+            .width                = 384,
+            .height               = 256,
+            .render_width         = 384,
+            .render_height        = 256,
+            .display_scale_factor = 1.0,
+        };
+        ASSERT_TRUE(render.init(info)) << render.lastError();
+        auto graph = sceneToRenderGraph(*loaded.scene);
+        ASSERT_NE(graph, nullptr);
+        ASSERT_TRUE(render.compileRenderGraph(*loaded.scene, *graph)) << render.lastError();
+        render.UpdateCameraFillMode(*loaded.scene, FillMode::ASPECTFIT);
+
+        // One host frame of 1/60 s with the cursor at the right edge.
+        loaded.scene->PassFrameTime(1.0 / 60.0);
+        loaded.scene->shaderValueUpdater->MouseInput(1.0, 0.5);
+        loaded.scene->shaderValueUpdater->FrameBegin();
+        ASSERT_TRUE(render.drawFrame(*loaded.scene)) << render.lastError();
+        const auto rgba = ReadOutput(render, *loaded.scene);
+        render.destroy();
+
+        ASSERT_EQ(rgba.size(), 384u * 256u * 4u);
+        const std::size_t centre = (128u * 384u + 192u) * 4u;
+        // 0.5 + 0.5 / 60 = 0.5083, 129.6 of 255; stepped twice it is 0.5247.
+        EXPECT_NEAR(rgba[centre + 0], 130, 1)
+            << "the pointer smoothing did not step exactly once for the frame";
+    }
 }
 
 TEST_F(MetalSceneDraw, InterleavedFeedbackCopiesPreserveEachReadersImage)

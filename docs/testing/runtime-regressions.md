@@ -24,6 +24,14 @@ device.
   and only on the chain's last node. An unused perspective camera does not
   reject; a supported layer that names a perspective camera, or an active
   perspective camera with supported layers, is accepted.
+- **The host's frame step** — `MetalSceneDraw.ThePointerSmoothingStepsOnceForEachFrameTheHostDraws`:
+  `WPShaderValueUpdater::FrameBegin` (the parallax cursor's smoothing, puppet
+  attachments) is the host's, once per frame before it draws, on either
+  backend. `MetalRender::drawFrame` used to call it again, which stepped the
+  smoothing twice per frame: the parallax on Native Metal chased the cursor
+  twice as fast and a frame earlier than on Compatibility. Test loops that
+  drive `drawFrame` directly take the step themselves, as `SceneWallpaper`'s
+  draw does.
 - **Perspective cameras** — `MetalProjection.PerspectiveUsesFovAspectNearFarAndAHomogeneousDivide`,
   `.UnprojectingNdcHitsTheLayerPlane` and `.CameraAxesFollowTheAttachedNode` in
   `metal_backend_test`; `MetalSceneDraw.APerspectiveCameraDrawsThroughTheAuthoredShader`.
