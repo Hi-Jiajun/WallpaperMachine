@@ -505,6 +505,19 @@ impl OweScene {
             sys::owe_property_project_property_reset()
         })
     }
+
+    /// Retrieves the name of the property that shows a project property
+    /// document on the running scene without loading it again.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EngineError::Render`] if OWE returns a null property name or
+    /// [`EngineError::Crash`] if the FFI call unwinds.
+    pub fn project_property_preview_json() -> Result<*const c_char, EngineError> {
+        Self::property_name("owe_property_project_property_preview_json", || unsafe {
+            sys::owe_property_project_property_preview_json()
+        })
+    }
 }
 
 impl OweScene {
@@ -1101,6 +1114,25 @@ impl OweScene {
         self.set_property_bool(Self::project_property_reset()?, true)
     }
 
+    /// Shows a flattened project property document on the running scene
+    /// without loading it again.
+    ///
+    /// The document is the whole property state to show: the project's
+    /// declared defaults with exactly these values over them, so a property it
+    /// leaves out is back at its declared default. The renderer never keeps
+    /// it, which is why this does not ask for a shader refresh the way
+    /// [`Self::set_property_override`] does: nothing is loaded again, and a
+    /// scene that is loaded later, for any reason, shows its saved look.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EngineError`] if the JSON contains an interior NUL byte, the
+    /// scene is closed, OWE property lookup fails, or OWE rejects the update.
+    pub fn preview_property_override(&mut self, flat_json: &str) -> Result<(), EngineError> {
+        let encoded = cstring(flat_json)?;
+        self.set_property_string(Self::project_property_preview_json()?, encoded.as_ptr())
+    }
+
     /// Closes and deletes the OWE renderer object.
     ///
     /// # Errors
@@ -1589,5 +1621,55 @@ mod render_failure_callback_tests {
             owe_render_failure_callback(std::ptr::null_mut());
             owe_render_failure_callback_drop(std::ptr::null_mut());
         }
+    }
+}
+
+#[cfg(test)]
+mod property_preview_tests {
+    use super::*;
+
+    fn name(pointer: *const c_char) -> String {
+        assert!(!pointer.is_null());
+        unsafe { CStr::from_ptr(pointer) }.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn the_preview_is_a_property_of_its_own() {
+        let preview = name(OweScene::project_property_preview_json().unwrap());
+        let others = [
+            name(OweScene::project_property_override_json().unwrap()),
+            name(OweScene::project_property_reset().unwrap()),
+            name(OweScene::force_shader_refresh().unwrap()),
+        ];
+
+        assert!(!preview.is_empty());
+        // A preview sent under the override's name would load the scene again
+        // and keep the document; under the reset's name it would clear the
+        // saved override.
+        for other in others {
+            assert_ne!(preview, other);
+        }
+    }
+
+    #[test]
+    fn a_document_with_a_nul_byte_never_reaches_the_renderer() {
+        let mut scene = OweScene { raw: None, render_initialized: false, registration: None, load: 0 };
+
+        let err = scene.preview_property_override("{\"a\":\"b\0c\"}").expect_err("a NUL byte is refused");
+
+        // The closed scene would have said so had the document got that far.
+        assert!(
+            matches!(&err, EngineError::InvalidInput(message) if !message.contains("already closed")),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn a_closed_scene_refuses_a_preview() {
+        let mut scene = OweScene { raw: None, render_initialized: false, registration: None, load: 0 };
+
+        let err = scene.preview_property_override("{}").expect_err("a closed scene takes nothing");
+
+        assert!(matches!(&err, EngineError::InvalidInput(message) if message.contains("already closed")), "{err:?}");
     }
 }

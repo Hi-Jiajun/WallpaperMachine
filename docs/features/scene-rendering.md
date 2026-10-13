@@ -216,6 +216,19 @@ before the first scene exists is dropped. The lock-screen and Mission Control
 pictures are not involved. Properties held at their loaded value are logged once,
 as a set, when it changes.
 
+The Rust engine sends the document with `WallpaperEngine::preview_property_override`,
+the property counterpart of the framing drag preview. It parses and flattens the
+document with the code `set_property_override` uses, so a document that is not a JSON
+object, has an array leaf or is not JSON is refused before the actor is asked and never
+reaches the renderer, and it then sets the preview property through
+`SceneRuntime::preview_property_override_json`. Unlike `set_property_override` it asks
+for no shader refresh and loads nothing, and it records nothing: the runtime's saved
+override, its descriptor, the stored scene template and the published snapshot stay as
+they were, so the next reconcile still compares the saved configuration, an edit that is
+abandoned leaves nothing to rebuild, and a rebuilt renderer shows the saved look.
+`set_property_override` and `reset_property_override` keep their meaning, a reload that
+remembers (or forgets) the override. Nothing in the bridge sends a preview yet.
+
 ### Scene render optimisation
 
 The only scene control that ships on. It reuses the result of scene subgraphs whose

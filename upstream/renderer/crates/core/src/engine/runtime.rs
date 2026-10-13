@@ -1046,6 +1046,20 @@ impl SceneRuntime {
         Ok(())
     }
 
+    /// Shows a property document on the running scene without making it the
+    /// scene's: the renderer follows, the runtime and its descriptor do not.
+    ///
+    /// An editor calls this for every step of an edit that is not yet saved.
+    /// Keeping it out of [`Self::property_override_json`], the descriptor and
+    /// the pointer state means an edit that is abandoned leaves the live
+    /// descriptor equal to the saved configuration, so the next reconcile finds
+    /// nothing to rebuild and a rebuilt renderer shows the saved look. It is
+    /// the opposite of [`Self::set_property_override_json`], which loads the
+    /// scene again with the override and remembers it.
+    pub fn preview_property_override_json(&mut self, flat_json: &str) -> Result<(), EngineError> {
+        self.renderer.preview_property_override(flat_json)
+    }
+
     pub fn close(&mut self) -> Result<(), EngineError> {
         self.pointer_relay.stop();
         self.shortcut_relay.stop();

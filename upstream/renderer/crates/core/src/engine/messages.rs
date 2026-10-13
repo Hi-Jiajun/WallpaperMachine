@@ -228,6 +228,14 @@ pub struct ResetPropertyOverride {
     pub handle: SceneHandle,
 }
 
+/// Shows a property document on the running scene without keeping it: the
+/// renderer follows, the stored runtime state does not, and the scene is not
+/// loaded again.
+pub struct PreviewPropertyOverride {
+    pub handle: SceneHandle,
+    pub flat_json: String,
+}
+
 pub struct CloseAllScenes;
 
 pub type ReconcileReply = Result<Vec<SceneResult>, crate::EngineError>;

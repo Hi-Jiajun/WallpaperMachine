@@ -450,6 +450,19 @@ impl EngineActor {
         self.with_scene_mut(handle, |scene| scene.set_property_override_json(None))
     }
 
+    /// Shows a property document while an edit is under way. Nothing about the
+    /// scene's state changes, so unlike [`Self::set_property_override`] there
+    /// is no runtime state to record and no snapshot to publish.
+    pub fn preview_property_override(
+        &mut self,
+        handle: SceneHandle,
+        flat_json: &str,
+    ) -> Result<(), EngineError> {
+        self.state
+            .scene_mut(handle)?
+            .preview_property_override_json(flat_json)
+    }
+
     pub fn update_display_state(
         &mut self,
         update: impl FnOnce(&mut DisplayStateModel) -> Result<(), EngineError>,
@@ -1406,6 +1419,18 @@ impl Message<messages::ResetPropertyOverride> for EngineActor {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         self.with_snapshot_update(|actor| actor.reset_property_override(msg.handle))
+    }
+}
+
+impl Message<messages::PreviewPropertyOverride> for EngineActor {
+    type Reply = Result<(), EngineError>;
+
+    async fn handle(
+        &mut self,
+        msg: messages::PreviewPropertyOverride,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.preview_property_override(msg.handle, &msg.flat_json)
     }
 }
 

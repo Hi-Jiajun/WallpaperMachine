@@ -1143,14 +1143,41 @@ impl WallpaperEngine {
         handle: SceneHandle,
         json: T,
     ) -> Result<(), EngineError> {
-        let json = json.into();
-        let flat_json = serde_json::from_str::<Value>(&json)
-            .map_err(|e| EngineError::InvalidInput(e.to_string()))?
-            .flatten()?;
-        let flat_json = serde_json::to_string(&flat_json)
-            .map_err(|e| EngineError::InvalidInput(e.to_string()))?;
+        let flat_json = flat_property_document(&json.into())?;
 
         self.ask_actor(messages::SetPropertyOverride { handle, flat_json })
+            .await
+    }
+
+    /// Shows a project property document on an open scene without keeping it.
+    ///
+    /// The document is the whole property state to show, like the one
+    /// [`Self::set_property_override`] takes: the project's declared defaults
+    /// with exactly these values over them, so a property it leaves out is back
+    /// at its declared default. Unlike that call it does not load the scene
+    /// again, saves nothing and publishes no snapshot: the scene's runtime state
+    /// and stored template stay as they were, so a caller can send one document
+    /// per step of an edit and an edit that is abandoned leaves nothing for the
+    /// next reconcile to rebuild. The shown state is gone as soon as the scene
+    /// is loaded again for any reason, and the scene then shows its saved
+    /// look, so an editor that is still open sends its document again with its
+    /// next step. A property the scene reads only while it loads stays at the
+    /// value the scene loaded with.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the JSON cannot be parsed/flattened, actor
+    /// communication fails, or the renderer rejects the document. The document
+    /// is checked before the actor is asked, so a malformed one never reaches
+    /// the renderer.
+    pub async fn preview_property_override<T: Into<String> + Send>(
+        &self,
+        handle: SceneHandle,
+        json: T,
+    ) -> Result<(), EngineError> {
+        let flat_json = flat_property_document(&json.into())?;
+
+        self.ask_actor(messages::PreviewPropertyOverride { handle, flat_json })
             .await
     }
 
@@ -1168,6 +1195,15 @@ impl WallpaperEngine {
     async fn poll_mouse_state(&self, state: MousePollState) -> Result<(), EngineError> {
         self.ask_actor(messages::PollMouseState { state }).await
     }
+}
+
+/// Parses a property document and flattens it into the one-level JSON object
+/// the renderer reads, the same way for every call that hands the renderer one.
+fn flat_property_document(json: &str) -> Result<String, EngineError> {
+    let flat = serde_json::from_str::<Value>(json)
+        .map_err(|e| EngineError::InvalidInput(e.to_string()))?
+        .flatten()?;
+    serde_json::to_string(&flat).map_err(|e| EngineError::InvalidInput(e.to_string()))
 }
 
 struct DisplaySnapshot<'a> {
@@ -2835,6 +2871,98 @@ mod tests {
                 matches!(&err, EngineError::InvalidInput(message)
                     if message.contains("unknown scene handle")),
                 "{framing:?} gave {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_property_document_reaches_the_renderer_as_one_flat_object() {
+        for (document, flat) in [
+            ("{}", "{}"),
+            (
+                r#"{"example":{"inner":true},"count":1.5,"label":"demo"}"#,
+                r#"{"count":1.5,"example_inner":true,"label":"demo"}"#,
+            ),
+            // A cleared text property is the empty string, not a missing one.
+            (r#"{"text":null}"#, r#"{"text":""}"#),
+            // Whitespace and key order are the caller's, the renderer's input is not.
+            (
+                "  { \"b\" : 2,\n \"a\" : { \"c\" : false } }  ",
+                r#"{"a_c":false,"b":2}"#,
+            ),
+        ] {
+            assert_eq!(
+                flat_property_document(document).expect("a valid document"),
+                flat,
+                "{document}"
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn preview_property_override_refuses_a_document_that_is_not_an_object_before_asking_the_actor(
+    ) {
+        let engine = engine_with_display_records(Vec::new());
+        let handle = SceneHandle::new(u64::MAX);
+
+        for document in [
+            "[]",
+            "1",
+            r#""text""#,
+            "null",
+            r#"{"broken":[1,2,3]}"#,
+            "{",
+            "",
+        ] {
+            let err = engine
+                .preview_property_override(handle, document)
+                .await
+                .expect_err("a malformed document should be refused");
+            // The unknown handle would have produced a different message had the
+            // document reached the actor.
+            assert!(
+                matches!(&err, EngineError::InvalidInput(message)
+                    if !message.contains("unknown scene handle")),
+                "{document:?} gave {err:?}"
+            );
+            // The same refusal as the call that loads the scene again, so an
+            // editor cannot show a document that Apply would then refuse.
+            let loaded = engine
+                .set_property_override(handle, document)
+                .await
+                .expect_err("the loading call refuses the same document");
+            assert_eq!(err.to_string(), loaded.to_string(), "{document:?}");
+        }
+
+        let err = engine
+            .preview_property_override(handle, "[]")
+            .await
+            .expect_err("an array root should be refused");
+        assert!(
+            matches!(&err, EngineError::InvalidInput(message)
+                if message == "override root must be a JSON object"),
+            "{err:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn preview_property_override_flattens_nested_documents_and_forwards_a_valid_one_to_the_actor(
+    ) {
+        let engine = engine_with_display_records(Vec::new());
+
+        for document in [
+            "{}",
+            r#"{"alpha":0.5}"#,
+            r#"{"example":{"inner":true},"label":null}"#,
+        ] {
+            let err = engine
+                .preview_property_override(SceneHandle::new(u64::MAX), document)
+                .await
+                .expect_err("unknown handle should fail");
+            assert!(
+                matches!(&err, EngineError::InvalidInput(message)
+                    if message.contains("unknown scene handle")),
+                "{document:?} gave {err:?}"
             );
         }
     }

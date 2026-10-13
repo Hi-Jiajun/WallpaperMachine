@@ -459,6 +459,20 @@ cargo test -p shader --test pipeline -- --nocapture
   `SceneRuntime::preview_framing` leaving the runtime's descriptor and stored template
   alone (so an abandoned drag leaves nothing to rebuild) is by construction and is
   covered, with the picture itself, only by a desktop run.
+- `wallpaper-core` property previews (`cargo test --release -p wallpaper-core --lib
+  property`; `--test core_audio_api`): `WallpaperEngine::preview_property_override`
+  refuses a document that is not a JSON object (an array, a number, a string, `null`,
+  text that is not JSON, nothing at all) or has an array leaf before it asks the actor,
+  with the message `set_property_override` gives for the same document, and forwards
+  an empty, a flat and a nested one to the actor; the document the renderer receives is
+  one flat object (nested keys joined with underscores, `null` as the empty string, key
+  order and spacing normalised). `OweScene` sets a property of its own, not the
+  override's, the reset's or the shader refresh's, and refuses a document with a NUL
+  byte and a closed scene without reaching the renderer. These tests have no scene:
+  `SceneRuntime::preview_property_override_json` leaving the runtime's saved override,
+  descriptor and stored template alone (so an abandoned edit leaves nothing to rebuild)
+  is by construction, like `preview_framing`, and the picture is covered only by the
+  renderer tests above and a desktop run.
 - `wallpaper_background`: renders unattached production Metal layers over a white
   bitmap with no drawable, before and after a resize and after recreation. Every
   pixel must be opaque black. Its harness runs on the process's main thread; no
