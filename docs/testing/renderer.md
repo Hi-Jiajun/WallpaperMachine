@@ -141,6 +141,9 @@ Frames, time and surfaces:
 | `WE_TEST_SAMPLE_FRAMES` | both scene probes | JSON array of frame indices. Saves each frame and `state-N.json` with live transforms, material values, text and script-error count |
 | `WE_TEST_METAL_FRAMES` | `metal_scene_draw_smoke` | Frames the local-project Metal test draws, 1/60 s apart: 120 by default, 2–3600 accepted. Its own knob, so the probe's `WE_TEST_FRAMES` in the same environment cannot move the Metal frame's scene time. The last frame is the output; the test also prints the bytes of this scene's render targets and, separately, the device-wide Metal allocation, which includes the layer's drawables and varies between runs |
 | `WE_TEST_METAL_FRAME_STEP` | `metal_scene_draw_smoke` | Simulation delta in seconds; default `1/60`. Use `1/120` and twice as many frames for a matched-duration 120 FPS scenario |
+| `WE_TEST_METAL_WARMUP_TICKS` | `metal_scene_draw_smoke` | Runtime ticks of 1/60 s before the graph is built, as `offscreen_scene_probe` takes 40; `0..3600`. Unset, none. The scene clock is not advanced by them, here or there |
+| `WE_TEST_COMPARE_PROJECTS` | `metal_scene_draw_smoke --gtest_filter='*DrawTheSamePictureOnBothRenderers*'` | Colon-separated `project.json` paths drawn by both renderers in one harness (see below). Unset, the test skips |
+| `WE_TEST_COMPARE_SURFACE` | the same test | `<width>x<height>` of the layer both renderers draw into; default `960x540` |
 | `WE_TEST_SURFACE` | `offscreen_scene_probe` | `<width>x<height>` physical output extent; defaults to `1920x1080`. Perspective scenes use it as their full-scale raster; authored 2D canvases keep their size |
 | `WE_TEST_TEXTURE_SURFACE` | `offscreen_scene_probe` | `<width>x<height>` opts into the production display-sized texture mip policy without changing raster extent; unset retains all source levels for before/after image and allocation comparisons. Native Metal uses its surface size automatically |
 | `WE_TEST_METAL_SURFACE` | `metal_scene_draw_smoke` | `<width>x<height>` for the surface the native backend rasterizes; defaults to `960x540`. Screen-space shader inputs follow it, so comparing this backend's output with another's is only meaningful when both rasterize the same extent |
@@ -215,6 +218,31 @@ run with `WE_TEST_FRAMES=4` and `WE_TEST_FRAME_STEP=0.6611111` (119/180) draws
 frame 3 at the default Metal frame's scene time. A puppet posed at a different
 scene time reads as a camera or backend fault. Seed both with the same
 `WE_TEST_RANDOM_SEED`.
+
+The fair renderer comparison is `MetalSceneDraw.LocalProjectsDrawTheSamePictureOnBothRenderers`
+with `WE_TEST_COMPARE_PROJECTS`: each project is parsed twice exactly as a
+wallpaper loads it, seeded and clocked identically (`WE_TEST_METAL_FRAMES`,
+`WE_TEST_METAL_FRAME_STEP`, `WE_TEST_METAL_WARMUP_TICKS`, `WE_TEST_RANDOM_SEED`),
+given the scaling the host pushes to every renderer, and drawn through
+`SceneRendererHandle` on a layer no window owns, once per renderer. The last
+frame's final composition returns through the poster path both renderers share,
+so the two pictures differ only by what the renderers did; it prints the mean
+absolute difference and writes both under `WE_TEST_OUTPUT`. A difference found by
+comparing `offscreen_scene_probe` with the local-project run is not yet a renderer
+difference: the two harnesses differ in the ways below, and the probe also never
+rebuilds its graph for a layer a script shows after the warm-up.
+
+To put both clocks on the same second, give the Metal run
+`WE_TEST_METAL_WARMUP_TICKS=40` and both runs the same frame count and step
+(`WE_TEST_FRAMES` with `WE_TEST_FRAME_STEP`, `WE_TEST_METAL_FRAMES` with
+`WE_TEST_METAL_FRAME_STEP`). Three more things differ between the harnesses
+unless set: the Vulkan probe steps particles only with `WE_TEST_AUDIO_HZ` (use
+`0` on both); it keeps every source mip unless `WE_TEST_TEXTURE_SURFACE` names
+the surface the Metal run rasterises (`WE_TEST_METAL_SURFACE`), which otherwise
+reads as Metal being blurrier; and a canvas that is not 16:9 is cropped by the
+Metal harness's fill mode on its default 960x540 surface, which reads as a
+zoom, so give both a surface of the canvas's own aspect. A scene still inside
+its camera fade at the sampled time is black on both and compares equal.
 
 `scene_reload_cycle_probe` parses every selected project twice in one process,
 each parse on a fresh thread with fresh VFS mounts, the way a wallpaper switch
@@ -506,7 +534,33 @@ count kept, and the next failure reports again.
 `ADrawFailureBeforeTheFirstFrameIsCountedButNotReported` pins that a scene that
 has not presented yet counts the failure and does not call back. The seam
 replaces only the failure, not its consequences; a real swapchain failure is not
-produced. The native
+produced.
+
+`LocalProjectEnergyIsMeasuredHeadlessly`, in the same binary, is the headless
+renderer A/B: it skips unless `WE_TEST_ENERGY_PROJECT` names a local
+`project.json` (with `WE_TEST_ASSETS`), then runs the production
+`SceneWallpaper` on the renderer `WE_TEST_ENERGY_RENDERER` asks for
+(`compatibility` or `native`) with its own 60 FPS clock into an unattached layer
+of `WE_TEST_ENERGY_WIDTH` x `WE_TEST_ENERGY_HEIGHT` (default 1920x1080), waits
+`WE_TEST_ENERGY_WARMUP` seconds (default 5) after the first frame and samples a
+`WE_TEST_ENERGY_SECONDS` window (default 20). It prints one `ENERGY {...}` line:
+the backend actually used, this process's CPU seconds and CPU energy
+(`ri_energy_nj`), the GPU time of this process's own Metal command buffers and
+how many there were (`gpu_own_s`, `command_buffers`: the test wraps the device's
+command-buffer `commit` to read each buffer's GPU start and end, which counts
+MoltenVK's buffers and the native backend's alike), the whole GPU's energy and
+busy time over all resource coalitions (other processes included), frames
+completed and presented, and the physical footprint. Counting is off and scene
+optimisation on, as shipped; `WE_TEST_ENERGY_CACHE` keeps the shader and pipeline
+caches between runs. Run one renderer per process, warm both caches with an
+unmeasured run first and alternate the renderers. The whole-GPU figures are only
+usable against an idle window of the same length on an otherwise quiet machine:
+a process launched from a terminal shares a coalition with that terminal, and
+any other process drawing at the time is in them. GPU time is workload, not
+energy. It changes nothing on
+the desktop and needs no privileges; it is not a power measurement in the
+sense of [power benchmarking](power-benchmark.md), which observes the app and
+WindowServer. The native
 Metal backend adds `metal_backend_test` (capability and graph gate, no device
 needed), `metal_scene_draw_smoke` (author shaders and same-frame intermediates
 drawn and read back, plus target reuse, dynamic-geometry upload, sprite-sheet

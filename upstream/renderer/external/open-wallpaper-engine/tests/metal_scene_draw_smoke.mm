@@ -6109,6 +6109,21 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                       << selection.fallback_reason << std::endl;
             continue;
         }
+        // Runtime ticks before the graph is built, as `offscreen_scene_probe`
+        // takes 40 of them. Comparing a scripted or timed scene with that
+        // probe needs both runtime clocks on the same second, so this matches
+        // it on request; the scene clock is not advanced by it, there or here.
+        if (const char* value = std::getenv("WE_TEST_METAL_WARMUP_TICKS");
+            value != nullptr && loaded.scene->runtime != nullptr) {
+            const int ticks = std::atoi(value);
+            ASSERT_TRUE(ticks >= 0 && ticks <= 3600) << "WE_TEST_METAL_WARMUP_TICKS " << value;
+            for (int tick = 0; tick < ticks; ++tick) {
+                loaded.scene->runtime->Tick(1.0 / 60.0);
+                loaded.scene->runtime->PumpTextLayerCache();
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+            (void)loaded.scene->runtime->ConsumeSceneGraphMutationFlag();
+        }
 
         // A real surface is the size of the display it is on, and screen-space
         // shader inputs -- texel size above all -- follow it. Comparing this
@@ -6333,6 +6348,157 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
         }
     }
     wallpaper::vulkan::SetSceneOptimizationEnabled(optimization_was);
+}
+
+TEST_F(MetalSceneDraw, LocalProjectsDrawTheSamePictureOnBothRenderers)
+{
+    // The two renderers in one harness: each project is parsed twice exactly
+    // as a wallpaper loads it, seeded and clocked identically, and drawn
+    // through `SceneRendererHandle` on a layer no window owns -- once by the
+    // compatibility backend, once by the native one. The final composition of
+    // the last frame comes back through the poster path both backends share,
+    // so the two pictures differ only by what the renderers did. Prints the
+    // mean absolute difference per channel and the share of pixels off by more
+    // than 48, and writes both pictures under `WE_TEST_OUTPUT`. A diagnostic,
+    // not a verdict: nothing is asserted about the size of a difference.
+    // `WE_TEST_COMPARE_PROJECTS` is a colon-separated list of `project.json`
+    // paths; `WE_TEST_METAL_FRAMES`, `WE_TEST_METAL_FRAME_STEP`,
+    // `WE_TEST_METAL_WARMUP_TICKS`, `WE_TEST_RANDOM_SEED` and
+    // `WE_TEST_PROPERTIES` mean what they mean for the local-project run, and
+    // `WE_TEST_COMPARE_SURFACE` is the layer's `<width>x<height>` (960x540).
+    const char* listed = std::getenv("WE_TEST_COMPARE_PROJECTS");
+    const auto  assets = LocalSceneAssetsRoot();
+    if (listed == nullptr || *listed == '\0' || assets.empty() ||
+        ! std::filesystem::is_directory(assets)) {
+        GTEST_SKIP() << "WE_TEST_COMPARE_PROJECTS names no local project";
+    }
+    int    frame_count = 120;
+    double frame_step  = 1.0 / 60.0;
+    int    warmup      = 0;
+    if (const char* value = std::getenv("WE_TEST_METAL_FRAMES")) frame_count = std::atoi(value);
+    if (const char* value = std::getenv("WE_TEST_METAL_FRAME_STEP")) frame_step = std::strtod(value, nullptr);
+    if (const char* value = std::getenv("WE_TEST_METAL_WARMUP_TICKS")) warmup = std::atoi(value);
+    ASSERT_TRUE(frame_count >= 1 && frame_count <= 3600 && frame_step > 0.0 && frame_step <= 1.0 &&
+                warmup >= 0 && warmup <= 3600);
+    uint32_t width = 960, height = 540;
+    if (const char* size = std::getenv("WE_TEST_COMPARE_SURFACE")) {
+        unsigned w = 0, h = 0;
+        if (std::sscanf(size, "%ux%u", &w, &h) == 2 && w > 0 && h > 0 && w <= 8192 && h <= 8192) {
+            width  = w;
+            height = h;
+        }
+    }
+    const char* output = std::getenv("WE_TEST_OUTPUT");
+
+    std::vector<std::string> projects;
+    for (std::string_view rest = listed; ! rest.empty();) {
+        const auto colon = rest.find(':');
+        if (colon != 0) projects.emplace_back(rest.substr(0, colon));
+        if (colon == std::string_view::npos) break;
+        rest.remove_prefix(colon + 1);
+    }
+
+    std::size_t index = 0;
+    for (const auto& project : projects) {
+        SCOPED_TRACE(project);
+        const std::string label = "compare-" + std::to_string(index++);
+        std::map<bool, RendererPicture> pictures;
+        std::string             scene_id;
+        for (const bool native : { false, true }) {
+            SetSceneRendererPreference(native ? SceneRendererPreference::NativeMetalPreferred
+                                              : SceneRendererPreference::Compatibility);
+            if (const char* seed = std::getenv("WE_TEST_RANDOM_SEED")) {
+                Random::seed(static_cast<uint32_t>(std::strtoul(seed, nullptr, 10)));
+            }
+            SceneSourcePaths paths;
+            std::string      error;
+            ASSERT_TRUE(ResolveSceneSourcePaths(project, &paths, &error)) << error;
+            scene_id = paths.scene_id;
+            LoadedScene loaded;
+            ASSERT_TRUE(loaded.vfs.Mount("/assets", fs::CreatePhysicalFs(assets.string()), "assets"));
+            ASSERT_TRUE(MountSceneSource(loaded.vfs, paths, &error)) << error;
+            ASSERT_TRUE(loaded.vfs.Mount(
+                "/cache",
+                fs::CreatePhysicalFs((root_ / (label + (native ? "-native" : "-compat"))).string(), true),
+                "cache"));
+            InstallVirtualAssets(loaded.vfs);
+            ASSERT_TRUE(ParseProjectProperties(project, &loaded.properties, &error)) << error;
+            if (const char* json = std::getenv("WE_TEST_PROPERTIES")) {
+                ProjectProperties overrides;
+                ASSERT_TRUE(ParseFlatProjectPropertyOverrideJson(json, &overrides, &error)) << error;
+                loaded.properties = MergeProjectProperties(loaded.properties, overrides);
+            }
+            auto source = loaded.vfs.Open("/assets/" + paths.pkg_entry);
+            ASSERT_NE(source, nullptr);
+            WPSceneParser parser;
+            loaded.scene = parser.Parse(SceneParseRequest {
+                                            .scene_id           = paths.scene_id,
+                                            .project_path       = project,
+                                            .project_properties = &loaded.properties,
+                                            .pkg_version        = PackageVersionOf(paths.pkg_path),
+                                        },
+                                        source->ReadAllStr(), loaded.vfs, loaded.sound);
+            ASSERT_NE(loaded.scene, nullptr);
+            InjectSystemMediaForMetal(*loaded.scene);
+            if (native) {
+                const auto selection = SelectSceneBackend(*loaded.scene);
+                if (selection.backend != SceneBackend::NativeMetal) {
+                    std::cout << "[ COMPARE  ] " << scene_id << ": native refused -- "
+                              << selection.fallback_reason << std::endl;
+                    break;
+                }
+            }
+            auto& scene = *loaded.scene;
+            if (scene.runtime != nullptr) {
+                for (int tick = 0; tick < warmup; ++tick) {
+                    scene.runtime->Tick(1.0 / 60.0);
+                    scene.runtime->PumpTextLayerCache();
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                }
+                (void)scene.runtime->ConsumeSceneGraphMutationFlag();
+            }
+
+            auto picture = DrawWithRenderer(scene, native, width, height, frame_count, frame_step);
+            if (! picture.error.empty()) {
+                std::cout << "[ COMPARE  ] " << scene_id << ": "
+                          << (native ? "native" : "compatibility") << " -- " << picture.error
+                          << std::endl;
+                break;
+            }
+            pictures[native] = std::move(picture);
+        }
+        if (pictures.size() != 2) continue;
+        const auto& a = pictures[false];
+        const auto& b = pictures[true];
+        ASSERT_EQ(a.width, b.width);
+        ASSERT_EQ(a.height, b.height);
+        double      total = 0.0;
+        std::size_t off   = 0;
+        for (std::size_t i = 0; i < a.rgb.size(); i += 3) {
+            int worst = 0;
+            for (std::size_t c = 0; c < 3; ++c) {
+                const int d = std::abs(int(a.rgb[i + c]) - int(b.rgb[i + c]));
+                total += d;
+                worst = std::max(worst, d);
+            }
+            if (worst > 48) ++off;
+        }
+        std::printf("[ COMPARE  ] %s: mean abs difference %.3f, %.4f of pixels off by more than 48\n",
+                    scene_id.c_str(), total / double(a.rgb.size()),
+                    double(off) / double(a.rgb.size() / 3));
+        if (output != nullptr && *output != '\0') {
+            std::filesystem::create_directories(output);
+            for (const auto& [native, picture] : pictures) {
+                std::ofstream image(std::filesystem::path(output) /
+                                        (scene_id + (native ? "-native.ppm" : "-compat.ppm")),
+                                    std::ios::binary);
+                image << "P6\n" << picture.width << " " << picture.height << "\n255\n";
+                image.write(reinterpret_cast<const char*>(picture.rgb.data()),
+                            std::streamsize(picture.rgb.size()));
+            }
+        }
+    }
+    SetSceneRendererPreference(SceneRendererPreference::Compatibility);
 }
 
 TEST_F(MetalSceneDraw, LayersSharingATargetShareOneRenderPassAndHiddenLayersCostNone)

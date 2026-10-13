@@ -16,6 +16,7 @@
 
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
+#import <objc/runtime.h>
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_metal.h>
@@ -23,6 +24,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -35,6 +37,16 @@
 #include <thread>
 #include <unistd.h>
 #include <vector>
+
+#include <libproc.h>
+#include <mach/mach.h>
+#include <sys/resource.h>
+
+// Private libsystem exports, read the way `scripts/power_benchmark.py` and the
+// app's energy readout read them: 45 uint64 fields, GPU time at 8, CPU energy
+// at 11, GPU energy at 41.
+extern "C" int coalition_info_resource_usage(uint64_t coalition_id, void* buffer, size_t size);
+extern "C" int proc_listcoalitions(int flavor, int coalition_type, void* buffer, int size);
 
 using namespace wallpaper;
 using namespace std::chrono_literals;
@@ -865,4 +877,221 @@ TEST_F(UnchangedPresent, ADrawFailureBeforeTheFirstFrameIsCountedButNotReported)
         << "the injected failure never ran";
     std::this_thread::sleep_for(400ms);
     EXPECT_EQ(probe.Reports(), 0) << "a scene that never presented called the host back";
+}
+
+namespace
+{
+
+/// GPU time of every Metal command buffer this process commits, whichever
+/// renderer made it: Compatibility's come from MoltenVK and the native
+/// backend's from itself, but both are command buffers of the one device.
+/// Counted from each buffer's own GPU start and end, so other processes'
+/// work on the GPU is not in it.
+std::atomic<uint64_t> g_command_buffer_gpu_ns { 0 };
+std::atomic<uint64_t> g_command_buffers { 0 };
+IMP                   g_original_commit = nullptr;
+
+void CountedCommit(id self, SEL command)
+{
+    [(id<MTLCommandBuffer>)self addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
+        const double seconds = buffer.GPUEndTime - buffer.GPUStartTime;
+        if (seconds > 0.0) g_command_buffer_gpu_ns += static_cast<uint64_t>(seconds * 1e9);
+        ++g_command_buffers;
+    }];
+    reinterpret_cast<void (*)(id, SEL)>(g_original_commit)(self, command);
+}
+
+/// Wraps `commit` of the device's command buffer class once per process.
+bool CountCommandBufferGpuTime(id<MTLDevice> device)
+{
+    if (g_original_commit != nullptr) return true;
+    id<MTLCommandQueue> queue = [device newCommandQueue];
+    Class retained   = [[queue commandBuffer] class];
+    Class unretained = [[queue commandBufferWithUnretainedReferences] class];
+    // One implementation of `commit` serves both kinds on this GPU; were they
+    // ever two, one of the renderers would go uncounted, so say so instead.
+    Method method = class_getInstanceMethod(retained, @selector(commit));
+    if (method == nullptr ||
+        method != class_getInstanceMethod(unretained, @selector(commit))) {
+        return false;
+    }
+    g_original_commit = method_setImplementation(method, reinterpret_cast<IMP>(&CountedCommit));
+    return true;
+}
+
+/// Whole-GPU and process counters at one instant.
+struct EnergySample
+{
+    std::chrono::steady_clock::time_point at;
+    double   cpu_seconds { 0.0 };
+    uint64_t own_gpu_ns { 0 };
+    uint64_t own_command_buffers { 0 };
+    uint64_t cpu_energy_nj { 0 };
+    uint64_t gpu_energy_nj { 0 };
+    uint64_t gpu_time_ns { 0 };
+    uint64_t footprint { 0 };
+    SurfaceHealthSnapshot health;
+};
+
+EnergySample SampleEnergy(const SceneWallpaper& wallpaper)
+{
+    EnergySample sample;
+    sample.at                  = std::chrono::steady_clock::now();
+    sample.own_gpu_ns          = g_command_buffer_gpu_ns.load();
+    sample.own_command_buffers = g_command_buffers.load();
+    rusage usage {};
+    getrusage(RUSAGE_SELF, &usage);
+    sample.cpu_seconds = double(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) +
+                         double(usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) / 1e6;
+    rusage_info_v6 info {};
+    if (proc_pid_rusage(getpid(), RUSAGE_INFO_V6, reinterpret_cast<rusage_info_t*>(&info)) == 0) {
+        sample.cpu_energy_nj = info.ri_energy_nj;
+    }
+    // Every coalition: the GPU's whole energy, which the kernel only shares
+    // out between coalitions, and this process shares one with whatever
+    // launched it.
+    std::vector<uint64_t> entries(2 * 4096);
+    const int bytes = proc_listcoalitions(2, 0, entries.data(), int(entries.size() * 8));
+    for (int i = 0; bytes > 0 && i < bytes / 16; ++i) {
+        std::array<uint64_t, 45> fields {};
+        if (coalition_info_resource_usage(entries[std::size_t(i) * 2], fields.data(),
+                                          sizeof(fields)) != 0) {
+            continue;
+        }
+        sample.gpu_time_ns += fields[8];
+        sample.gpu_energy_nj += fields[41];
+    }
+    task_vm_info_data_t vm {};
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    if (task_info(mach_task_self(), TASK_VM_INFO, reinterpret_cast<task_info_t>(&vm), &count) ==
+        KERN_SUCCESS) {
+        sample.footprint = vm.phys_footprint;
+    }
+    sample.health = wallpaper.surfaceHealth();
+    return sample;
+}
+
+} // namespace
+
+// Headless A/B of what one real wallpaper costs on one renderer: the
+// production `SceneWallpaper` with its own frame clock at 60 FPS, drawing into
+// an unattached layer, so nothing reaches the desktop. One scene and one
+// renderer per process, so footprint and compiled state belong to that run.
+// Prints one `ENERGY {json}` line; asserts only that the scene kept drawing on
+// the renderer asked for. Skipped unless `WE_TEST_ENERGY_PROJECT` is set.
+//
+// Process CPU time and CPU energy are this process's own, and so is the GPU
+// time of its command buffers (`gpu_own_s`), whichever renderer committed
+// them. GPU energy and busy time over all coalitions are the whole GPU's,
+// other processes included: compare those only in alternating windows
+// against an idle window of the same length on an otherwise quiet machine.
+TEST_F(UnchangedPresent, LocalProjectEnergyIsMeasuredHeadlessly)
+{
+    const char* project = std::getenv("WE_TEST_ENERGY_PROJECT");
+    const char* assets  = std::getenv("WE_TEST_ASSETS");
+    if (project == nullptr || assets == nullptr) {
+        GTEST_SKIP() << "WE_TEST_ENERGY_PROJECT and WE_TEST_ASSETS name no wallpaper";
+    }
+    const auto number = [](const char* name, double fallback) {
+        const char* value = std::getenv(name);
+        return value != nullptr ? std::strtod(value, nullptr) : fallback;
+    };
+    const std::string_view renderer =
+        std::getenv("WE_TEST_ENERGY_RENDERER") != nullptr ? std::getenv("WE_TEST_ENERGY_RENDERER")
+                                                          : "compatibility";
+    const bool native = renderer == "native";
+    const double warmup  = number("WE_TEST_ENERGY_WARMUP", 5.0);
+    const double window  = number("WE_TEST_ENERGY_SECONDS", 20.0);
+    const auto   width   = static_cast<uint16_t>(number("WE_TEST_ENERGY_WIDTH", 1920));
+    const auto   height  = static_cast<uint16_t>(number("WE_TEST_ENERGY_HEIGHT", 1080));
+    const auto   cache   = std::getenv("WE_TEST_ENERGY_CACHE") != nullptr
+                               ? std::filesystem::path(std::getenv("WE_TEST_ENERGY_CACHE"))
+                               : root_ / "cache";
+
+    // Production defaults: counting off, scene optimisation on.
+    RendererCounters::SetEnabled(false);
+    vulkan::SetSceneOptimizationEnabled(true);
+    SetSceneRendererPreference(native ? SceneRendererPreference::NativeMetalPreferred
+                                      : SceneRendererPreference::Compatibility);
+
+    std::mutex              mutex;
+    std::condition_variable changed;
+    bool                    first_frame = false;
+    CAMetalLayer*           layer = [CAMetalLayer layer];
+    layer.device                  = MTLCreateSystemDefaultDevice();
+    ASSERT_TRUE(CountCommandBufferGpuTime(layer.device))
+        << "this GPU's command buffers could not be counted";
+    layer.pixelFormat             = MTLPixelFormatBGRA8Unorm;
+    layer.contentsScale           = 1.0;
+    layer.frame                   = CGRectMake(0, 0, width, height);
+    layer.drawableSize            = CGSizeMake(width, height);
+
+    SceneWallpaper wallpaper;
+    ASSERT_TRUE(wallpaper.init());
+    wallpaper.setPropertyObject(PROPERTY_FIRST_FRAME_CALLBACK,
+                                std::make_shared<FirstFrameCallback>([&] {
+                                    std::scoped_lock lock(mutex);
+                                    first_frame = true;
+                                    changed.notify_all();
+                                }));
+    RenderInitInfo info;
+    void*          handle = (__bridge void*)layer;
+    info.metal_layer      = handle;
+    info.width            = width;
+    info.height           = height;
+    info.render_width     = width;
+    info.render_height    = height;
+    info.surface_info.instanceExts = { VK_KHR_SURFACE_EXTENSION_NAME,
+                                       VK_EXT_METAL_SURFACE_EXTENSION_NAME };
+    info.surface_info.createSurfaceOp = [handle](VkInstance instance, VkSurfaceKHR* surface) {
+        auto* create = reinterpret_cast<PFN_vkCreateMetalSurfaceEXT>(
+            vkGetInstanceProcAddr(instance, "vkCreateMetalSurfaceEXT"));
+        if (create == nullptr) return VK_ERROR_EXTENSION_NOT_PRESENT;
+        const VkMetalSurfaceCreateInfoEXT create_info {
+            .sType  = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT,
+            .pNext  = nullptr,
+            .flags  = 0,
+            .pLayer = (__bridge CAMetalLayer*)handle,
+        };
+        return create(instance, &create_info, nullptr, surface);
+    };
+    wallpaper.initVulkan(info);
+    SceneWallpaperConfig config;
+    config.source     = project;
+    config.assets     = assets;
+    config.cache_path = cache.string();
+    config.fps        = 60;
+    config.paused     = false;
+    wallpaper.applyConfig(config);
+    {
+        std::unique_lock lock(mutex);
+        ASSERT_TRUE(changed.wait_for(lock, 120s, [&] { return first_frame; }))
+            << "the wallpaper never drew a frame";
+    }
+    std::this_thread::sleep_for(std::chrono::duration<double>(warmup));
+
+    const auto selection = wallpaper.sceneBackendSelection();
+    const auto before    = SampleEnergy(wallpaper);
+    std::this_thread::sleep_for(std::chrono::duration<double>(window));
+    const auto after = SampleEnergy(wallpaper);
+    wallpaper.shutdown();
+
+    const double seconds = std::chrono::duration<double>(after.at - before.at).count();
+    const uint64_t completed = after.health.frames_completed - before.health.frames_completed;
+    const uint64_t presented = after.health.frames_presented - before.health.frames_presented;
+    std::cout << "ENERGY {\"renderer\":\"" << renderer << "\",\"backend\":\""
+              << (selection.backend == SceneBackend::NativeMetal ? "native" : "compatibility")
+              << "\",\"seconds\":" << seconds
+              << ",\"cpu_seconds\":" << (after.cpu_seconds - before.cpu_seconds)
+              << ",\"cpu_mj\":" << double(after.cpu_energy_nj - before.cpu_energy_nj) / 1e6
+              << ",\"gpu_own_s\":" << double(after.own_gpu_ns - before.own_gpu_ns) / 1e9
+              << ",\"command_buffers\":" << (after.own_command_buffers - before.own_command_buffers)
+              << ",\"gpu_all_mj\":" << double(after.gpu_energy_nj - before.gpu_energy_nj) / 1e6
+              << ",\"gpu_all_busy_s\":" << double(after.gpu_time_ns - before.gpu_time_ns) / 1e9
+              << ",\"frames_completed\":" << completed << ",\"frames_presented\":" << presented
+              << ",\"footprint_mb\":" << double(after.footprint) / 1048576.0
+              << ",\"failed_frames\":" << after.health.failed_frames << "}" << std::endl;
+    EXPECT_EQ(selection.backend == SceneBackend::NativeMetal, native) << selection.fallback_reason;
+    EXPECT_GT(completed, 0u) << "the wallpaper stopped drawing during the window";
+    EXPECT_EQ(after.health.failed_frames, 0u);
 }
