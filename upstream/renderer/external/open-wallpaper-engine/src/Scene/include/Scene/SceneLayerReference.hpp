@@ -22,7 +22,8 @@ class VFS;
 /// another layer as `_rt_imageLayerComposite_<id>` with an optional `_a` / `_b`
 /// ping-pong suffix. `_a` (or no suffix) is that layer's produced output;
 /// `_b` on the same layer is the other ping-pong buffer, which is last-frame
-/// history.
+/// history. Inside the layer's own effect chain `_a` is not its output but the
+/// chain's buffer A (`IsOwnEffectChainInput`).
 inline constexpr std::string_view kLayerTextureMissingTarget =
     "a texture names a layer that does not exist";
 inline constexpr std::string_view kLayerTextureDuplicateName =
@@ -73,6 +74,13 @@ std::optional<int32_t> ParseImageLayerCompositeId(std::string_view name,
 
 bool IsImageLayerCompositeName(std::string_view name);
 
+/// Whether `name`, bound by an effect of layer `layer_id` itself, is that
+/// chain's ping-pong buffer A: the image the effect works on, the one
+/// `previous` names (for the first effect, the layer before any effect). The
+/// layer's composite is what its chain ends in, so read here it could only be
+/// a texture the same frame has yet to draw. Other layers binding the same name
+/// still get the composite.
+bool IsOwnEffectChainInput(std::string_view name, int32_t layer_id);
 
 /// Resolve one authored texture string. File names still go through VFS: a
 /// unique layer name is only treated as a layer if no material file exists.

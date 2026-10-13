@@ -1668,8 +1668,20 @@ void RegisterTextComposite(ParseContext& context, const wpscene::WPTextObject& o
     camera.Update();
 }
 
+/// An effect of layer `layer_id` naming the layer's own `_a` composite reads
+/// the chain's buffer A, `chain_input`, as `previous` does: the layer's
+/// composite is what this chain is about to produce. A clock's outline bound
+/// that way otherwise sampled an empty link every frame and drew nothing.
+void BindOwnEffectChainInput(wpscene::WPMaterial& material, int32_t layer_id,
+                             const std::string& chain_input) {
+    for (auto& texture : material.textures) {
+        if (IsOwnEffectChainInput(texture, layer_id)) texture = chain_input;
+    }
+}
+
 void AttachEffectsToNode(ParseContext& context,
                          SceneNode& node,
+                         int32_t layer_id,
                          SceneMesh& final_mesh,
                          std::span<const wpscene::WPImageEffect> effects,
                          const std::string& runtime_name,
@@ -1919,6 +1931,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         if (! obj.effects.empty()) {
             AttachEffectsToNode(context,
                                 *node,
+                                obj.id,
                                 effect_final_mesh,
                                 obj.effects,
                                 runtime_name,
@@ -2230,6 +2243,7 @@ void RegisterMaterialConstants(ParseContext& context, std::shared_ptr<SceneMater
 
 void AttachEffectsToNode(ParseContext& context,
                          SceneNode& node,
+                         int32_t layer_id,
                          SceneMesh& final_mesh,
                          std::span<const wpscene::WPImageEffect> effects,
                          const std::string& runtime_name,
@@ -2365,6 +2379,7 @@ void AttachEffectsToNode(ParseContext& context,
                     }
                 }
             }
+            BindOwnEffectChainInput(wpmat, layer_id, inRT);
             if (wpmat.textures.empty()) wpmat.textures.resize(1);
             if (wpmat.textures.at(0).empty()) wpmat.textures[0] = inRT;
 
@@ -3808,6 +3823,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                         }
                     }
                 }
+                BindOwnEffectChainInput(wpmat, wpimgobj.id, inRT);
                 if (wpmat.textures.size() == 0) wpmat.textures.resize(1);
                 if (wpmat.textures.at(0).empty()) {
                     wpmat.textures[0] = inRT;

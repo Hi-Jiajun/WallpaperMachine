@@ -487,6 +487,20 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
     through the scene camera into a screen-sized fallback it sat wherever it is
     on screen, and hidden it was never drawn, so a marquee of a hidden song
     title showed nothing.
+  - A layer's own effect binding the layer's `_a` composite (or the bare name)
+    reads the chain's buffer A, the image `previous` names at that point (the
+    layer before any effect, for the first), and does not make the layer a
+    sampled one; other layers binding the name still get the final composite
+    (`ALayersOwnEffectReadsItsBufferANotItsComposite`, image and text layers,
+    with and without another consumer; pixels on the native backend in
+    `MetalSceneDraw.ALayersOwnEffectReadsItsBufferANotItsComposite`). Read as the
+    composite, the effect sampled a link the frame filled only after it: the
+    compatibility renderer logged `slot 0 (_rt_link_<id>) has no image` and the
+    layer drew nothing (a clock whose outline effect names its own text), and
+    native Metal refused the scene as history feedback. Built-in blur, shine and
+    godrays carry the same names, `_a` and `_b` alternating along the chain, in
+    the slot their effect binds to `previous`; that binding wins. A self `_b` is
+    still treated as last-frame history.
   - A linked composite's size is never folded into the material as a zero at
     parse time (the card padding divides by it and every texture coordinate of
     the consumer's card becomes `NaN`), and nothing stale is folded in its place:

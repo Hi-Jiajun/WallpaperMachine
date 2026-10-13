@@ -955,6 +955,114 @@ TEST(LayerTextureReference, ASampledTextLayerIsItsCardInItsOwnComposite) {
     }
 }
 
+// A layer's own effect may bind the layer's `_a` composite where it would
+// otherwise take `previous` -- an outline that names the text it outlines.
+// Inside the layer's chain that is the chain's buffer A, the image the effect
+// works on; the composite is what the chain ends in. Read as the composite, the
+// effect sampled a link the frame had yet to fill, so the layer drew nothing
+// and the native backend refused the scene as history feedback. Another layer
+// binding the same name still samples the finished composite.
+TEST(LayerTextureReference, ALayersOwnEffectReadsItsBufferANotItsComposite) {
+    constexpr std::string_view kBlendFrag = R"(uniform sampler2D g_Texture0;
+uniform sampler2D g_Texture1;
+varying vec2 v_TexCoord;
+void main() {
+  gl_FragColor = texture(g_Texture0, v_TexCoord) * texture(g_Texture1, v_TexCoord);
+}
+)";
+    const std::array<std::pair<std::string_view, std::string_view>, 2> layers { {
+        { "image", R"("image":"image.json")" },
+        { "text", R"("text":"Wind","font":"Arial","pointsize":20,"origin":[32,16,0])" },
+    } };
+    for (const auto& [kind, layer] : layers) {
+        for (const bool sampled_elsewhere : { false, true }) {
+            SCOPED_TRACE(std::string(kind) + (sampled_elsewhere ? ", sampled elsewhere" : ""));
+            auto files = CopyEffectFiles();
+            files["/effects/blend/effect.json"] =
+                R"({"name":"blend","passes":[{"material":"materials/blend.json"}]})";
+            files["/materials/blend.json"] =
+                R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"blend","textures":[null,null]}]})";
+            files["/shaders/blend.vert"] = std::string(kVert);
+            files["/shaders/blend.frag"] = std::string(kBlendFrag);
+            files["/linked_mat.json"] =
+                R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":["_rt_imageLayerComposite_7_a"]}]})";
+            // The first effect takes the name in place of `previous`, the second
+            // next to it.
+            const std::string objects =
+                std::string(R"([{"id":7,"name":"outlined",)") + std::string(layer) + R"(,
+                "effects":[
+                  {"file":"effects/copy/effect.json","visible":true,
+                   "passes":[{"textures":["_rt_imageLayerComposite_7_a"]}]},
+                  {"file":"effects/blend/effect.json","visible":true,
+                   "passes":[{"textures":[null,"_rt_imageLayerComposite_7_a"]}]}]})" +
+                (sampled_elsewhere
+                     ? R"(,{"id":8,"name":"mirror","image":"linked.json","dependencies":[7]})"
+                     : "") +
+                "]";
+            const ProjectProperties properties {};
+            fs::VFS                 vfs;
+            auto parsed = ParseScene(vfs, objects, files, &properties);
+            ASSERT_NE(parsed, nullptr);
+            EXPECT_TRUE(parsed->layer_texture_error.empty()) << parsed->layer_texture_error;
+            // Its own effects do not make a layer something another samples.
+            EXPECT_EQ(parsed->layer_texture_sources.contains(7), sampled_elsewhere);
+            AddScreenTarget(*parsed);
+            SceneNode* outlined = nullptr;
+            for (auto& child : parsed->sceneGraph->GetChildren()) {
+                if (child->Name() == "outlined") outlined = child.get();
+            }
+            ASSERT_NE(outlined, nullptr);
+            const auto camera = parsed->cameras.find(outlined->Camera());
+            ASSERT_NE(camera, parsed->cameras.end());
+            ASSERT_TRUE(camera->second->HasImgEffect());
+            auto& chain = *camera->second->GetImgEffect();
+            ASSERT_EQ(chain.EffectCount(), 2u);
+
+            const auto graph = sceneToRenderGraph(*parsed);
+            ASSERT_NE(graph, nullptr);
+            const auto passes_of = [&](const SceneNode* node) {
+                std::vector<const vulkan::CustomShaderPass*> found;
+                for (const auto id : graph->topologicalOrder()) {
+                    auto* pass = dynamic_cast<const vulkan::CustomShaderPass*>(graph->getPass(id));
+                    if (pass != nullptr && pass->desc().node == node) found.push_back(pass);
+                }
+                return found;
+            };
+            const auto own = passes_of(outlined);
+            const auto first  = passes_of(chain.GetEffect(0)->nodes.front().sceneNode.get());
+            const auto second = passes_of(chain.GetEffect(1)->nodes.front().sceneNode.get());
+            ASSERT_EQ(own.size(), 1u);
+            ASSERT_EQ(first.size(), 1u);
+            ASSERT_FALSE(second.empty());
+
+            // The first effect reads the layer as drawn, before any effect...
+            ASSERT_FALSE(first[0]->desc().textures.empty());
+            EXPECT_EQ(first[0]->desc().textures[0], own[0]->desc().output);
+            // ...and the second what the first made of it, in both slots.
+            for (const auto* pass : second) {
+                ASSERT_GE(pass->desc().textures.size(), 2u);
+                EXPECT_EQ(pass->desc().textures[0], first[0]->desc().output);
+                EXPECT_EQ(pass->desc().textures[1], pass->desc().textures[0]);
+            }
+
+            const auto* link = FindLinkCopy(*graph, GenLinkTex(7));
+            if (! sampled_elsewhere) {
+                EXPECT_EQ(link, nullptr);
+                EXPECT_EQ(FindPassByOutput(*graph, LayerCompositeTargetKey(7)), nullptr)
+                    << "the layer was drawn into a composite nobody samples";
+                continue;
+            }
+            const auto* mirror = FindPassByNode(*graph, "mirror");
+            ASSERT_NE(mirror, nullptr);
+            ASSERT_FALSE(mirror->desc().textures.empty());
+            EXPECT_EQ(mirror->desc().textures[0], GenLinkTex(7));
+            ASSERT_NE(link, nullptr) << "the mirror was given nothing to sample";
+            EXPECT_EQ(link->desc().src, LayerCompositeTargetKey(7));
+            EXPECT_NE(FindPassByOutput(*graph, LayerCompositeTargetKey(7)), nullptr);
+        }
+    }
+}
+
 // A wallpaper whose settings offer a choice -- a theme, a language, a date
 // format -- usually ships every option as a layer and hides all but the chosen
 // one through its properties. Changing a property reloads the scene, so a layer
