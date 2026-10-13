@@ -1527,6 +1527,40 @@ fn type_coercion_strategy_broadcasts_scalar_call_assigned_to_a_swizzle() {
 }
 
 #[test]
+fn type_coercion_strategy_broadcasts_whole_scalar_builtin_calls_to_vectors() {
+    // `dot`, `length` and `distance` return a scalar whatever their argument
+    // widths, so a whole call of one broadcasts like any other scalar.
+    let source = concat!(
+        "varying vec2 v_TexCoord;\n",
+        "varying vec4 v_Util;\n",
+        "vec3 reach(vec2 uv) { return length(uv); }\n",
+        "void main() {\n",
+        "    vec2 proj = dot(v_TexCoord - 0.5, v_Util.zw);\n",
+        "    vec4 gap = vec4(0.0);\n",
+        "    gap = distance(v_TexCoord, v_Util.zw);\n",
+        "    gl_FragColor = vec4(proj, reach(v_TexCoord).x, gap.y);\n",
+        "}\n",
+    );
+
+    let legalized = legalize(ShaderStageKind::Fragment, source);
+    let source = legalized.source();
+
+    assert!(
+        source.contains("vec2 proj = vec2(dot(v_TexCoord - 0.5, v_Util.zw));"),
+        "{source}"
+    );
+    assert!(
+        source.contains("gap = vec4(distance(v_TexCoord, v_Util.zw));"),
+        "{source}"
+    );
+    assert!(source.contains("return vec3(length(uv));"), "{source}");
+    compile_for_both_targets(
+        &legalized,
+        "a scalar builtin call must broadcast to a vector",
+    );
+}
+
+#[test]
 fn type_coercion_strategy_converts_returned_values_to_the_declared_return_type() {
     // A returned value converts to the declared type the way an assigned one
     // does on the permissive path: a wider vector keeps its leading

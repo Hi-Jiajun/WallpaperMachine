@@ -865,6 +865,7 @@ where
         Self::parenthesized_argument(tokens, argument)
             .is_some_and(|inner| self.argument_is_scalar_like(tokens, inner))
             || self.is_scalar_call(tokens, argument)
+            || self.is_builtin_scalar_call(tokens, argument)
             || self.is_component_wise_scalar_call(tokens, argument)
             || self.single_component_read(tokens, argument.start()) == Some(argument.end())
             || self.is_scalar_expression(tokens, argument)
@@ -1298,6 +1299,20 @@ where
                     && Self::scalar_call_end(tokens, argument.start())
                         .is_some_and(|close| close == argument.end())
             })
+    }
+
+    /// Returns whether the whole expression calls a builtin that returns a
+    /// scalar whatever its argument widths, such as `dot`, unless a visible
+    /// user overload of that name returns something else.
+    fn is_builtin_scalar_call(self, tokens: TokenCursor<'_>, argument: CallArgument) -> bool {
+        tokens[argument.start()]
+            .kind()
+            .source_text()
+            .is_some_and(|name| BuiltinScalarReturningFunction::NAMES.contains(&name))
+            && Self::scalar_call_end(tokens, argument.start()) == Some(argument.end())
+            && self
+                .call_return_type(tokens, argument)
+                .is_none_or(|ty| ty == VectorExpressionType::Scalar)
     }
 
     /// Returns a parenthesized inner expression if the whole argument is

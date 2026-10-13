@@ -852,7 +852,11 @@ Rust regressions in `crates/shader/tests` (`legalize`, `preprocess`,
   narrowing and scalar initializer conversion. Floating remainder uses a
   generated typed helper accepted by Naga, preserving truncating remainder and
   single evaluation of its operands. Active `#undef` directives remove macros
-  across includes; inactive branches leave them intact. Generated NV12 members
+  across includes; inactive branches leave them intact. A directive keyword ends
+  at its first non-identifier character, so `#if(A == B)` and `#endif// note`
+  are conditionals, and only an `#include <path>` body opens angle brackets, so
+  a `<` comparison keeps a trailing `//` comment out of its `#if` expression.
+  Generated NV12 members
   create and bind a uniform block even when a material has no authored scalar
   uniforms. It also absorbs idioms author shaders inherit from the permissive
   path they were written against, each of which otherwise drops a whole effect
@@ -867,6 +871,9 @@ Rust regressions in `crates/shader/tests` (`legalize`, `preprocess`,
   `mix` and the other broadcasting builtins broadcasts when it is a
   component-wise builtin of known scalars or a one-component read
   (`pow(abs(c), color)`, legacy `saturate`/`lerp`/`fmod` spellings included);
+  a whole call of a builtin that always returns a scalar (`dot`, `length`,
+  `distance`) is a scalar unless a user overload of that name says otherwise,
+  so `vec2 proj = dot(a, b);` broadcasts;
   a scalar stored into a vector by plain `=` broadcasts, and a returned value
   converts to the declared return type the same way (`vec3 f() { vec4 c; return
   c; }` keeps `.xyz`); a comparison stored into a float lvalue (`x += a < b;`,
@@ -880,8 +887,7 @@ Rust regressions in `crates/shader/tests` (`legalize`, `preprocess`,
   A statement that follows a JSON annotation or a `#define` is analyzed like any
   other; before, it took that token for its type and every repair skipped it.
   Known and not handled: logical-not applied to a float (`!someFloat`), which
-  still rejects Wallpaper Engine's own `clipping_mask` effect, and a builtin
-  scalar call initializing a vector (`vec2 proj = dot(a, b);`).
+  still rejects Wallpaper Engine's own `clipping_mask` effect.
 - **Legacy effect shader interfaces** — `pipeline` tests: array varyings reserve
   all element locations; unambiguous user function parameters narrow wider vector
   arguments; a whole vector variable assigned to a narrower one keeps its leading
