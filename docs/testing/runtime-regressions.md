@@ -29,6 +29,17 @@ device.
   `metal_backend_test`; `MetalSceneDraw.APerspectiveCameraDrawsThroughTheAuthoredShader`.
   Projection is the scene camera's own FOV/aspect/near/far, not an orthographic
   scale; a rotated card must foreshorten.
+- **Depth writes** — `MetalSceneDraw.ADepthWritingDrawHidesLaterDrawsAsOnCompatibility`:
+  a half-transparent card, then an opaque card behind it, authored with
+  translucent, additive and normal blending, with and without `depthtest` and
+  `depthwrite`, and with and without a depth attachment, each drawn by both
+  renderers through `SceneRendererHandle` (`DrawWithRenderer`); the pictures must
+  be byte-identical, and the nearer card must hide the overlap exactly when it
+  depth-tests and writes into a depth-attached target. Both renderers take their
+  depth state from `ResolveSceneDepthState` (`SceneMaterial.h`). Native Metal used
+  to drop depth writes for translucent and additive materials, and depth-tested
+  into targets with no depth attachment, where Compatibility draws in painter's
+  order.
 - **Render passes** — `MetalSceneDraw.LayersSharingATargetShareOneRenderPassAndHiddenLayersCostNone`:
   consecutive passes into one image share one render pass, a hidden layer starts
   none, a hidden card draws exactly what a dropped one does, and showing it

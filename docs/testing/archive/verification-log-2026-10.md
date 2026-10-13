@@ -9,6 +9,17 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-13 — Random Wallpaper command
+
+A new AutomationCommand.random(display:pool:) with pools all and favorites, reached from the menu bar, wallpapermachine://random, a Shortcuts action and a shortcut key. Its pick comes from PlaylistStore.randomPick with a round of its own per display and pool (kept beside the shuffle rounds in WallpaperMachine.playlistRounds), and BridgeStore.activateRandomWallpaperAsync makes it in the display's turn of the command queue. Commit 8 of the desktop-menubar lane, checked in an isolated worktree on macOS 27.0.1; targeted runs only, not the full gate.
+
+- `python3 scripts/test.py --only AutomationCommandTests --only PlaylistStoreTests --only PlaylistPlannerTests --only HotKeyPreferencesTests --only StatusMenuModelTests --only WallpaperDisplayTransferIntegrationTests --only WebPanelGeneralSettingsTests` — exit 0; 105 passed, 0 failed, 0 skipped
+- `python3 scripts/test.py --only AppAutomationTests --only GlobalHotKeysTests --only PlaylistSchedulerTests --only WebPanelPlaylistTests --only WallpaperBackupTests --only ControlPanelPlaybackToolsTests --only ControlPanelShellTests --only WebPanelAssetsTests --only ActivationLogTests --only WallpaperActivationRecoveryTests` — exit 0; 172 passed, 0 failed, 0 skipped
+- Mutation check: dropping the held-wallpaper exclusion and recording a pick before it was applied each failed the integration test written for it; both were reverted
+- Every scripts/tests/test_*.py module run directly — all passed (the WebUI key check includes the two new keys in ja, zh-Hans and zh-Hant)
+- Not run: the full `python3 scripts/test.py` gate, `python3 scripts/check_rust.py` and `python3 scripts/check_renderer.py` (no Rust, bridge or renderer change), Release build, any desktop run
+- Not covered: how the menu item draws and reads, a real shortcut key press, Siri or Shortcuts listing the action and its Choose from option, and how a random pick looks on real displays; see manual-smoke "The menu bar with two displays"
+
 ## 2026-10-13 — Menu bar: control each display
 
 The menu bar menu gets a submenu per display when two or more displays can show their own wallpaper (StatusMenuModel), with Remove from Display, Start Again and Open in Control Panel; one display keeps the flat menu. Lane worktree, targeted run only, not the full gate.

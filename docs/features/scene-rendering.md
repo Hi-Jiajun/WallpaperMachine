@@ -41,7 +41,14 @@ whole scene. Compatibility additionally instantiates leaf `.mdl` model objects,
 activates the scene's perspective camera, honours material `depthtest` /
 `depthwrite` / `cullmode` on a depth attachment for the default target and keeps
 authored `scene.lights`; Native Metal refuses those scenes as a whole until it grows
-the same depth, perspective and lighting path. `input.cursorWorldPosition` stays 2D
+the same depth, perspective and lighting path. Both renderers apply a material's
+depth state the same way: a pass depth-tests only into a target with a depth
+attachment (a scene with a perspective camera or models), and every other pass
+draws in painter's order. A material writes depth as authored whatever its
+blending, as Wallpaper Engine's own translucent depth-tested font materials expect,
+so a translucent or additive layer that asks to write depth hides what is drawn
+behind it afterwards, its transparent texels included; a pass that does not
+depth-test writes none. `input.cursorWorldPosition` stays 2D
 (`z = 0`), so a scripted orbit drag may not match Wallpaper Engine.
 
 Puppets and rope geometry behave the same on both renderers. A puppet is deformed

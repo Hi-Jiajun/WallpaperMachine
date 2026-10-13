@@ -57,10 +57,14 @@
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
 
+#include <vulkan/vulkan.h>
+#include <vulkan/vulkan_metal.h>
+
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
 #include <array>
+#include <atomic>
 #include <charconv>
 #include <chrono>
 #include <cmath>
@@ -263,6 +267,126 @@ SceneNode* FirstDrawableNode(SceneNode* node)
         if (auto* found = FirstDrawableNode(child.get()); found != nullptr) return found;
     }
     return nullptr;
+}
+
+/// The last frame's final composition from one renderer.
+struct RendererPicture
+{
+    std::vector<uint8_t> rgb;
+    uint32_t             width { 0 };
+    uint32_t             height { 0 };
+    /// Why there is no picture: the renderer did not start, prepare or draw.
+    std::string          error;
+};
+
+/// Draws `scene` with one renderer through `SceneRendererHandle` on a layer no
+/// window owns, as the host drives it -- the scaling it pushes to every
+/// renderer it creates, its per-frame `FrameBegin`, a graph rebuilt on every
+/// mutation -- and returns the last frame through the poster path both
+/// renderers share. Two calls on two parses of one scene, seeded and clocked
+/// alike, differ only by what the renderers did.
+RendererPicture DrawWithRenderer(Scene& scene, bool native, uint32_t width, uint32_t height,
+                                 int frames, double step)
+{
+    RendererPicture picture;
+    @autoreleasepool {
+        CAMetalLayer* layer   = [CAMetalLayer layer];
+        layer.device          = MTLCreateSystemDefaultDevice();
+        layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+        layer.contentsScale   = 1.0;
+        layer.frame           = CGRectMake(0, 0, width, height);
+        layer.drawableSize    = CGSizeMake(width, height);
+        layer.framebufferOnly = NO;
+        void* handle          = (__bridge void*)layer;
+
+        std::atomic<bool> wanted { false };
+        RenderInitInfo    info;
+        info.metal_layer   = handle;
+        info.width         = static_cast<uint16_t>(width);
+        info.height        = static_cast<uint16_t>(height);
+        info.render_width  = static_cast<uint16_t>(width);
+        info.render_height = static_cast<uint16_t>(height);
+        info.surface_info.instanceExts = { VK_KHR_SURFACE_EXTENSION_NAME,
+                                           VK_EXT_METAL_SURFACE_EXTENSION_NAME };
+        info.surface_info.createSurfaceOp = [handle](VkInstance instance, VkSurfaceKHR* surface) {
+            auto* create = reinterpret_cast<PFN_vkCreateMetalSurfaceEXT>(
+                vkGetInstanceProcAddr(instance, "vkCreateMetalSurfaceEXT"));
+            if (create == nullptr) return VK_ERROR_EXTENSION_NOT_PRESENT;
+            const VkMetalSurfaceCreateInfoEXT create_info {
+                .sType  = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT,
+                .pNext  = nullptr,
+                .flags  = 0,
+                .pLayer = (__bridge CAMetalLayer*)handle,
+            };
+            return create(instance, &create_info, nullptr, surface);
+        };
+        info.wants_poster   = [&wanted] { return wanted.exchange(false); };
+        info.poster_pending = [&wanted] { return wanted.load(); };
+        info.poster_ready   = [&picture](std::span<const uint8_t> bytes, uint32_t w, uint32_t h,
+                                       bool bgra) {
+            picture.width  = w;
+            picture.height = h;
+            picture.rgb.resize(std::size_t(w) * h * 3);
+            for (std::size_t i = 0; i < std::size_t(w) * h && i * 4 + 3 < bytes.size(); ++i) {
+                picture.rgb[i * 3 + 0] = bytes[i * 4 + (bgra ? 2 : 0)];
+                picture.rgb[i * 3 + 1] = bytes[i * 4 + 1];
+                picture.rgb[i * 3 + 2] = bytes[i * 4 + (bgra ? 0 : 2)];
+            }
+        };
+
+        SceneRendererHandle render;
+        std::string         error;
+        if (native ? ! render.createMetal(info, error) : ! render.createVulkan(info)) {
+            picture.error = "could not start: " + error;
+            return picture;
+        }
+        auto graph = sceneToRenderGraph(scene);
+        if (graph == nullptr || ! render.compileRenderGraph(scene, *graph)) {
+            picture.error = "could not prepare: " + render.lastError();
+            render.destroy();
+            return picture;
+        }
+        render.SetWallpaperScalingMode(WallpaperScalingMode::FILL);
+        render.SetWallpaperScalingFactor(1.0);
+        render.SetWallpaperFraming(WallpaperFraming {});
+        render.SetWallpaperHorizontalFlip(false);
+        render.UpdateCameraFillMode(scene, FillMode::ASPECTCROP);
+        if (scene.runtime != nullptr) {
+            scene.runtime->SetScreenResolution(Eigen::Vector2f(width, height));
+        }
+        for (int frame = 0; frame < frames && picture.error.empty(); ++frame) {
+            scene.paritileSys->Emitt();
+            if (scene.runtime != nullptr) {
+                scene.runtime->Tick(step);
+                scene.runtime->PumpTextLayerCache();
+                if (scene.runtime->ConsumeSceneGraphMutationFlag()) {
+                    // Cleared before the old graph is released: the renderer
+                    // still refers to its passes until then.
+                    if (! render.clearLastRenderGraph()) {
+                        picture.error = "could not rebuild: " + render.lastError();
+                        break;
+                    }
+                    graph = sceneToRenderGraph(scene);
+                    if (graph == nullptr || ! render.compileRenderGraph(scene, *graph)) {
+                        picture.error = "could not rebuild: " + render.lastError();
+                        break;
+                    }
+                }
+            }
+            if (frame == frames - 1) wanted = true;
+            if (scene.shaderValueUpdater != nullptr) scene.shaderValueUpdater->FrameBegin();
+            if (! render.drawFrame(scene)) {
+                picture.error = "frame " + std::to_string(frame) + ": " + render.lastError();
+            }
+            scene.PassFrameTime(step);
+        }
+        if (picture.rgb.empty() && picture.error.empty() && native) {
+            (void)render.ServicePosterRequest(scene);
+        }
+        render.destroy();
+        if (picture.rgb.empty() && picture.error.empty()) picture.error = "delivered no picture";
+    }
+    return picture;
 }
 
 rg::TexNode::Desc TexDesc(const std::string& key)
@@ -1612,6 +1736,141 @@ TEST_F(MetalSceneDraw, APerspectiveCameraDrawsThroughTheAuthoredShader)
             << left_h << " right height " << right_h;
 
         render.destroy();
+    }
+}
+
+/// Two overlapping cards, drawn in order: a half-transparent red card nearer
+/// the camera, whose `blending`, `depthtest` and `depthwrite` are the given
+/// authored strings, then an opaque blue card further away that depth-tests
+/// and writes no depth. The blue card spans x 152..312 and the red one
+/// 72..232, so half the blue card lies behind the red one.
+std::filesystem::path WriteDepthWriteFixture(const std::filesystem::path& root,
+                                             std::string_view blending,
+                                             std::string_view depthtest,
+                                             std::string_view depthwrite)
+{
+    const std::string vertex =
+        "uniform mat4 g_ModelViewProjectionMatrix;\n"
+        "attribute vec3 a_Position;\n"
+        "attribute vec2 a_TexCoord;\n"
+        "varying vec2 v_TexCoord;\n"
+        "void main() {\n"
+        "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+        "  v_TexCoord = a_TexCoord;\n"
+        "}\n";
+    const auto fragment = [](std::string_view colour) {
+        return "varying vec2 v_TexCoord;\n"
+               "void main() {\n"
+               "  gl_FragColor = vec4(" + std::string(colour) + ");\n"
+               "}\n";
+    };
+    const auto pass = [](std::string_view shader, std::string_view blend, std::string_view test,
+                         std::string_view write) {
+        return R"({"passes":[{"shader":")" + std::string(shader) + R"(","blending":")" +
+               std::string(blend) + R"(","cullmode":"nocull","depthtest":")" +
+               std::string(test) + R"(","depthwrite":")" + std::string(write) + R"("}]})";
+    };
+    const auto card = [](int id, std::string_view name, int x, int z) {
+        return R"({"id":)" + std::to_string(id) + R"(,"name":")" + std::string(name) +
+               R"(","image":"models/)" + std::string(name) + R"(.json","origin":[)" +
+               std::to_string(x) + ",128," + std::to_string(z) +
+               R"(],"scale":[1,1,1],"angles":[0,0,0],"visible":true})";
+    };
+
+    const std::map<std::string, std::string> files {
+        { "project.json",
+          R"({"title":"Metal depth write","type":"scene","file":"layout.json","general":{"properties":{}}})" },
+        { "models/near.json", R"({"width":160,"height":128,"material":"materials/near.json"})" },
+        { "models/far.json", R"({"width":160,"height":128,"material":"materials/far.json"})" },
+        { "materials/near.json", pass("depth_write_near", blending, depthtest, depthwrite) },
+        { "materials/far.json", pass("depth_write_far", "normal", "enabled", "disabled") },
+        { "shaders/depth_write_near.vert", vertex },
+        { "shaders/depth_write_near.frag", fragment("1.0, 0.0, 0.0, 0.5") },
+        { "shaders/depth_write_far.vert", vertex },
+        { "shaders/depth_write_far.frag", fragment("0.0, 0.0, 1.0, 1.0") },
+        { "layout.json",
+          R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+          R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0.0,0.0,0.0],)"
+          R"("cameraparallax":false,"orthogonalprojection":{"width":384,"height":256}},)"
+          R"("objects":[)" + card(1, "near", 152, 100) + "," + card(2, "far", 232, -100) + "]}" },
+    };
+    for (const auto& [name, contents] : files) {
+        const auto path = root / name;
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream(path) << contents;
+    }
+    return root / "project.json";
+}
+
+TEST_F(MetalSceneDraw, ADepthWritingDrawHidesLaterDrawsAsOnCompatibility)
+{
+    // Wallpaper Engine applies a material's `depthwrite` whatever its blending
+    // -- its own depth-tested font materials are translucent and write depth --
+    // so a translucent or additive layer that asks to write depth hides what
+    // is drawn behind it afterwards, its transparent texels included. As in
+    // Direct3D, OpenGL and Vulkan, a draw that does not depth-test writes no
+    // depth, and only a target with a depth attachment has any. Each case is
+    // drawn by both renderers and must come out the same; the cases also have
+    // to differ from each other, or the comparison proves nothing.
+    struct Case
+    {
+        const char* name;
+        const char* blending;
+        const char* depthtest;
+        const char* depthwrite;
+        bool        depth;
+        bool        hides;
+    };
+    const Case cases[] = {
+        { "translucent", "translucent", "enabled", "enabled", true, true },
+        { "additive", "additive", "enabled", "enabled", true, true },
+        { "opaque", "normal", "enabled", "enabled", true, true },
+        { "translucent-no-write", "translucent", "enabled", "disabled", true, false },
+        { "translucent-no-test", "translucent", "disabled", "enabled", true, false },
+        { "translucent-no-depth", "translucent", "enabled", "enabled", false, false },
+        { "opaque-no-depth", "normal", "enabled", "enabled", false, false },
+    };
+    // The far card is 160 x 128 pixels, half of it behind the near card.
+    constexpr std::size_t kFarCard   = 160 * 128;
+    constexpr std::size_t kUnhidden  = kFarCard * 9 / 10;
+    constexpr std::size_t kHalfShown = kFarCard / 2;
+    for (const auto& c : cases) {
+        SCOPED_TRACE(c.name);
+        std::map<bool, RendererPicture> pictures;
+        for (const bool native : { false, true }) {
+            const std::string name = std::string(c.name) + (native ? "-native" : "-compat");
+            const auto        project = WriteDepthWriteFixture(root_ / ("depth-write-" + name),
+                                                               c.blending, c.depthtest,
+                                                               c.depthwrite);
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / ("depth-write-cache-" + name), loaded, error))
+                << error;
+            loaded.scene->FindRenderTarget(std::string(SpecTex_Default))->withDepth = c.depth;
+            if (native) {
+                ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal);
+            }
+            pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
+            ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+        }
+        for (const bool native : { false, true }) {
+            const auto& rgb  = pictures[native].rgb;
+            std::size_t blue = 0;
+            for (std::size_t i = 0; i + 2 < rgb.size(); i += 3) {
+                if (rgb[i] < 32 && rgb[i + 1] < 32 && rgb[i + 2] > 224) ++blue;
+            }
+            const char* renderer = native ? "native" : "compatibility";
+            if (c.hides) {
+                EXPECT_GT(blue, kHalfShown * 9 / 10) << renderer << " hid more than the overlap";
+                EXPECT_LT(blue, kHalfShown * 11 / 10)
+                    << renderer << " drew the far card over a nearer depth-writing one";
+            } else {
+                EXPECT_GT(blue, kUnhidden) << renderer << " hid the far card behind a draw "
+                                           << "that writes no depth";
+            }
+        }
+        EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
+            << "the native renderer wrote other depth than the compatibility renderer";
     }
 }
 

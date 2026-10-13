@@ -25,6 +25,17 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-13 — One depth rule for both scene renderers
+
+Native Metal dropped depth writes for translucent and additive materials and depth-tested into targets with no depth attachment; both renderers now take a draw's depth state from ResolveSceneDepthState. Wallpaper Engine's own translucent depth-tested font materials write depth, as Compatibility already did.
+
+- `MetalSceneDraw.ADepthWritingDrawHidesLaterDrawsAsOnCompatibility` (seven authored blend/depth cases through both renderers): **failed** without the source change (translucent, additive and no-attachment opaque cases differ), **passed** with it
+- `python3 scripts/check_renderer.py`: **exit 0**; `metal_scene_draw_smoke` **57 passed**, `metal_backend_test` **35 passed**, generated cases pixel-equal with no diagnostics, reload probe 8 projects x2 clean; local-project tests skipped (no `WE_TEST_*` projects)
+- `python3 scripts/build.py --renderer-only` then `python3 scripts/test.py`: **2564 passed, 0 failed, 45 skipped**
+- After rebasing onto `b0f1a177`: `metal_scene_draw_smoke` **58 passed**, `metal_backend_test` **35 passed**
+- Renderer comparison (`LocalProjectsDrawTheSamePictureOnBothRenderers`, on the uncommitted Native Metal compatibility work, which draws model scenes natively) over 28 local model/perspective scenes plus Leon, baseline/fix/baseline: no change beyond run-to-run noise; 3675966045 differs by 0.417 mean in every run, unrelated
+- Not checked: the app on the desktop; the Release build follows the commit
+
 ## 2026-10-13 — Workshop effect shaders the legalizer rejected
 
 Shader legalizer repairs for permissive-path expressions that dropped whole Workshop effects on both renderers (scalar builtin broadcasts, mixed-width operands, scalar and bool stores, return conversion, widened float-array component subscripts, runtime global initializers, statements after annotations or directives). ShaderPipelineRevision 11 -> 12.
@@ -119,14 +130,3 @@ PlaybackPreferences.wallpapersMuted, OR-ed into WallpaperPresentationPolicy's au
 - Every scripts/tests/test_*.py module run directly — 316 passed (the WebUI key check includes the new keys in ja, zh-Hans and zh-Hant)
 - Not run: the full `python3 scripts/test.py` gate, `python3 scripts/check_rust.py` and `python3 scripts/check_renderer.py` (no Rust, bridge or renderer change), Release build, any desktop run
 - Not covered: that scene, video (Native and Compatibility) and Web wallpapers really go silent and come back through an audio output (audio hardware needs an authorized desktop run; only the suppression delivered to the bridge is tested), how the ticked menu item draws and reads, Siri or Shortcuts listing the three actions, and a real shortcut key press; see manual-smoke "Audio responsiveness"
-
-## 2026-10-13 — Random Wallpaper command
-
-A new AutomationCommand.random(display:pool:) with pools all and favorites, reached from the menu bar, wallpapermachine://random, a Shortcuts action and a shortcut key. Its pick comes from PlaylistStore.randomPick with a round of its own per display and pool (kept beside the shuffle rounds in WallpaperMachine.playlistRounds), and BridgeStore.activateRandomWallpaperAsync makes it in the display's turn of the command queue. Commit 8 of the desktop-menubar lane, checked in an isolated worktree on macOS 27.0.1; targeted runs only, not the full gate.
-
-- `python3 scripts/test.py --only AutomationCommandTests --only PlaylistStoreTests --only PlaylistPlannerTests --only HotKeyPreferencesTests --only StatusMenuModelTests --only WallpaperDisplayTransferIntegrationTests --only WebPanelGeneralSettingsTests` — exit 0; 105 passed, 0 failed, 0 skipped
-- `python3 scripts/test.py --only AppAutomationTests --only GlobalHotKeysTests --only PlaylistSchedulerTests --only WebPanelPlaylistTests --only WallpaperBackupTests --only ControlPanelPlaybackToolsTests --only ControlPanelShellTests --only WebPanelAssetsTests --only ActivationLogTests --only WallpaperActivationRecoveryTests` — exit 0; 172 passed, 0 failed, 0 skipped
-- Mutation check: dropping the held-wallpaper exclusion and recording a pick before it was applied each failed the integration test written for it; both were reverted
-- Every scripts/tests/test_*.py module run directly — all passed (the WebUI key check includes the two new keys in ja, zh-Hans and zh-Hant)
-- Not run: the full `python3 scripts/test.py` gate, `python3 scripts/check_rust.py` and `python3 scripts/check_renderer.py` (no Rust, bridge or renderer change), Release build, any desktop run
-- Not covered: how the menu item draws and reads, a real shortcut key press, Siri or Shortcuts listing the action and its Choose from option, and how a random pick looks on real displays; see manual-smoke "The menu bar with two displays"
