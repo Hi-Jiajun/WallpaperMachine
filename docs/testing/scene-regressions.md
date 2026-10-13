@@ -249,10 +249,11 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   false}`, or a combo `condition`) holds the editor's value only as a default: the parser builds the effect when the
   property's current value says so, by the layer-visibility rule
   (`ResolveBoolSetting`), and keeps the authored value for a property the project
-  does not declare. A settings change reloads the scene, so this is decided at
-  parse time with no per-frame cost; a scripted effect `visible` keeps its
-  authored value. Reading only the default left colour modes and effect toggles
-  in customizable wallpapers doing nothing.
+  does not declare. It is decided at parse time with no per-frame cost: a live
+  property preview holds the property at the loaded value (see *Load-only
+  properties* below) and Apply changes reloads. A scripted effect `visible`
+  keeps its authored value. Reading only the default left colour modes and
+  effect toggles in customizable wallpapers doing nothing.
 - **Alignment anchors under dynamic transforms** — `SceneSchema.ImageAlignmentAnchorSurvivesScriptedOriginAndScale`,
   `ScriptRuntimeCompat.RotatedAnchoredLayerTurnsAboutItsAnchor` and
   `.ScriptedRingBarsHangOutwardFromTheirCircle`, plus `nodes.txt` translate diffs
@@ -429,6 +430,28 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   (`DescribeTimeAdvancingWork` stays 0 for a still scene), so the on-demand idle
   analysis is unchanged. A name the scene loaded with but the project does not
   declare keeps its last value until the next load; callers send only declared ids.
+- **Load-only properties** — `project_property_preview_test`
+  (`LoadOnlyProperties.*`, CPU only). Almost every property is a live binding, so
+  a document reaches the scene on its next tick. Two readers decide once, while
+  the scene loads, and a built effect or a filled material slot is not redone:
+  a `usertextures` slot that names a `scenetexture` property
+  (`UserTexturePropertyName`, noted by `LoadMaterial`) and an effect whose
+  `visible` is bound to a property, plain or with a combo `condition`
+  (`UserPropertyName`, noted by `ResolveUserEffectVisibility`, image and text
+  objects). Building every hidden effect would cost passes and memory, so these
+  stay load-only. The parser calls `NoteLoadOnlyProperty(name)`, which records
+  the value the name was read with (absent when the table did not name it);
+  `LoadOnlyProperties()` lists the names. `PreviewProjectPropertyOverride(document)`
+  is `ApplyProjectPropertyOverride` with every noted name forced back to that
+  value for every consumer of it, live ones included (`glow` here also shows a
+  layer, and the layer stays put), and lists the names the document asked
+  something else for as `deferred`: a document that leaves out a name the scene
+  loaded with a saved choice defers it too, and asking for the loaded value again
+  defers nothing. A scripted effect `visible`, an effect with a plain value, a
+  property nothing reads and a live slider note nothing. One test builds the
+  scene again with the new values to show the effect set and the slot texture
+  differ, which is why a running scene cannot take them. A sound layer's volume
+  binding is also read when the layer is created and is not noted here.
 - **Scene commits in headless tests** — `scene_schema_tests` helpers wait for
   posted work with a render-looper round trip (`beginSurfaceReconfigure`) and a
   main-looper one (installing a pointer callback replays from the main looper)

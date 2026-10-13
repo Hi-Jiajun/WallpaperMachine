@@ -1290,6 +1290,13 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
         pScene != nullptr && pScene->runtime != nullptr ? &pScene->runtime->projectProperties()
                                                         : nullptr;
     ApplySystemUserTextures(base_textures, wpmat.usertextures, properties);
+    // The slot is decided here and a built material is not rebuilt, so a running
+    // scene holds the property at this value.
+    if (pScene != nullptr && pScene->runtime != nullptr) {
+        for (const auto& user_texture : wpmat.usertextures) {
+            pScene->runtime->NoteLoadOnlyProperty(UserTexturePropertyName(user_texture));
+        }
+    }
 
     std::unordered_map<std::string, ImageHeader> texHeaders;
 
@@ -1770,16 +1777,20 @@ void RegisterLayerAlpha(ParseContext& context, std::string_view runtime_name,
 // An effect a user property switches on or off is built only when the
 // property's current value -- a preset or the user's choice, by the same rule
 // as a layer's visibility -- says so. The scene file's value is the editor's
-// default. A property change reloads the scene, so deciding here suffices.
+// default. It is decided here, when the scene loads: building every hidden
+// effect would cost passes and memory, so a running scene holds the property at
+// this value (SceneRuntimeContext::NoteLoadOnlyProperty) and a changed one
+// takes a reload.
 void ResolveUserEffectVisibility(ParseContext& context,
                                  std::vector<wpscene::WPImageEffect>& effects,
                                  std::string_view runtime_name) {
     if (context.scene->runtime == nullptr) return;
+    auto& runtime = *context.scene->runtime;
     for (auto& effect : effects) {
         if (effect.visible_setting.is_null()) continue;
         effect.visible =
-            ResolveBoolSetting(*context.scene->runtime, effect.visible_setting, runtime_name)
-                ->getBool();
+            ResolveBoolSetting(runtime, effect.visible_setting, runtime_name)->getBool();
+        runtime.NoteLoadOnlyProperty(UserPropertyName(effect.visible_setting));
     }
 }
 
@@ -4758,6 +4769,11 @@ std::optional<std::string> TexturePropertyTextureName(const std::string& value) 
     return name;
 }
 
+std::string_view wallpaper::UserTexturePropertyName(const wpscene::WPUserTexture& user_texture) {
+    // A typed slot (`system`, ...) names something the runtime supplies.
+    return user_texture.type.empty() ? std::string_view(user_texture.name) : std::string_view {};
+}
+
 void wallpaper::ApplySystemUserTextures(std::vector<std::string>&                  textures,
                                         const std::vector<wpscene::WPUserTexture>& usertextures,
                                         const ProjectProperties*                   properties) {
@@ -4769,8 +4785,7 @@ void wallpaper::ApplySystemUserTextures(std::vector<std::string>&               
         std::string replacement;
         if (wpscene::IsSystemUserTexture(user_texture)) {
             replacement = user_texture.name;
-        } else if (properties != nullptr && user_texture.type.empty() &&
-                   ! user_texture.name.empty()) {
+        } else if (properties != nullptr && ! UserTexturePropertyName(user_texture).empty()) {
             // The bare-string form names one of this wallpaper's properties. An
             // unset property is the author's own default, so the slot keeps it.
             const auto property = properties->find(user_texture.name);

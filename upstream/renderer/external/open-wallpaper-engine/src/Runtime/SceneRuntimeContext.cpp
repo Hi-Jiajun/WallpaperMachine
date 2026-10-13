@@ -635,8 +635,53 @@ const ProjectProperties& SceneRuntimeContext::projectProperties() const {
 std::vector<std::string> SceneRuntimeContext::ApplyProjectPropertyOverride(
     const ProjectProperties& override_properties) {
     m_project_property_overrides = override_properties;
+    return ApplyProjectProperties(
+        MergeProjectProperties(m_default_project_properties, m_project_property_overrides));
+}
+
+void SceneRuntimeContext::NoteLoadOnlyProperty(std::string_view name) {
+    if (name.empty()) return;
+    std::string key(name);
+    if (m_load_only_properties.contains(key)) return;
+    const auto found = m_project_properties.find(key);
+    std::optional<RuntimeScalarValue> read_with;
+    if (found != m_project_properties.end()) read_with = found->second;
+    m_load_only_properties.emplace(std::move(key), std::move(read_with));
+}
+
+std::vector<std::string> SceneRuntimeContext::LoadOnlyProperties() const {
+    std::vector<std::string> names;
+    names.reserve(m_load_only_properties.size());
+    for (const auto& entry : m_load_only_properties) names.push_back(entry.first);
+    return names;
+}
+
+ProjectPropertyPreview SceneRuntimeContext::PreviewProjectPropertyOverride(
+    const ProjectProperties& override_properties) {
+    m_project_property_overrides = override_properties;
     auto next_properties =
         MergeProjectProperties(m_default_project_properties, m_project_property_overrides);
+    ProjectPropertyPreview preview;
+    // The map is ordered, so the names come out sorted.
+    for (const auto& [name, read_with] : m_load_only_properties) {
+        const auto asked = next_properties.find(name);
+        const bool asked_for_something_else =
+            asked == next_properties.end()
+                ? read_with.has_value()
+                : ! read_with.has_value() || ProjectPropertyValueChanged(*read_with, asked->second);
+        if (asked_for_something_else) preview.deferred.push_back(name);
+        if (read_with.has_value()) {
+            next_properties.insert_or_assign(name, *read_with);
+        } else if (asked != next_properties.end()) {
+            next_properties.erase(name);
+        }
+    }
+    preview.changed = ApplyProjectProperties(std::move(next_properties));
+    return preview;
+}
+
+std::vector<std::string> SceneRuntimeContext::ApplyProjectProperties(
+    ProjectProperties next_properties) {
     ProjectProperties changed_properties;
     for (const auto& [name, value] : next_properties) {
         const auto previous = m_project_properties.find(name);

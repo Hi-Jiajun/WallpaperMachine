@@ -174,6 +174,24 @@ Compiled pipelines are shared between copies. The native backend's binary archiv
 stores pipelines, so it covers the smaller part. Method and what recompiles:
 [renderer testing](../testing/renderer.md#metal-compile-across-processes).
 
+### Live property edits
+
+The renderer can take a whole property document on a running scene instead of
+loading the scene again. The document is the project's declared defaults with
+exactly the given values over them, so a property it leaves out is back at the
+declared default whatever the scene loaded with. It adds no per-frame work.
+
+Nearly every property is a live binding and follows on the next tick: layer
+visibility, alpha, colour, origin, scale and angles, camera, clear colour, bloom,
+shader constants, rope and particle values, text, puppets, and the values a
+script reads and reacts to. Two readers decide once, while the scene loads, and
+are **load-only**: a material slot that a `scenetexture` property picks, and an
+effect an on/off or combo property builds or leaves out (every hidden effect
+would otherwise cost passes and memory). A preview of a document holds a
+load-only property at the value the scene read, for every layer that uses it, and
+reports it as deferred; only loading the scene applies it. A sound layer's volume
+binding is also read when the layer is created, and is not covered by that hold.
+
 ### Scene render optimisation
 
 The only scene control that ships on. It reuses the result of scene subgraphs whose

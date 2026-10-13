@@ -2,7 +2,9 @@
 // again. These tests pin what that document means, with no device, window or
 // audio output: it is the project's declared defaults with exactly the given
 // values over them, whatever the scene happened to load with, and a scene that
-// takes it ends up exactly where a fresh load with the same document would.
+// takes it ends up exactly where a fresh load with the same document would. The
+// few properties a scene reads only while it loads are noted, and a preview holds
+// them at the value they were read with.
 
 #include <gtest/gtest.h>
 
@@ -18,9 +20,13 @@
 #include "Runtime/SceneSettingResolver.hpp"
 #include "Scene/Scene.h"
 #include "Scene/SceneNode.h"
+#include "Scene/include/Scene/SceneImageEffectLayer.h"
+#include "Scene/include/Scene/SceneMaterial.h"
 #include "Scene/include/Scene/SceneMesh.h"
 #include "WPSceneParser.hpp"
+#include "wpscene/WPMaterial.h"
 
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <optional>
@@ -240,9 +246,10 @@ struct LoadedScene {
 // Loads the scene as the engine does: the values it loads with, and the
 // project's own beside them when those carry saved choices.
 std::unique_ptr<LoadedScene> Load(std::string_view objects, const ProjectProperties& loaded,
-                                  const ProjectProperties* authored) {
+                                  const ProjectProperties* authored,
+                                  const std::map<std::string, std::string>& more_files = {}) {
     auto loaded_scene = std::make_unique<LoadedScene>();
-    const std::map<std::string, std::string> files {
+    std::map<std::string, std::string> files {
         { "/image.json", R"({"width":64,"height":32,"material":"mat.json"})" },
         { "/mat.json",
           R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":["solid"]}]})" },
@@ -250,6 +257,7 @@ std::unique_ptr<LoadedScene> Load(std::string_view objects, const ProjectPropert
         { "/shaders/genericimage.frag", std::string(kFrag) },
         { "/materials/solid.tex", "" },
     };
+    files.insert(more_files.begin(), more_files.end());
     if (! loaded_scene->vfs.Mount("/assets", std::make_unique<MemoryFs>(files))) return nullptr;
     loaded_scene->scene = loaded_scene->parser.Parse(
         SceneParseRequest {
@@ -484,6 +492,255 @@ TEST(ProjectPropertyRuntime, ApplyingPropertiesAddsNoTimeAdvancingWork) {
     loaded->runtime().ApplyProjectPropertyOverride({});
     loaded->runtime().Tick(1.0 / 60.0);
     EXPECT_EQ(loaded->runtime().DescribeTimeAdvancingWork(), before);
+}
+
+
+// What a scene reads only while it loads. A slot a `scenetexture` property picks,
+// and an effect a toggle switches on, are decided by the scene's first build and
+// never revisited, so each is a load-only property.
+const std::map<std::string, std::string> kLoadOnlyFiles = [] {
+    std::map<std::string, std::string> files {
+        { "/picture.json", R"({"width":64,"height":32,"material":"picture_mat.json"})" },
+        { "/picture_mat.json",
+          R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":["solid"],"usertextures":["backdrop"]}]})" },
+        { "/materials/other.tex", "" },
+    };
+    // A material is named after its shader, so each effect gets its own.
+    for (const std::string name : { "toggled", "chosen", "scripted", "plain", "caption" }) {
+        files["/effects/" + name + "/effect.json"] =
+            R"({"name":")" + name + R"(","passes":[{"material":"materials/effects/)" + name +
+            R"(.json"}]})";
+        files["/materials/effects/" + name + ".json"] =
+            R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"effects/)" +
+            name + R"(","textures":[null]}]})";
+        files["/shaders/effects/" + name + ".vert"] = std::string(kVert);
+        files["/shaders/effects/" + name + ".frag"] = std::string(kFrag);
+    }
+    return files;
+}();
+
+// A layer a picture property fills, an image layer whose effects follow a toggle,
+// a combo condition, a script and nothing, a layer the toggle also shows, and a
+// slider only a live binding reads. `glow` is bound twice -- to an effect and to
+// a layer's visibility -- so a hold on it has to reach both.
+constexpr std::string_view kLoadOnlyLayers = R"([
+  {"id":1,"name":"picture","image":"picture.json","visible":true},
+  {"id":2,"name":"effects","image":"image.json","visible":true,
+   "effects":[
+     {"file":"effects/toggled/effect.json","id":10,
+      "visible":{"user":"glow","value":false}},
+     {"file":"effects/chosen/effect.json","id":11,
+      "visible":{"user":{"name":"mode","condition":"2"},"value":false}},
+     {"file":"effects/scripted/effect.json","id":12,
+      "visible":{"script":"'use strict'; export function update(value) { return value; }","value":true}},
+     {"file":"effects/plain/effect.json","id":13,"visible":true}
+   ]},
+  {"id":3,"name":"gate","image":"image.json","visible":{"user":"glow","value":false}},
+  {"id":4,"name":"fader","image":"image.json","alpha":{"user":"opacity","value":1.0}}
+])";
+constexpr std::string_view kLoadOnlyText = R"({"id":5,"name":"caption",
+  "text":"hello","font":"Arial","pointsize":10,"origin":[32,16,0],"size":"200 40","visible":true,
+  "effects":[{"file":"effects/caption/effect.json","id":14,
+              "visible":{"user":"captionglow","value":false}}]})";
+
+std::string LoadOnlyObjects(bool with_text) {
+    std::string objects(kLoadOnlyLayers);
+    if (with_text) objects.insert(objects.rfind(']'), "," + std::string(kLoadOnlyText));
+    return objects;
+}
+
+// What the project declares for them, and what a user's saved choices make of it.
+const ProjectProperties kLoadOnlyAuthored {
+    { "backdrop", RuntimeScalarValue::String("") },
+    { "glow", RuntimeScalarValue::Bool(false) },
+    { "captionglow", RuntimeScalarValue::Bool(false) },
+    { "mode", RuntimeScalarValue::String("1") },
+    { "opacity", RuntimeScalarValue::Float(1.0f) },
+    { "unused", RuntimeScalarValue::Bool(false) },
+};
+
+// The materials of every effect the parser built, by name.
+std::vector<std::string> BuiltEffects(Scene& scene) {
+    std::vector<std::string> names;
+    for (auto& [camera_name, camera] : scene.cameras) {
+        (void)camera_name;
+        if (! camera->HasImgEffect()) continue;
+        auto& layer = *camera->GetImgEffect();
+        for (std::size_t index = 0; index < layer.EffectCount(); ++index) {
+            for (const auto& node : layer.GetEffect(index)->nodes) {
+                if (node.sceneNode == nullptr || node.sceneNode->Mesh() == nullptr) continue;
+                if (const auto* material = node.sceneNode->Mesh()->Material()) {
+                    names.push_back(material->name);
+                }
+            }
+        }
+    }
+    std::sort(names.begin(), names.end());
+    return names;
+}
+
+// The texture the picture layer's slot ended up on.
+std::string PictureTexture(LoadedScene& loaded) {
+    auto* node = FindNode(*loaded.scene->sceneGraph, "picture");
+    if (node == nullptr || node->Mesh() == nullptr || node->Mesh()->Material() == nullptr) {
+        return "<none>";
+    }
+    const auto& textures = node->Mesh()->Material()->textures;
+    return textures.empty() ? "<none>" : textures.front();
+}
+
+std::unique_ptr<LoadedScene> LoadOnly(bool with_text, const ProjectProperties& saved) {
+    return Load(LoadOnlyObjects(with_text), MergeProjectProperties(kLoadOnlyAuthored, saved),
+                &kLoadOnlyAuthored, kLoadOnlyFiles);
+}
+
+TEST(LoadOnlyProperties, UserPropertyNameReadsBothAuthoredForms) {
+    EXPECT_EQ(UserPropertyName({ { "user", "toggle" }, { "value", true } }), "toggle");
+    EXPECT_EQ(UserPropertyName({ { "user", { { "name", "mode" }, { "condition", "2" } } },
+                                 { "value", true } }),
+              "mode");
+    // A combo that names its property without a condition is still bound to it.
+    EXPECT_EQ(UserPropertyName({ { "user", { { "name", "mode" } } } }), "mode");
+    EXPECT_EQ(UserPropertyName({ { "script", "return value;" }, { "value", true } }), "");
+    EXPECT_EQ(UserPropertyName(nlohmann::json(true)), "");
+    EXPECT_EQ(UserPropertyName(nlohmann::json()), "");
+}
+
+TEST(LoadOnlyProperties, ASlotNamesAPropertyOnlyInItsBareForm) {
+    EXPECT_EQ(UserTexturePropertyName({ .name = "backdrop" }), "backdrop");
+    // The slots the runtime supplies, and any other typed slot, name no property.
+    EXPECT_EQ(UserTexturePropertyName({ .name = "$mediaThumbnail", .type = "system" }), "");
+    EXPECT_EQ(UserTexturePropertyName({ .name = "other", .type = "something" }), "");
+    EXPECT_EQ(UserTexturePropertyName({}), "");
+}
+
+TEST(LoadOnlyProperties, AScenetextureBindingEffectToggleAndComboConditionAreNoted) {
+    const auto loaded = LoadOnly(false, {});
+    ASSERT_NE(loaded, nullptr);
+    // The slot a property picks, an effect a toggle builds, and an effect a combo
+    // option builds. A scripted effect visibility is not bound to a property, an
+    // effect with a plain value reads none, and `opacity` has a live binding.
+    EXPECT_EQ(loaded->runtime().LoadOnlyProperties(), Names({ "backdrop", "glow", "mode" }));
+
+    // The same, for an effect on a text object.
+    const auto with_text = LoadOnly(true, {});
+    ASSERT_NE(with_text, nullptr);
+    EXPECT_EQ(with_text->runtime().LoadOnlyProperties(),
+              Names({ "backdrop", "captionglow", "glow", "mode" }));
+
+    // A scene with none of those has nothing to hold.
+    const auto plain = Load(Objects(false), kLayerAuthored, nullptr);
+    ASSERT_NE(plain, nullptr);
+    EXPECT_TRUE(plain->runtime().LoadOnlyProperties().empty());
+}
+
+TEST(LoadOnlyProperties, APreviewHoldsALoadOnlyPropertyAndReportsItDeferred) {
+    // The user saved the toggle on, so the scene loads with it on although the
+    // project's own default is off.
+    const auto loaded = LoadOnly(false, { { "glow", RuntimeScalarValue::Bool(true) } });
+    ASSERT_NE(loaded, nullptr);
+    auto& runtime = loaded->runtime();
+    runtime.Tick(1.0 / 60.0);
+    // The scripted effect keeps its authored value; the toggle is on.
+    ASSERT_EQ(BuiltEffects(*loaded->scene),
+              Names({ "effects/plain", "effects/scripted", "effects/toggled" }));
+
+    // Only the slider is live; the toggle, the combo and the picture are held.
+    const auto preview = runtime.PreviewProjectPropertyOverride({
+        { "glow", RuntimeScalarValue::Bool(false) },
+        { "mode", RuntimeScalarValue::String("2") },
+        { "backdrop", RuntimeScalarValue::String("materials/other.tex") },
+        { "opacity", RuntimeScalarValue::Float(0.5f) },
+    });
+    EXPECT_EQ(preview.changed, Names({ "opacity" }));
+    EXPECT_EQ(preview.deferred, Names({ "backdrop", "glow", "mode" }));
+    EXPECT_TRUE(runtime.projectProperties().at("glow").bool_value);
+    EXPECT_EQ(runtime.projectProperties().at("mode").string_value, "1");
+    EXPECT_EQ(runtime.projectProperties().at("backdrop").string_value, "");
+    EXPECT_EQ(runtime.projectProperties().at("opacity").float_value, 0.5f);
+    EXPECT_TRUE(runtime.FindPropertyValue("glow")->getBool());
+    EXPECT_EQ(runtime.FindPropertyValue("mode")->getString(), "1");
+
+    // A document that leaves the toggle out asks for the project's default, which
+    // is not what the scene was built with.
+    const auto left_out = runtime.PreviewProjectPropertyOverride({
+        { "opacity", RuntimeScalarValue::Float(0.5f) },
+    });
+    EXPECT_TRUE(left_out.changed.empty());
+    EXPECT_EQ(left_out.deferred, Names({ "glow" }));
+    EXPECT_TRUE(runtime.projectProperties().at("glow").bool_value);
+
+    // Asking for the value it was read with is not a request for anything else,
+    // and the live slider still moves.
+    const auto same = runtime.PreviewProjectPropertyOverride({
+        { "glow", RuntimeScalarValue::Bool(true) },
+        { "opacity", RuntimeScalarValue::Float(0.75f) },
+    });
+    EXPECT_EQ(same.changed, Names({ "opacity" }));
+    EXPECT_TRUE(same.deferred.empty());
+
+    // The empty document is the project's defaults: the slider returns and the
+    // toggle, saved on, is the one thing still asked for.
+    const auto reset = runtime.PreviewProjectPropertyOverride({});
+    EXPECT_EQ(reset.changed, Names({ "opacity" }));
+    EXPECT_EQ(reset.deferred, Names({ "glow" }));
+    EXPECT_EQ(runtime.projectProperties().at("opacity").float_value, 1.0f);
+}
+
+// A property that also drives a layer's visibility is held for that layer too: a
+// half applied property would show the toggle in one place and not the other.
+TEST(LoadOnlyProperties, HeldEverywhereWhenAlsoBoundToALiveConsumer) {
+    const auto loaded = LoadOnly(false, {});
+    ASSERT_NE(loaded, nullptr);
+    auto& runtime = loaded->runtime();
+    runtime.Tick(1.0 / 60.0);
+    ASSERT_FALSE(runtime.NodeVisible("gate"));
+
+    const auto preview = runtime.PreviewProjectPropertyOverride({
+        { "glow", RuntimeScalarValue::Bool(true) },
+        { "opacity", RuntimeScalarValue::Float(0.5f) },
+    });
+    runtime.Tick(1.0 / 60.0);
+    EXPECT_EQ(preview.deferred, Names({ "glow" }));
+    EXPECT_FALSE(runtime.NodeVisible("gate"));
+    EXPECT_FALSE(runtime.FindPropertyValue("glow")->getBool());
+
+    // The same document applied for real reaches the layer, so it is the hold,
+    // not the binding, that kept it still.
+    runtime.ApplyProjectPropertyOverride({ { "glow", RuntimeScalarValue::Bool(true) } });
+    runtime.Tick(1.0 / 60.0);
+    EXPECT_TRUE(runtime.NodeVisible("gate"));
+}
+
+// The audit is not vacuous: a fresh load with a new value builds a different
+// effect and fills a different slot, which a running scene cannot do.
+TEST(LoadOnlyProperties, AFreshParseWithTheNewValueDiffersWhichIsWhyItIsHeld) {
+    const auto before = LoadOnly(false, {});
+    ASSERT_NE(before, nullptr);
+    const auto after = LoadOnly(false, { { "glow", RuntimeScalarValue::Bool(true) },
+                                         { "mode", RuntimeScalarValue::String("2") },
+                                         { "backdrop", RuntimeScalarValue::String("materials/other.tex") } });
+    ASSERT_NE(after, nullptr);
+
+    EXPECT_EQ(BuiltEffects(*before->scene), Names({ "effects/plain", "effects/scripted" }));
+    EXPECT_EQ(BuiltEffects(*after->scene),
+              Names({ "effects/chosen", "effects/plain", "effects/scripted", "effects/toggled" }));
+    EXPECT_NE(PictureTexture(*before), PictureTexture(*after));
+
+    // Held at the value the first scene read, a preview of the second document
+    // leaves the first scene as it was.
+    const auto effects = BuiltEffects(*before->scene);
+    const auto texture = PictureTexture(*before);
+    const auto preview = before->runtime().PreviewProjectPropertyOverride({
+        { "glow", RuntimeScalarValue::Bool(true) },
+        { "mode", RuntimeScalarValue::String("2") },
+        { "backdrop", RuntimeScalarValue::String("materials/other.tex") },
+    });
+    before->runtime().Tick(1.0 / 60.0);
+    EXPECT_EQ(preview.deferred, Names({ "backdrop", "glow", "mode" }));
+    EXPECT_TRUE(preview.changed.empty());
+    EXPECT_EQ(BuiltEffects(*before->scene), effects);
+    EXPECT_EQ(PictureTexture(*before), texture);
 }
 
 } // namespace

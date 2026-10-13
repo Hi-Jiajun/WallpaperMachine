@@ -19,6 +19,7 @@
 #include <functional>
 #include <memory>
 #include <limits>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -51,6 +52,16 @@ struct SceneRuntimeBootstrap {
     // What the project declares, apart from any saved choice already folded into
     // `project_properties`. Unset means the loaded table is also the authored one.
     std::optional<ProjectProperties> authored_project_properties {};
+};
+
+// What showing a property document on a running scene did.
+struct ProjectPropertyPreview {
+    // Sorted names whose value in effect changed.
+    std::vector<std::string> changed;
+    // Sorted names of load-only properties (see `NoteLoadOnlyProperty`) the
+    // document asked to change but that were held at the value the scene loaded
+    // with, because a fresh load is the only thing that applies them.
+    std::vector<std::string> deferred;
 };
 
 // How window-normalized cursor input maps onto scene coordinates:
@@ -121,6 +132,20 @@ public:
     std::vector<std::string> ApplyProjectPropertyOverride(const ProjectProperties& override_properties);
     // The declared defaults, as applying an empty document.
     std::vector<std::string> ResetProjectPropertyOverride();
+    // Records that something read property `name` once, while the scene loaded,
+    // and never again: a scenetexture picked into a material slot, or an effect
+    // a toggle builds or leaves out. Only a fresh load applies a new value to
+    // such a consumer, so a preview keeps the property at the value it was read
+    // with (`name` absent from the table is held absent). Parse-time only.
+    void NoteLoadOnlyProperty(std::string_view name);
+    // The sorted names noted above.
+    std::vector<std::string> LoadOnlyProperties() const;
+    // `ApplyProjectPropertyOverride` for a document shown without reloading the
+    // scene: the same whole document, except that every load-only property stays
+    // at the value it was read with, for every consumer of that name, live ones
+    // included, so no property is ever half applied. A load-only property the
+    // document asked for something else is reported in `deferred`.
+    ProjectPropertyPreview PreviewProjectPropertyOverride(const ProjectProperties& override_properties);
     void          AttachScene(Scene* scene);
     void          SetCursorWorldPosition(const Eigen::Vector3f& value);
     // World rectangle the window shows, so window-normalized cursor input lands
@@ -518,6 +543,9 @@ private:
     /// the card a relayout left it with, and resizes the target to it.
     void FitTextLayerComposite(SceneNode& node, const TextLayerRenderFrame& card);
     void TextWorkerLoop();
+    // Makes `next_properties` the table in effect, refreshes every binding and
+    // tells the scripts. Returns the sorted names whose value changed.
+    std::vector<std::string> ApplyProjectProperties(ProjectProperties next_properties);
 
     std::unique_ptr<ScriptEngine>                                  m_script_engine;
     std::unique_ptr<ScriptHostContext>                             m_host_context;
@@ -526,6 +554,9 @@ private:
     ProjectProperties                                              m_default_project_properties;
     ProjectProperties                                              m_project_property_overrides;
     ProjectProperties                                              m_project_properties;
+    // The properties read only while the scene loaded, each with the value it
+    // was read with (empty: the table did not name it).
+    std::map<std::string, std::optional<RuntimeScalarValue>>       m_load_only_properties;
     bool                                                           m_project_properties_changing { false };
     std::unordered_map<std::string, std::unique_ptr<DynamicValue>> m_property_values;
     std::vector<std::unique_ptr<DynamicValue>>                     m_owned_values;
