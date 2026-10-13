@@ -9,6 +9,18 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-13 — Layers a wallpaper's properties hide leave the render graph
+
+Settled-hidden layers (authored or property-bound visibility, no script) are left out of sceneToRenderGraph; a script showing one rebuilds the graph once. Run in a detached worktree at 24aa0834 plus this change.
+
+- `layer_texture_reference_test` HiddenLayers, `rendergraph_smoke` aHiddenFirstWriter…, `metal_scene_draw_smoke` ALayerItsPropertiesHide… — new; the first and last fail without the change
+- `python3 scripts/check_renderer.py` — exit 0; 4 asset-dependent tests skipped (no local corpus assets)
+- `python3 scripts/test.py` — exit 0; 1341 passed, 0 failed, 14 skipped
+- By hand: `script_runtime_compat_test` 98, `scene_schema_tests` 111, `mdl_schema_tests` 57 — all passed
+- Workshop 2531810451 defaults: native Metal targets 11.42 → 0.39 GB, peak footprint 12.66 → 1.64 GB, 240 → 19 passes/frame; Vulkan VMA 8.26 → 0.54 GB; frames byte-identical on both
+- 60 local scenes, both probes, base ×2 vs fix: 29 use less memory, none more; same backend choices; no difference beyond base-vs-base noise (one Vulkan video-decode timing case converges by frame 89)
+- Not checked: desktop/app run, a real SceneScript revealing a property-hidden layer (covered by the runtime call it makes), scenes with clearenabled false (none local; guarded by rendergraph_smoke)
+
 ## 2026-10-13 — Web wallpaper pointer and frame cadence (#45)
 
 Issue #45 reported the Colorful Fluid Animation web wallpaper (1748506393) sampling the cursor at 10–20 Hz on a 120 Hz screen. Measured on a 120 Hz MacBook Pro, macOS 27.0.1. Web wallpapers now draw at a display's full refresh when its effective frame rate reaches a refresh above 60 Hz.

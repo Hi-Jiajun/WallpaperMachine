@@ -1943,6 +1943,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 _ = try self.automationDisplay(displayId, store: store)
                 try await store.activateWallpaperAsync(id: id, displayId: displayId, origin: .user)
             }
+        case .applyEverywhere(let id):
+            guard store.librarySnapshot.wallpapers.contains(where: { $0.id == id }) else {
+                throw AutomationError(message: String(localized: "No installed wallpaper has the id “\(id)”."))
+            }
+            // One command for the whole operation, which takes its own turn in the queue.
+            try await store.activateWallpaperEverywhereAsync(id: id)
         case .applyPlaylist(let id, let display):
             let displayID = try automationDisplay(display, store: store)
             try await store.commands.run(slot: BridgeStore.activationSlot(displayId: displayID)) {

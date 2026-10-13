@@ -749,7 +749,12 @@ function renderInspector(discover) {
   const playlistIDs = state.playlists?.[state.targetDisplayID]?.wallpaperIDs || [];
   const inPlaylist = playlistIDs.includes(item.id);
   const playlistToggle = !discover && isInstalled && item.supported !== false ? button('', inPlaylist ? 'playlistRemove' : 'playlistAdd', { id: item.id }, { icon: inPlaylist ? 'listMinus' : 'listPlus', title: inPlaylist ? t('Remove from this display’s playlist') : t('Add to this display’s playlist'), className: `icon-button${inPlaylist ? ' playlist-selected' : ''}`, disabled: !target?.enabled || target.mode === 'mirror' }) : '';
-  const secondary = `${discover ? button(t('View on Steam Workshop'), 'openExternal', { url: `https://steamcommunity.com/sharedfiles/filedetails/?id=${encodeURIComponent(item.id)}` }, { icon: 'external', className: 'wide', title: t('View on Steam Workshop') }) : isInstalled ? button(t('Show in Finder'), 'reveal', { id: item.id }, { icon: 'folder', className: 'wide', title: t('Show in Finder') }) : ''}${!discover && isInstalled ? button('', 'favorite', { id: item.id }, { icon: 'heart', title: state.favorites.includes(item.id) ? t('Remove from favorites') : t('Add to favorites'), className: `icon-button${state.favorites.includes(item.id) ? ' favorite-selected' : ''}` }) : ''}${playlistToggle}${!discover && isInstalled && canReinstall(item) ? button('', 'workshopReinstall', { id: item.id }, { icon: 'refresh', className: 'icon-button', title: t('Reinstall from Workshop…') }) : ''}${!discover && isInstalled ? button('', 'delete', { id: item.id }, { icon: 'trash', className: 'icon-button danger', title: t('Move wallpaper to Trash') }) : ''}`;
+  // One step for every display, offered only where there is more than one display to put it on.
+  // A mirror follows its source and a disabled display shows nothing, so neither counts.
+  const sharedDisplays = state.displays.filter(display => display.enabled && display.mode !== 'mirror');
+  const applyAll = isInstalled && !discover && item.supported !== false && !['Application', 'Unknown'].includes(item.kind) && sharedDisplays.length >= 2
+    ? button(t('Apply to all displays'), 'activateAll', { id: item.id }, { icon: 'monitor', className: 'wide inspector-apply-all', disabled: sharedDisplays.every(display => display.wallpaperID === item.id) }) : '';
+  const secondary = `${applyAll}${discover ? button(t('View on Steam Workshop'), 'openExternal', { url: `https://steamcommunity.com/sharedfiles/filedetails/?id=${encodeURIComponent(item.id)}` }, { icon: 'external', className: 'wide', title: t('View on Steam Workshop') }) : isInstalled ? button(t('Show in Finder'), 'reveal', { id: item.id }, { icon: 'folder', className: 'wide', title: t('Show in Finder') }) : ''}${!discover && isInstalled ? button('', 'favorite', { id: item.id }, { icon: 'heart', title: state.favorites.includes(item.id) ? t('Remove from favorites') : t('Add to favorites'), className: `icon-button${state.favorites.includes(item.id) ? ' favorite-selected' : ''}` }) : ''}${playlistToggle}${!discover && isInstalled && canReinstall(item) ? button('', 'workshopReinstall', { id: item.id }, { icon: 'refresh', className: 'icon-button', title: t('Reinstall from Workshop…') }) : ''}${!discover && isInstalled ? button('', 'delete', { id: item.id }, { icon: 'trash', className: 'icon-button danger', title: t('Move wallpaper to Trash') }) : ''}`;
   // An installed Workshop wallpaper whose author has changed it since: one click downloads the
   // new version, which replaces this one once it has arrived whole.
   const updating = isInstalled && download?.pending;
@@ -1362,8 +1367,13 @@ async function handleAction(action, data, element) {
     case 'restoreProperty': drafts.delete(draftKey(id, data.propertyId)); await deliver(action, { id, propertyID: data.propertyId }); return;
     case 'restoreAllProperties': for (const key of [...drafts.keys()]) if (key.startsWith(`${id}\u0000`)) drafts.delete(key); await deliver(action, { id }); return;
     case 'revert': for (const key of drafts.keys()) if (key.startsWith(`${id}\u0000`)) drafts.delete(key); await deliver(action, { id }); return;
-    case 'activate': case 'reapplyWallpaper':
-      try { await deliver(action, { id }); activationFailures.delete(id); } catch (error) { activationFailures.set(id, error?.message || String(error)); throw error; } finally { render(); }
+    case 'activate': case 'reapplyWallpaper': case 'activateAll':
+      try { await deliver(action, { id }); activationFailures.delete(id); } catch (error) {
+        activationFailures.set(id, error?.message || String(error));
+        // Putting the displays back selects the wallpapers they showed; stay on the one that failed, where its notice is.
+        if (action === 'activateAll') await deliver('select', { id }).catch(() => {});
+        throw error;
+      } finally { render(); }
       return;
     case 'previewWallpaper': {
       const texts = new Set((state.options?.id === id ? state.options.properties : []).filter(property => property.kind === 'textInput' && property.enabled !== false).map(property => property.id));

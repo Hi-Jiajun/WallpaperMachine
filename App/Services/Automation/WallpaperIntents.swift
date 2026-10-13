@@ -93,7 +93,7 @@ struct PreviousWallpaperIntent: AppIntent {
 struct ApplyWallpaperIntent: AppIntent {
     static let title: LocalizedStringResource = "Apply Wallpaper"
     static let description: IntentDescription? = IntentDescription(
-        "Applies an installed wallpaper to a chosen display, or the target display when none is chosen.")
+        "Applies an installed wallpaper to a chosen display, to every display, or to the target display when none is chosen.")
 
     @Parameter(title: "Wallpaper")
     var wallpaper: WallpaperEntity
@@ -101,14 +101,21 @@ struct ApplyWallpaperIntent: AppIntent {
     @Parameter(title: "Display")
     var display: WallpaperDisplayEntity?
 
+    /// Wins over a chosen display: the wallpaper goes on every enabled independent display,
+    /// all of them or none.
+    @Parameter(title: "On all displays", default: false)
+    var allDisplays: Bool
+
     static var parameterSummary: some ParameterSummary {
         Summary("Apply \(\.$wallpaper)") {
             \.$display
+            \.$allDisplays
         }
     }
 
     func perform() async throws -> some IntentResult {
-        try await AppAutomation.shared.perform(.apply(wallpaperID: wallpaper.id, display: display?.id))
+        try await AppAutomation.shared.perform(
+            allDisplays ? .applyEverywhere(wallpaperID: wallpaper.id) : .apply(wallpaperID: wallpaper.id, display: display?.id))
         return .result()
     }
 }

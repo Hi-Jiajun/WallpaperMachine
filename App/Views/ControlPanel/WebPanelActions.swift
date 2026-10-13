@@ -340,6 +340,11 @@ extension WebPanelController {
         if hidesAfterActivating, store.supportPrompt?.isPending != true,
           !store.commands.hasWaiting(slot: slot) { NSApp.hide(nil) }
       }
+    // One wallpaper on every enabled independent display. The transfer takes its own turn in
+    // the queue, so it must not run inside `commands.run` here.
+    case "activateAll":
+      try await store.activateWallpaperEverywhereAsync(id: try wallpaperID(request))
+      if hidesAfterActivating, store.supportPrompt?.isPending != true, !store.commands.isBusy { NSApp.hide(nil) }
     case "previousWallpaper":
       let displayID = try playlistDisplay(request)
       try await store.commands.run(slot: BridgeStore.activationSlot(displayId: displayID)) {

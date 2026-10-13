@@ -18,12 +18,24 @@ final class AutomationCommandTests: XCTestCase {
         XCTAssertEqual(
             command("wallpapermachine://apply?id=image-Sunset%20.png&display=identity%3A%7B%7D"),
             .apply(wallpaperID: "image-Sunset .png", display: "identity:{}"))
+        XCTAssertEqual(command("wallpapermachine://apply?id=3632513108&display=all"), .applyEverywhere(wallpaperID: "3632513108"))
+        XCTAssertEqual(command("wallpapermachine://apply?display=ALL&id=image-Sunset%20.png"),
+                       .applyEverywhere(wallpaperID: "image-Sunset .png"), "the value ignores case like the command does")
         XCTAssertEqual(command("wallpapermachine://open"), .open(page: nil))
         XCTAssertEqual(command("wallpapermachine://open?page=Settings"), .open(page: .settings))
         XCTAssertEqual(command("wallpapermachine://playlist?id=plan%20one&display=secondary"), .applyPlaylist(planID: "plan one", display: "secondary"))
         XCTAssertEqual(command("wallpapermachine://playlist?id=p"), .applyPlaylist(planID: "p", display: nil))
         XCTAssertEqual(command("wallpapermachine://preset?id=preset%20one"), .applyPreset(presetID: "preset one"))
         XCTAssertEqual(command("wallpapermachine://layout?id=desk"), .applyDisplayLayout(layoutID: "desk"))
+    }
+
+    /// `all` means every display only on an apply link; the other commands still take a display's
+    /// own selector and report an unknown one when they run.
+    func testAllIsNotADisplayForAnyOtherCommand() {
+        XCTAssertEqual(command("wallpapermachine://next?display=all"), .next(display: "all"))
+        XCTAssertEqual(command("wallpapermachine://previous?display=all"), .previous(display: "all"))
+        XCTAssertEqual(command("wallpapermachine://playlist?id=p&display=all"), .applyPlaylist(planID: "p", display: "all"))
+        XCTAssertEqual(command("wallpapermachine://apply?id=1&display=primary"), .apply(wallpaperID: "1", display: "primary"))
     }
 
     func testAnythingElseIsRefusedRatherThanGuessed() {
@@ -36,6 +48,8 @@ final class AutomationCommandTests: XCTestCase {
             "wallpapermachine://playlist", "wallpapermachine://playlist?id=a&id=b",
             "wallpapermachine://preset?id=", "wallpapermachine://preset?id=p&display=primary",
             "wallpapermachine://layout?id=", "wallpapermachine://layout?id=a&id=b", "wallpapermachine://layout?id=a&display=primary",
+            "wallpapermachine://apply?display=all", "wallpapermachine://apply?id=1&display=all&x=1",
+            "wallpapermachine://apply?id=1&display=all&display=primary", "wallpapermachine://apply?id=&display=all",
         ] {
             XCTAssertNil(command(link), link)
         }

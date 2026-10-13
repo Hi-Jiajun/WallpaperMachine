@@ -93,8 +93,8 @@ interrupts; the first-wallpaper support prompt follows only a successful
 downloaded activation; only the user's own activation reports a manual choice,
 and an update reload gives way to a choice the user is waiting on; a wallpaper
 held back after a crash keeps its display assignment, so only the user's choice
-of it reaches the bridge to lift the hold, while a playlist, rule or layout
-finds it already shown and stops. The same suite
+of it reaches the bridge to lift the hold (as does Apply to all displays, which
+asks for it), while a playlist, rule or layout finds it already shown and stops. The same suite
 covers Retry for a scene that stopped drawing over the two-display fake: it takes
 the wallpaper off the named display and applies it again and touches no other, a
 display with no wallpaper gets an error and no change, a mirroring display reloads
@@ -238,10 +238,21 @@ cover capture of stable display identity, complete validation before any write,
 copy and swap, rollback and recovery (including cancellation and empty
 destinations), one history entry per display, newer manual commands and a
 transfer counting as the user's choice for each display it gives a wallpaper
-to, from the moment it is asked for.
+to, from the moment it is asked for. Applying one wallpaper to every display
+is covered through planning (the main display first, ineligible displays left out, no
+display or an unknown wallpaper refused), execution (a display that already shows it
+is skipped unless the wallpaper is held back after a crash, in which case it is applied
+again and the apply lifts the hold; a display set that changed while preparing is refused
+before any write), the real store (one history entry and one manual choice per display,
+the apply passed to the bridge as the user's, a held wallpaper opened on every display
+with copy and swap leaving the hold alone, rollback after a failure on the second display,
+pending edits refused before any write) and the link
+parser (`apply?…&display=all`).
 `WallpaperDisplayLayoutStoreTests` (Library) covers bounded persistence, and
 offscreen `ControlPanelDisplayLayoutTests` covers save, rename, apply, delete,
-copy/swap failure feedback, keyboard focus, missing screens and compact locales.
+copy/swap failure feedback, keyboard focus, missing screens, compact locales and the
+inspector's Apply to all displays (offered only with two eligible displays, applies
+both, shows a failure).
 Not covered: real WindowServer transitions, visible appearance and separate
 per-Space assignments; see
 [display layouts](../features/display-layouts.md#code-and-verification).

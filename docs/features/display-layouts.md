@@ -29,6 +29,39 @@ cannot redirect a request to another display. Empty destination choices disable
 both actions. The buttons retain contextual accessible names and return focus to
 the initiating control; failures focus their complete error in Display layouts.
 
+## Apply to every display
+
+**Apply to all displays** in an installed wallpaper's inspector, `display=all` in an
+apply link and **On all displays** in the Apply Wallpaper shortcut put one
+wallpaper on every enabled independent display in a single step. There is no
+persistent "all displays" mode: it is a one-time assignment like a layout, and a
+display connected afterwards starts as any new display does. Mirrors are left out
+because they follow their source; for the same reason the button appears only when
+two or more eligible displays exist, and is unavailable when they all already show
+the wallpaper.
+
+The displays are read when the command takes its turn, the main display first and
+the others in the order Settings lists them, and are read again after the
+wallpaper's options are checked. If a display was connected, disabled or switched to
+mirroring in between, nothing changes and the result asks you to review the
+displays. With no eligible display it refuses with a message to enable one. A
+display that already shows the wallpaper is skipped without reloading it, and it
+still counts as your choice there. The command is also your choice of the wallpaper as
+far as a [crash hold](crash-recovery.md#what-the-user-sees) goes: when the load journal
+is holding the wallpaper back, a display that reads as showing it is applied again, and
+the first apply that succeeds lifts the hold for every display.
+
+The wallpaper must have no unapplied edits, because one apply for every display
+cannot decide which display an edit was for. The single-display Apply commits the
+wallpaper's own edits first; here, choose the inspector's **Apply changes** or
+**Revert** and then **Apply to all displays**. The refusal reuses the layout message,
+"Apply or revert wallpaper edits before changing a display layout."
+
+It shares copy and swap's recovery guarantees (below): one queue turn, a failure
+or cancellation restores every display it changed, and the result says which
+displays could not be restored. When the shortcut is given both a **Display** and
+**On all displays**, **On all displays** wins.
+
 ## Missing resources and failure recovery
 
 Every saved display and wallpaper must be available before any assignment changes.
@@ -39,13 +72,14 @@ No screen is substituted by position or by matching its friendly title. The
 `primary` selector keeps its existing app meaning; other selectors retain the
 renderer identity used throughout display settings.
 
-Copy, swap and layout application each hold one user-command queue turn. The
-operation validates all targets and rejects pending edits on involved wallpapers,
-then checks the assignments again after preparation and between changes. A later
-manual wallpaper command waits for this operation, including any recovery, and
-then wins on its own display. The operation has no display slot of its own, so
-it counts as your choice for every display it gives a wallpaper to (both for a
-swap, the destination for a copy) from the moment it is asked for: a
+Copy, swap, applying to every display and layout application each hold one
+user-command queue turn. The operation validates all targets and rejects pending
+edits on involved wallpapers, then checks the assignments again after preparation
+and between changes. A later manual wallpaper command waits for this operation,
+including any recovery, and then wins on its own display. The operation has no
+display slot of its own, so it counts as your choice for every display it gives a
+wallpaper to (both for a swap, the destination for a copy, every eligible display
+for an apply to all) from the moment it is asked for: a
 [Download and apply](workshop-downloads.md#download-and-apply) waiting on one of
 them is withdrawn and does not override the result when its download arrives.
 
@@ -126,15 +160,19 @@ separate live renderer instances. Actual OS transitions still need desktop verif
 | Bridge queue, clean-option checks and final history | `App/ViewModels/BridgeStoreDisplayLayouts.swift` |
 | Panel actions/snapshot | `App/Views/ControlPanel/WebPanelDisplayLayouts.swift` |
 | Settings UI | `WebUI/display-layouts.js`, integrated in `WebUI/settings.js` |
-| Shortcuts and links | `App/Services/Automation/WallpaperConfigurationIntents.swift`, `AutomationCommand.swift`, `AppDelegate.performAutomation` |
+| Apply to all displays button | `WebUI/panel.js` (inspector), `activateAll` in `WebPanelActions.swift` |
+| Shortcuts and links | `App/Services/Automation/WallpaperConfigurationIntents.swift`, `WallpaperIntents.swift` (Apply Wallpaper's **On all displays**), `AutomationCommand.swift`, `AppDelegate.performAutomation` |
 
 The store, transfer and BridgeStore integration suites (`WallpaperDisplayLayoutStoreTests`,
 `WallpaperDisplayTransferTests`, `WallpaperDisplayTransferIntegrationTests`) cover bounded
 persistence, capture, copy/swap, stale preparation, validation before writes, failures after
 mutation, recovery of empty destinations, external-choice preservation, cancellation, history,
-manual-choice callbacks, clean-edit preflight, paused playback and a newer queued manual
-action. `ControlPanelDisplayLayoutTests` drives an offscreen WKWebView through save, rename,
-apply, delete, copy, swap, failed-recovery feedback, focus return, escaped names, unavailable
+manual-choice callbacks, clean-edit preflight, paused playback, a newer queued manual
+action and applying one wallpaper to every display (plan order, displays that already show
+it, a display set that changed while preparing, one history entry per display, rollback).
+`ControlPanelDisplayLayoutTests` drives an offscreen WKWebView through save, rename,
+apply, delete, copy, swap, Apply to all displays (offered only with two eligible displays),
+failed-recovery feedback, focus return, escaped names, unavailable
 displays and the compact English/Chinese/Japanese layout; `WallpaperBackupTests`,
 `AutomationCommandTests` and `AppAutomationTests` cover backup merging and link validation.
 These tests create no desktop wallpaper windows and do not prove real multi-monitor

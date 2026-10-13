@@ -8,8 +8,10 @@ enum ActivationOrigin: String, Sendable {
     case user
     case playlist
     case automation
-    /// Applying a saved display layout. The layout is one user command that reports the
-    /// choices it made itself, so its individual activations are not choices.
+    /// Applying a saved display layout, or copying, swapping or applying one wallpaper to every
+    /// display. Each is one user command that reports the choices it made itself, so its
+    /// individual activations are not choices. Applying one wallpaper to every display also
+    /// asks the activation to lift a crash hold on it (`releasesHold`), as naming it does.
     case layout
     /// Files loaded afresh: an update replacing them, or the user's Retry for a scene that
     /// stopped drawing. Neither is a new choice of wallpaper, so both give way to one.

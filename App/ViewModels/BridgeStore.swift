@@ -257,15 +257,19 @@ final class BridgeStore {
     /// log line saying who asked and how it ended ([ActivationLog]). `restarting` says the
     /// display showed this wallpaper until the caller took it off to load it afresh, so the
     /// display gains no wallpaper it did not have: that is not a first apply of it.
+    /// `releasesHold` is for a command the user gave that carries out its activations under
+    /// another origin (Apply to all displays): the wallpaper it names is the user's choice as far
+    /// as a crash hold goes, so it opens a held wallpaper and lifts the hold, while the origin
+    /// keeps deciding what is reported as a choice.
     func activateWallpaperAsync(id: String, displayId: String, origin: ActivationOrigin = .automation,
                                 returningToPrevious: Bool = false, recordsHistory: Bool = true,
-                                restarting: Bool = false) async throws {
+                                restarting: Bool = false, releasesHold: Bool = false) async throws {
         let started = ContinuousClock.now
         do {
             let result = try await performActivation(
                 id: id, displayId: displayId, origin: origin,
                 returningToPrevious: returningToPrevious, recordsHistory: recordsHistory,
-                restarting: restarting)
+                restarting: restarting, releasesHold: releasesHold)
             logActivation(.activation, wallpaper: id, display: displayId, origin: origin,
                           outcome: .init(result), since: started)
         } catch {
@@ -278,7 +282,7 @@ final class BridgeStore {
     /// The activation itself, without the log line: internal so a test can read its result.
     func performActivation(id: String, displayId: String, origin: ActivationOrigin,
                            returningToPrevious: Bool, recordsHistory: Bool,
-                           restarting: Bool = false) async throws -> ActivationResult {
+                           restarting: Bool = false, releasesHold: Bool = false) async throws -> ActivationResult {
         await waitForIdleActivation()
         try requireIdleWallpaperEdits(id: id)
         guard librarySnapshot.wallpapers.contains(where: { $0.id == id }) else {
@@ -299,7 +303,8 @@ final class BridgeStore {
         // hold, so that choice must reach the bridge, which lifts the hold on a user-initiated
         // apply. An automatic origin still stops here, or a rotation would reopen the wallpaper
         // that crashed the app every time it came round to it.
-        let reopensHeld = origin.isUserChoice && heldWallpaperIDs.contains(id)
+        let userInitiated = origin.isUserChoice || releasesHold
+        let reopensHeld = userInitiated && heldWallpaperIDs.contains(id)
         if !reopensHeld, isWallpaperActive(id: id, displayId: displayId), !options.dirty,
            !wallpaperAppliesNeedingSave.contains(id), !editorState.hasPendingEdits(wallpaperID: id) {
             if origin.isUserChoice { onUserWallpaperChoice?(id, displayId) }
@@ -321,7 +326,7 @@ final class BridgeStore {
         var applyCompleted = false
         do {
             try await setDisplayConfigEnabledAsync(wallpaperId: id, displayId: displayId, enabled: true)
-            try await applyValidatedWallpaperOptionsAsync(wallpaperId: id, userInitiated: origin.isUserChoice)
+            try await applyValidatedWallpaperOptionsAsync(wallpaperId: id, userInitiated: userInitiated)
             applyCompleted = true
             try validateActivationTarget(displayId)
             guard isWallpaperActive(id: id, displayId: displayId) else {

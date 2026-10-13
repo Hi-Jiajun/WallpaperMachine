@@ -83,6 +83,7 @@ and retained if restore rolls back.
 | Previous wallpaper | Returns to an earlier successful switch on the chosen display; repeated requests keep walking back, skipping deleted or unsupported wallpapers. History is consumed only after Apply succeeds. |
 | Next wallpaper | Changes a display to its playlist's next when it rotates (see [playlists](playlists.md)), otherwise to the next playable wallpaper in library order. |
 | Apply a wallpaper | Applies an installed wallpaper, named by its id (its folder name in the library). |
+| Apply a wallpaper to all displays | Applies an installed wallpaper to every enabled independent display in one step: all of them change or none does, and each is put back as it was after a failure. Refuses a wallpaper with unapplied edits. See [Apply to every display](display-layouts.md#apply-to-every-display). |
 | Apply saved playlist | Copies a saved plan to the chosen display and starts it when playback can run. |
 | Apply wallpaper property preset | Applies a saved preset to its owning wallpaper on every display using it; rejects unapplied editor drafts. |
 | Apply display layout | Restores the saved wallpaper arrangement across its named displays, with full preflight and verified failure recovery. |
@@ -133,6 +134,10 @@ building a shortcut ("Next wallpaper in WallpaperMachine", "Apply a wallpaper wi
 WallpaperMachine"). The actions run in the app's own process; if it is not running,
 macOS starts it first.
 
+**Apply Wallpaper** also has an **On all displays** option, off by default, that
+applies the wallpaper to every enabled independent display instead of one; it wins
+over a chosen **Display**.
+
 **Previous Wallpaper**, **Next Wallpaper**, **Apply Wallpaper** and **Apply Saved
 Playlist** have an optional **Display** picker.
 It lists connected, enabled independent displays using the same stable identities
@@ -156,11 +161,16 @@ wallpapermachine://previous
 wallpapermachine://next
 wallpapermachine://next?display=primary
 wallpapermachine://apply?id=3632513108
+wallpapermachine://apply?id=3632513108&display=all
 wallpapermachine://playlist?id=PLAN_ID&display=primary
 wallpapermachine://preset?id=PRESET_ID
 wallpapermachine://layout?id=LAYOUT_ID
 wallpapermachine://open?page=settings
 ```
+
+`display=all` is accepted by `apply` only and cannot be a display's own selector
+(`primary`, a number or `identity:{…}`); `next`, `previous` and `playlist` treat it as
+an unknown display and fail.
 
 A link with an unknown command, a query value the command does not take, a value
 given twice, or a path is ignored and logged rather than guessed at. A browser

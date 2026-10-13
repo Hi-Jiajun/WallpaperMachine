@@ -8,7 +8,15 @@ extension BridgeStore {
             return .init(id: display.displayId, title: display.title.isEmpty ? display.displayId : display.title,
                          eligible: display.enabled && display.mode == .standalone,
                          wallpaperID: assignment.flatMap { $0.wallpaperId.isEmpty ? nil : $0.wallpaperId })
-        }, wallpapers: Set(librarySnapshot.wallpapers.filter(\.supported).map(\.id)), reliable: !activationNeedsRefresh)
+        }, wallpapers: Set(librarySnapshot.wallpapers.filter(\.supported).map(\.id)), reliable: !activationNeedsRefresh,
+           held: Set(heldWallpaperIDs))
+    }
+
+    /// One wallpaper on every enabled independent display, or on none of them: a failure puts
+    /// each display back as it was, and says so when one cannot be put back. A mirror follows
+    /// its source, so it is left out.
+    func activateWallpaperEverywhereAsync(id: String) async throws {
+        try await applyDisplayTransferAsync(.everywhere(wallpaperID: id))
     }
 
     func applyDisplayTransferAsync(_ request: WallpaperDisplayTransfer.Request) async throws {
@@ -17,7 +25,7 @@ extension BridgeStore {
         // It has no slot of its own, so it counts as the user's choice for each display it
         // names as it is asked for, and work waiting on one of them (a Download and apply)
         // stands down.
-        commands.noteUserChoice(in: request.displayIDs.map { Self.activationSlot(displayId: $0) })
+        commands.noteUserChoice(in: request.displayIDs(in: displayTransferSnapshot()).map { Self.activationSlot(displayId: $0) })
         try await commands.run {
             let before = displayTransferSnapshot()
             var successful: [WallpaperDisplayAssignment] = []
@@ -47,7 +55,8 @@ extension BridgeStore {
                     }
                 }, apply: { id, display in
                     touched.insert(display)
-                    try await self.activateWallpaperAsync(id: id, displayId: display, origin: .layout, recordsHistory: false)
+                    try await self.activateWallpaperAsync(id: id, displayId: display, origin: .layout, recordsHistory: false,
+                                                          releasesHold: request.releasesHold)
                 }, clear: { id, display in
                     try await self.ejectWallpaperFromDisplayAsync(displayId: display, wallpaperId: id)
                 })

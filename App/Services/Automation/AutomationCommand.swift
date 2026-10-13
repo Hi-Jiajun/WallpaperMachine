@@ -13,6 +13,9 @@ enum AutomationCommand: Equatable, Sendable {
     case previous(display: String?)
     /// Applies an installed wallpaper on `display`, or on the target display when nil.
     case apply(wallpaperID: String, display: String?)
+    /// Applies an installed wallpaper on every enabled independent display in one step: all of
+    /// them change or none does.
+    case applyEverywhere(wallpaperID: String)
     case applyPlaylist(planID: String, display: String?)
     case applyPreset(presetID: String)
     case applyDisplayLayout(layoutID: String)
@@ -24,6 +27,8 @@ enum AutomationCommand: Equatable, Sendable {
     }
 
     static let scheme = "wallpapermachine"
+    /// What `display=` says to mean every display rather than one.
+    private static let everyDisplay = "all"
 
     /// Reads a `wallpapermachine://` link: the command is the host, and `display`, `id` and
     /// `page` are query items. Anything else answers nil rather than guessing.
@@ -31,6 +36,7 @@ enum AutomationCommand: Equatable, Sendable {
     ///     wallpapermachine://toggle
     ///     wallpapermachine://next?display=primary
     ///     wallpapermachine://apply?id=3632513108
+    ///     wallpapermachine://apply?id=3632513108&display=all
     ///     wallpapermachine://open?page=settings
     init?(url: URL) {
         guard url.scheme?.lowercased() == Self.scheme,
@@ -53,7 +59,12 @@ enum AutomationCommand: Equatable, Sendable {
         case "previous" where Set(values.keys).isSubset(of: ["display"]): self = .previous(display: display)
         case "apply" where Set(values.keys).isSubset(of: ["id", "display"]):
             guard let id = values["id"] else { return nil }
-            self = .apply(wallpaperID: id, display: display)
+            // `all` cannot be a display's own selector (`primary`, a number or `identity:{…}`).
+            if display?.lowercased() == Self.everyDisplay {
+                self = .applyEverywhere(wallpaperID: id)
+            } else {
+                self = .apply(wallpaperID: id, display: display)
+            }
         case "playlist" where Set(values.keys).isSubset(of: ["id", "display"]):
             guard let id = values["id"] else { return nil }
             self = .applyPlaylist(planID: id, display: display)

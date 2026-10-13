@@ -25,6 +25,15 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-13 — Apply a wallpaper to every display
+
+A new transfer request, WallpaperDisplayTransfer.Request.everywhere, expands over the eligible displays when it is planned (main display first), so it keeps copy and swap's preflight, re-plan after preparing and verified rollback. Entry points: the inspector's Apply to all displays, apply?id=…&display=all and Apply Wallpaper's On all displays. Commit 6 of the desktop-menubar lane, checked in an isolated worktree on macOS 27.0.1.
+
+- `python3 scripts/test.py --only WallpaperDisplayTransferTests --only WallpaperDisplayTransferIntegrationTests --only AutomationCommandTests --only ControlPanelDisplayLayoutTests --only WallpaperReapplyPanelTests --only AppAutomationTests --only ControlPanelLibraryTests --only WebPanelGeneralSettingsTests --only ControlPanelAutomationTests --only WallpaperActivationRecoveryTests --only ActivationLogTests --only WorkshopApplyOnArrivalTests --only ControlPanelShellTests --only WallpaperBackupTests` — 191 passed, 0 failed, 0 skipped
+- Every module under `scripts/tests/` passes, including the new WebUI catalog key in zh-Hans, zh-Hant and ja.
+- Mutation checks: with the main display no longer planned first, or the choice counted for no display when asked for, the matching transfer and integration tests fail and the rest pass. The first inspector test run failed because putting the displays back selects the wallpaper they showed, so the failure notice sat on a wallpaper the panel no longer showed; the panel now returns to the wallpaper it applied.
+- Not run: the full gate, a Release build, any desktop run. Unverified: a real two-monitor apply and rollback, the button in the narrow inspector, and Shortcuts showing the On all displays switch; the display set is a two-display test bridge. See the new row in manual-smoke.md.
+
 ## 2026-10-13 — Rotate on unlock
 
 A third How often choice for rotating playlists, Each time the Mac is unlocked (DisplayPlaylist.trigger). The presentation policy reports the locked-to-unlocked edge of its corrected lock state; PlaylistScheduler answers it for every display that waits for it, once, within a 30 second window. Commit 5 of the desktop-menubar lane, checked in an isolated worktree on macOS 27.0.1.
@@ -110,15 +119,3 @@ Energy use's battery line was missing on macOS 27 (capacity keys moved into Batt
 - Inspector sentence rendered with Node from `panel.js`'s `energyRating` and the real catalogs in en, zh-Hans, zh-Hant and ja, with and without a battery share
 - `python3 scripts/test.py` — 1342 passed, 0 failed, 14 skipped
 - Not checked: the rendered panel on screen (no desktop run requested); the rating line on a real rated wallpaper
-
-## 2026-10-13 — Layers a wallpaper's properties hide leave the render graph
-
-Settled-hidden layers (authored or property-bound visibility, no script) are left out of sceneToRenderGraph; a script showing one rebuilds the graph once. Run in a detached worktree at 24aa0834 plus this change.
-
-- `layer_texture_reference_test` HiddenLayers, `rendergraph_smoke` aHiddenFirstWriter…, `metal_scene_draw_smoke` ALayerItsPropertiesHide… — new; the first and last fail without the change
-- `python3 scripts/check_renderer.py` — exit 0; 4 asset-dependent tests skipped (no local corpus assets)
-- `python3 scripts/test.py` — exit 0; 1341 passed, 0 failed, 14 skipped
-- By hand: `script_runtime_compat_test` 98, `scene_schema_tests` 111, `mdl_schema_tests` 57 — all passed
-- Workshop 2531810451 defaults: native Metal targets 11.42 → 0.39 GB, peak footprint 12.66 → 1.64 GB, 240 → 19 passes/frame; Vulkan VMA 8.26 → 0.54 GB; frames byte-identical on both
-- 60 local scenes, both probes, base ×2 vs fix: 29 use less memory, none more; same backend choices; no difference beyond base-vs-base noise (one Vulkan video-decode timing case converges by frame 89)
-- Not checked: desktop/app run, a real SceneScript revealing a property-hidden layer (covered by the runtime call it makes), scenes with clearenabled false (none local; guarded by rendergraph_smoke)

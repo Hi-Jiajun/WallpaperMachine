@@ -24,6 +24,8 @@ final class DisplayTransferTestBridge: LayoutSnapshotBridge {
     private var selected = "a"
     private var edits: [String: [String: Bool]] = [:]
     private(set) var applications: [(String, String)] = []
+    /// Whether each apply that reached the bridge came from the user, in order.
+    private(set) var applyRequests: [Bool] = []
     /// Every `(display, wallpaper)` the store asked to take off a display, in order.
     private(set) var ejections: [(String, String)] = []
     /// What an eject throws instead of taking the wallpaper off the display.
@@ -89,6 +91,9 @@ final class DisplayTransferTestBridge: LayoutSnapshotBridge {
     }
     override func applyWallpaperOptions(wallpaperId: String, userInitiated: Bool) async throws -> BridgeWallpaperMutationBundle {
         if let beforeApply { await beforeApply() }
+        applyRequests.append(userInitiated)
+        // Like the engine: only the user applying a held wallpaper lifts its hold.
+        if userInitiated { held.removeAll { $0 == wallpaperId } }
         let changes = edits[wallpaperId] ?? [:]
         let fail = changes.keys.contains { "\($0)=\(wallpaperId)" == failOnce }
         if fail { failOnce = nil }

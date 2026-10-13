@@ -33,7 +33,11 @@ names the build (`ClientPaths.buildStamp`).
 - **Apply** in the inspector, or choosing the wallpaper again from the library, also opens it
   again, even when nothing in its draft changed, and clears the hold and the banner. Only the
   user's own choice does, which is what `BridgeStore` calls `userInitiated` (a Shortcuts or
-  URL command that names the wallpaper counts as one, and so does the options dialog's OK). A
+  URL command that names the wallpaper counts as one, and so does the options dialog's OK).
+  **Apply to all displays** counts too, whether from the inspector, a `display=all` link or the
+  shortcut's **On all displays**: it applies a held wallpaper again on every display, including
+  one that already reads as showing it, and lifts the hold. Copy, swap and applying a saved
+  layout move assignments that already exist, so they leave a hold alone. A
   playlist rotation, an automatic rule or a Space or Focus rule that comes round to the
   wallpaper leaves the hold and the strike count alone, so the rotation cannot reopen the
   wallpaper that crashed the app each time it reaches it: that display stays empty and the

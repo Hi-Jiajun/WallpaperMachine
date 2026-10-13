@@ -208,6 +208,13 @@ reuse, or visual behavior, which is why these items are manual.
 - [ ] Select a target display and apply: other displays keep their assignments.
 - [ ] Disconnected, disabled or mirrored targets are not silently redirected to
       primary.
+- [ ] With two displays, select a wallpaper only one of them shows and choose **Apply
+      to all displays** in the inspector: both change, the main display first, and
+      the button turns unavailable. With a third display mirroring another, or one
+      disabled, it keeps its own picture. `wallpapermachine://apply?id=ID&display=all`
+      and Shortcuts' **On all displays** do the same. Unplug a display while the
+      apply runs, or use a wallpaper whose files fail to load on one display: the
+      others return to what they showed.
 - [ ] Pause/resume and relaunch: the expected wallpaper and playback state
       return.
 - [ ] Leave invalid scaling text, refresh or change routes, then return: the

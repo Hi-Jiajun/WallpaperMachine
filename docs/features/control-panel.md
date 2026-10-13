@@ -259,6 +259,15 @@ screen. Activation is explicit.
   display; for the wallpaper already active there it reads **Reapply wallpaper**.
   An Installed tile shows an **Applying** ring while its apply runs and a quiet
   mark while it waits behind another apply.
+- **Apply to all displays** (an installed wallpaper's inspector, shown only when two
+  or more enabled independent displays exist) puts the wallpaper on every one of
+  them in a single step, whichever display is targeted, and is unavailable once they
+  all show it. It is all-or-nothing: if one display fails, the others are put back
+  as they were and the inspector says so. It refuses, before changing anything, a
+  wallpaper with unapplied property edits (the single-display Apply commits them
+  first; use the inspector's **Apply changes** or **Revert** before this one). Mirrors
+  follow their source and disabled displays are left alone. See
+  [Apply to every display](display-layouts.md#apply-to-every-display).
 - **Reapply wallpaper** restarts the wallpaper on the target display: it takes the
   wallpaper off the display and loads it afresh, for one that froze, went blank or
   shows stale content. It is the only Library or inspector control that restarts a
@@ -395,7 +404,9 @@ settings` and can open Settings → Performance; the inspector's per-display
 frame-rate field shows the same note. Saved frame rates are never rewritten.
 
 **Copy or swap wallpapers** under an independent display transfers its current
-wallpaper to another eligible screen or exchanges their assignments. **Display
+wallpaper to another eligible screen or exchanges their assignments, and
+**Apply to all displays** in the inspector puts one wallpaper on every eligible
+screen at once. **Display
 layouts** below the display sections saves and reapplies named arrangements.
 Unavailable layouts stay visible with their missing resource, and all targets are
 validated before changes. These operations preserve existing playback rules and
