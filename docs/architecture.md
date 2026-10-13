@@ -473,6 +473,20 @@ injected closure, so tests never open System Settings. System Settings does not 
 when the user allows the item, so while the approval is pending the panel reads every snapshot
 again each time its window becomes key (`WebPanelController.windowStateChanged`).
 
+`preview_wallpaper_properties(wallpaper_id, show)` shows a wallpaper's pending property edits on
+every scene that draws it, mirrors included, without applying them (the Revert and drag-follow
+counterpart of `preview_display_position`). The document is built from the whole draft by the
+function that builds a scene descriptor's, except that a texture, a file and a folder keep their
+saved value, so it is what Apply would load. The call saves nothing, keeps the draft, bumps no
+generation and builds no snapshot; the lock-screen export and the Mission Control picture follow
+the saved configuration. The actor remembers the wallpapers it showed an edit on
+(`previewed_properties`, the document last shown to all of them, or nothing known after a
+reconcile or a refused update): asking for what is shown, or for the saved look when that is
+shown, sends the engine nothing; `show` false and Revert (`cancel_wallpaper_options`) put the
+saved look back, and Apply forgets the mark because the scenes are opened again from the saved
+configuration. A wallpaper that is a video or a web page, or that no display shows, is a silent
+no-op. See [scene rendering](features/scene-rendering.md#live-property-edits).
+
 ### Rust crates and the C++ scene engine
 
 `upstream/renderer` is a Cargo workspace (`resolver = "2"`, edition 2024, GPL-2.0-only) with

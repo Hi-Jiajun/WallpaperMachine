@@ -201,6 +201,13 @@ pub struct PreviewDisplayPosition {
     pub pan_y: Option<f64>,
 }
 
+/// Shows a wallpaper's pending property edits on every scene that draws it
+/// (`show`), or puts back what is saved (`!show`). Nothing is saved.
+pub struct PreviewWallpaperProperties {
+    pub wallpaper_id: String,
+    pub show: bool,
+}
+
 pub struct SetTargetFps {
     pub wallpaper_id: String,
     pub display_id: String,

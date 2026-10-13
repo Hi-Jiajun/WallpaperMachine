@@ -73,7 +73,8 @@ use crate::{
             RestorePropertyDefault,
             SelectWallpaper,
             SetAudioResponseEnabled, SetDisplayConfigEnabled, SetDisplayEnabled, SetDisplayMode,
-            PreviewDisplayPosition, SetDisplayPosition, SetDisplayPresentationSuspended,
+            PreviewDisplayPosition, PreviewWallpaperProperties, SetDisplayPosition,
+            SetDisplayPresentationSuspended,
             SetFilter, SetGlobalPlayback, SetLaunchAtLogin, SetMirrorMuted, SetMirrorScalingFactor,
             SetMirrorScalingMode, SetMirrorTarget, SetMirrorTargetFps, SetMirrorVolume, SetMuted,
             SetAudioSuppressed, SetBatteryMode, SetBatteryQualityProfile, SetContentPacingEnabled,
@@ -879,6 +880,14 @@ impl EngineFacade for ArcEngineFacade {
         self.0.preview_framing(handle, framing)
     }
 
+    fn preview_property_override(
+        &self,
+        handle: SceneHandle,
+        flat_json: String,
+    ) -> Pin<Box<dyn Future<Output = Result<(), wallpaper_core::EngineError>> + Send>> {
+        self.0.preview_property_override(handle, flat_json)
+    }
+
     fn set_fps(
         &self,
         handle: SceneHandle,
@@ -1427,6 +1436,37 @@ impl WallpaperBridge {
                 pan_x,
                 pan_y,
             })
+            .await
+    }
+
+    /// Shows a wallpaper's pending property edits on every scene that draws it,
+    /// mirrors included, without applying them, or with `show` false puts the
+    /// saved look back. The scenes follow the whole pending edit: what the
+    /// panel's inspector holds, except a texture, a file or a folder, which
+    /// stay at what is saved because a texture is read only while a scene loads
+    /// and a file or folder is saved the moment it is picked. Nothing is saved,
+    /// the draft stays as it is, no snapshot changes and the lock screen and
+    /// screen saver are not told, so a page can call it after every edit.
+    ///
+    /// Asking for what the scenes already show, or for the saved look when they
+    /// are showing it, sends the engine nothing. Cancelling the options puts
+    /// the saved look back by itself, and applying them loads the scenes from
+    /// the saved configuration. Anything else that loads a scene again, a
+    /// display change or a wake for one, also shows the saved look, and the next
+    /// call shows the edit again. A wallpaper that is a video or a web page, or
+    /// that no display shows, has nothing to show and is not an error.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the wallpaper id is unknown or the live engine
+    /// update fails. A refused update leaves the call to be repeated.
+    pub async fn preview_wallpaper_properties(
+        &self,
+        wallpaper_id: String,
+        show: bool,
+    ) -> Result<(), BridgeError> {
+        self.actor
+            .ask(PreviewWallpaperProperties { wallpaper_id, show })
             .await
     }
 

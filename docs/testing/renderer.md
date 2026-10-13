@@ -473,6 +473,23 @@ cargo test -p shader --test pipeline -- --nocapture
   descriptor and stored template alone (so an abandoned edit leaves nothing to rebuild)
   is by construction, like `preview_framing`, and the picture is covered only by the
   renderer tests above and a desktop run.
+- `wallpaper-bridge` property previews (`cargo test --release -p wallpaper-bridge --lib
+  property_preview`, and `--lib state::drafts` for the document builder):
+  `preview_wallpaper_properties` tells the fake engine's
+  preview call once per scene that draws the wallpaper, on two displays and a mirror,
+  with the whole document, and writes no file, changes neither the lock-screen export
+  nor the draft and leaves nothing for a display refresh to rebuild. The document equals
+  the one Apply loads byte for byte, a restored property or restore all defaults sends
+  the saved document (host-supplied defaults included), and a texture waits for Apply
+  while a picked file, which is saved at once, stays in every later document. An unchanged
+  document, an untouched wallpaper and a saved look already shown send nothing; Revert and
+  `show` false put the saved look back once and keep the draft; a refused update or a
+  refused restore is repeated, the restore leaving the draft dirty; Apply drops the mark
+  and a reconcile (a display change here) makes the last document untrustworthy, so it is
+  sent again. A preview that lands while an Apply is loading does not make the Apply
+  stale. A video, a web page and a wallpaper no display shows are a silent no-op, and an
+  unknown wallpaper is refused. These are fake-engine tests: what a real scene does with
+  the document is covered by the renderer tests above.
 - `wallpaper_background`: renders unattached production Metal layers over a white
   bitmap with no drawable, before and after a resize and after recreation. Every
   pixel must be opaque black. Its harness runs on the process's main thread; no

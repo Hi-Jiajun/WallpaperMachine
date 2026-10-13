@@ -115,6 +115,17 @@ pub trait EngineFacade: Send + Sync + 'static {
     /// does not, and a later `set_framing` commits it. The engine refuses a
     /// position that is not a fraction between 0 and 1.
     fn preview_framing(&self, handle: SceneHandle, framing: SceneFraming) -> EngineFuture<()>;
+    /// Shows a scene a whole property document while an edit is under way,
+    /// without making it the scene's look: the renderer follows, the engine's
+    /// stored state does not, so the next time the scene is loaded it shows
+    /// what is saved. The document is the complete state to show (`{}` is the
+    /// project's authored defaults), and the engine refuses one that is not a
+    /// JSON object.
+    fn preview_property_override(
+        &self,
+        handle: SceneHandle,
+        flat_json: String,
+    ) -> EngineFuture<()>;
     fn set_fps(&self, handle: SceneHandle, fps: u32) -> EngineFuture<()>;
     /// Live-updates one scene's internal rasterization scale. Resizes render
     /// targets in place; it must not reparse the project or reopen video.
@@ -617,6 +628,15 @@ impl EngineFacade for RealEngineFacade {
     fn preview_framing(&self, handle: SceneHandle, framing: SceneFraming) -> EngineFuture<()> {
         let engine = self.engine.clone();
         async move { engine.preview_framing(handle, framing).await }.boxed()
+    }
+
+    fn preview_property_override(
+        &self,
+        handle: SceneHandle,
+        flat_json: String,
+    ) -> EngineFuture<()> {
+        let engine = self.engine.clone();
+        async move { engine.preview_property_override(handle, flat_json).await }.boxed()
     }
 
     fn set_fps(&self, handle: SceneHandle, fps: u32) -> EngineFuture<()> {
@@ -1124,7 +1144,9 @@ pub struct FakeEngineFacade {
     scaling_factor_calls: Arc<ArcSwap<Vec<(SceneHandle, f64)>>>,
     framing_calls: Arc<ArcSwap<Vec<(SceneHandle, SceneFraming)>>>,
     preview_framing_calls: Arc<ArcSwap<Vec<(SceneHandle, SceneFraming)>>>,
+    preview_property_calls: Arc<ArcSwap<Vec<(SceneHandle, String)>>>,
     framing_failure: Arc<ArcSwap<Option<String>>>,
+    property_preview_failure: Arc<ArcSwap<Option<String>>>,
     fps_calls: Arc<ArcSwap<Vec<(SceneHandle, u32)>>>,
     render_scale_calls: Arc<ArcSwap<Vec<(SceneHandle, f32)>>>,
     render_scale_failure: Arc<ArcSwap<Option<String>>>,
@@ -1587,6 +1609,15 @@ impl FakeEngineFacade {
         load_log(&self.preview_framing_calls)
     }
 
+    /// Every property document the fake was asked to show on a scene while an
+    /// edit is under way, in order, as the flat JSON the renderer would
+    /// receive. A refused call is in here too: it is what the bridge asked
+    /// for. Showing a document moves nothing the fake stores.
+    #[must_use]
+    pub fn preview_property_calls(&self) -> Vec<(SceneHandle, String)> {
+        load_log(&self.preview_property_calls)
+    }
+
     #[must_use]
     pub fn fps_calls(&self) -> Vec<(SceneHandle, u32)> {
         load_log(&self.fps_calls)
@@ -1667,6 +1698,13 @@ impl FakeEngineFacade {
     pub fn fail_next_render_scale(&self) {
         self.render_scale_failure
             .store(Arc::new(Some("render scale failed".into())));
+    }
+
+    /// The next property document shown on a scene is refused by the
+    /// renderer, which leaves the scene as it was.
+    pub fn fail_next_property_preview(&self) {
+        self.property_preview_failure
+            .store(Arc::new(Some("property preview failed".into())));
     }
 
     pub fn fail_next_close(&self) {
@@ -2140,6 +2178,22 @@ impl EngineFacade for FakeEngineFacade {
         let fake = self.clone();
         async move {
             push_log(&fake.preview_framing_calls, (handle, framing));
+            Ok(())
+        }
+        .boxed()
+    }
+
+    fn preview_property_override(
+        &self,
+        handle: SceneHandle,
+        flat_json: String,
+    ) -> EngineFuture<()> {
+        let fake = self.clone();
+        async move {
+            push_log(&fake.preview_property_calls, (handle, flat_json));
+            if let Some(message) = fake.property_preview_failure.swap(Arc::new(None)).as_ref() {
+                return Err(EngineError::Platform(message.clone()));
+            }
             Ok(())
         }
         .boxed()

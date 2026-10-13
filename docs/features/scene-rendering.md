@@ -227,7 +227,28 @@ override, its descriptor, the stored scene template and the published snapshot s
 they were, so the next reconcile still compares the saved configuration, an edit that is
 abandoned leaves nothing to rebuild, and a rebuilt renderer shows the saved look.
 `set_property_override` and `reset_property_override` keep their meaning, a reload that
-remembers (or forgets) the override. Nothing in the bridge sends a preview yet.
+remembers (or forgets) the override.
+
+The bridge sends it with `preview_wallpaper_properties(wallpaper_id, show)`. The document
+is built from the whole draft, so a property the draft restored is back at its authored
+default, by the function that builds a scene descriptor's document: it is byte for byte
+what Apply would load, except that a texture, a file and a folder stay at their saved
+value (a texture is read only while a scene loads, and a file or folder is saved the
+moment it is picked). It goes to every scene that draws the wallpaper, mirrors included
+(they run a scene of their own), and to nothing for a video, a web page or a wallpaper
+no display shows. It saves nothing and leaves the draft alone, and it advances no
+generation and builds no snapshot, so a reconcile that is already under way is not made
+stale; the lock-screen export and the Mission Control picture follow the saved
+configuration. A scene that already shows the document, or whose saved look is asked for
+while it shows it, is not told again. The bridge keeps the wallpapers it showed an edit on
+(`previewed_properties`) so that **Revert** (`cancel_wallpaper_options`) puts the saved
+look back on those scenes before the draft is cancelled, and asks again if the engine
+refused: a refusal leaves the draft dirty. `show` false does the same restore without
+cancelling anything. **Apply** forgets the mark, because it loads the scene again from the
+saved configuration, and every reconcile and every refused update leaves the mark only as
+"may be showing a preview", which makes the next call send its document again instead of
+trusting the last one. Anything else that loads a scene again (a display change, waking)
+shows the saved look, and the next edit shows the draft again.
 
 ### Scene render optimisation
 

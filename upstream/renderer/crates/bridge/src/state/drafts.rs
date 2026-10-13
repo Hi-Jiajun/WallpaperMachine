@@ -1,11 +1,11 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use wallpaper_core::project::ScalingMode;
 
 use crate::{
     api::BridgeError,
     config::{FramingCfg, MonitorRender, SerializedSelector, WallpaperConfig},
-    project::{ProjectModel, PropertyValue},
+    project::{ProjectModel, PropertyValue, scene_property_override_json},
 };
 
 /// What moving a wallpaper on one display did to its committed config.
@@ -61,6 +61,43 @@ pub fn moved_framing(
     })
 }
 
+/// The two property documents a scene wallpaper has while it is being edited.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PropertyDocuments {
+    /// What a running scene is shown: the pending edits, except the kinds that
+    /// wait for Apply (see `ProjectModel::live_property_overrides`).
+    pub shown: String,
+    /// What the saved configuration loads a scene with, which is also what a
+    /// scene falls back to when the edit is cancelled. `{}` stands for "the
+    /// project's authored defaults", where a descriptor carries no document.
+    pub saved: String,
+}
+
+/// The documents for a wallpaper whose saved configuration is `committed` and
+/// whose pending edits are in `current`.
+///
+/// Both come out of `scene_property_override_json`, the builder of the
+/// descriptors, so `saved` is byte for byte what a scene opened from the
+/// saved configuration is loaded with, and `shown` is what Apply would load
+/// but for the kinds a running scene cannot take. The two are equal exactly
+/// when showing the pending edits would change nothing.
+#[must_use]
+pub fn property_documents(
+    model: &ProjectModel,
+    committed: &WallpaperConfig,
+    current: &WallpaperConfig,
+) -> PropertyDocuments {
+    let document = |overrides: &BTreeMap<String, serde_json::Value>| {
+        scene_property_override_json(Some(model), overrides).unwrap_or_else(|| "{}".to_string())
+    };
+    PropertyDocuments {
+        shown: document(
+            &model.live_property_overrides(&committed.property_overrides, &current.property_overrides),
+        ),
+        saved: document(&committed.property_overrides),
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct WallpaperOptionsDraft {
     committed: WallpaperConfig,
@@ -97,6 +134,13 @@ impl WallpaperOptionsDraft {
     #[must_use]
     pub fn committed(&self) -> &WallpaperConfig {
         &self.committed
+    }
+
+    /// The documents of this draft, for showing its property edits on a
+    /// running scene.
+    #[must_use]
+    pub fn property_documents(&self, model: &ProjectModel) -> PropertyDocuments {
+        property_documents(model, &self.committed, &self.current)
     }
 
     #[must_use]
@@ -569,5 +613,46 @@ mod tests {
 
         assert_eq!(draft.committed(), &applied);
         assert_eq!(draft.committed().property_overrides.len(), 1);
+    }
+
+    const DOCUMENT_PROJECT: &str = r#"{"type":"scene","title":"T","general":{"properties":{
+        "alpha":{"type":"slider","text":"Alpha","value":1,"min":0,"max":1},
+        "picture":{"type":"scenetexture","text":"Picture","value":""}
+    }}}"#;
+
+    /// The two documents are equal exactly when showing the pending edits
+    /// would change nothing, which is what lets the bridge send nothing.
+    #[test]
+    fn the_shown_document_differs_from_the_saved_one_only_by_what_a_scene_can_take() {
+        let model = ProjectModel::parse("100", DOCUMENT_PROJECT).unwrap();
+        let mut draft =
+            WallpaperOptionsDraft::from_committed(WallpaperConfig::new_for("100", "scene"));
+
+        let untouched = draft.property_documents(&model);
+        assert_eq!(untouched.shown, "{}");
+        assert_eq!(untouched.shown, untouched.saved);
+
+        draft.edit_property(&model, "picture", PropertyValue::String("pending.png".into()));
+        assert_eq!(
+            draft.property_documents(&model),
+            untouched,
+            "a texture waits for Apply"
+        );
+
+        draft.edit_property(&model, "alpha", PropertyValue::Number(0.5));
+        let edited = draft.property_documents(&model);
+        assert_eq!(edited.shown, r#"{"alpha":0.5}"#);
+        assert_eq!(edited.saved, "{}", "the saved document does not follow the edit");
+
+        let applied = draft.apply();
+        let mut applied = WallpaperOptionsDraft::from_committed(applied);
+        applied.edit_property(&model, "alpha", PropertyValue::Number(1.0));
+        let back = applied.property_documents(&model);
+        assert_eq!(
+            back.shown, r#"{"picture":"pending.png"}"#,
+            "an edit back to the authored value leaves it out, and the texture \
+             Apply saved is part of every document from then on"
+        );
+        assert_eq!(back.saved, r#"{"alpha":0.5,"picture":"pending.png"}"#);
     }
 }

@@ -199,6 +199,39 @@ impl BridgeActorState {
             })
     }
 
+    /// The documents of a scene wallpaper's pending property edits, or `None`
+    /// for a wallpaper whose scenes take none: a video, a web page, and one
+    /// whose project is not loaded, none of which a property document reaches.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the wallpaper id is unknown.
+    pub fn pending_property_documents(
+        &self,
+        wallpaper_id: &str,
+    ) -> Result<Option<drafts::PropertyDocuments>, BridgeError> {
+        self.ensure_wallpaper_exists(wallpaper_id)?;
+        let Some(model) = self
+            .project_models
+            .get(wallpaper_id)
+            .filter(|model| model.project_type == WallpaperProjectType::Scene)
+        else {
+            return Ok(None);
+        };
+        Ok(Some(match self.wallpaper_drafts.get(wallpaper_id) {
+            Some(draft) => draft.property_documents(model),
+            // Nothing was edited, so the draft that would be made is the saved
+            // configuration twice.
+            None => match self.wallpaper_configs.get(wallpaper_id) {
+                Some(saved) => drafts::property_documents(model, saved, saved),
+                None => {
+                    let saved = WallpaperConfig::new_for(wallpaper_id, "scene");
+                    drafts::property_documents(model, &saved, &saved)
+                }
+            },
+        }))
+    }
+
     pub fn project_model(&self, wallpaper_id: &str) -> Result<&ProjectModel, BridgeError> {
         self.ensure_wallpaper_exists(wallpaper_id)?;
         self.project_models.get(wallpaper_id).ok_or_else(|| {

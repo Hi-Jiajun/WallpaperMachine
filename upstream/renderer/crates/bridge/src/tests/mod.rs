@@ -24,6 +24,7 @@ mod quality_throttle;
 mod scene_settings;
 mod production_constructor;
 mod project_parse;
+mod property_preview;
 mod property_snapshot;
 mod settings_intents;
 mod wallpaper_options_draft;

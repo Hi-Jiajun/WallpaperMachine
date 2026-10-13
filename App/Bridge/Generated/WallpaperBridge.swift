@@ -816,6 +816,31 @@ public protocol WallpaperBridgeProtocol : AnyObject {
     func previewDisplayPosition(wallpaperId: String, displayId: String, panX: Double?, panY: Double?) async throws 
     
     /**
+     * Shows a wallpaper's pending property edits on every scene that draws it,
+     * mirrors included, without applying them, or with `show` false puts the
+     * saved look back. The scenes follow the whole pending edit: what the
+     * panel's inspector holds, except a texture, a file or a folder, which
+     * stay at what is saved because a texture is read only while a scene loads
+     * and a file or folder is saved the moment it is picked. Nothing is saved,
+     * the draft stays as it is, no snapshot changes and the lock screen and
+     * screen saver are not told, so a page can call it after every edit.
+     *
+     * Asking for what the scenes already show, or for the saved look when they
+     * are showing it, sends the engine nothing. Cancelling the options puts
+     * the saved look back by itself, and applying them loads the scenes from
+     * the saved configuration. Anything else that loads a scene again, a
+     * display change or a wake for one, also shows the saved look, and the next
+     * call shows the edit again. A wallpaper that is a video or a web page, or
+     * that no display shows, has nothing to show and is not an error.
+     *
+     * # Errors
+     *
+     * Returns an error when the wallpaper id is unknown or the live engine
+     * update fails. A refused update leaves the call to be repeated.
+     */
+    func previewWallpaperProperties(wallpaperId: String, show: Bool) async throws 
+    
+    /**
      * # Errors
      *
      * Returns an error when display refresh fails.
@@ -2130,6 +2155,46 @@ open func previewDisplayPosition(wallpaperId: String, displayId: String, panX: D
                 uniffi_wallpaper_bridge_fn_method_wallpaperbridge_preview_display_position(
                     self.uniffiClonePointer(),
                     FfiConverterString.lower(wallpaperId),FfiConverterString.lower(displayId),FfiConverterOptionDouble.lower(panX),FfiConverterOptionDouble.lower(panY)
+                )
+            },
+            pollFunc: ffi_wallpaper_bridge_rust_future_poll_void,
+            completeFunc: ffi_wallpaper_bridge_rust_future_complete_void,
+            freeFunc: ffi_wallpaper_bridge_rust_future_free_void,
+            liftFunc: { $0 },
+            errorHandler: FfiConverterTypeBridgeError.lift
+        )
+}
+    
+    /**
+     * Shows a wallpaper's pending property edits on every scene that draws it,
+     * mirrors included, without applying them, or with `show` false puts the
+     * saved look back. The scenes follow the whole pending edit: what the
+     * panel's inspector holds, except a texture, a file or a folder, which
+     * stay at what is saved because a texture is read only while a scene loads
+     * and a file or folder is saved the moment it is picked. Nothing is saved,
+     * the draft stays as it is, no snapshot changes and the lock screen and
+     * screen saver are not told, so a page can call it after every edit.
+     *
+     * Asking for what the scenes already show, or for the saved look when they
+     * are showing it, sends the engine nothing. Cancelling the options puts
+     * the saved look back by itself, and applying them loads the scenes from
+     * the saved configuration. Anything else that loads a scene again, a
+     * display change or a wake for one, also shows the saved look, and the next
+     * call shows the edit again. A wallpaper that is a video or a web page, or
+     * that no display shows, has nothing to show and is not an error.
+     *
+     * # Errors
+     *
+     * Returns an error when the wallpaper id is unknown or the live engine
+     * update fails. A refused update leaves the call to be repeated.
+     */
+open func previewWallpaperProperties(wallpaperId: String, show: Bool)async throws  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wallpaper_bridge_fn_method_wallpaperbridge_preview_wallpaper_properties(
+                    self.uniffiClonePointer(),
+                    FfiConverterString.lower(wallpaperId),FfiConverterBool.lower(show)
                 )
             },
             pollFunc: ffi_wallpaper_bridge_rust_future_poll_void,
@@ -10139,6 +10204,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_preview_display_position() != 55563) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_preview_wallpaper_properties() != 35488) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_refresh_displays() != 55592) {

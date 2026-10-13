@@ -31,13 +31,13 @@ use crate::{
 /// test process exits. The bridge tests are already a few hundred threads short
 /// of the limit a process has, so a test that builds bridges has to break that
 /// loop itself.
-fn new_engine() -> (FakeEngineFacade, EngineRelease) {
+pub(super) fn new_engine() -> (FakeEngineFacade, EngineRelease) {
     let engine = FakeEngineFacade::default();
     let release = EngineRelease(engine.clone());
     (engine, release)
 }
 
-struct EngineRelease(FakeEngineFacade);
+pub(super) struct EngineRelease(FakeEngineFacade);
 
 impl Drop for EngineRelease {
     fn drop(&mut self) {
@@ -45,7 +45,7 @@ impl Drop for EngineRelease {
     }
 }
 
-fn identified_display(display_id: u32) -> DisplaySnapshotEntry {
+pub(super) fn identified_display(display_id: u32) -> DisplaySnapshotEntry {
     let identity = DisplayIdentity {
         uuid: Some(format!("display-{display_id}")),
         vendor_id: Some(10),
@@ -68,7 +68,7 @@ fn identified_display(display_id: u32) -> DisplaySnapshotEntry {
 
 /// What the engine reports once it runs `scenes`: the fake hands out handles by
 /// position, and every running scene carries the descriptor it was opened with.
-fn running(scenes: &[SceneDesc]) -> Vec<DisplaySnapshotEntry> {
+pub(super) fn running(scenes: &[SceneDesc]) -> Vec<DisplaySnapshotEntry> {
     scenes
         .iter()
         .enumerate()
