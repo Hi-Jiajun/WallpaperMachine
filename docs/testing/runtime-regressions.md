@@ -395,6 +395,13 @@ device.
   a caption computed every tick keeps the clock on every frame, whatever the
   script returns. No script source is read, no repeated result is counted and no
   schedule is inferred.
+- **A history loop is never called still** — `UnchangedPresent.AHistoryLoopKeepsTheClockRunningWithoutATimeUniform`:
+  a layer sampling a target the graph fills only after it has drawn (the fixture
+  uses `_rt_MipMappedFrameBuffer`; a motion-blur trail or an accumulation is the
+  same shape) keeps changing the picture with no time uniform. The compatibility
+  backend reports `Feedback` for a `carriesPreviousFrame` target its compiled
+  graph reads or writes, so the clock keeps running with pixel reuse off and on,
+  while the same card without the loop goes idle.
 - **Geometry rewritten on an event** — `SceneDemandMapping.GeometryRewrittenOnAnEventIsNotAReasonToKeepDrawing`
   in `static_subgraph_cache_test`: `EventMesh` and `DynamicMesh` must both cost a
   target its cacheability and must differ at the scene level. Collapsing them

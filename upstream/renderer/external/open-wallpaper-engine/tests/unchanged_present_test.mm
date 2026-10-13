@@ -174,6 +174,46 @@ std::filesystem::path WriteStaticScene(const std::filesystem::path& root)
     return root / "project.json";
 }
 
+/// The static card beside an echo card that shows the scene's previous frame
+/// through `_rt_MipMappedFrameBuffer`. The graph fills that buffer from the
+/// frame's output only after the echo has drawn, so every frame hands its
+/// picture to the next: a history loop, with no shader reading the time.
+std::filesystem::path WriteHistoryScene(const std::filesystem::path& root)
+{
+    const auto project = WriteStaticScene(root);
+    WriteText(root / "models/echo.json",
+              R"({"width":192,"height":128,"material":"materials/echo.json"})");
+    WriteText(root / "materials/echo.json",
+              R"({"passes":[{"shader":"echo","blending":"translucent","cullmode":"nocull",)"
+              R"("depthtest":"disabled","depthwrite":"disabled",)"
+              R"("textures":["_rt_MipMappedFrameBuffer"]}]})");
+    WriteText(root / "shaders/echo.vert",
+              "uniform mat4 g_ModelViewProjectionMatrix;\n"
+              "attribute vec3 a_Position;\n"
+              "attribute vec2 a_TexCoord;\n"
+              "varying vec2 v_TexCoord;\n"
+              "void main() {\n"
+              "gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+              "v_TexCoord = a_TexCoord;\n"
+              "}\n");
+    WriteText(root / "shaders/echo.frag",
+              "uniform sampler2D g_Texture0;\n"
+              "varying vec2 v_TexCoord;\n"
+              "void main() {\n"
+              "gl_FragColor = vec4(texture(g_Texture0, v_TexCoord).rgb, 1.0);\n"
+              "}\n");
+    WriteText(root / "layout.json",
+              R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+              R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],)"
+              R"("clearcolor":[0.1,0.2,0.3],"cameraparallax":false,)"
+              R"("orthogonalprojection":{"width":384,"height":256}},)"
+              R"("objects":[{"id":1,"name":"card","image":"models/card.json",)"
+              R"("origin":[96,176,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true},)"
+              R"({"id":2,"name":"echo","image":"models/echo.json",)"
+              R"("origin":[288,80,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true}]})");
+    return project;
+}
+
 /// A 30 fps clip as a plain video wallpaper.
 std::filesystem::path WriteVideoProject(const std::filesystem::path& root)
 {
@@ -368,6 +408,7 @@ protected:
     void TearDown() override
     {
         vulkan::SetSceneOptimizationEnabled(true);
+        SetSceneOnDemandEnabled(false);
         RendererCounters::SetEnabled(false);
         std::error_code ignored;
         std::filesystem::remove_all(root_, ignored);
@@ -644,6 +685,53 @@ TEST_F(UnchangedPresent, AStaticSceneStopsPresentingOnceEveryPassIsReused)
     ASSERT_FALSE(pictures[0].empty());
     EXPECT_EQ(pictures[0], pictures[1])
         << "the picture presented with the skip on differs from the baseline";
+}
+
+// "Update only when the scene changes": a history loop keeps changing the
+// picture with nothing else changing -- a trail keeps fading, an accumulation
+// keeps converging -- so it must keep the clock running although no shader
+// reads the time, with pixel reuse off and on. The same card without the loop
+// is the control: it goes idle, so the loop is what keeps the clock.
+TEST_F(UnchangedPresent, AHistoryLoopKeepsTheClockRunningWithoutATimeUniform)
+{
+    SetSceneOnDemandEnabled(true);
+    struct Case
+    {
+        const char* name;
+        bool        history;
+        bool        optimise;
+    };
+    for (const auto& run : { Case { "still card", false, true },
+                             Case { "history loop, reuse off", true, false },
+                             Case { "history loop, reuse on", true, true } }) {
+        SCOPED_TRACE(run.name);
+        vulkan::SetSceneOptimizationEnabled(run.optimise);
+        const auto scene = root_ / (std::string(run.name) + " scene");
+        const auto project = run.history ? WriteHistoryScene(scene) : WriteStaticScene(scene);
+        RunningWallpaper running(project, root_ / (std::string(run.name) + " run"));
+        ASSERT_TRUE(running.WaitForFirstFrame()) << "the scene never reached the surface";
+        ASSERT_EQ(running.wallpaper().sceneBackendSelection().backend, SceneBackend::LegacyVulkan);
+        std::this_thread::sleep_for(600ms);
+
+        const uint32_t reasons = running.wallpaper().sceneDemandReasons();
+        const auto     before  = running.Read();
+        std::this_thread::sleep_for(500ms);
+        const auto delta = Delta(before, running.Read());
+        Print(run.name, delta);
+        EXPECT_FALSE(reasons & SceneDemandReason::TimeUniform)
+            << "the fixture reads the time, so it cannot show what the loop does";
+        EXPECT_EQ(delta[OWE_RC_RENDER_FAILURES], 0u);
+        if (run.history) {
+            EXPECT_TRUE(reasons & SceneDemandReason::Feedback) << "reasons " << reasons;
+            EXPECT_EQ(running.wallpaper().sceneUpdateKind(), SceneUpdateDemand::Kind::Continuous);
+            EXPECT_GT(delta[OWE_RC_DRAWS_EXECUTED], 10u) << "the clock stopped on a history loop";
+        } else {
+            EXPECT_EQ(reasons, 0u);
+            EXPECT_EQ(running.wallpaper().sceneUpdateKind(),
+                      SceneUpdateDemand::Kind::WaitingForEvent);
+            EXPECT_LE(delta[OWE_RC_DRAWS_EXECUTED], 1u) << "the still card kept the clock";
+        }
+    }
 }
 
 // The triggers ARepeatedVideoFramePresentsAgainOnlyWhenSomethingChanges does
