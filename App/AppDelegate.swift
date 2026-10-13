@@ -540,7 +540,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     /// can be credited.
     private func startWallpaperEnergyRecorder(store: BridgeStore) {
         let ratings = WallpaperEnergyRatings(
-            file: ClientPaths.supportURL.appendingPathComponent("EnergyRatings.json"))
+            file: ClientPaths.supportURL.appendingPathComponent("EnergyRatings.json"),
+            batteryWattHours: { BatteryCapacity.fullChargeWattHours() })
         store.wallpaperEnergyRatings = ratings
         let recorder = WallpaperEnergyRecorder(
             source: CoalitionEnergySource(), ratings: ratings

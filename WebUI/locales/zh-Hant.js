@@ -789,6 +789,7 @@ export default {
   '{count} displays': '{count} 台顯示器',
   'each display’s own frame rate': '各顯示器本身的影格率',
   '{level}, about {power}. Measured while it played alone on {displays} at {rate}, {scale} render scale, with this window closed.': '{level}，約 {power}。測量條件：關閉此視窗並單獨播放此桌布，{displays}，{rate}，渲染比例 {scale}。',
+  '{level}, about {power}. {battery} Measured while it played alone on {displays} at {rate}, {scale} render scale, with this window closed.': '{level}，約 {power}。{battery}測量條件：關閉此視窗並單獨播放此桌布，{displays}，{rate}，渲染比例 {scale}。',
   'Scene wallpapers': '場景桌布',
   'Scene render optimisation': '場景渲染最佳化',
   'Skips rendering work that wouldn’t change the picture, such as parts of a scene that stay the same. Resolution, frame rate and animation speed are unaffected. Works with both scene renderers. Turn it off to compare.': '略過不會改變畫面的渲染工作，例如場景中保持不變的部分。解析度、影格率與動畫速度皆不受影響。兩種場景渲染器都支援此功能。可關閉此功能來比較差異。',

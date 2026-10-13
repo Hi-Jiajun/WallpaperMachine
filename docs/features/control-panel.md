@@ -111,8 +111,9 @@ is unavailable, not for an ordinary operation failure.
     (occlusion, other-app audio, display sleep, battery, Low Power Mode, heat,
     Focus, app rules). Video backend, scene controls and the experimental switches
     stay under **Advanced**. See [Performance settings](performance.md). The
-    inspector of an installed wallpaper adds its measured energy grade once it has
-    one ([Per-wallpaper energy rating](performance.md#per-wallpaper-energy-rating)).
+    inspector of an installed wallpaper adds its measured energy grade, and on a
+    Mac with a battery its share of a charge per hour, once it has one
+    ([Per-wallpaper energy rating](performance.md#per-wallpaper-energy-rating)).
   - **About** leads with the app version (`MARKETING_VERSION` in `project.yml`) and
     the Git revision. **Check for Updates** reads the latest GitHub Release;
     download and restart-install happen only after confirmation (see

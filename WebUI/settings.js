@@ -197,7 +197,7 @@ export function energyLevelLabel(level) {
   return energyLevels[level] ? t(energyLevels[level]) : '';
 }
 
-function batteryShare(percent) {
+export function batteryShare(percent) {
   const number = Number(percent);
   if (!Number.isFinite(number)) return '';
   if (number < 1) return t('Less than 1% of a full battery charge per hour.');

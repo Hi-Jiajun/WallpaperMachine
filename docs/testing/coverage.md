@@ -142,8 +142,9 @@ per-Space assignments; see
   surface-exclusive and shared work apart, never labels present requests as
   displayed frames, and states the milliseconds it counted.
 - `EnergyUsageMonitorTests` and `WallpaperEnergyRatingsTests` — coalition
-  readings, contention, before/after comparisons, grades and the rating recorder;
-  two `testKernelCounters…` cases read the test process's real kernel counters.
+  readings, contention, before/after comparisons, grades, battery share and the
+  rating recorder; two `testKernelCounters…` cases read the test process's real
+  kernel counters.
 
 Log line format, retention and the verbose setting are covered in Rust; see
 [diagnostics](../features/diagnostics.md#verification).

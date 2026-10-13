@@ -109,8 +109,9 @@ which also remains the way to compare builds; this readout is for users.
 ## Per-wallpaper energy rating
 
 The inspector of an installed wallpaper shows, once measured, a line such as
-**Medium energy use, about 1.2 W. Measured while it played alone on 1 display at
-60 fps, 75% render scale, with this window closed.** It is measured in the
+**Medium energy use, about 1.2 W. About 1% of a full battery charge per hour.
+Measured while it played alone on 1 display at 60 fps, 75% render scale, with this
+window closed.** It is measured in the
 background by `WallpaperEnergyRecorder` and kept by `WallpaperEnergyRatings` (both
 in `App/Services/Diagnostics/WallpaperEnergyRatings.swift`), owned by the app
 delegate and reachable from the panel as `BridgeStore.wallpaperEnergyRatings`:
@@ -140,6 +141,11 @@ delegate and reachable from the panel as `BridgeStore.wallpaperEnergyRatings`:
 - **Averaging.** Intervals combine as a time-weighted mean. History is weighted as
   at most 30 minutes, so a rating follows a wallpaper whose cost changed. A rating
   is shown after two minutes of credited time.
+- **Battery share.** On a Mac with a battery the snapshot adds
+  `batteryPercentPerHour`, the rated power as a share of a full charge, and the line
+  states it as the readout above does. `BatteryCapacity` is read when the first
+  rating is shown and kept for the app's run, since the panel asks for every
+  wallpaper's rating in each snapshot. A desktop Mac's line has no share.
 - **Storage.** `<support>/EnergyRatings.json`, keyed by wallpaper id. It is saved
   when a rating first appears or changes grade, at most every ten minutes
   otherwise, and on quit. An unreadable file is logged and starts empty. Each

@@ -789,6 +789,7 @@ export default {
   '{count} displays': '{count} 台显示器',
   'each display’s own frame rate': '各显示器自身的帧率',
   '{level}, about {power}. Measured while it played alone on {displays} at {rate}, {scale} render scale, with this window closed.': '{level}，约 {power}。在关闭本窗口、仅播放这张壁纸时测得：{displays}，{rate}，渲染比例 {scale}。',
+  '{level}, about {power}. {battery} Measured while it played alone on {displays} at {rate}, {scale} render scale, with this window closed.': '{level}，约 {power}。{battery}在关闭本窗口、仅播放这张壁纸时测得：{displays}，{rate}，渲染比例 {scale}。',
   'Scene wallpapers': '场景壁纸',
   'Scene render optimisation': '场景渲染优化',
   'Skips rendering work that wouldn’t change the picture, such as parts of a scene that stay the same. Resolution, frame rate and animation speed are unaffected. Works with both scene renderers. Turn it off to compare.': '跳过不影响画面的渲染工作，比如场景中没有变化的部分。分辨率、帧率和动画速度都不受影响。两种场景渲染器都支持，可以关掉对比效果。',

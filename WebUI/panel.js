@@ -1,4 +1,4 @@
-import { renderSettings, revealSettingsSection, performanceLimitedFps, showEnergyUsage, milliwatts, energyLevelLabel } from './settings.js';
+import { renderSettings, revealSettingsSection, performanceLimitedFps, showEnergyUsage, milliwatts, energyLevelLabel, batteryShare } from './settings.js';
 import { createWelcome, SIGN_IN_ID } from './welcome.js';
 import { glyphs } from './icons.js';
 import { t, applyStaticText, setLanguage, language } from './i18n.js';
@@ -564,14 +564,18 @@ function issueLink(item, failure = '') {
 }
 
 // The background recorder's rating, with the conditions it was measured under: a rating
-// taken on two displays with no limit says little about one display at 30 fps.
+// taken on two displays with no limit says little about one display at 30 fps. Native
+// sends the battery share only on a Mac with a battery.
 function energyRating(energy) {
   const level = energyLevelLabel(energy?.level);
   if (!level || !Number.isFinite(Number(energy.milliwatts))) return '';
   const displays = Number(energy.displays) === 1 ? t('1 display') : t('{count} displays', { count: Number(energy.displays) || 0 });
   const rate = energy.frameRateCap != null && Number.isFinite(Number(energy.frameRateCap)) ? t('{fps} fps', { fps: Number(energy.frameRateCap) }) : t('each display’s own frame rate');
   const scale = `${Math.round(Number(energy.renderScale) * 100)}%`;
-  return t('{level}, about {power}. Measured while it played alone on {displays} at {rate}, {scale} render scale, with this window closed.', { level, power: milliwatts(energy.milliwatts), displays, rate, scale });
+  const values = { level, power: milliwatts(energy.milliwatts), displays, rate, scale };
+  const battery = batteryShare(energy.batteryPercentPerHour);
+  if (battery) return t('{level}, about {power}. {battery} Measured while it played alone on {displays} at {rate}, {scale} render scale, with this window closed.', { ...values, battery });
+  return t('{level}, about {power}. Measured while it played alone on {displays} at {rate}, {scale} render scale, with this window closed.', values);
 }
 
 // The author's other wallpapers, unless they are what is on show already.

@@ -789,6 +789,7 @@ export default {
   '{count} displays': '{count}台のディスプレイ',
   'each display’s own frame rate': '各ディスプレイ固有のフレームレート',
   '{level}, about {power}. Measured while it played alone on {displays} at {rate}, {scale} render scale, with this window closed.': '{level}（約{power}）。このウインドウを閉じ、この壁紙のみを{displays}、{rate}、レンダリングスケール{scale}で再生して測定しました。',
+  '{level}, about {power}. {battery} Measured while it played alone on {displays} at {rate}, {scale} render scale, with this window closed.': '{level}（約{power}）。{battery}このウインドウを閉じ、この壁紙のみを{displays}、{rate}、レンダリングスケール{scale}で再生して測定しました。',
   'Scene wallpapers': 'シーン壁紙',
   'Scene render optimisation': 'シーンレンダリングの最適化',
   'Skips rendering work that wouldn’t change the picture, such as parts of a scene that stay the same. Resolution, frame rate and animation speed are unaffected. Works with both scene renderers. Turn it off to compare.': 'シーン内の変化しない部分など、画像に影響しないレンダリング処理を省略します。解像度、フレームレート、アニメーションの速度は変わりません。どちらのシーンレンダラでも機能します。オフにすると比較できます。',
