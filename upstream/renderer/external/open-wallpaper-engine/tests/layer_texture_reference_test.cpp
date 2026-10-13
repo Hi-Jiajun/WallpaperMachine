@@ -18,11 +18,15 @@
 #include "VulkanRender/SceneToRenderGraph.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <map>
 #include <memory>
 #include <string>
+#include <thread>
+#include <utility>
 #include <vector>
 
 namespace
@@ -214,13 +218,47 @@ Eigen::Vector2d CardCornerNdc(Scene& scene, const vulkan::CustomShaderPass& pass
 }
 
 void ExpectCardFillsItsTarget(Scene& scene, const vulkan::CustomShaderPass& pass,
-                              Eigen::Vector2d half_extent) {
-    const auto lower_left  = CardCornerNdc(scene, pass, -half_extent);
-    const auto upper_right = CardCornerNdc(scene, pass, half_extent);
+                              Eigen::Vector2d lower_left_corner, Eigen::Vector2d upper_right_corner) {
+    const auto lower_left  = CardCornerNdc(scene, pass, lower_left_corner);
+    const auto upper_right = CardCornerNdc(scene, pass, upper_right_corner);
     EXPECT_NEAR(lower_left.x(), -1.0, 1e-4);
     EXPECT_NEAR(lower_left.y(), -1.0, 1e-4);
     EXPECT_NEAR(upper_right.x(), 1.0, 1e-4);
     EXPECT_NEAR(upper_right.y(), 1.0, 1e-4);
+}
+
+void ExpectCardFillsItsTarget(Scene& scene, const vulkan::CustomShaderPass& pass,
+                              Eigen::Vector2d half_extent) {
+    ExpectCardFillsItsTarget(scene, pass, -half_extent, half_extent);
+}
+
+/// The lower-left and upper-right corners of a card mesh, in the space it is
+/// authored in.
+std::pair<Eigen::Vector2d, Eigen::Vector2d> CardCorners(const SceneMesh& mesh) {
+    const auto& vertices = mesh.GetVertexArray(0);
+    const auto  offsets  = vertices.GetAttrOffsetMap();
+    const auto  position = offsets.find(std::string(WE_IN_POSITION));
+    Eigen::Vector2d lower = Eigen::Vector2d::Constant(std::numeric_limits<double>::infinity());
+    Eigen::Vector2d upper = -lower;
+    if (position == offsets.end()) return { lower, upper };
+    for (std::size_t vertex = 0; vertex < vertices.VertexCount(); ++vertex) {
+        const float* xy = vertices.Data() + vertex * vertices.OneSize() +
+                          position->second.offset / sizeof(float);
+        lower = lower.cwiseMin(Eigen::Vector2d(xy[0], xy[1]));
+        upper = upper.cwiseMax(Eigen::Vector2d(xy[0], xy[1]));
+    }
+    return { lower, upper };
+}
+
+/// Lays a text layer out as the wallpaper's frame loop does, until the layout
+/// lands. False when it never does.
+bool PumpTextLayout(SceneRuntimeContext& runtime, std::string_view name) {
+    for (int attempt = 0; attempt < 200; ++attempt) {
+        runtime.PumpTextLayerCache();
+        if (! runtime.NodeTextDirty(name)) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return false;
 }
 
 } // namespace
@@ -805,6 +843,115 @@ void main() {
         ASSERT_NE(composite, nullptr);
         ExpectCardFillsItsTarget(*parsed, *composite, { 8.0, 4.0 });
         EXPECT_TRUE(composite->desc().node->MustProduce());
+    }
+}
+
+// A text layer is sampled like an image: a hidden title another layer scrolls
+// across a card of its own, a clock whose effect outlines what it samples. Only
+// an image layer was given a composite, though. A sampled text layer was drawn
+// through the scene camera into a screen-sized fallback, so the consumer found
+// the text wherever it sits on screen, and, hidden, it was never drawn at all.
+// Its card is laid out again whenever the text changes, so its composite moves
+// and resizes with it, one texel per unit as an image's is: a consumer may place
+// the image by its size.
+TEST(LayerTextureReference, ASampledTextLayerIsItsCardInItsOwnComposite) {
+    // With an effect the layer draws at an effect capacity larger than its
+    // card, and what is sampled is still the card. Declared as a dependency the
+    // reference is known before the text is parsed; named only in a material
+    // file it is found while the consumer is parsed.
+    for (const bool with_effect : { false, true }) {
+        for (const bool declared : { true, false }) {
+            SCOPED_TRACE(std::string(with_effect ? "with an effect" : "plain") +
+                         (declared ? ", declared" : ", found in a material"));
+            auto files = CopyEffectFiles();
+            files["/linked_mat.json"] =
+                R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":["_rt_imageLayerComposite_416_a"]}]})";
+            // Left-aligned in a box narrower than the text, the card overflows to
+            // the right and is not centred on the layer's origin.
+            const std::string objects =
+                std::string(R"([
+                {"id":680,"name":"marquee","image":"linked.json")") +
+                (declared ? R"(,"dependencies":[416])" : "") + R"(},
+                {"id":416,"name":"title","text":"Wind","font":"Arial","pointsize":20,
+                 "padding":0,"size":[24,40],"horizontalalign":"left",
+                 "origin":[50,20,0],"visible":false)" +
+                (with_effect ? R"(,"effects":[{"file":"effects/copy/effect.json","visible":true}])"
+                             : "") +
+                "}]";
+            const ProjectProperties properties {};
+            fs::VFS                 vfs;
+            auto parsed = ParseScene(vfs, objects, files, &properties);
+            ASSERT_NE(parsed, nullptr);
+            ASSERT_NE(parsed->runtime, nullptr);
+            EXPECT_TRUE(parsed->layer_texture_error.empty()) << parsed->layer_texture_error;
+            AddScreenTarget(*parsed);
+            auto& runtime = *parsed->runtime;
+
+            // The pass that draws the title into its composite, and the card it
+            // draws there.
+            struct Composite {
+                const vulkan::CustomShaderPass* pass { nullptr };
+                Eigen::Vector2d                 lower, upper;
+            };
+            const auto find_composite = [&](const rg::RenderGraph& graph) {
+                Composite found;
+                found.pass = FindPassByOutput(graph, LayerCompositeTargetKey(416));
+                if (found.pass == nullptr || found.pass->desc().node->Mesh() == nullptr)
+                    return found;
+                std::tie(found.lower, found.upper) =
+                    CardCorners(*found.pass->desc().node->Mesh());
+                return found;
+            };
+            const auto expect_composite_is_the_card = [&](const Composite& composite) {
+                ASSERT_NE(composite.pass, nullptr) << "the title was never drawn into a composite";
+                auto* owner = composite.pass->desc().visibility_node != nullptr
+                                        ? composite.pass->desc().visibility_node
+                                        : composite.pass->desc().node;
+                EXPECT_EQ(owner->Name(), "title");
+                EXPECT_TRUE(owner->MustProduce()) << "hidden, the title would never be drawn";
+                // The card the title shows on screen, whichever mesh draws it.
+                ASSERT_NE(owner->Mesh(), nullptr);
+                const auto [card_lower, card_upper] = CardCorners(*owner->Mesh());
+                EXPECT_NEAR(composite.lower.x(), card_lower.x(), 1e-3);
+                EXPECT_NEAR(composite.lower.y(), card_lower.y(), 1e-3);
+                EXPECT_NEAR(composite.upper.x(), card_upper.x(), 1e-3);
+                EXPECT_NEAR(composite.upper.y(), card_upper.y(), 1e-3);
+                ExpectCardFillsItsTarget(*parsed, *composite.pass, composite.lower, composite.upper);
+                const auto* target = parsed->FindRenderTarget(LayerCompositeTargetKey(416));
+                ASSERT_NE(target, nullptr);
+                EXPECT_EQ(target->width, std::lround(composite.upper.x() - composite.lower.x()));
+                EXPECT_EQ(target->height, std::lround(composite.upper.y() - composite.lower.y()));
+            };
+
+            auto graph = sceneToRenderGraph(*parsed);
+            ASSERT_NE(graph, nullptr);
+            const auto* marquee = FindPassByNode(*graph, "marquee");
+            ASSERT_NE(marquee, nullptr);
+            ASSERT_FALSE(marquee->desc().textures.empty());
+            EXPECT_EQ(marquee->desc().textures[0], GenLinkTex(416));
+            const auto* link = FindLinkCopy(*graph, GenLinkTex(416));
+            ASSERT_NE(link, nullptr) << "the marquee was given nothing to sample";
+            EXPECT_EQ(link->desc().src, LayerCompositeTargetKey(416));
+
+            const auto before = find_composite(*graph);
+            expect_composite_is_the_card(before);
+            ASSERT_NE(before.pass, nullptr);
+            ASSERT_GT(std::abs((before.lower.x() + before.upper.x()) * 0.5), 1.0)
+                << "the fixture's card must sit off the layer's origin";
+
+            // A longer title widens the card while the layer stays hidden.
+            ASSERT_TRUE(runtime.SetNodeText("title", "Wind over the river"));
+            ASSERT_TRUE(PumpTextLayout(runtime, "title"))
+                << "a hidden text layer another samples was never laid out again";
+            EXPECT_TRUE(runtime.ConsumeSceneGraphMutationFlag())
+                << "the composite outgrew its target and nothing asked for a new graph";
+            graph = sceneToRenderGraph(*parsed);
+            ASSERT_NE(graph, nullptr);
+            const auto after = find_composite(*graph);
+            expect_composite_is_the_card(after);
+            ASSERT_NE(after.pass, nullptr);
+            EXPECT_GT(after.upper.x() - after.lower.x(), before.upper.x() - before.lower.x());
+        }
     }
 }
 

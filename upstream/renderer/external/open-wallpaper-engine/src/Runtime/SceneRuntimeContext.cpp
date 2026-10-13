@@ -821,7 +821,7 @@ bool SceneRuntimeContext::TextLayoutInFlight() const {
 bool SceneRuntimeContext::TextLayerIsBeingPrepared(const std::string& name) const {
     const auto node = m_nodes.find(name);
     if (node == m_nodes.end() || node->second == nullptr) return true;
-    return node->second->EffectiveVisible();
+    return node->second->EffectiveVisible() || node->second->MustProduce();
 }
 
 void SceneRuntimeContext::SetContentWakeHandler(std::function<void()> handler) {
@@ -913,6 +913,8 @@ bool SceneRuntimeContext::ApplyPreparedTextLayer(const RuntimePreparedTextLayerI
     }
 
     if (raster_size_changed || layout_size_changed) {
+        // The card the layer shows: the text's own, or the chain's final card.
+        TextLayerRenderFrame card = prepared.render_frame;
         if (const auto effect_iterator = m_node_effect_final.find(prepared.name);
             effect_iterator != m_node_effect_final.end() &&
             effect_iterator->second.node != nullptr &&
@@ -965,6 +967,11 @@ bool SceneRuntimeContext::ApplyPreparedTextLayer(const RuntimePreparedTextLayerI
                 resolved != nullptr && resolved->Mesh() != nullptr) {
                 ResizeCardMesh(*resolved->Mesh(), final_frame.bounds, texture_bounds);
             }
+            card = final_frame;
+        }
+        if (const auto node_iterator = m_nodes.find(prepared.name);
+            node_iterator != m_nodes.end() && node_iterator->second != nullptr) {
+            FitTextLayerComposite(*node_iterator->second, card);
         }
     }
 
@@ -977,6 +984,35 @@ bool SceneRuntimeContext::ApplyPreparedTextLayer(const RuntimePreparedTextLayerI
     }
     if (! layer.layoutPending()) layer.ClearDirty();
     return true;
+}
+
+void SceneRuntimeContext::FitTextLayerComposite(SceneNode& node,
+                                                const TextLayerRenderFrame& card) {
+    if (m_scene == nullptr || card.size.x() <= 0.0f || card.size.y() <= 0.0f) return;
+    const auto camera = m_scene->cameras.find(LayerCompositeCameraKey(node.ID()));
+    if (camera == m_scene->cameras.end() || camera->second == nullptr ||
+        camera->second->GetAttachedNode() == nullptr)
+        return;
+    camera->second->SetWidth(card.size.x());
+    camera->second->SetHeight(card.size.y());
+    camera->second->GetAttachedNode()->SetTranslate(
+        Eigen::Vector3f(card.center.x(), card.center.y(), 0.0f));
+    camera->second->Update();
+    // One texel per unit of the card, as at parse time: a consumer may place
+    // the image by its size (`g_Texture1Resolution`), so stretching a new card
+    // over the old target would show the text at another scale. Only a card
+    // whose size in texels changed costs a new graph.
+    const auto found = m_scene->renderTargets.find(LayerCompositeTargetKey(node.ID()));
+    if (found == m_scene->renderTargets.end()) return;
+    auto&      target = found->second;
+    const auto width  = std::max(4, static_cast<int32_t>(std::lround(card.size.x())));
+    const auto height = std::max(4, static_cast<int32_t>(std::lround(card.size.y())));
+    const auto current_width  = target.authored_width > 0 ? target.authored_width : target.width;
+    const auto current_height = target.authored_height > 0 ? target.authored_height : target.height;
+    if (current_width == width && current_height == height) return;
+    target.width = target.authored_width = width;
+    target.height = target.authored_height = height;
+    m_scene_graph_mutated = true;
 }
 
 DynamicValue* SceneRuntimeContext::FindPropertyValue(std::string_view name) const {

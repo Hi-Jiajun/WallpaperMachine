@@ -474,6 +474,19 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
     by a script it keeps its draw into the picture, since nothing rebuilds the
     graph when the script shows it again. The same rule decides whether a
     sampled top-level layer keeps its on-screen draw.
+  - A sampled text layer is its card in its own composite, as an image is
+    (`ASampledTextLayerIsItsCardInItsOwnComposite`; pixels on the native backend
+    in `MetalSceneDraw.AHiddenTextLayerAnotherSamplesIsItsCardInItsComposite`).
+    With effects the card is the chain's final card, not the larger capacity
+    the chain renders at, and a card aligned to one side of an overflowed box is
+    framed off the layer's origin. A relayout moves the composite camera with
+    the card and resizes the target to keep one texel per unit, since a consumer
+    may place the image by its size (`g_Texture1Resolution`); only a size change
+    in texels costs a new graph. A hidden sampled text is still laid out when
+    its text changes. Before, a text layer had no composite of its own: drawn
+    through the scene camera into a screen-sized fallback it sat wherever it is
+    on screen, and hidden it was never drawn, so a marquee of a hidden song
+    title showed nothing.
   - A linked composite's size is never folded into the material as a zero at
     parse time (the card padding divides by it and every texture coordinate of
     the consumer's card becomes `NaN`), and nothing stale is folded in its place:

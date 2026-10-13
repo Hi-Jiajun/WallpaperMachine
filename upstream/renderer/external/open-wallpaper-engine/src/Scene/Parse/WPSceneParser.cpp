@@ -268,6 +268,9 @@ struct ParseContext {
     std::unordered_map<int32_t, std::string>                object_runtime_names;
     std::unordered_map<std::string, uint32_t>               text_name_counts;
     std::unordered_set<int32_t>                             referenced_layer_ids;
+    /// The card each text layer shows, for a composite registered only once
+    /// a later consumer turns out to sample the layer.
+    std::unordered_map<int32_t, TextLayerRenderFrame>       text_cards;
 
     ShaderValueMap             global_base_uniforms;
     std::shared_ptr<SceneNode> effect_camera_node;
@@ -1615,6 +1618,56 @@ Eigen::Vector2f ResolveTextEffectCapacity(const wpscene::WPTextObject& obj,
     return capacity.cwiseMin(max_capacity);
 }
 
+/// A layer another layer samples draws into a composite of its own, `extent`
+/// texels, through a camera that frames the layer's card in its own texture
+/// space: the card fills the target, and where the layer sits in the scene --
+/// its transform, the scene camera, parallax -- does not reach the image.
+/// `camera_node` puts that camera on the card's centre.
+SceneCamera& RegisterLayerComposite(ParseContext& context, int32_t id, SceneNode& node,
+                                    std::array<int32_t, 2> extent, bool clamp_uvs,
+                                    std::shared_ptr<SceneNode> camera_node) {
+    node.SetMustProduce(true);
+    const auto key = LayerCompositeTargetKey(id);
+    if (! context.scene->HasRenderTarget(key)) {
+        // A consumer may tile a layer texture across a model (UVs far outside
+        // 0..1). Clamping that smears the edge texels into solid bands; the
+        // layer's own `clampuvs` decides, like a packaged texture's flag.
+        const auto wrap = clamp_uvs ? TextureWrap::CLAMP_TO_EDGE : TextureWrap::REPEAT;
+        context.scene->renderTargets[key] = SceneRenderTarget {
+            .width = extent[0], .height = extent[1], .allowReuse = true,
+            .sample = { wrap, wrap, TextureFilter::LINEAR, TextureFilter::LINEAR },
+            .format = context.scene->hdr ? TextureFormat::RGBA16F : TextureFormat::RGBA8,
+        };
+    }
+    auto camera = std::make_shared<SceneCamera>(extent[0], extent[1], -1.0f, 1.0f);
+    camera->SetLayerLocal(true);
+    camera->AttatchNode(std::move(camera_node));
+    auto& registered = context.scene->cameras[LayerCompositeCameraKey(id)];
+    registered = std::move(camera);
+    return *registered;
+}
+
+/// A sampled text layer's composite is the card it shows: its text, or with
+/// effects the final card of the chain, never the larger capacity the chain
+/// renders at. Aligned to one side of a box the text overflows, that card is
+/// not centred on the layer's origin, and every relayout may move and resize
+/// it (`SceneRuntimeContext::FitTextLayerComposite`), so the camera has a node
+/// of its own and frames the card exactly.
+void RegisterTextComposite(ParseContext& context, const wpscene::WPTextObject& object,
+                           SceneNode& node, const TextLayerRenderFrame& card) {
+    auto camera_node = std::make_shared<SceneNode>();
+    camera_node->SetTranslate(Eigen::Vector3f(card.center.x(), card.center.y(), 0.0f));
+    auto& camera = RegisterLayerComposite(context,
+                                          object.id,
+                                          node,
+                                          ResolveTextRenderExtent(card.size, context),
+                                          object.clampuvs,
+                                          std::move(camera_node));
+    camera.SetWidth(std::max(1.0f, card.size.x()));
+    camera.SetHeight(std::max(1.0f, card.size.y()));
+    camera.Update();
+}
+
 void AttachEffectsToNode(ParseContext& context,
                          SceneNode& node,
                          SceneMesh& final_mesh,
@@ -1876,6 +1929,11 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
                                 { obj.parallaxDepth[0], obj.parallaxDepth[1] },
                                 /* copy_background */ true,
                                 /* preserve_effect_fbo_resolution */ true);
+        }
+        const auto& card = obj.effects.empty() ? render_frame : effect_final_frame;
+        context.text_cards[obj.id] = card;
+        if (context.referenced_layer_ids.contains(obj.id)) {
+            RegisterTextComposite(context, obj, *node, card);
         }
     } else {
         LoadAlignment(*node, anchor, layout_size);
@@ -3137,25 +3195,8 @@ void BuildBloomPostProcess(ParseContext& context, const wpscene::WPScene& sc) {
 
 void RegisterImageComposite(ParseContext& context, const wpscene::WPImageObject& object,
                              SceneNode& node) {
-    node.SetMustProduce(true);
-    const auto extent = ResolveImageRenderExtent(object, context);
-    const auto key = LayerCompositeTargetKey(object.id);
-    if (! context.scene->HasRenderTarget(key)) {
-        // A consumer may tile a layer texture across a model (UVs far outside
-        // 0..1). Clamping that smears the edge texels into solid bands; the
-        // layer's own `clampuvs` decides, like a packaged texture's flag.
-        const auto wrap = object.clampuvs ? TextureWrap::CLAMP_TO_EDGE : TextureWrap::REPEAT;
-        context.scene->renderTargets[key] = SceneRenderTarget {
-            .width = extent[0], .height = extent[1], .allowReuse = true,
-            .sample = { wrap, wrap, TextureFilter::LINEAR, TextureFilter::LINEAR },
-            .format = context.scene->hdr ? TextureFormat::RGBA16F : TextureFormat::RGBA8,
-        };
-    }
-    // A layer texture is its card, independent of its position in the scene.
-    auto camera = std::make_shared<SceneCamera>(extent[0], extent[1], -1.0f, 1.0f);
-    camera->SetLayerLocal(true);
-    camera->AttatchNode(context.effect_camera_node);
-    context.scene->cameras[LayerCompositeCameraKey(object.id)] = std::move(camera);
+    RegisterLayerComposite(context, object.id, node, ResolveImageRenderExtent(object, context),
+                           object.clampuvs, context.effect_camera_node);
 }
 
 void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
@@ -4999,10 +5040,17 @@ std::shared_ptr<Scene> WPSceneParser::Parse(const SceneParseRequest& request,
             bool already_parsed = false;
             for (const auto& object : wp_objs) {
                 const auto* image = std::get_if<wpscene::WPImageObject>(&object);
-                if (image == nullptr || image->id != id) continue;
+                const auto* text  = std::get_if<wpscene::WPTextObject>(&object);
+                if ((image == nullptr || image->id != id) && (text == nullptr || text->id != id))
+                    continue;
                 if (const auto node = context.layer_nodes.find(id);
                     node != context.layer_nodes.end() && node->second != nullptr) {
-                    RegisterImageComposite(context, *image, *node->second);
+                    if (image != nullptr) {
+                        RegisterImageComposite(context, *image, *node->second);
+                    } else if (const auto card = context.text_cards.find(id);
+                               card != context.text_cards.end()) {
+                        RegisterTextComposite(context, *text, *node->second, card->second);
+                    }
                 }
                 already_parsed = true;
                 break;

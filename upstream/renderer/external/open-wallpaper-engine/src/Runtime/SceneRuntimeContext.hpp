@@ -485,12 +485,16 @@ private:
     /// Whether this text layer's pending layout is being worked on at all.
     ///
     /// A hidden layer is not: its relayout waits until it is shown again, which
-    /// is an event. Shared with `PumpTextLayerCache` so "in flight" and "the
-    /// pump will do it" cannot drift apart.
+    /// is an event. One another layer samples is, since its composite is drawn
+    /// while it is hidden. Shared with `PumpTextLayerCache` so "in flight" and
+    /// "the pump will do it" cannot drift apart.
     [[nodiscard]] bool TextLayerIsBeingPrepared(const std::string& name) const;
     void EnqueueTextLayerPreparation(std::string name, const TextLayer& layer);
     void CollectPreparedTextLayers();
     bool ApplyPreparedTextLayer(const RuntimePreparedTextLayerImage& prepared);
+    /// Moves the composite of a text layer another layer samples onto `card`,
+    /// the card a relayout left it with, and resizes the target to it.
+    void FitTextLayerComposite(SceneNode& node, const TextLayerRenderFrame& card);
     void TextWorkerLoop();
 
     std::unique_ptr<ScriptEngine>                                  m_script_engine;

@@ -3390,6 +3390,102 @@ TEST_F(MetalSceneDraw, ATextLayerIsParsedTranslatedAndDrawnByTheNativeBackend)
     }
 }
 
+namespace
+{
+
+/// A hidden text layer another layer samples: the marquee's card covers the
+/// canvas and shows the title's composite across all of it. The title sits in
+/// a corner of the canvas, so a composite that held it where it sits on screen
+/// would show it there, small, instead of across the marquee.
+std::filesystem::path WriteSampledTextFixture(const std::filesystem::path& root, bool with_effect)
+{
+    const auto project = WriteTextFixture(root, "HELLO", with_effect);
+    const std::string effects =
+        with_effect ? R"(,"effects":[{"file":"effects/probe.json","visible":true}])" : "";
+    const std::map<std::string, std::string> files {
+        { "models/marquee.json", R"({"width":384,"height":256,"material":"materials/marquee.json"})" },
+        { "materials/marquee.json",
+          R"({"passes":[{"shader":"probe_copy","blending":"translucent","cullmode":"nocull",)"
+          R"("depthtest":"disabled","depthwrite":"disabled",)"
+          R"("textures":["_rt_imageLayerComposite_1_a"]}]})" },
+        { "layout.json",
+          R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+          R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0.0,0.0,0.0],)"
+          R"("cameraparallax":false,"orthogonalprojection":{"width":384,"height":256}},)"
+          R"("objects":[{"id":1,"name":"title","text":"HELLO","font":"Arial","pointsize":24,)"
+          R"("padding":0,"origin":[60,220,0],"visible":false)" + effects + R"(},)"
+          R"({"id":2,"name":"marquee","image":"models/marquee.json","origin":[192,128,0],)"
+          R"("dependencies":[1]}]})" },
+    };
+    for (const auto& [name, contents] : files) {
+        const auto path = root / name;
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream(path) << contents;
+    }
+    return project;
+}
+
+} // namespace
+
+// A hidden text layer another layer samples was never drawn into a composite
+// on the native backend (nothing marked it as one that must produce), and,
+// visible, it would have been drawn where it sits on screen rather than as its
+// own card: the marquee showed nothing.
+TEST_F(MetalSceneDraw, AHiddenTextLayerAnotherSamplesIsItsCardInItsComposite)
+{
+    for (const bool with_effect : { false, true }) {
+        SCOPED_TRACE(with_effect ? "with an effect" : "plain");
+        const auto  directory = root_ / (with_effect ? "sampled-text-effect" : "sampled-text");
+        const auto  project   = WriteSampledTextFixture(directory, with_effect);
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, directory / "cache", loaded, error)) << error;
+        auto& scene = *loaded.scene;
+        ASSERT_TRUE(scene.layer_texture_error.empty()) << scene.layer_texture_error;
+        const auto selection = SelectSceneBackend(scene);
+        ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+
+        @autoreleasepool {
+            CAMetalLayer* layer = [CAMetalLayer layer];
+            layer.device        = MTLCreateSystemDefaultDevice();
+            layer.pixelFormat   = MTLPixelFormatBGRA8Unorm;
+            layer.drawableSize  = CGSizeMake(384, 256);
+            MetalRender render;
+            ASSERT_TRUE(render.init(MetalRenderInitInfo {
+                .metal_layer = (__bridge void*)layer, .width = 384, .height = 256,
+                .render_width = 384, .render_height = 256, .display_scale_factor = 1.0,
+            }));
+            auto graph = sceneToRenderGraph(scene);
+            ASSERT_NE(graph, nullptr);
+            ASSERT_TRUE(render.compileRenderGraph(scene, *graph)) << render.lastError();
+            render.UpdateCameraFillMode(scene, FillMode::ASPECTFIT);
+            for (int frame = 0; frame < 3; ++frame) AdvanceSceneFrame(render, scene);
+
+            const auto pixels = ReadOutput(render, scene);
+            ASSERT_EQ(pixels.size(), 384u * 256u * 4u);
+            uint32_t left = 384, right = 0, bottom = 0, top = 256;
+            for (uint32_t y = 0; y < 256; ++y) {
+                for (uint32_t x = 0; x < 384; ++x) {
+                    const auto* pixel = &pixels[(y * 384 + x) * 4];
+                    if (pixel[0] == 0 && pixel[1] == 0 && pixel[2] == 0) continue;
+                    left   = std::min(left, x);
+                    right  = std::max(right, x);
+                    top    = std::min(top, y);
+                    bottom = std::max(bottom, y);
+                }
+            }
+            ASSERT_GT(LitPixels(pixels), 0u) << "the marquee found nothing in the title's composite";
+            // The title's card fills its composite, so its glyphs stretch from
+            // one side of the marquee to the other, and sit across its middle.
+            EXPECT_LT(left, 384u / 8u);
+            EXPECT_GT(right, 384u * 7u / 8u);
+            EXPECT_LT(top, 256u / 2u);
+            EXPECT_GT(bottom, 256u / 2u);
+            render.destroy();
+        }
+    }
+}
+
 TEST_F(MetalSceneDraw, TextThatHasNotChangedIsNeitherLaidOutNorUploadedAgain)
 {
     // The round's optimisation, stated as what must NOT happen: the scripts and
