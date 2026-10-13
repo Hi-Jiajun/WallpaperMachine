@@ -78,7 +78,15 @@ the next frame is presented once, and the position survives a surface rebuild an
 change of renderer. The Rust engine carries it with a scene's other settings
 (`SceneFraming`, refused unless both fractions are between 0 and 1): it stays with the
 same wallpaper across a rebuild, and a different wallpaper takes the position of its
-own descriptor. The app does not offer it yet.
+own descriptor. The wallpaper config keeps it per display as `framing` (`pan_x` and
+`pan_y`) in that display's `monitors` entry, beside the scaling mode and factor, and the
+bridge hands it to the scene it builds for that display. The key is left out while the
+display is centred, so an older build ignores it and a file nobody positioned is
+unchanged. A hand-edited value never costs the file its other settings: a fraction
+outside 0 to 1 is clamped, and anything that is not a number reads as the centre. A
+mirror display is always centred, because it has its own display settings and a live
+change to its source's position never reaches it. The native video player ignores the
+position. The app does not offer it yet.
 
 Compiled work is reused across launches where it can be. A scene's translated Metal
 shaders, their reflection and their binding plans are stored in that scene's shader

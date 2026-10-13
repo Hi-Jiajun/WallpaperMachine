@@ -13,7 +13,7 @@ pub use app::{
     VideoBackendModeCfg, WindowGeom, clamp_render_scale,
 };
 pub use store::{ConfigLoad, ConfigStore};
-pub use wallpaper::{AudioCfg, MonitorRender, WallpaperConfig};
+pub use wallpaper::{AudioCfg, FramingCfg, MonitorRender, WallpaperConfig};
 
 /// The rate older builds wrote when the user had never chosen one.
 ///

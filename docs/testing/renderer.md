@@ -355,6 +355,16 @@ cargo test -p shader --test pipeline -- --nocapture
   taken for a different one). These are pure state tests: none opens a renderer or a
   window, so `SceneRuntime::set_framing` against a live renderer is covered only by
   a desktop run.
+- `wallpaper-bridge` framing coverage (`cargo test --release -p wallpaper-bridge
+  --lib -- config::wallpaper tests::activation_plan`): a display's saved position
+  (`FramingCfg` in the wallpaper config's `monitors` entry) is written only when it
+  is not centred and round-trips; a hand-edited value is clamped or read as centred
+  without losing the file's other settings, because a file that fails to parse is set
+  aside whole; the scene built for a display carries that display's position and no
+  other display's, whichever selector (Primary or identity) addresses it; a mirror is
+  centred even when its source is positioned; and a position changes neither the
+  native video descriptor nor its admission key, so moving a clip never restarts the
+  native player.
 - `wallpaper_background`: renders unattached production Metal layers over a white
   bitmap with no drawable, before and after a resize and after recreation. Every
   pixel must be opaque black. Its harness runs on the process's main thread; no

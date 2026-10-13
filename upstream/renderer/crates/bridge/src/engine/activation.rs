@@ -11,7 +11,9 @@ use std::{
 use wallpaper_core::{
     DisplayDesc, DisplaySelector, DisplaySnapshotEntry, EngineError, WallpaperAssignment,
     media::audio::AudioVolume,
-    project::{ScalingMode, SceneDesc, SceneDescBuilder, SceneTemplate, WallpaperProjectType},
+    project::{
+        ScalingMode, SceneDesc, SceneDescBuilder, SceneFraming, SceneTemplate, WallpaperProjectType,
+    },
 };
 
 use crate::{
@@ -352,6 +354,12 @@ impl ActivationInputs<'_> {
             scene.paused = self.display_paused(scene.display.display_id);
             scene.scaling_mode = mirror.settings.parse_scaling_mode();
             scene.scaling_factor = mirror.settings.scaling_factor;
+            // A mirror copies its source's scene but has its own display
+            // settings, and those carry no position. A live position change on
+            // the source never reaches the mirror's handle, so inheriting the
+            // source's would make what the mirror shows depend on when the
+            // last reconcile ran.
+            scene.framing = SceneFraming::default();
             scene.fps = mirror.settings.fps_on(scene.display.refresh_rate_hz);
             scene.audio_volume = audio_volume;
             scene.audio_muted = mirror.settings.muted;
@@ -1038,6 +1046,9 @@ impl SceneDescBuilderExt for SceneDescBuilder {
             .map(crate::config::wallpaper::MonitorRender::parse_scaling_mode)
             .unwrap_or_default();
         let scaling_factor = render_override.map_or(1.0, |render| render.scaling_factor);
+        let framing = render_override
+            .map(|render| render.framing.to_scene())
+            .unwrap_or_default();
         let property_override_json = if context.wallpaper.r#type.eq_ignore_ascii_case("scene") {
             // The scene engine parses the project file itself, so a default
             // this host supplied rather than read from that file reaches it
@@ -1074,6 +1085,7 @@ impl SceneDescBuilderExt for SceneDescBuilder {
             .paused(context.paused)
             .scaling_mode(scaling_mode)
             .scaling_factor(scaling_factor)
+            .framing(framing)
             .audio_response_enabled(context.wallpaper.audio.response_enabled)
             // Reading what the user is listening to is consent, not a
             // capability: the scene is told exactly what the inspector shows,

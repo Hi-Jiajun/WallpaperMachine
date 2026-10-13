@@ -1,13 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use wallpaper_core::{
-    DisplayDesc, DisplayIdentity, DisplaySelector, DisplaySnapshotEntry, project::ScalingMode,
+    DisplayDesc, DisplayIdentity, DisplaySelector, DisplaySnapshotEntry,
+    project::{ScalingMode, SceneFraming},
 };
 
 use crate::{
     api::{BridgeWallpaperEntry, BridgeWallpaperKind},
     config::{
-        AppConfig, MonitorCfg, MonitorRender, MonitorSettingsCfg, SerializedSelector,
+        AppConfig, FramingCfg, MonitorCfg, MonitorRender, MonitorSettingsCfg, SerializedSelector,
         WallpaperConfig,
     },
     engine::{ActivationInputs, NativeVideoRejection},
@@ -781,3 +782,246 @@ fn build_owned_maps_each_display_to_its_wallpaper_including_mirrors() {
 }
 
 static NONE_HELD_FOR_OWNERS: BTreeSet<String> = BTreeSet::new();
+
+fn framing(pan_x: f64, pan_y: f64) -> FramingCfg {
+    FramingCfg { pan_x, pan_y }
+}
+
+fn scene_framing(scenes: &[wallpaper_core::project::SceneDesc], display_id: u32) -> SceneFraming {
+    scenes
+        .iter()
+        .find(|scene| scene.display.display_id == display_id)
+        .unwrap_or_else(|| panic!("missing scene for display {display_id}"))
+        .framing
+}
+
+/// One wallpaper on two displays, positioned on only one of them.
+#[test]
+fn a_saved_position_reaches_only_the_scene_built_for_its_display() {
+    let (left, right) = (
+        identified_display("left", 1),
+        identified_display("right", 2),
+    );
+    let selector_of = |display: &DisplaySnapshotEntry| {
+        SerializedSelector::from_selector(&DisplaySelector::Identity(display.identity.clone()))
+    };
+    let app_config = AppConfig {
+        monitors: [&left, &right]
+            .map(|display| MonitorCfg {
+                selector: selector_of(display),
+                enabled: true,
+                mode: "independent".to_string(),
+                wallpaper: Some("100".to_string()),
+                mirror_target: None,
+            })
+            .into(),
+        ..AppConfig::default()
+    };
+    let mut wallpaper = WallpaperConfig::new_for("100", "scene");
+    wallpaper.monitors.push(MonitorRender {
+        selector: selector_of(&left),
+        framing: framing(0.2, 0.8),
+        ..MonitorRender::default()
+    });
+    let wallpapers = BTreeMap::from([("100".to_string(), wallpaper)]);
+    let displays = [left, right];
+    let paths = BridgePaths::for_home("/Users/example");
+
+    let scenes = ActivationInputs {
+        app_config: &app_config,
+        wallpapers: &wallpapers,
+        library: None,
+        displays: &displays,
+        suspended_displays: &BTreeSet::new(),
+        held: &BTreeSet::new(),
+        paused: false,
+        paths: &paths,
+        force_shader_refresh: false,
+        project_models: &BTreeMap::new(),
+        native_video_enabled: false,
+        native_video_rejected: &BTreeMap::new(),
+        frame_rate_cap: None,
+        audio_suppressed: false,
+    }
+    .build()
+    .unwrap();
+
+    assert_eq!(scenes.len(), 2);
+    assert_eq!(
+        scene_framing(&scenes, 1),
+        SceneFraming {
+            pan_x: 0.2,
+            pan_y: 0.8
+        }
+    );
+    assert_eq!(
+        scene_framing(&scenes, 2),
+        SceneFraming::default(),
+        "a display with no saved position of its own stays centred"
+    );
+}
+
+/// The position is looked up the way scaling is: a display addressed as
+/// Primary by one record and by identity by another is still one display.
+#[test]
+fn a_saved_position_follows_the_display_across_the_ways_it_is_addressed() {
+    let display = identified_display("primary", 1);
+    let identity_selector =
+        SerializedSelector::from_selector(&DisplaySelector::Identity(display.identity.clone()));
+    for (monitor_selector, render_selector) in [
+        (identity_selector.clone(), SerializedSelector::Primary),
+        (SerializedSelector::Primary, identity_selector),
+    ] {
+        let app_config = AppConfig {
+            monitors: vec![MonitorCfg {
+                selector: monitor_selector,
+                enabled: true,
+                mode: "independent".to_string(),
+                wallpaper: Some("100".to_string()),
+                mirror_target: None,
+            }],
+            ..AppConfig::default()
+        };
+        let mut wallpaper = WallpaperConfig::new_for("100", "scene");
+        wallpaper.monitors.push(MonitorRender {
+            selector: render_selector,
+            framing: framing(0.0, 1.0),
+            ..MonitorRender::default()
+        });
+        let wallpapers = BTreeMap::from([("100".to_string(), wallpaper)]);
+        let paths = BridgePaths::for_home("/Users/example");
+
+        let scenes = ActivationInputs {
+            app_config: &app_config,
+            wallpapers: &wallpapers,
+            library: None,
+            displays: std::slice::from_ref(&display),
+            suspended_displays: &BTreeSet::new(),
+            held: &BTreeSet::new(),
+            paused: false,
+            paths: &paths,
+            force_shader_refresh: false,
+            project_models: &BTreeMap::new(),
+            native_video_enabled: false,
+            native_video_rejected: &BTreeMap::new(),
+            frame_rate_cap: None,
+            audio_suppressed: false,
+        }
+        .build()
+        .unwrap();
+
+        assert_eq!(
+            scene_framing(&scenes, 1),
+            SceneFraming {
+                pan_x: 0.0,
+                pan_y: 1.0
+            }
+        );
+    }
+}
+
+/// A mirror copies its source's scene, but a position set on the source is
+/// applied to the source's handle only, so the mirror must not inherit it.
+#[test]
+fn a_mirror_is_centred_even_when_its_source_is_positioned() {
+    let mut wallpaper = WallpaperConfig::new_for("100", "scene");
+    wallpaper.monitors.push(MonitorRender {
+        selector: SerializedSelector::Primary,
+        framing: framing(0.1, 0.9),
+        ..MonitorRender::default()
+    });
+    let wallpapers = BTreeMap::from([("100".to_string(), wallpaper)]);
+    let app_config = AppConfig {
+        monitors: vec![
+            MonitorCfg {
+                selector: SerializedSelector::Primary,
+                enabled: true,
+                wallpaper: Some("100".to_string()),
+                ..MonitorCfg::default()
+            },
+            MonitorCfg {
+                selector: SerializedSelector::LiveDisplayId { display_id: 2 },
+                enabled: true,
+                mode: "mirror".to_string(),
+                mirror_target: Some(SerializedSelector::Primary),
+                ..MonitorCfg::default()
+            },
+        ],
+        ..AppConfig::default()
+    };
+    let displays = vec![display_snapshot(1), display_snapshot(2)];
+    let paths = BridgePaths::for_home("/tmp/test-home");
+
+    let scenes = ActivationInputs {
+        app_config: &app_config,
+        wallpapers: &wallpapers,
+        library: None,
+        displays: &displays,
+        suspended_displays: &BTreeSet::new(),
+        held: &BTreeSet::new(),
+        paused: false,
+        paths: &paths,
+        force_shader_refresh: false,
+        project_models: &BTreeMap::new(),
+        native_video_enabled: false,
+        native_video_rejected: &BTreeMap::new(),
+        frame_rate_cap: None,
+        audio_suppressed: false,
+    }
+    .build()
+    .unwrap();
+
+    assert_eq!(scenes.len(), 2);
+    assert_eq!(
+        scene_framing(&scenes, 1),
+        SceneFraming {
+            pan_x: 0.1,
+            pan_y: 0.9
+        }
+    );
+    assert_eq!(scene_framing(&scenes, 2), SceneFraming::default());
+}
+
+/// The native player ignores a position, so moving a clip must not look like a
+/// change to it: the descriptor it is handed and the key its admission is
+/// judged by stay what they were, and the clip does not fall back to the engine.
+#[test]
+fn a_position_does_not_change_what_the_native_video_player_is_handed() {
+    let mut fixture = HeldFixture::new();
+    let none = BTreeSet::new();
+    let before = fixture.inputs(&none).build_native_video().unwrap();
+    let keys_before = fixture.inputs(&none).native_video_admission_keys();
+    assert_eq!(before.len(), 1);
+
+    let clip_on_display_3 = SerializedSelector::LiveDisplayId { display_id: 3 };
+    fixture
+        .wallpapers
+        .get_mut("500")
+        .unwrap()
+        .monitors
+        .push(MonitorRender {
+            selector: clip_on_display_3.clone(),
+            framing: framing(0.1, 0.9),
+            ..MonitorRender::default()
+        });
+    assert_eq!(
+        fixture.inputs(&none).build_native_video().unwrap(),
+        before,
+        "the player is handed the same clip with the same settings"
+    );
+    assert_eq!(
+        fixture.inputs(&none).native_video_admission_keys(),
+        keys_before
+    );
+    assert_eq!(
+        fixture.inputs(&none).build().unwrap().len(),
+        1,
+        "and the engine is still given only the scene wallpaper"
+    );
+
+    // The same record does reach the player once it holds something the
+    // player honours, so the equality above is not a record that was never found.
+    fixture.wallpapers.get_mut("500").unwrap().monitors[0].scaling_mode = "fit".to_string();
+    let fitted = fixture.inputs(&none).build_native_video().unwrap();
+    assert_eq!(fitted[0].scaling_mode, ScalingMode::Fit);
+}
