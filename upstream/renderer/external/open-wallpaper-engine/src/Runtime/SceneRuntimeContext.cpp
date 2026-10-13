@@ -1956,15 +1956,29 @@ std::string SceneRuntimeContext::CreateLayerFromTemplate(std::string_view reques
         return {};
     }
 
-    const auto& binding = template_iterator->second;
-    if (binding.node == nullptr) return {};
-    if (! binding.node->Camera().empty() || ! binding.node->GetChildren().empty()) {
-        LOG_INFO(
-            "scene runtime createLayer unsupported template shape: current=\"%s\" template=\"%s\"",
-            std::string(current_layer_name).c_str(),
-            binding.canonical_path.c_str());
-        return {};
+    // The scene layer registered under a model is copied, but one with an
+    // effect chain (its own camera) or child layers cannot be. The model itself
+    // still makes a layer, as when no scene layer uses it; loading it replaces
+    // that registration, so later calls copy the loaded layer directly.
+    const auto copyable = [](const LayerTemplateBinding& candidate) {
+        return candidate.node != nullptr && candidate.node->Camera().empty() &&
+               candidate.node->GetChildren().empty();
+    };
+    if (! copyable(template_iterator->second)) {
+        const std::string model_path = template_iterator->second.canonical_path;
+        template_iterator            = load_template(model_path);
+        if (template_iterator == m_layer_templates.end() || ! copyable(template_iterator->second)) {
+            // A model that loads into a shape that cannot be copied always will.
+            m_failed_layer_templates.insert(model_path);
+            LOG_INFO(
+                "scene runtime createLayer unsupported template shape: current=\"%s\" template=\"%s\"",
+                std::string(current_layer_name).c_str(),
+                model_path.c_str());
+            return {};
+        }
     }
+
+    const auto& binding = template_iterator->second;
 
     const std::string generated_name =
         "__generated_layer_" + std::to_string(m_next_generated_layer_id++) + ":" + requested_path;

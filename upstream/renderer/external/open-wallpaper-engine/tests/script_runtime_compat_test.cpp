@@ -1469,6 +1469,68 @@ TEST(ScriptRuntimeCompat, CreateLayerFindsTheAssetsOfTheWorkshopItemItsScriptDec
     }
 }
 
+// The scene layer that uses a model registers as its template, but one with an
+// effect chain (its own camera) or child layers cannot be copied. The model
+// still makes a layer, as it does when no scene layer uses it.
+TEST(ScriptRuntimeCompat, CreateLayerBuildsTheModelsOwnLayerWhenTheLayerUsingItCannotBeCopied) {
+    for (const bool has_effects : { true, false }) {
+        SCOPED_TRACE(has_effects ? "owner with effects" : "owner with a child layer");
+        WorkshopTemplateScene fixture({ "models/workshop/2398102478/bar.json" });
+        auto& runtime = *fixture.runtime;
+        if (has_effects) {
+            fixture.owner->SetCamera("owner-effects");
+        } else {
+            fixture.owner->AppendChild(std::make_shared<SceneNode>());
+        }
+        runtime.RegisterLayerTemplate(
+            "models/workshop/2398102478/bar.json", fixture.owner, Eigen::Vector2f(8, 8));
+        runtime.RegisterNodeVisibility(
+            "owner",
+            fixture.owner.get(),
+            ResolveBoolSetting(runtime,
+                               nlohmann::json {
+                                   { "script", BarScript("export let __workshopId = '2398102478';") },
+                                   { "value", true } },
+                               "owner"));
+
+        runtime.Tick(1.0 / 60.0);
+        runtime.Tick(1.0 / 60.0);
+
+        ASSERT_EQ(fixture.CreatedLayers(), 3u);
+        EXPECT_EQ(runtime.scriptErrorCount(), 0u);
+        for (const auto& created : fixture.scene.sceneGraph->GetChildren()) {
+            if (created == fixture.owner) continue;
+            EXPECT_TRUE(created->Camera().empty());
+            EXPECT_TRUE(created->GetChildren().empty());
+        }
+        EXPECT_TRUE(fixture.scene.sceneGraph->GetChildren().back()->Translate().isApprox(
+            Eigen::Vector3f(1, 2, 0)));
+        EXPECT_EQ(fixture.requested,
+                  (std::vector<std::string> { "models/workshop/2398102478/bar.json" }));
+    }
+}
+
+TEST(ScriptRuntimeCompat, CreateLayerDoesNotReloadAModelThatLoadsIntoALayerItCannotCopy) {
+    Scene scene;
+    auto runtime = MakeRuntimeWithScene(scene);
+    const auto uncopyable = [] {
+        auto node = std::make_shared<SceneNode>();
+        node->SetCamera("effects");
+        return node;
+    };
+    runtime->RegisterLayerTemplate("models/fx.json", uncopyable(), Eigen::Vector2f(8, 8));
+    int loads = 0;
+    runtime->SetLayerTemplateLoader([&](std::string_view path) {
+        ++loads;
+        runtime->RegisterLayerTemplate(std::string(path), uncopyable(), Eigen::Vector2f(8, 8));
+        return true;
+    });
+
+    EXPECT_TRUE(runtime->CreateLayerFromTemplate("models/fx.json", "").empty());
+    EXPECT_TRUE(runtime->CreateLayerFromTemplate("models/fx.json", "").empty());
+    EXPECT_EQ(loads, 1);
+}
+
 TEST(ScriptRuntimeCompat, CreateLayerPrefersThePathAsWrittenOverTheDeclaredWorkshopItem) {
     WorkshopTemplateScene fixture(
         { "models/bar.json", "models/workshop/2398102478/bar.json" });

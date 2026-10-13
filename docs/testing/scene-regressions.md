@@ -323,7 +323,16 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   loader builds the template from the bare model: visible (copies start as copies
   of it) and as large as the model's picture when the model states no size
   (`SceneSchema.ALayerCreatedFromAWorkshopModelIsSizedByItsPictureAndShows`); a
-  zero-sized hidden template makes every lazily created layer invisible.
+  zero-sized hidden template makes every lazily created layer invisible. A
+  scene layer using the model registers as its template, but one with an effect
+  chain (its own camera) or child layers cannot be copied, which is common for
+  the script's own layer: the lazy loader then builds the model's own layer once
+  and it replaces that registration
+  (`ScriptRuntimeCompat.CreateLayerBuildsTheModelsOwnLayerWhenTheLayerUsingItCannotBeCopied`;
+  a model that loads into such a shape fails once and is not reloaded,
+  `.CreateLayerDoesNotReloadAModelThatLoadsIntoALayerItCannotCopy`).
+  Refusing it threw `Unable to create layer` from `init` and logged
+  `createLayer unsupported template shape`.
 - **Timeline events** — `ScriptRuntimeCompat.*Timeline*Event*`, `*Marker*`,
   `GlobalAnimationListenersRunOncePerMarkerWhateverIsBound`,
   `GlobalOnlyAnimationListenerSeesTheCurrentTickTime` and
