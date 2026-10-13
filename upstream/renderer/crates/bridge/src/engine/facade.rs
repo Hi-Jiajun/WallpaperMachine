@@ -1127,6 +1127,7 @@ pub struct FakeEngineFacade {
     framing_failure: Arc<ArcSwap<Option<String>>>,
     fps_calls: Arc<ArcSwap<Vec<(SceneHandle, u32)>>>,
     render_scale_calls: Arc<ArcSwap<Vec<(SceneHandle, f32)>>>,
+    render_scale_failure: Arc<ArcSwap<Option<String>>>,
     content_pacing_enabled: Arc<ArcSwap<bool>>,
     shared_video_decode_enabled: Arc<ArcSwap<bool>>,
     shared_video_decode_counts: Arc<ArcSwap<(u32, u32)>>,
@@ -1662,6 +1663,12 @@ impl FakeEngineFacade {
             .store(Arc::new(Some("framing failed".into())));
     }
 
+    /// The next live render-scale change is refused by the renderer.
+    pub fn fail_next_render_scale(&self) {
+        self.render_scale_failure
+            .store(Arc::new(Some("render scale failed".into())));
+    }
+
     pub fn fail_next_close(&self) {
         self.close_failure
             .store(Arc::new(Some("close failed".into())));
@@ -2157,6 +2164,9 @@ impl EngineFacade for FakeEngineFacade {
         let fake = self.clone();
         async move {
             push_log(&fake.render_scale_calls, (handle, scale));
+            if let Some(message) = fake.render_scale_failure.swap(Arc::new(None)).as_ref() {
+                return Err(EngineError::Platform(message.clone()));
+            }
             Ok(())
         }
         .boxed()

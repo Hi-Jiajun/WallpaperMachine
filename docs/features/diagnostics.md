@@ -102,8 +102,10 @@ the load.
 - Startup milestones (`startup: …`).
 
 Each time the quality settings are applied (a battery-mode, frame-rate-limit or
-battery-profile change, or a power-source change in reduced-quality mode), the
-frame-rate ceiling and render scale in force are logged.
+battery-profile change, a power-source change in reduced-quality mode, or a change
+of the reduced-quality request the app makes for reasons such as heat), the
+frame-rate ceiling and render scale in force are logged, with the causes of any
+such request.
 
 ### How the previous session ended
 

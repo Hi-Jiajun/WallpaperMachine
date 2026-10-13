@@ -17,7 +17,7 @@ pub use types::{
     BridgeLockScreenScene, BridgeLogLevel, BridgeLogStatus, BridgeMonitorInfoRow, BridgeWallpaperPreview,
     BridgeNativeVideoWallpaper, BridgeMediaSnapshot,
     BridgeMonitorInformationSnapshot, BridgePlaybackState, BridgeBatteryMode, BridgePropertyDescriptor,
-    BridgePropertyKind, BridgePropertyValue, BridgeRendererCountersReport,
+    BridgePropertyKind, BridgePropertyValue, BridgeQualityThrottleCause, BridgeRendererCountersReport,
     BridgeRendererSurfaceCounters, BridgeScalingMode, BridgeSceneBackendReport,
     BridgeSceneUpdateModeReport, BridgeSettingsSnapshot, BridgeUserShortcut,
     BridgeSliderMetadata, BridgeSnapshotBundle, BridgeStorageStatus, BridgeSurfaceCheck,
@@ -78,7 +78,8 @@ use crate::{
             SetMirrorScalingMode, SetMirrorTarget, SetMirrorTargetFps, SetMirrorVolume, SetMuted,
             SetAudioSuppressed, SetBatteryMode, SetBatteryQualityProfile, SetContentPacingEnabled,
             SetFrameRateCap, SetLabelLanguages, SetMediaIntegrationEnabled,
-            SetPresentationUnloaded, SetPresentationSuspended, SetPropertyPath, SetRenderScale,
+            SetPresentationUnloaded, SetPresentationSuspended, SetPropertyPath,
+            SetQualityThrottle, SetRenderScale,
             SetVerboseLogging,
             SetRendererCountersEnabled, SetScalingFactor, SetScalingMode,
             SetSceneOnDemandEnabled, SetSceneOptimizationEnabled, SetSceneRenderer,
@@ -1601,6 +1602,29 @@ impl WallpaperBridge {
         cap: Option<u32>,
     ) -> Result<BridgeSnapshotBundle, BridgeError> {
         self.actor.ask(SetFrameRateCap { cap }).await
+    }
+
+    /// Asks for the reduced-quality profile for as long as any of `causes`
+    /// holds, on top of the battery mode the user saved. The same frame-rate
+    /// ceiling and render scale the battery profile uses apply live to every
+    /// open scene, web page and native video, and the empty list hands the
+    /// user's own values back. Not persisted: a new bridge starts without any
+    /// cause, and the host asks again.
+    ///
+    /// It can only lower what runs. A scale or rate already below the profile
+    /// stays where the user put it, and playback is untouched, so a pause the
+    /// user asked for survives. Asking again with the same causes re-applies
+    /// them, which is how a caller whose last request failed retries.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a running scene rejects the resulting scale or
+    /// rate. The request is kept, so asking again retries it.
+    pub async fn set_quality_throttle(
+        &self,
+        causes: Vec<BridgeQualityThrottleCause>,
+    ) -> Result<BridgeSnapshotBundle, BridgeError> {
+        self.actor.ask(SetQualityThrottle { causes }).await
     }
 
     /// Closes every scene runtime so the host can free wallpaper memory,

@@ -105,6 +105,10 @@ pub enum SceneRendererModeCfg {
 
 /// Internal rasterization size and frame rate the renderer targets.
 ///
+/// This is the reduced-quality profile. The battery mode applies it while the
+/// Mac is on battery, and a quality throttle the host asks for applies it too;
+/// both lower what runs without touching what the user saved.
+///
 /// `render_scale` is the fraction of the display's native pixel grid the scene
 /// is actually rasterized at. It is not window scaling and not wallpaper
 /// scaling: at 0.5 the renderer does a quarter of the pixel work.
@@ -554,18 +558,36 @@ impl AppConfig {
         }
     }
 
-    /// The render scale in force right now: the battery profile's while
-    /// reduced quality is selected and the machine is on battery, the user's
-    /// otherwise.
+    /// The render scale in force right now.
+    ///
+    /// A throttle takes the lower of the user's scale and the profile's, so
+    /// asking for less work can never raise quality above what the user
+    /// chose, and adding a throttle to the battery profile never raises it
+    /// either. The battery profile alone keeps the profile's scale as is, even
+    /// when that is higher than a lower saved scale; with neither held the
+    /// user's scale runs.
     #[must_use]
-    pub fn effective_render_scale(&self, on_battery: bool) -> f32 {
-        let scale = if self.power.on_battery == BatteryModeCfg::ReducedQuality && on_battery {
-            self.quality.battery.render_scale
+    pub fn effective_render_scale(&self, in_force: QualityInForce) -> f32 {
+        let preferred = clamp_render_scale(self.quality.render_scale);
+        let profile = clamp_render_scale(self.quality.battery.render_scale);
+        let scale = if in_force.throttled {
+            preferred.min(profile)
+        } else if in_force.battery_profile {
+            profile
         } else {
-            self.quality.render_scale
+            preferred
         };
         clamp_render_scale(scale)
     }
+}
+
+/// Which reasons for the reduced-quality profile hold right now.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct QualityInForce {
+    /// Reduced quality is the saved battery mode and the Mac is on battery.
+    pub battery_profile: bool,
+    /// The host asked for less work, whatever the power source.
+    pub throttled: bool,
 }
 
 /// Confines a render scale to the range the renderer honours.

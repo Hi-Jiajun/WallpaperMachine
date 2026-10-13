@@ -1259,6 +1259,8 @@ final class BridgeStore {
                 batteryRenderScale: 0.75,
                 batteryTargetFps: 30,
                 onBatteryPower: false,
+                qualityThrottle: [],
+                effectiveFrameRateCap: nil,
                 renderScaleSupported: false
             )
         )

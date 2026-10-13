@@ -783,12 +783,16 @@ impl BridgeActorState {
             scene_update_modes,
             scene_renderers,
             user_assets_path: paths.user_assets_root().to_string_lossy().into_owned(),
-            render_scale: self.app_config.effective_render_scale(on_battery),
+            render_scale: self
+                .app_config
+                .effective_render_scale(self.quality_in_force()),
             preferred_render_scale: self.app_config.quality.render_scale,
             frame_rate_cap: self.app_config.quality.frame_rate_cap,
             battery_render_scale: self.app_config.quality.battery.render_scale,
             battery_target_fps: self.app_config.quality.battery.target_fps,
             on_battery_power: on_battery,
+            quality_throttle: self.quality_throttle.iter().copied().collect(),
+            effective_frame_rate_cap: self.active_target_fps_cap(),
             render_scale_supported: backends.render_scale_supported,
         }
     }

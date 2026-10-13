@@ -9,6 +9,7 @@ use wallpaper_core::{
     project::{SceneHandle, SceneTemplate},
 };
 
+use super::engine_release::EngineRelease;
 use crate::{
     BridgeDisplayMode, BridgeErrorKind, BridgePropertyValue, BridgeScalingMode,
     BridgeWallpaperKind, WallpaperBridge,
@@ -2328,6 +2329,20 @@ async fn a_display_refresh_does_not_reload_a_scene_held_to_the_battery_frame_rat
 }
 
 #[tokio::test]
+async fn a_display_refresh_does_not_reload_a_scene_held_to_the_quality_throttle() {
+    let engine = FakeEngineFacade::default();
+    let _release = EngineRelease::of(&engine);
+    let (bridge, _root) = running_scene_bridge(&engine).await;
+    bridge
+        .set_quality_throttle(vec![crate::BridgeQualityThrottleCause::Heat])
+        .await
+        .unwrap();
+    assert_eq!(engine.fps_calls().last(), Some(&(SceneHandle::new(1), 30)));
+
+    assert_refresh_keeps_the_scene(&bridge, &engine).await;
+}
+
+#[tokio::test]
 async fn a_display_refresh_does_not_reload_a_scene_muted_for_other_audio() {
     let engine = FakeEngineFacade::default();
     let (bridge, _root) = running_scene_bridge(&engine).await;
@@ -2382,6 +2397,20 @@ async fn a_reconcile_does_not_reload_a_scene_held_to_the_frame_rate_cap() {
     let (bridge, _root) = running_scene_bridge(&engine).await;
     bridge.set_frame_rate_cap(Some(60)).await.unwrap();
     assert_eq!(engine.fps_calls().last(), Some(&(SceneHandle::new(1), 60)));
+
+    assert_reconcile_keeps_the_scene(&bridge, &engine).await;
+}
+
+#[tokio::test]
+async fn a_reconcile_does_not_reload_a_scene_held_to_the_quality_throttle() {
+    let engine = FakeEngineFacade::default();
+    let _release = EngineRelease::of(&engine);
+    let (bridge, _root) = running_scene_bridge(&engine).await;
+    bridge
+        .set_quality_throttle(vec![crate::BridgeQualityThrottleCause::Heat])
+        .await
+        .unwrap();
+    assert_eq!(engine.fps_calls().last(), Some(&(SceneHandle::new(1), 30)));
 
     assert_reconcile_keeps_the_scene(&bridge, &engine).await;
 }

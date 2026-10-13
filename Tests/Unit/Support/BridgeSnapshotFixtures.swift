@@ -88,6 +88,8 @@ enum BridgeSnapshotFixtures {
     batteryRenderScale: Float = 0.75,
     batteryTargetFps: UInt32 = 30,
     onBatteryPower: Bool = false,
+    qualityThrottle: [BridgeQualityThrottleCause] = [],
+    effectiveFrameRateCap: UInt32? = nil,
     renderScaleSupported: Bool = true
   ) -> BridgeSettingsSnapshot {
     BridgeSettingsSnapshot(
@@ -121,6 +123,8 @@ enum BridgeSnapshotFixtures {
       batteryRenderScale: batteryRenderScale,
       batteryTargetFps: batteryTargetFps,
       onBatteryPower: onBatteryPower,
+      qualityThrottle: qualityThrottle,
+      effectiveFrameRateCap: effectiveFrameRateCap,
       renderScaleSupported: renderScaleSupported)
   }
 }

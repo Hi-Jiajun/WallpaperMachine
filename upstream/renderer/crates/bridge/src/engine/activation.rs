@@ -54,10 +54,10 @@ pub struct ActivationInputs<'a> {
     /// admission key. See [`NativeVideoRejections`].
     pub native_video_rejected: &'a NativeVideoRejections,
     /// Global frame-rate ceiling in force. `None` means no limit. Call sites
-    /// pass `active_target_fps_cap()`, so it already includes the battery cap
-    /// while Reduced quality is selected and the Mac is on battery. Web and
-    /// native-video descriptors carry the capped rate because those hosts have
-    /// no later `set_fps`.
+    /// pass `active_target_fps_cap()`, so it already includes the profile's
+    /// cap while Reduced quality is selected and the Mac is on battery, and
+    /// while a quality throttle holds. Web and native-video descriptors carry
+    /// the capped rate because those hosts have no later `set_fps`.
     pub frame_rate_cap: Option<u32>,
     /// Transient mute composed on top of each slot's saved mute for every playback host.
     pub audio_suppressed: bool,

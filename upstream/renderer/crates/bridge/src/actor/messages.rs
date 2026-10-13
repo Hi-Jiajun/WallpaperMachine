@@ -6,7 +6,7 @@ use crate::{
         BridgeAppSnapshot, BridgeDisplayMode, BridgeDisplayMutationBundle,
         BridgeDisplaySettingsRow, BridgeError, BridgeLibrarySnapshot, BridgeLockScreenScene,
         BridgeMonitorInformationSnapshot, BridgePlaybackState, BridgePropertyValue,
-        BridgeNativeVideoWallpaper, BridgeRendererCountersReport,
+        BridgeNativeVideoWallpaper, BridgeQualityThrottleCause, BridgeRendererCountersReport,
         BridgeScalingMode, BridgeSettingsSnapshot, BridgeSnapshotBundle, BridgeWallpaperEntry,
         BridgeWallpaperKind, BridgeWallpaperMutationBundle, BridgeWallpaperOptionsSnapshot,
         BridgeWebWallpaper,
@@ -262,6 +262,10 @@ pub struct SetFrameRateCap {
     pub cap: Option<u32>,
 }
 
+pub struct SetQualityThrottle {
+    pub causes: Vec<BridgeQualityThrottleCause>,
+}
+
 pub struct SetBatteryQualityProfile {
     pub render_scale: f32,
     pub target_fps: u32,
@@ -479,6 +483,7 @@ pub type RendererCountersReply = Result<BridgeRendererCountersReport, BridgeErro
 pub type SetVideoBackendReply = AllSnapshotsReply;
 pub type SetRenderScaleReply = AllSnapshotsReply;
 pub type SetFrameRateCapReply = AllSnapshotsReply;
+pub type SetQualityThrottleReply = AllSnapshotsReply;
 pub type SetBatteryQualityProfileReply = AllSnapshotsReply;
 pub type SetContentPacingEnabledReply = AllSnapshotsReply;
 pub type SetSharedVideoDecodeEnabledReply = AllSnapshotsReply;

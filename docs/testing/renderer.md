@@ -347,6 +347,20 @@ progress before comparing counts, so a busy CI worker is not mistaken for a
 dropped cursor update. Close the gap while the sample is blocked before checking
 that probes stop; otherwise an in-flight probe can race the final count.
 
+A `wallpaper-bridge` test bridge keeps its actor runtime's threads (about one per
+CPU core, and the actor's own) until the test process exits, unless the test lets go
+of its engine: the bridge registers a callback with the engine that holds the actor
+and its runtime, and the actor holds the engine. A test that builds a bridge over a
+`FakeEngineFacade` keeps an `EngineRelease` for it (`tests/engine_release.rs`), which
+drops that callback when the test ends and leaves about one thread behind instead of
+twenty. Only a few tests do so far, so on an 18-core Mac the library suite peaks near
+5,800 threads against the 6,144 a process may hold (`sysctl kern.num_taskthreads`).
+A new test that builds a bridge keeps an `EngineRelease`, and shares one bridge
+between the phases of a property instead of building one per assertion. A failure of
+an unrelated test with `Resource temporarily unavailable (os error 35)` from `kameo`
+or a tokio worker is that cap, not the change under test; it also turns up when other
+builds on the same Mac hold the per-user process limit.
+
 Run individual commands from `upstream/renderer` with the Homebrew environment
 from `scripts/build.py`. The first `cargo test` after that environment changes
 fails in its CMake configure step and succeeds on an unchanged retry, so a single
@@ -409,6 +423,25 @@ cargo test -p shader --test pipeline -- --nocapture
   already carries it and a restart loads it; the lock-screen export carries a scene's
   and a natively played video's saved position, centres a web page and a mirror, and
   follows a position at once while an unapplied scale factor stays out of it.
+- `wallpaper-bridge` reduced-quality request (`cargo test --release -p wallpaper-bridge
+  --lib -- tests::quality_throttle tests::quality_settings tests::performance_settings
+  tests::settings_intents`): `set_quality_throttle` lowers every open scene live through
+  the same `set_render_scale` and `set_fps` calls the battery profile uses, never rebuilds
+  the scene list, and an empty list hands the saved scale and the display's own rate back.
+  It only ever lowers: a scale or cap already below the profile stays, and a table over
+  saved scale, saved cap, battery profile and request pins the stricter-of rule, including
+  that the battery profile alone still returns the profile's scale as is. The request is
+  deduplicated and reported sorted, one cause ending keeps the others in force, it is
+  never written to `config.toml` and a new bridge starts without one, a wallpaper applied
+  under it opens at the lowered rate and scale, web, lock-screen and native-video
+  descriptors follow it (a refusal recorded for the old rate is dropped, as for a cap),
+  playback is never touched, and asking again after a refused renderer update re-applies it.
+  A clip the native player refused at the old rate goes back to it the moment the ceiling
+  moves, whichever change moved it (a throttle, the cap, the rate or mode of the battery
+  profile, the power source), and a request that failed halfway or whose scene rebuild failed
+  still hands the clip back when it is repeated or the host asks what to play next, because
+  the rebuild stays owed until one succeeds. The engine is the fake one, so a live Metal or
+  Vulkan scene following the change and any power effect are desktop checks.
 - `wallpaper-core` and `wallpaper-bridge` drag previews (`cargo test --release -p
   wallpaper-core --lib framing`; `cargo test --release -p wallpaper-bridge --lib
   display_position`): `WallpaperEngine::preview_framing` refuses an invalid position

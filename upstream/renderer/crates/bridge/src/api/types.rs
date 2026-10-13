@@ -237,6 +237,19 @@ pub enum BridgeBatteryMode {
     Pause,
 }
 
+/// Why the host asks for the reduced-quality profile right now, apart from
+/// the battery mode the user saved. Held only while the host reports it; never
+/// persisted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, uniffi::Enum)]
+pub enum BridgeQualityThrottleCause {
+    /// Low Power Mode is on.
+    LowPowerMode,
+    /// The Mac reports a thermal state that calls for less work.
+    Heat,
+    /// The battery is at or below the user's low-battery threshold.
+    LowBattery,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct BridgeAppSnapshot {
     pub playback_state: BridgePlaybackState,
@@ -566,6 +579,13 @@ pub struct BridgeSettingsSnapshot {
     pub battery_render_scale: f32,
     pub battery_target_fps: u32,
     pub on_battery_power: bool,
+    /// The causes the host has asked the reduced-quality profile for, sorted.
+    /// Empty when none holds. Runtime only: a fresh bridge starts without any.
+    pub quality_throttle: Vec<BridgeQualityThrottleCause>,
+    /// The frame-rate ceiling in force: the stricter of the saved global cap
+    /// and the profile's rate while the battery mode or a throttle holds the
+    /// profile. `frame_rate_cap` stays the saved global cap.
+    pub effective_frame_rate_cap: Option<u32>,
     /// False when nothing running can honour an internal render scale, so the
     /// control describes a preference that changes nothing on screen today.
     pub render_scale_supported: bool,

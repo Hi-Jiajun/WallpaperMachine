@@ -1214,6 +1214,26 @@ public protocol WallpaperBridgeProtocol : AnyObject {
     func setPropertyPath(wallpaperId: String, propertyId: String, path: String?) async throws  -> BridgeWallpaperMutationBundle
     
     /**
+     * Asks for the reduced-quality profile for as long as any of `causes`
+     * holds, on top of the battery mode the user saved. The same frame-rate
+     * ceiling and render scale the battery profile uses apply live to every
+     * open scene, web page and native video, and the empty list hands the
+     * user's own values back. Not persisted: a new bridge starts without any
+     * cause, and the host asks again.
+     *
+     * It can only lower what runs. A scale or rate already below the profile
+     * stays where the user put it, and playback is untouched, so a pause the
+     * user asked for survives. Asking again with the same causes re-applies
+     * them, which is how a caller whose last request failed retries.
+     *
+     * # Errors
+     *
+     * Returns an error when a running scene rejects the resulting scale or
+     * rate. The request is kept, so asking again retries it.
+     */
+    func setQualityThrottle(causes: [BridgeQualityThrottleCause]) async throws  -> BridgeSnapshotBundle
+    
+    /**
      * Sets the internal rasterization scale the user prefers.
      *
      * Clamped to the range the renderer honours. This is a preference: while
@@ -3073,6 +3093,41 @@ open func setPropertyPath(wallpaperId: String, propertyId: String, path: String?
             completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
             freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeBridgeWallpaperMutationBundle.lift,
+            errorHandler: FfiConverterTypeBridgeError.lift
+        )
+}
+    
+    /**
+     * Asks for the reduced-quality profile for as long as any of `causes`
+     * holds, on top of the battery mode the user saved. The same frame-rate
+     * ceiling and render scale the battery profile uses apply live to every
+     * open scene, web page and native video, and the empty list hands the
+     * user's own values back. Not persisted: a new bridge starts without any
+     * cause, and the host asks again.
+     *
+     * It can only lower what runs. A scale or rate already below the profile
+     * stays where the user put it, and playback is untouched, so a pause the
+     * user asked for survives. Asking again with the same causes re-applies
+     * them, which is how a caller whose last request failed retries.
+     *
+     * # Errors
+     *
+     * Returns an error when a running scene rejects the resulting scale or
+     * rate. The request is kept, so asking again retries it.
+     */
+open func setQualityThrottle(causes: [BridgeQualityThrottleCause])async throws  -> BridgeSnapshotBundle {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wallpaper_bridge_fn_method_wallpaperbridge_set_quality_throttle(
+                    self.uniffiClonePointer(),
+                    FfiConverterSequenceTypeBridgeQualityThrottleCause.lower(causes)
+                )
+            },
+            pollFunc: ffi_wallpaper_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeBridgeSnapshotBundle.lift,
             errorHandler: FfiConverterTypeBridgeError.lift
         )
 }
@@ -6523,6 +6578,17 @@ public struct BridgeSettingsSnapshot {
     public var batteryTargetFps: UInt32
     public var onBatteryPower: Bool
     /**
+     * The causes the host has asked the reduced-quality profile for, sorted.
+     * Empty when none holds. Runtime only: a fresh bridge starts without any.
+     */
+    public var qualityThrottle: [BridgeQualityThrottleCause]
+    /**
+     * The frame-rate ceiling in force: the stricter of the saved global cap
+     * and the profile's rate while the battery mode or a throttle holds the
+     * profile. `frame_rate_cap` stays the saved global cap.
+     */
+    public var effectiveFrameRateCap: UInt32?
+    /**
      * False when nothing running can honour an internal render scale, so the
      * control describes a preference that changes nothing on screen today.
      */
@@ -6594,6 +6660,15 @@ public struct BridgeSettingsSnapshot {
          * rates are not rewritten to this.
          */frameRateCap: UInt32?, batteryRenderScale: Float, batteryTargetFps: UInt32, onBatteryPower: Bool, 
         /**
+         * The causes the host has asked the reduced-quality profile for, sorted.
+         * Empty when none holds. Runtime only: a fresh bridge starts without any.
+         */qualityThrottle: [BridgeQualityThrottleCause], 
+        /**
+         * The frame-rate ceiling in force: the stricter of the saved global cap
+         * and the profile's rate while the battery mode or a throttle holds the
+         * profile. `frame_rate_cap` stays the saved global cap.
+         */effectiveFrameRateCap: UInt32?, 
+        /**
          * False when nothing running can honour an internal render scale, so the
          * control describes a preference that changes nothing on screen today.
          */renderScaleSupported: Bool) {
@@ -6627,6 +6702,8 @@ public struct BridgeSettingsSnapshot {
         self.batteryRenderScale = batteryRenderScale
         self.batteryTargetFps = batteryTargetFps
         self.onBatteryPower = onBatteryPower
+        self.qualityThrottle = qualityThrottle
+        self.effectiveFrameRateCap = effectiveFrameRateCap
         self.renderScaleSupported = renderScaleSupported
     }
 }
@@ -6725,6 +6802,12 @@ extension BridgeSettingsSnapshot: Equatable, Hashable {
         if lhs.onBatteryPower != rhs.onBatteryPower {
             return false
         }
+        if lhs.qualityThrottle != rhs.qualityThrottle {
+            return false
+        }
+        if lhs.effectiveFrameRateCap != rhs.effectiveFrameRateCap {
+            return false
+        }
         if lhs.renderScaleSupported != rhs.renderScaleSupported {
             return false
         }
@@ -6762,6 +6845,8 @@ extension BridgeSettingsSnapshot: Equatable, Hashable {
         hasher.combine(batteryRenderScale)
         hasher.combine(batteryTargetFps)
         hasher.combine(onBatteryPower)
+        hasher.combine(qualityThrottle)
+        hasher.combine(effectiveFrameRateCap)
         hasher.combine(renderScaleSupported)
     }
 }
@@ -6804,6 +6889,8 @@ public struct FfiConverterTypeBridgeSettingsSnapshot: FfiConverterRustBuffer {
                 batteryRenderScale: FfiConverterFloat.read(from: &buf), 
                 batteryTargetFps: FfiConverterUInt32.read(from: &buf), 
                 onBatteryPower: FfiConverterBool.read(from: &buf), 
+                qualityThrottle: FfiConverterSequenceTypeBridgeQualityThrottleCause.read(from: &buf), 
+                effectiveFrameRateCap: FfiConverterOptionUInt32.read(from: &buf), 
                 renderScaleSupported: FfiConverterBool.read(from: &buf)
         )
     }
@@ -6839,6 +6926,8 @@ public struct FfiConverterTypeBridgeSettingsSnapshot: FfiConverterRustBuffer {
         FfiConverterFloat.write(value.batteryRenderScale, into: &buf)
         FfiConverterUInt32.write(value.batteryTargetFps, into: &buf)
         FfiConverterBool.write(value.onBatteryPower, into: &buf)
+        FfiConverterSequenceTypeBridgeQualityThrottleCause.write(value.qualityThrottle, into: &buf)
+        FfiConverterOptionUInt32.write(value.effectiveFrameRateCap, into: &buf)
         FfiConverterBool.write(value.renderScaleSupported, into: &buf)
     }
 }
@@ -8924,6 +9013,91 @@ extension BridgePropertyValue: Equatable, Hashable {}
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * Why the host asks for the reduced-quality profile right now, apart from
+ * the battery mode the user saved. Held only while the host reports it; never
+ * persisted.
+ */
+
+public enum BridgeQualityThrottleCause {
+    
+    /**
+     * Low Power Mode is on.
+     */
+    case lowPowerMode
+    /**
+     * The Mac reports a thermal state that calls for less work.
+     */
+    case heat
+    /**
+     * The battery is at or below the user's low-battery threshold.
+     */
+    case lowBattery
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBridgeQualityThrottleCause: FfiConverterRustBuffer {
+    typealias SwiftType = BridgeQualityThrottleCause
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BridgeQualityThrottleCause {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .lowPowerMode
+        
+        case 2: return .heat
+        
+        case 3: return .lowBattery
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: BridgeQualityThrottleCause, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .lowPowerMode:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .heat:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .lowBattery:
+            writeInt(&buf, Int32(3))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBridgeQualityThrottleCause_lift(_ buf: RustBuffer) throws -> BridgeQualityThrottleCause {
+    return try FfiConverterTypeBridgeQualityThrottleCause.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBridgeQualityThrottleCause_lower(_ value: BridgeQualityThrottleCause) -> RustBuffer {
+    return FfiConverterTypeBridgeQualityThrottleCause.lower(value)
+}
+
+
+
+extension BridgeQualityThrottleCause: Equatable, Hashable {}
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
 public enum BridgeScalingMode {
     
@@ -9770,6 +9944,31 @@ fileprivate struct FfiConverterSequenceTypeBridgeWebWallpaper: FfiConverterRustB
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeBridgeQualityThrottleCause: FfiConverterRustBuffer {
+    typealias SwiftType = [BridgeQualityThrottleCause]
+
+    public static func write(_ value: [BridgeQualityThrottleCause], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeBridgeQualityThrottleCause.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [BridgeQualityThrottleCause] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [BridgeQualityThrottleCause]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeBridgeQualityThrottleCause.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterDictionaryStringString: FfiConverterRustBuffer {
     public static func write(_ value: [String: String], into buf: inout [UInt8]) {
         let len = Int32(value.count)
@@ -10054,6 +10253,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_property_path() != 4178) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_quality_throttle() != 36320) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_render_scale() != 18212) {

@@ -13,10 +13,10 @@ use wallpaper_core::project::{SceneDesc, WallpaperProjectType};
 
 use crate::{
     api::{
-        BridgeDisplaySettingsRow, BridgeError, BridgePlaybackState, BridgeWallpaperEntry,
-        BridgeWallpaperKind,
+        BridgeDisplaySettingsRow, BridgeError, BridgePlaybackState, BridgeQualityThrottleCause,
+        BridgeWallpaperEntry, BridgeWallpaperKind,
     },
-    config::{AppConfig, SerializedSelector, WallpaperConfig},
+    config::{AppConfig, QualityInForce, SerializedSelector, WallpaperConfig},
     engine::NativeVideoRejections,
     project::{ProjectModel, localization::FALLBACK_LOCALE},
 };
@@ -36,6 +36,11 @@ pub struct BridgeActorState {
     /// Transient mute applied on top of each wallpaper's saved mute. Never
     /// persisted. A user unmute while this is set stays muted until it clears.
     pub audio_suppressed: bool,
+    /// Why the host currently asks for the reduced-quality profile, beyond the
+    /// battery mode the user saved. Empty by default and never persisted, like
+    /// `audio_suppressed`: the host reports the conditions again at every
+    /// start.
+    pub quality_throttle: BTreeSet<BridgeQualityThrottleCause>,
     /// Languages a wallpaper's own label tables are read in, most preferred
     /// first, as Wallpaper Engine locale codes. Supplied by the host from the
     /// app's language and never persisted, like `audio_suppressed`. English is
@@ -59,6 +64,14 @@ pub struct BridgeActorState {
     /// wallpaper cannot oscillate between the two backends, and the scene
     /// engine — which supports everything — takes it back.
     pub native_video_rejected: NativeVideoRejections,
+    /// A refusal was dropped because the configuration it described is gone
+    /// (the frame-rate ceiling moved), and the scene list has not been rebuilt
+    /// since, so the engine may still hold a scene for a clip the native player
+    /// is offered again. Set when the refusal goes and cleared only by the
+    /// rebuild that hands the clip back: a rebuild that failed leaves it set, so
+    /// the next change of quality, or the host's next ask for the native list,
+    /// owes the same rebuild instead of finding nothing left to drop.
+    pub native_video_release_owed: bool,
     /// Wallpapers the load journal holds back: the app died while opening
     /// them in consecutive sessions. Activation plans skip them until the
     /// user applies one again. Nothing here is persisted; the journal is.
@@ -102,10 +115,12 @@ impl Default for BridgeActorState {
             presentation_suspended: false,
             presentation_unloaded: false,
             audio_suppressed: false,
+            quality_throttle: BTreeSet::new(),
             label_locales: vec![FALLBACK_LOCALE.to_owned()],
             suspended_displays: BTreeSet::new(),
             renderer_counters_enabled: false,
             native_video_rejected: BTreeMap::new(),
+            native_video_release_owed: false,
             held_wallpapers: BTreeSet::new(),
             selected_wallpaper_id: None,
             active_wallpaper_ids: Vec::new(),
@@ -487,18 +502,32 @@ impl BridgeActorState {
 }
 
 impl BridgeActorState {
-    /// Shared by routing and snapshots so native admission keys use the same ceiling.
+    /// Which reasons for the reduced-quality profile hold right now: the
+    /// battery mode the user saved while the Mac is on battery, and the
+    /// causes the host asked for.
+    pub(super) fn quality_in_force(&self) -> QualityInForce {
+        QualityInForce {
+            battery_profile: self.app_config.power.on_battery
+                == crate::config::BatteryModeCfg::ReducedQuality
+                && self.power_source == crate::power::PowerSource::Battery,
+            throttled: !self.quality_throttle.is_empty(),
+        }
+    }
+
+    /// The frame-rate ceiling in force, shared by routing and snapshots so
+    /// native admission keys use the same one: the global cap, the reduced
+    /// quality profile's rate while the battery mode or a throttle holds it,
+    /// or the stricter of the two. It only ever lowers what the user chose.
     pub(super) fn active_target_fps_cap(&self) -> Option<u32> {
         let quality = &self.app_config.quality;
         let global = quality.frame_rate_cap.map(|cap| cap.max(1));
-        let battery = (self.app_config.power.on_battery
-            == crate::config::BatteryModeCfg::ReducedQuality
-            && self.power_source == crate::power::PowerSource::Battery)
+        let in_force = self.quality_in_force();
+        let profile = (in_force.battery_profile || in_force.throttled)
             .then(|| quality.battery.target_fps.max(1));
-        match (global, battery) {
-            (Some(global), Some(battery)) => Some(global.min(battery)),
+        match (global, profile) {
+            (Some(global), Some(profile)) => Some(global.min(profile)),
             (Some(global), None) => Some(global),
-            (None, Some(battery)) => Some(battery),
+            (None, Some(profile)) => Some(profile),
             (None, None) => None,
         }
     }

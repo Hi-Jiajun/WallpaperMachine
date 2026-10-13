@@ -42,7 +42,7 @@ use crate::{
             SetDisplayPresentationSuspended,
             FanOutSystemMediaArtwork, FanOutSystemMediaEvent, GetSystemMediaConsentHandles,
             GetSystemMediaSceneHandles, SetFilter,
-            SetFrameRateCap, SetGlobalPlayback,
+            SetFrameRateCap, SetGlobalPlayback, SetQualityThrottle,
             SetLaunchAtLogin, SetMediaIntegrationEnabled,
             SetMirrorMuted, SetMirrorScalingFactor,
             SetMirrorScalingMode, SetMirrorTarget, SetMirrorTargetFps, SetMirrorVolume, SetMuted,
@@ -790,12 +790,12 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
     fn effective_render_scale(&self) -> f32 {
         self.state
             .app_config
-            .effective_render_scale(self.state.power_source == crate::power::PowerSource::Battery)
+            .effective_render_scale(self.state.quality_in_force())
     }
 
-    /// The frame-rate ceiling in force: the global cap, the battery cap while
-    /// reduced quality is selected and the machine is on battery, or the
-    /// stricter of the two.
+    /// The frame-rate ceiling in force: the global cap, the reduced-quality
+    /// profile's rate while the battery mode or a quality throttle holds it, or
+    /// the stricter of the two.
     fn active_target_fps_cap(&self) -> Option<u32> {
         self.state.active_target_fps_cap()
     }
@@ -812,19 +812,35 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         }
     }
 
-    /// Puts the quality settings the current power source calls for into
-    /// effect on everything already running.
+    /// Puts the quality settings the current power source and any quality
+    /// throttle call for into effect on everything already running.
     ///
     /// Restoring hands back the user's own saved per-display target rate, read
     /// from the live configuration rather than from a remembered constant.
     /// It never touches playback, so a pause the user asked for survives.
-    async fn apply_quality_profile(&self) -> Result<(), BridgeError> {
+    ///
+    /// Every change that moves the frame-rate ceiling ends here (the cap, the
+    /// profile, the battery mode, the power source, a throttle), so this is
+    /// where a native video whose refusal described the old ceiling is handed
+    /// back, not in each of them.
+    async fn apply_quality_profile(&mut self) -> Result<(), BridgeError> {
         self.apply_effective_render_scale().await?;
         let cap = self.active_target_fps_cap();
+        let throttle = self
+            .state
+            .quality_throttle
+            .iter()
+            .map(|cause| format!("{cause:?}"))
+            .collect::<Vec<_>>();
         log::info!(
-            "quality profile in force: frame-rate ceiling {}, render scale {}",
+            "quality profile in force: frame-rate ceiling {}, render scale {}, throttle {}",
             cap.map_or_else(|| "none".to_string(), |cap| format!("{cap} fps")),
-            self.effective_render_scale()
+            self.effective_render_scale(),
+            if throttle.is_empty() {
+                "none".to_string()
+            } else {
+                throttle.join(", ")
+            }
         );
         let displays = self.engine.display_snapshot();
         let rates = self
@@ -843,7 +859,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                 .await
                 .map_err(|error| BridgeError::engine(error.to_string()))?;
         }
-        Ok(())
+        self.release_stale_native_video().await
     }
 
     async fn apply_power_policy(&mut self) -> Result<(), BridgeError> {
@@ -1169,6 +1185,41 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             !by_key.is_empty()
         });
         pruned
+    }
+
+    /// Hands a clip back to the native player once the refusal that kept it on
+    /// the scene engine describes a configuration that is gone.
+    ///
+    /// The frame-rate ceiling is part of a native video's admission key, so a
+    /// change of it makes the refusal recorded at the old rate stale. The
+    /// refusal is dropped and the scene list is rebuilt, which is what lets the
+    /// engine give up a clip the native player is about to be offered; left
+    /// alone, both would decode and play it.
+    ///
+    /// This does not compare the keys before and after one change, because a
+    /// change that fails halfway has already been made when it is asked for
+    /// again, and the second attempt would then find nothing different. What is
+    /// stale is read from the refusals themselves, and a rebuild that is owed
+    /// stays owed until one succeeds ([`BridgeActorState::native_video_release_owed`]),
+    /// so a repeated request, any other change of quality and the host's next
+    /// ask for the native list all finish what an earlier attempt did not.
+    async fn release_stale_native_video(&mut self) -> Result<(), BridgeError> {
+        if self.prune_stale_native_video_rejections() {
+            self.state.native_video_release_owed = true;
+        }
+        if !self.state.native_video_release_owed {
+            return Ok(());
+        }
+        // Nothing is drawn while presentation is unloaded, and loading it again
+        // rebuilds the scene list from the refusals as they stand now.
+        if !self.state.presentation_unloaded {
+            let app_config = self.state.app_config.clone();
+            let wallpaper_configs = self.state.wallpaper_configs.clone();
+            let scenes = self.reconcile_engine(app_config, wallpaper_configs).await?;
+            self.state.set_active_ids_from_scenes(&scenes);
+        }
+        self.state.native_video_release_owed = false;
+        Ok(())
     }
 
     /// Committed web wallpapers for connected displays, rendered by the host.
@@ -3220,21 +3271,31 @@ impl<E: EngineFacade + Clone> Message<SetFrameRateCap> for BridgeActor<E> {
         msg: SetFrameRateCap,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        let before = self.native_video_admission_keys();
         self.state.app_config.quality.frame_rate_cap = msg.cap.map(|cap| cap.max(1));
         if let Some(store) = &self.config_store {
             store.save_app_config(&self.state.app_config)?;
         }
         self.apply_quality_profile().await?;
-        if self.native_video_admission_keys() != before {
-            self.prune_stale_native_video_rejections();
-            if !self.state.presentation_unloaded {
-                let app_config = self.state.app_config.clone();
-                let wallpaper_configs = self.state.wallpaper_configs.clone();
-                let scenes = self.reconcile_engine(app_config, wallpaper_configs).await?;
-                self.state.set_active_ids_from_scenes(&scenes);
-            }
-        }
+        self.bump_generation();
+        Ok(self.all_snapshots())
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<SetQualityThrottle> for BridgeActor<E> {
+    type Reply = messages::SetQualityThrottleReply;
+
+    async fn handle(
+        &mut self,
+        msg: SetQualityThrottle,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state.quality_throttle = msg.causes.into_iter().collect();
+        // Asking again with the same causes still applies them: a caller whose
+        // last request failed halfway retries by repeating it, and the state
+        // is kept on error just as a frame-rate cap is. Re-asserting an
+        // unchanged scale or rate is free in the renderer, and handing a clip
+        // back to the native player is owed until it has been done.
+        self.apply_quality_profile().await?;
         self.bump_generation();
         Ok(self.all_snapshots())
     }
@@ -4053,12 +4114,7 @@ impl<E: EngineFacade + Clone> Message<GetNativeVideoWallpapers> for BridgeActor<
         // that has outlived its configuration expires. The wallpaper goes back
         // to the native player, so the scene engine has to let go of it in the
         // same step or both would render it.
-        if self.prune_stale_native_video_rejections() {
-            let app_config = self.state.app_config.clone();
-            let wallpaper_configs = self.state.wallpaper_configs.clone();
-            let scenes = self.reconcile_engine(app_config, wallpaper_configs).await?;
-            self.state.set_active_ids_from_scenes(&scenes);
-        }
+        self.release_stale_native_video().await?;
         self.native_video_wallpapers()
     }
 }

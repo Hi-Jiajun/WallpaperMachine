@@ -586,6 +586,7 @@ engine to redo, and when.
   suspended.
 - **A display refresh keeps an unchanged scene** — `settings_intents::a_display_refresh_does_not_reload_a_scene_whose_audio_response_has_nothing_to_read`,
   `::a_display_refresh_does_not_reload_a_scene_held_to_the_battery_frame_rate`,
+  `::a_display_refresh_does_not_reload_a_scene_held_to_the_quality_throttle`,
   `::a_display_refresh_does_not_reload_a_scene_muted_for_other_audio`,
   `::a_display_refresh_does_not_reload_a_scene_paused_by_a_lock_or_a_covered_display`,
   and `DisplayRefreshCoalescerTests` in `Tests/Unit/Desktop/`. A value applied
@@ -694,6 +695,7 @@ engine to redo, and when.
   of the ladder. The readings are scripted: whether a real surface stops across a sleep, and
   whether the reconfigure restores it, needs an authorized sleep and wake.
 - **A reconcile keeps an unchanged scene** — `settings_intents::a_reconcile_does_not_reload_a_scene_held_to_the_frame_rate_cap`,
+  `::a_reconcile_does_not_reload_a_scene_held_to_the_quality_throttle`,
   `::a_reconcile_does_not_reload_a_scene_muted_for_other_audio` and
   `performance_settings::wallpapers_applied_under_a_frame_rate_cap_start_at_the_capped_rate`.
   A reconcile hands the engine every configured scene and the engine reopens any
