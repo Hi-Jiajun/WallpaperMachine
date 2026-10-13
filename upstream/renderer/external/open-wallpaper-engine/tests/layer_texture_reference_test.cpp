@@ -323,14 +323,15 @@ TEST(LayerTextureReference, CycleIsExplicit) {
     EXPECT_EQ(ClassifyLayerTextureReferences(refs, index), kLayerTextureIllegalCycle);
 }
 
-TEST(LayerTextureReference, SelfBIsHistoryFeedback) {
+TEST(LayerTextureReference, SelfBInItsOwnEffectsIsNotAReference) {
     const auto objects = nlohmann::json::parse(R"([
       {"id":7,"name":"self","image":"image.json",
        "effects":[{"passes":[{"textures":["_rt_imageLayerComposite_7_b"]}]}]}
     ])");
     const auto index = BuildLayerObjectIndex(objects);
     const auto refs  = CollectLayerTextureRefs(objects, index, nullptr);
-    EXPECT_EQ(ClassifyLayerTextureReferences(refs, index), kLayerTextureHistoryFeedback);
+    EXPECT_TRUE(refs.empty());
+    EXPECT_TRUE(ClassifyLayerTextureReferences(refs, index).empty());
 }
 
 TEST(LayerTextureReference, FileNameIsNotALayerEvenWhenNamesMatch) {
@@ -955,14 +956,14 @@ TEST(LayerTextureReference, ASampledTextLayerIsItsCardInItsOwnComposite) {
     }
 }
 
-// A layer's own effect may bind the layer's `_a` composite where it would
-// otherwise take `previous` -- an outline that names the text it outlines.
-// Inside the layer's chain that is the chain's buffer A, the image the effect
-// works on; the composite is what the chain ends in. Read as the composite, the
-// effect sampled a link the frame had yet to fill, so the layer drew nothing
-// and the native backend refused the scene as history feedback. Another layer
-// binding the same name still samples the finished composite.
-TEST(LayerTextureReference, ALayersOwnEffectReadsItsBufferANotItsComposite) {
+namespace
+{
+
+/// Layer 7, an image and a text layer, with two effects that name the layer's
+/// own composite: the first, `first`, where it would take `previous`, the
+/// second, `second`, next to it. Both must read the image the chain is working
+/// on, and only another layer may make the layer produce its composite.
+void ExpectOwnEffectsReadTheChainInput(std::string_view first, std::string_view second) {
     constexpr std::string_view kBlendFrag = R"(uniform sampler2D g_Texture0;
 uniform sampler2D g_Texture1;
 varying vec2 v_TexCoord;
@@ -986,15 +987,13 @@ void main() {
             files["/shaders/blend.frag"] = std::string(kBlendFrag);
             files["/linked_mat.json"] =
                 R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":["_rt_imageLayerComposite_7_a"]}]})";
-            // The first effect takes the name in place of `previous`, the second
-            // next to it.
             const std::string objects =
                 std::string(R"([{"id":7,"name":"outlined",)") + std::string(layer) + R"(,
                 "effects":[
                   {"file":"effects/copy/effect.json","visible":true,
-                   "passes":[{"textures":["_rt_imageLayerComposite_7_a"]}]},
+                   "passes":[{"textures":[")" + std::string(first) + R"("]}]},
                   {"file":"effects/blend/effect.json","visible":true,
-                   "passes":[{"textures":[null,"_rt_imageLayerComposite_7_a"]}]}]})" +
+                   "passes":[{"textures":[null,")" + std::string(second) + R"("]}]}]})" +
                 (sampled_elsewhere
                      ? R"(,{"id":8,"name":"mirror","image":"linked.json","dependencies":[7]})"
                      : "") +
@@ -1060,6 +1059,41 @@ void main() {
             EXPECT_EQ(link->desc().src, LayerCompositeTargetKey(7));
             EXPECT_NE(FindPassByOutput(*graph, LayerCompositeTargetKey(7)), nullptr);
         }
+    }
+}
+
+} // namespace
+
+// A layer's own effect may bind the layer's `_a` composite where it would
+// otherwise take `previous` -- an outline that names the text it outlines.
+// Inside the layer's chain that is the chain's buffer A, the image the effect
+// works on; the composite is what the chain ends in. Read as the composite, the
+// effect sampled a link the frame had yet to fill, so the layer drew nothing
+// and the native backend refused the scene as history feedback. Another layer
+// binding the same name still samples the finished composite.
+TEST(LayerTextureReference, ALayersOwnEffectReadsItsBufferANotItsComposite) {
+    ExpectOwnEffectsReadTheChainInput("_rt_imageLayerComposite_7_a", "_rt_imageLayerComposite_7_a");
+}
+
+// `_b` is the chain's other ping-pong buffer. The layer is drawn into `_a` and
+// every effect pass without a target of its own writes the other buffer; the
+// editor names, in the slot `previous` fills, the buffer `previous` was in when
+// the effect was set up, so `_a` and `_b` alternate along the chain (built-in
+// blur, shine and godrays; a workshop wave named `_b` in its first slot, after
+// one effect). Taken as last-frame history, the name made the native backend
+// refuse the whole scene and the wave sampled an empty link; it is the image
+// the effect works on. A name left over from before the effects were reordered
+// is still that image.
+TEST(LayerTextureReference, ALayersOwnEffectReadsItsBufferBAsTheImageItWorksOn) {
+    {
+        SCOPED_TRACE("_a then _b, as the editor alternates them");
+        ExpectOwnEffectsReadTheChainInput("_rt_imageLayerComposite_7_a",
+                                          "_rt_imageLayerComposite_7_b");
+    }
+    {
+        SCOPED_TRACE("_b in both");
+        ExpectOwnEffectsReadTheChainInput("_rt_imageLayerComposite_7_b",
+                                          "_rt_imageLayerComposite_7_b");
     }
 }
 

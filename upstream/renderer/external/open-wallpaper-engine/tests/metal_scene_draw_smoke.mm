@@ -3823,10 +3823,10 @@ TEST_F(MetalSceneDraw, AHiddenTextLayerAnotherSamplesIsItsCardInItsComposite)
 namespace
 {
 
-/// One card of one colour in the middle of the canvas, whose effect binds the
-/// card's own `_a` composite where it would take `previous`, and shows what it
-/// reads with red and blue swapped.
-std::filesystem::path WriteOwnBufferAFixture(const std::filesystem::path& root)
+/// One card of one colour in the middle of the canvas, with `effects`: each
+/// `effects/own/effect.json` shows what it reads with red and blue swapped.
+std::filesystem::path WriteOwnBufferFixture(const std::filesystem::path& root,
+                                            const std::string&           effects)
 {
     const auto project = WriteFixture(root);
     const std::string vertex =
@@ -3859,8 +3859,7 @@ std::filesystem::path WriteOwnBufferAFixture(const std::filesystem::path& root)
           R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0.0,0.0,0.0],)"
           R"("cameraparallax":false,"orthogonalprojection":{"width":384,"height":256}},)"
           R"("objects":[{"id":1,"name":"card","image":"models/card.json","origin":[192,128,0],)"
-          R"("effects":[{"file":"effects/own/effect.json","visible":true,)"
-          R"("passes":[{"textures":["_rt_imageLayerComposite_1_a"]}]}]}]})" },
+          R"("effects":)" + effects + "}]}" },
     };
     for (const auto& [name, contents] : files) {
         const auto path = root / name;
@@ -3881,7 +3880,10 @@ TEST_F(MetalSceneDraw, ALayersOwnEffectReadsItsBufferANotItsComposite)
     {
         SCOPED_TRACE("image");
         const auto  directory = root_ / "own-buffer-a";
-        const auto  project   = WriteOwnBufferAFixture(directory);
+        // The card's own `_a` composite where the effect would take `previous`.
+        const auto  project   = WriteOwnBufferFixture(
+            directory, R"([{"file":"effects/own/effect.json","visible":true,)"
+                       R"("passes":[{"textures":["_rt_imageLayerComposite_1_a"]}]}])");
         LoadedScene loaded;
         std::string error;
         ASSERT_TRUE(LoadScene(project, directory / "cache", loaded, error)) << error;
@@ -3957,6 +3959,105 @@ TEST_F(MetalSceneDraw, ALayersOwnEffectReadsItsBufferANotItsComposite)
             for (int frame = 0; frame < 3; ++frame) AdvanceSceneFrame(render, scene);
             EXPECT_GT(LitPixels(ReadOutput(render, scene)), 0u)
                 << "the text layer's effect showed nothing of the text";
+            render.destroy();
+        }
+    }
+}
+
+// The editor names `previous`'s ping-pong buffer in the slot `previous` fills,
+// `_a` and `_b` alternating along the chain, so a second effect names `_b`.
+// Taken as last-frame history, the name made the native backend refuse the
+// whole scene; it is the image the effect works on, the first effect's output.
+TEST_F(MetalSceneDraw, ALayersOwnEffectReadsItsBufferBAsTheImageItWorksOn)
+{
+    const std::string effects =
+        R"([{"file":"effects/own/effect.json","visible":true,)"
+        R"("passes":[{"textures":["_rt_imageLayerComposite_1_a"]}]},)"
+        R"({"file":"effects/own/effect.json","visible":true,)"
+        R"("passes":[{"textures":["_rt_imageLayerComposite_1_b"]}]}])";
+    {
+        SCOPED_TRACE("image");
+        const auto  directory = root_ / "own-buffer-b";
+        const auto  project   = WriteOwnBufferFixture(directory, effects);
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, directory / "cache", loaded, error)) << error;
+        auto& scene = *loaded.scene;
+        ASSERT_TRUE(scene.layer_texture_error.empty()) << scene.layer_texture_error;
+        const auto selection = SelectSceneBackend(scene);
+        ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+        const auto graph = sceneToRenderGraph(scene);
+        ASSERT_NE(graph, nullptr);
+
+        @autoreleasepool {
+            CAMetalLayer* layer = [CAMetalLayer layer];
+            layer.device        = MTLCreateSystemDefaultDevice();
+            layer.pixelFormat   = MTLPixelFormatBGRA8Unorm;
+            layer.drawableSize  = CGSizeMake(384, 256);
+            MetalRender render;
+            ASSERT_TRUE(render.init(MetalRenderInitInfo {
+                .metal_layer = (__bridge void*)layer, .width = 384, .height = 256,
+                .render_width = 384, .render_height = 256, .display_scale_factor = 1.0,
+            }));
+            ASSERT_TRUE(render.compileRenderGraph(scene, *graph)) << render.lastError();
+            ASSERT_TRUE(render.drawFrame(scene)) << render.lastError();
+            std::vector<uint8_t> bytes;
+            std::vector<float>   radiance;
+            uint32_t             width = 0, height = 0;
+            ASSERT_TRUE(render.ReadRenderTargetForTests(
+                scene.ResolveRenderTargetName(SpecTex_Default), bytes, width, height, &radiance));
+            ASSERT_EQ(width, 384u);
+            ASSERT_EQ(height, 256u);
+            const auto expect_color = [&](uint32_t x, uint32_t y, std::array<float, 3> expected) {
+                const size_t pixel = (y * width + x) * 4;
+                for (size_t channel = 0; channel < 3; ++channel) {
+                    EXPECT_NEAR(radiance[pixel + channel], expected[channel], 0.01f)
+                        << "pixel " << x << "," << y << " channel " << channel;
+                }
+            };
+            // Swapped twice: the second effect swapped back what the first made.
+            // Reading the card before any effect would leave it swapped, and an
+            // empty texture black.
+            expect_color(192, 128, { 0.25f, 0.5f, 0.75f });
+            expect_color(140, 100, { 0.25f, 0.5f, 0.75f });
+            expect_color(32, 32, { 0.0f, 0.0f, 0.0f });
+            render.destroy();
+        }
+    }
+    {
+        SCOPED_TRACE("text");
+        const auto  directory = root_ / "own-buffer-b-text";
+        const auto  project   = WriteTextFixture(
+            directory, "HELLO", false, {},
+            R"(,"effects":[{"file":"effects/probe.json","visible":true,)"
+            R"("passes":[{"textures":["_rt_imageLayerComposite_1_a"]}]},)"
+            R"({"file":"effects/probe.json","visible":true,)"
+            R"("passes":[{"textures":["_rt_imageLayerComposite_1_b"]}]}])");
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, directory / "cache", loaded, error)) << error;
+        auto& scene = *loaded.scene;
+        ASSERT_TRUE(scene.layer_texture_error.empty()) << scene.layer_texture_error;
+        const auto selection = SelectSceneBackend(scene);
+        ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+
+        @autoreleasepool {
+            CAMetalLayer* layer = [CAMetalLayer layer];
+            layer.device        = MTLCreateSystemDefaultDevice();
+            layer.pixelFormat   = MTLPixelFormatBGRA8Unorm;
+            layer.drawableSize  = CGSizeMake(384, 256);
+            MetalRender render;
+            ASSERT_TRUE(render.init(MetalRenderInitInfo {
+                .metal_layer = (__bridge void*)layer, .width = 384, .height = 256,
+                .render_width = 384, .render_height = 256, .display_scale_factor = 1.0,
+            }));
+            auto graph = sceneToRenderGraph(scene);
+            ASSERT_NE(graph, nullptr);
+            ASSERT_TRUE(render.compileRenderGraph(scene, *graph)) << render.lastError();
+            render.UpdateCameraFillMode(scene, FillMode::ASPECTFIT);
+            for (int frame = 0; frame < 3; ++frame) AdvanceSceneFrame(render, scene);
+            EXPECT_GT(LitPixels(ReadOutput(render, scene)), 0u)
+                << "the text layer's second effect showed nothing of the text";
             render.destroy();
         }
     }

@@ -55,7 +55,7 @@ void HarvestTextureString(std::string_view value, int32_t consumer_id, bool in_o
 }
 
 /// `in_own_effects`: `node` is inside the consumer's own `effects`, where its
-/// `_a` names the chain's buffer rather than the layer.
+/// `_a` and `_b` name the chain's buffers rather than the layer.
 void HarvestTextures(const nlohmann::json& node, int32_t consumer_id, const LayerObjectIndex& index,
                      fs::VFS* vfs, std::vector<LayerTextureRef>& out, bool in_own_effects = false) {
     if (node.is_object()) {
@@ -145,10 +145,7 @@ bool IsImageLayerCompositeName(std::string_view name) {
 }
 
 bool IsOwnEffectChainInput(std::string_view name, int32_t layer_id) {
-    if (layer_id == 0) return false;
-    LayerCompositeSlot slot = LayerCompositeSlot::None;
-    const auto         id   = ParseImageLayerCompositeId(name, &slot);
-    return id == layer_id && slot == LayerCompositeSlot::A;
+    return layer_id != 0 && ParseImageLayerCompositeId(name) == layer_id;
 }
 
 LayerObjectIndex BuildLayerObjectIndex(const nlohmann::json& objects) {

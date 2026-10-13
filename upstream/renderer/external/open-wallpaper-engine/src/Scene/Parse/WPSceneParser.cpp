@@ -1668,10 +1668,10 @@ void RegisterTextComposite(ParseContext& context, const wpscene::WPTextObject& o
     camera.Update();
 }
 
-/// An effect of layer `layer_id` naming the layer's own `_a` composite reads
-/// the chain's buffer A, `chain_input`, as `previous` does: the layer's
-/// composite is what this chain is about to produce. A clock's outline bound
-/// that way otherwise sampled an empty link every frame and drew nothing.
+/// An effect of layer `layer_id` naming the layer's own `_a` or `_b` composite
+/// reads the chain's current buffer, `chain_input`, as `previous` does: the
+/// layer's composite is what this chain is about to produce. A clock's outline
+/// bound that way otherwise sampled an empty link every frame and drew nothing.
 void BindOwnEffectChainInput(wpscene::WPMaterial& material, int32_t layer_id,
                              const std::string& chain_input) {
     for (auto& texture : material.textures) {

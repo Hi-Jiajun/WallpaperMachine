@@ -499,8 +499,22 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
     layer drew nothing (a clock whose outline effect names its own text), and
     native Metal refused the scene as history feedback. Built-in blur, shine and
     godrays carry the same names, `_a` and `_b` alternating along the chain, in
-    the slot their effect binds to `previous`; that binding wins. A self `_b` is
-    still treated as last-frame history.
+    the slot their effect binds to `previous`; that binding wins.
+  - A self `_b` in the layer's own effects is that same input, not last-frame
+    history (`ALayersOwnEffectReadsItsBufferBAsTheImageItWorksOn`, the editor's
+    `_a`-then-`_b` alternation and `_b` in both effects;
+    `SelfBInItsOwnEffectsIsNotAReference`; pixels on the native backend in
+    `MetalSceneDraw.ALayersOwnEffectReadsItsBufferBAsTheImageItWorksOn`). The
+    editor names the buffer `previous` was in when the effect was set up: the
+    layer is drawn into `_a` and each effect pass without a target of its own
+    moves to the other buffer, so a name can be stale after effects are
+    reordered. Wallpaper Engine keeps last-frame images in an effect's own
+    `unique` buffers filled by a `copy` command (motion blur), not in these.
+    Taken as history, the name made native Metal refuse the scene, and an
+    effect naming `_b` in its first slot without a `bind` (a wave after an
+    audio-bar effect) logged `slot 0 (_rt_link_<id>) has no image` on the
+    compatibility renderer. A self `_b` outside the layer's effects still
+    refuses the scene.
   - A linked composite's size is never folded into the material as a zero at
     parse time (the card padding divides by it and every texture coordinate of
     the consumer's card becomes `NaN`), and nothing stale is folded in its place:
