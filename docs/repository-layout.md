@@ -51,8 +51,8 @@ App/                               WallpaperMachine application target sources o
     Playlist/                      per-display playlists: model, planner, store and the scheduler that switches wallpapers
     Preview/                       isolated live preview inputs, lifecycle, WebKit and scene/video surfaces
     Steam/                         SteamCMD runtime discovery and setup state
-    Support/                       the one-time prompts: support after a downloaded wallpaper is applied
-                                   and the performance data question
+    Support/                       the one-time prompts: support after a downloaded wallpaper is applied,
+                                   the later star request and the performance data question
     SystemMedia/                   shared now-playing session (MediaRemote, Music/Spotify
                                    AppleScript fallback) and artwork for Web and Scene media integration
     Telemetry/                     Send performance data: report schema, frame windows, local spool, upload

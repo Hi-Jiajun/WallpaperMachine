@@ -89,6 +89,8 @@ final class WebPanelController: NSObject, WKNavigationDelegate {
   /// Shows System Settings › General › Login Items, where the user allows a launch at login
   /// they switched off there. Tests capture the call so no Settings window opens.
   var openLoginItemsSettings: @MainActor () -> Void = { SMAppService.openSystemSettingsLoginItems() }
+  /// Tests capture what would be shared, and where, so no share menu opens. Nil shows macOS's.
+  var presentSharePicker: (@MainActor ([Any], NSRect) -> Void)?
   /// Shows a file in Finder; tests capture it instead.
   var revealFile: @MainActor (URL) -> Void = { NSWorkspace.shared.activateFileViewerSelecting([$0]) }
   let displayTitles: DisplayTitleResolver
@@ -515,6 +517,8 @@ final class WebPanelController: NSObject, WKNavigationDelegate {
         // occlusion and deminiaturize observers call back here once this task
         // has ended, and that call delivers it along with the energy readout.
         guard self.presentationAllowsUpdates() else { return }
+        // A day the panel was on screen, for the star prompt's count.
+        self.store.supportPrompt?.recordPanelUse()
         self.refreshDisplayOptions()
         self.updatePending = false
         let state = self.deliverySnapshot()

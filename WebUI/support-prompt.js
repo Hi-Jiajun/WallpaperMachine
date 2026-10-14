@@ -1,11 +1,13 @@
 import { t } from './i18n.js';
 
-// The one-time prompts: support after the first downloaded wallpaper, and asking someone who
-// finished the welcome guide before it had the switch whether to send performance data. Native owns eligibility, the order and the durable once-only flags, and
+// The three one-time prompts: support after the first downloaded wallpaper, a later GitHub star
+// request, and asking someone who finished the welcome guide before it had the switch whether to
+// send performance data. Native owns eligibility, the order and the durable once-only flags, and
 // names at most one in `pendingPrompt`. The page acknowledges only a visible dialog, then keeps
 // that presentation alive when the acknowledgement clears it.
 const CHOICES = {
   support: ['star', 'supporter', 'dismiss'],
+  star: ['star', 'dismiss'],
   telemetry: ['enableTelemetry', 'dismiss'],
 };
 
@@ -29,6 +31,8 @@ export function createSupportPrompt({ container, send, escapeHTML: e, icon, morp
     const copy = {
       support: [t('Feeling good?'), t('Your first downloaded wallpaper is up and running. Enjoying WallpaperMachine? You can help it grow.'),
         `${choice('star', 'github', t('Star on GitHub'), t('Help others discover WallpaperMachine.'))}${choice('supporter', 'heart', t('Become a Supporter'), t('Support development with a one-time contribution.'))}`],
+      star: [t('Like WallpaperMachine?'), t('A star on GitHub helps other Mac users find it.'),
+        choice('star', 'github', t('Star on GitHub'), t('Opens the project on GitHub.'))],
       telemetry: [t('Send performance data?'), t('It helps find what makes wallpapers slow: how long they take to apply, their frame rate and energy use, and your Mac’s model, sent once a day. No names, files or account details.'),
         choice('enableTelemetry', 'activity', t('Send performance data'), t('You can turn it off in Settings › Storage.'), false)],
     }[prompt];

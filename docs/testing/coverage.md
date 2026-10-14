@@ -1045,7 +1045,9 @@ follows the developer's in-app language choice.
   someone who finished the guide earlier, answered from the page),
   `WebPanelTelemetryTests` (the performance data switch round-trips, **Show in
   Finder** writes the report it would send, and the guide answers the question only
-  if its switch was shown), `WebPanelWorkshopSourceTests`,
+  if its switch was shown), `WebPanelSharingTests` (a Workshop wallpaper and the app
+  are shared through the injected share menu with links built in Swift, and a
+  non-Workshop id is refused), `WebPanelWorkshopSourceTests`,
   `WebPanelWorkshopUpdateTests`, `WebPanelImagePlacementRaceTests` and
   `WebPanelAssetProvenanceTests`. `WallpaperEditorStateTests` cover locale
   scaling, invalid raw text and independent drafts; `PropertyImageCacheTests`
@@ -1191,9 +1193,11 @@ install and a no-login smoke run (see [README.md](README.md#opt-in-layers)).
 
 `SupportPromptStoreTests` — a downloaded wallpaper qualifies only after a
 successful activation, a pending prompt survives relaunch and further downloads,
-and a presented prompt never returns. Across the prompts: one a day in priority
-order, the performance data question only for someone who finished the guide
-without it, and state saved by earlier builds still loads. `Support/` also holds the shared fixtures
+and a presented prompt never returns. Across the three prompts: one a day in
+priority order, the performance data question only for someone who finished the
+guide without it, the star prompt after 14 days and 5 days of use (one day counts
+once) and not after the star was chosen, and state saved by earlier builds still
+loads. `Support/` also holds the shared fixtures
 (`TemporaryDefaults`, `TestAppLanguage`, bridge snapshots).
 
 ## SystemMedia

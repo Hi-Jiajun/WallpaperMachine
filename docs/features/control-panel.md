@@ -340,6 +340,16 @@ an apply failure stays until an apply succeeds. Nothing is submitted by the app:
 the user edits and sends the issue on GitHub. Neither is shown when the snapshot
 carries no `https` repository URL.
 
+### Sharing a wallpaper
+
+A Workshop wallpaper (its id is all digits), installed or on Discover, has **Share…**
+in the utility row. It opens the system share menu under the button with the
+wallpaper's title, its Steam Workshop page and the website's home page (the Chinese
+page for either Chinese app language). The page sends only the id and the button's
+frame; `WebPanelSharing.swift` builds both links from fixed parts, so nothing the page
+says becomes a URL. Local wallpapers have no share button: they have no page to
+share.
+
 ## Previous and recently used
 
 The activity bar's **Previous wallpaper** returns the target display to its last

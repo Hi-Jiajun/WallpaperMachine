@@ -17,6 +17,7 @@ extension WebPanelController {
     if try await performLetterbox(action, request: request) { return }
     if try await performImagePlacement(action, request: request) { return }
     if try await performTelemetry(action, request: request) { return }
+    if try await performSharing(action, request: request) { return }
     if try await performDisplayPosition(action, request: request) { return }
     switch action {
     case "ready":
@@ -180,7 +181,7 @@ extension WebPanelController {
         store.telemetry?.setEnabled(true)
         store.supportPrompt?.markPresented(.telemetry)
         return
-      case (.support, "star"): url = AppUpdateConfiguration.repositoryURL
+      case (.support, "star"), (.star, "star"): url = AppUpdateConfiguration.repositoryURL
       case (.support, "supporter"):
         let path = language.hasPrefix("zh") ? "zh/pricing/" : "pricing/"
         url = URL(string: "https://www.wallpapermachine.app/\(path)")!
@@ -189,6 +190,7 @@ extension WebPanelController {
       guard openSupportURL(url) else {
         throw WallpaperActionError(message: String(localized: "The link could not be opened. Please try again."))
       }
+      if url == AppUpdateConfiguration.repositoryURL { store.supportPrompt?.recordStarChosen() }
       store.supportPrompt?.markPresented(prompt)
       return
     case "workshopSelect":

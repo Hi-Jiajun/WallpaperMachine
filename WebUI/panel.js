@@ -110,6 +110,11 @@ function button(label, action, args = {}, options = {}) {
   const attributes = Object.entries(args).map(([key, value]) => `data-${key.replace(/ID$/, 'Id').replace(/[A-Z]/g, c => `-${c.toLowerCase()}`)}="${escapeHTML(typeof value === 'object' ? JSON.stringify(value) : value)}"`).join(' ');
   return `<button type="button" data-action="${action}" ${attributes} class="${options.className || ''}"${disabled(options.disabled || busy(action, args))}${options.title ? ` title="${escapeHTML(options.title)}" aria-label="${escapeHTML(options.title)}"` : ''}${options.expanded !== undefined ? ` aria-expanded="${options.expanded ? 'true' : 'false'}"` : ''}${options.controls ? ` aria-controls="${escapeHTML(options.controls)}"` : ''}>${options.icon ? icon(options.icon) : ''}${label ? `<span class="button-label">${escapeHTML(label)}</span>` : ''}</button>`;
 }
+// A control's frame in the page, for a native menu that opens next to it.
+function elementRect(element) {
+  const box = element?.getBoundingClientRect?.() || { x: 0, y: 0, width: 0, height: 0 };
+  return { x: box.x, y: box.y, width: box.width, height: box.height };
+}
 function selectOptions(values, current) { return values.map((entry) => { const [value, label] = Array.isArray(entry) ? entry : [entry, entry]; return `<option value="${escapeHTML(value)}"${String(current) === String(value) ? ' selected' : ''}>${escapeHTML(label)}</option>`; }).join(''); }
 function safeLink(url) { if (!url) return ''; try { const parsed = new URL(url); return parsed.protocol === 'https:' ? parsed.href : ''; } catch { return ''; } }
 function safeImage(url) { if (!url) return ''; try { const parsed = new URL(url); return ['https:', 'mwe-ui:'].includes(parsed.protocol) ? parsed.href : ''; } catch { return ''; } }
@@ -754,7 +759,7 @@ function renderInspector(discover) {
   const sharedDisplays = state.displays.filter(display => display.enabled && display.mode !== 'mirror');
   const applyAll = isInstalled && !discover && item.supported !== false && !['Application', 'Unknown'].includes(item.kind) && sharedDisplays.length >= 2
     ? button(t('Apply to all displays'), 'activateAll', { id: item.id }, { icon: 'monitor', className: 'wide inspector-apply-all', disabled: sharedDisplays.every(display => display.wallpaperID === item.id) }) : '';
-  const secondary = `${applyAll}${discover ? button(t('View on Steam Workshop'), 'openExternal', { url: `https://steamcommunity.com/sharedfiles/filedetails/?id=${encodeURIComponent(item.id)}` }, { icon: 'external', className: 'wide', title: t('View on Steam Workshop') }) : isInstalled ? button(t('Show in Finder'), 'reveal', { id: item.id }, { icon: 'folder', className: 'wide', title: t('Show in Finder') }) : ''}${!discover && isInstalled ? button('', 'favorite', { id: item.id }, { icon: 'heart', title: state.favorites.includes(item.id) ? t('Remove from favorites') : t('Add to favorites'), className: `icon-button${state.favorites.includes(item.id) ? ' favorite-selected' : ''}` }) : ''}${playlistToggle}${!discover && isInstalled && canReinstall(item) ? button('', 'workshopReinstall', { id: item.id }, { icon: 'refresh', className: 'icon-button', title: t('Reinstall from Workshop…') }) : ''}${!discover && isInstalled ? button('', 'delete', { id: item.id }, { icon: 'trash', className: 'icon-button danger', title: t('Move wallpaper to Trash') }) : ''}`;
+  const secondary = `${applyAll}${discover ? button(t('View on Steam Workshop'), 'openExternal', { url: `https://steamcommunity.com/sharedfiles/filedetails/?id=${encodeURIComponent(item.id)}` }, { icon: 'external', className: 'wide', title: t('View on Steam Workshop') }) : isInstalled ? button(t('Show in Finder'), 'reveal', { id: item.id }, { icon: 'folder', className: 'wide', title: t('Show in Finder') }) : ''}${!discover && isInstalled ? button('', 'favorite', { id: item.id }, { icon: 'heart', title: state.favorites.includes(item.id) ? t('Remove from favorites') : t('Add to favorites'), className: `icon-button${state.favorites.includes(item.id) ? ' favorite-selected' : ''}` }) : ''}${/^\d+$/.test(item.id) ? button('', 'shareWallpaper', { id: item.id }, { icon: 'share', className: 'icon-button', title: t('Share…') }) : ''}${playlistToggle}${!discover && isInstalled && canReinstall(item) ? button('', 'workshopReinstall', { id: item.id }, { icon: 'refresh', className: 'icon-button', title: t('Reinstall from Workshop…') }) : ''}${!discover && isInstalled ? button('', 'delete', { id: item.id }, { icon: 'trash', className: 'icon-button danger', title: t('Move wallpaper to Trash') }) : ''}`;
   // An installed Workshop wallpaper whose author has changed it since: one click downloads the
   // new version, which replaces this one once it has arrived whole.
   const updating = isInstalled && download?.pending;
@@ -1461,6 +1466,8 @@ async function handleAction(action, data, element) {
     case 'requestDownloadAndApply': await requestDownload(id, element, true); return;
     case 'requestAssets': await requestDownload(null, element); return;
     case 'continueSetup': openDialog(id, element); return;
+    // Native builds the links and opens the share menu under the button.
+    case 'shareWallpaper': await send('shareWallpaper', { id, rect: elementRect(element) }); return;
     case 'dismissDialog': closeDialog(); return;
     case 'consentResources': await continueDownload(true); return;
     // Native cancels this exact job and hands the same intent back at the account stage, so the dialog simply follows it.

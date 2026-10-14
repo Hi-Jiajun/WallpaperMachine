@@ -736,6 +736,7 @@ function draw(view) {
     + `<div class="settings-form-actions">${updateActions}</div>`
     + updateNotes
     + `<p class="settings-note settings-update-footnote">${e(update.footnote || t('Updates are checked against the latest published GitHub Release. Download and restart-install happen only after you confirm.'))}</p></section>`
+    + group('about-share', t('Spread the word'), `<div class="settings-form-actions">${button(t('Share WallpaperMachine…'), 'shareApp', {})}${button(t('Star on GitHub'), 'starRepository', {})}</div>`)
     + group('about-credits', '', `<div class="settings-attribution">${e(t('Not affiliated with Wallpaper Engine or Valve. Built on the GPLv2-only open-source renderer. Workshop browsing is independently implemented. No warranty is provided.'))}</div>`
     + `<div class="settings-form-actions">${button(t('GNU General Public License v2'), 'openExternal', { url: 'https://www.gnu.org/licenses/old-licenses/gpl-2.0.html' })}</div>`);
   const html = `<div class="settings-layout" data-key="settings-layout"><nav class="settings-nav" aria-label="${e(t('Settings categories'))}" role="tablist" aria-orientation="${compactNavigation.matches ? 'horizontal' : 'vertical'}" data-key="settings-nav">${sections.map(([id, title, glyph]) => `<button type="button" id="settings-tab-${id}" role="tab" aria-selected="${id === view.section}" aria-controls="settings-${id}" tabindex="${id === view.section ? '0' : '-1'}" data-key="nav-${id}" data-section="${id}">${helpers.icon(glyph, 16)}<span>${e(t(title))}</span></button>`).join('')}</nav><div class="settings-scroll" data-key="settings-scroll">${error('settings-action-error', view.error || state.error)}${unavailable ? `<div class="settings-notice" role="status">${e(t('Settings are unavailable. Try refreshing the library.'))}</div>` : ''}${section('general', t('General'), general)}${section('appearance', t('Appearance'), appearance)}${section('performance', t('Performance'), performance)}${section('displays', t('Displays'), displaysPage, button(t('Refresh'), 'refreshDisplays', {}, busy))}${section('library', t('Library & Steam'), library)}${section('storage', t('Storage'), storage)}${section('about', t('About'), about)}</div></div>`;
@@ -968,6 +969,12 @@ async function onClick(view, event) {
   }
   if (action === 'automationClearLocation') {
     await perform(view, action, action, args, () => { view.drafts.delete('solar-latitude'); view.drafts.delete('solar-longitude'); });
+    return;
+  }
+  // Native opens the share menu next to the button.
+  if (action === 'shareApp') {
+    const box = button.getBoundingClientRect();
+    await perform(view, action, action, { rect: { x: box.x, y: box.y, width: box.width, height: box.height } });
     return;
   }
   if (action === 'playlistMove') {

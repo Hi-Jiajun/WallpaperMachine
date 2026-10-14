@@ -2,9 +2,9 @@
 
 One-time offers on a Mac that has not seen them: the welcome guide that covers the
 first window, a single request to star or support the project after the first
-downloaded wallpaper is applied, and one question about
-[performance data](telemetry.md) for someone who finished the guide before it had
-that switch. Each is shown once and remembered natively. The panel they appear
+downloaded wallpaper is applied, a later request for a GitHub star, and one question
+about [performance data](telemetry.md) for someone who finished the guide before it
+had that switch. Each is shown once and remembered natively. The panel they appear
 in is described in [control panel](control-panel.md).
 
 ## First run
@@ -124,15 +124,27 @@ flag; after that it never returns automatically, including after quitting or
 updating. Opening a link neither stars the repository nor makes a payment; the user
 finishes that action in their browser. See [Supporter details](../../SPONSORS.md).
 
-## The performance data question
+## Star prompt and the performance data question
 
-`SupportPromptStore` schedules both prompts and names at most one in the snapshot's
-`pendingPrompt`; `WebUI/support-prompt.js` shows it in the same dialog with the same
-waiting rules as above. When both are due, the performance data question comes first,
-and no prompt appears on the same calendar day as another.
+`SupportPromptStore` schedules all three prompts and names at most one in the
+snapshot's `pendingPrompt`; `WebUI/support-prompt.js` shows it in the same dialog with
+the same waiting rules as above. When several are due, the order is the performance
+data question, then the support prompt, then the star prompt, and no prompt appears on
+the same calendar day as another.
 
+- **Like WallpaperMachine?** asks once for a GitHub star from someone who did not
+  choose **Star on GitHub** in the support prompt or in Settings → About. It waits
+  until 14 days after the first day the panel was opened with a build that counts it,
+  and until the panel has been on screen on at least 5 different days. For an existing
+  user the 14 days start at the update. Someone who never downloads a wallpaper, and
+  so never sees the support prompt, gets it too.
 - **Send performance data?** asks once someone who finished the welcome guide before
   it had the switch. **Send performance data** turns it on; **What is sent** opens
   [telemetry.md](telemetry.md) on GitHub without closing the dialog. Reaching the
   guide's Preferences page, or choosing in Settings, counts as having been asked; someone
   who leaves the guide before that page is asked once afterwards.
+
+Settings → About also has **Share WallpaperMachine…**, the system share menu with the
+website's home page (the Chinese page for either Chinese app language), and **Star on
+GitHub**. A wallpaper's details offer **Share…** for Workshop wallpapers; see
+[control panel](control-panel.md#sharing-a-wallpaper).
