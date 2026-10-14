@@ -518,7 +518,7 @@ conflicts with that mode; screen-saver-only ownership does not.
 
 ### App rules
 
-**Edit…** opens an inline list. Each row is an app name, a condition (**Running**
+The **App rules** row on Playback & Power opens an inline list. Each row is an app name, a condition (**Running**
 or **In front**), an action (**Pause**, **Mute** or **Stop**) and **Remove**. **Add
 app…** opens a native panel for one `.app` bundle. An app with no bundle identifier
 is refused. The same bundle is not added twice. Rules pause, mute or stop

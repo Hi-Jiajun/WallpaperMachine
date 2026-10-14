@@ -1,7 +1,13 @@
 /* Settings, laid out as System Settings lays itself out: sections in the window sidebar with
-   coloured glyphs, a page per section that opens with what it is for, and titled groups of
-   rows in rounded cards. Long explanations wait behind each row's ⓘ. */
+   coloured glyphs, a page per section that opens with a centred card saying what it is for, and
+   titled groups of rows in translucent rounded boxes. Pop-up buttons stay borderless until
+   pointed at, switches are the small size, and long explanations wait behind the ⓘ after a
+   row's title. */
 :root {
+  /* Grouped boxes are a wash over the window colour, so every surface tone shows through. */
+  --settings-group: rgb(255 255 255 / 4.5%);
+  --settings-group-edge: rgb(255 255 255 / 6.5%);
+  --settings-group-hover: rgb(255 255 255 / 8%);
   /* Section glyph colours: the system palette System Settings draws its own icons in. */
   --glyph-blue: #0a84ff;
   --glyph-indigo: #5e5ce6;
@@ -20,6 +26,11 @@
   --mini-dark-line: #48484c;
   --mini-warm: #f4e7d3;
   --mini-cool: #dbe5f3;
+}
+:root[data-theme="light"] {
+  --settings-group: rgb(0 0 0 / 3.2%);
+  --settings-group-edge: rgb(0 0 0 / 6%);
+  --settings-group-hover: rgb(0 0 0 / 5.5%);
 }
 
 #settings-content {
@@ -45,9 +56,8 @@
 .settings-nav .nav-item { min-height: 30px; gap: 9px; padding-left: 6px; }
 .settings-nav .nav-item.search-dim { opacity: .4; }
 .settings-nav .nav-count:empty { display: none; }
-/* A section's glyph: white on its colour, in the rounded square System Settings uses. */
+/* A section's glyph: a solid white symbol on its colour, in the rounded square System Settings uses. */
 .settings-glyph { flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; color: var(--glyph-ink); background: var(--glyph-gray); box-shadow: inset 0 .5px 0 rgb(255 255 255 / 25%), 0 .5px 1.5px rgb(0 0 0 / 22%); }
-.settings-glyph svg { stroke-width: 2.1; }
 .settings-glyph[data-color="blue"] { background: linear-gradient(180deg, color-mix(in srgb, var(--glyph-blue) 82%, #fff), var(--glyph-blue)); }
 .settings-glyph[data-color="indigo"] { background: linear-gradient(180deg, color-mix(in srgb, var(--glyph-indigo) 82%, #fff), var(--glyph-indigo)); }
 .settings-glyph[data-color="teal"] { background: linear-gradient(180deg, color-mix(in srgb, var(--glyph-teal) 82%, #fff), var(--glyph-teal)); }
@@ -55,7 +65,7 @@
 .settings-glyph[data-color="orange"] { background: linear-gradient(180deg, color-mix(in srgb, var(--glyph-orange) 82%, #fff), var(--glyph-orange)); }
 .settings-glyph[data-color="purple"] { background: linear-gradient(180deg, color-mix(in srgb, var(--glyph-purple) 82%, #fff), var(--glyph-purple)); }
 .settings-glyph[data-color="gray"] { background: linear-gradient(180deg, color-mix(in srgb, var(--glyph-gray) 82%, #fff), var(--glyph-gray)); }
-.settings-glyph.large { width: 44px; height: 44px; border-radius: 11px; box-shadow: inset 0 .5px 0 rgb(255 255 255 / 30%), 0 4px 12px rgb(0 0 0 / 18%); }
+.settings-glyph.large { width: 58px; height: 58px; border-radius: 14px; box-shadow: inset 0 .5px 0 rgb(255 255 255 / 30%), 0 4px 12px rgb(0 0 0 / 18%); }
 
 /* ——— Page ——— */
 .settings-scroll {
@@ -66,58 +76,70 @@
   overscroll-behavior: contain;
   padding: 6px 28px 40px;
 }
-.settings-page { max-width: 700px; margin: 0 auto; min-width: 0; container: settings-page / inline-size; animation: settings-page-in 220ms var(--ease-out); }
+.settings-page { max-width: 660px; margin: 0 auto; min-width: 0; container: settings-page / inline-size; animation: settings-page-in 220ms var(--ease-out); }
 @keyframes settings-page-in { from { transform: translateY(6px); } }
 .settings-scroll.searching .settings-page { animation: none; }
 .settings-scroll.searching .settings-page + .settings-page { margin-top: 28px; }
-.settings-heading { display: flex; align-items: center; gap: 14px; margin: 4px 0 22px; }
-.settings-heading-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
-.settings-heading h2 { margin: 0; font-size: 20px; line-height: 1.25; font-weight: 700; letter-spacing: -.02em; }
-.settings-blurb { color: var(--muted); font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
-.settings-scroll.searching .settings-heading { margin-bottom: 12px; }
-.settings-scroll.searching .settings-heading .settings-glyph.large { width: 30px; height: 30px; border-radius: 8px; }
-.settings-scroll.searching .settings-heading .settings-glyph.large svg { width: 17px; height: 17px; }
+/* The page's own card: its glyph, name and purpose, centred as System Settings opens a pane. */
+.settings-heading { display: flex; flex-direction: column; align-items: center; gap: 4px; margin: 4px 0 22px; padding: 22px 24px 20px; border-radius: var(--radius-lg); background: var(--settings-group); box-shadow: inset 0 0 0 .5px var(--settings-group-edge); text-align: center; }
+.settings-heading > .settings-glyph { margin-bottom: 6px; }
+.settings-heading-text { min-width: 0; display: grid; justify-items: center; gap: 3px; }
+.settings-heading h2 { margin: 0; font-size: 17px; line-height: 1.25; font-weight: 700; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.settings-blurb { max-width: 46ch; color: var(--muted); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+.settings-heading > .settings-button { margin-top: 8px; }
+.settings-scroll.searching .settings-heading { flex-direction: row; gap: 10px; margin: 0 0 10px 4px; padding: 0; background: none; box-shadow: none; text-align: left; }
+.settings-scroll.searching .settings-heading > .settings-glyph { margin: 0; }
+.settings-scroll.searching .settings-heading-text { justify-items: start; }
+.settings-scroll.searching .settings-heading .settings-glyph.large { width: 26px; height: 26px; border-radius: 7px; }
+.settings-scroll.searching .settings-heading .settings-glyph.large svg { width: 16px; height: 16px; }
 .settings-scroll.searching .settings-heading h2 { font-size: 15px; }
-.settings-scroll.searching .settings-blurb { display: none; }
+.settings-scroll.searching .settings-blurb, .settings-scroll.searching .settings-heading > .settings-button { display: none; }
 .search-miss { display: none !important; }
 .settings-no-results { display: grid; justify-items: center; gap: 10px; padding: 60px 20px; color: var(--muted); text-align: center; }
 .settings-no-results svg { color: var(--faint); }
 
 /* ——— Groups: a title, then one card of rows ——— */
 .settings-group + .settings-group, .settings-group + .settings-footnote { margin-top: 22px; }
-.settings-group-title { display: flex; align-items: baseline; gap: 8px; margin: 0 0 7px 2px; font-size: 13px; font-weight: 600; line-height: 1.4; }
+.settings-group-title { display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px 12px; font-size: 13px; font-weight: 600; line-height: 1.4; }
 .settings-group-title > svg { align-self: center; color: var(--muted); }
 .settings-group-title > .settings-note { margin: 0; font-weight: 400; }
-.settings-card { padding: 0 14px; border-radius: var(--radius-md); background: var(--card); box-shadow: 0 0 0 .5px var(--divider), 0 1px 2px rgb(0 0 0 / 5%); }
-:root[data-theme="light"] .settings-card { box-shadow: 0 0 0 .5px rgb(0 0 0 / 9%), 0 1px 2px rgb(0 0 0 / 4%); }
-.settings-card > .settings-note, .settings-card > p.settings-note { padding: 10px 0 12px; }
-.settings-card > .settings-note + .settings-row, .settings-card > .settings-row + .settings-note { box-shadow: 0 -.5px 0 var(--divider); }
+.settings-card { padding: 0 12px; border-radius: var(--radius-lg); background: var(--settings-group); box-shadow: inset 0 0 0 .5px var(--settings-group-edge); }
+/* Text that belongs to the whole box runs its full width, so the hairline above it does too. */
+.settings-card > .settings-note, .settings-card > p.settings-note { max-width: none; padding: 10px 0 12px; }
+.settings-card > .settings-note + .settings-row, .settings-card > .settings-row + .settings-note, .settings-card > .settings-note + .settings-note { box-shadow: 0 -.5px 0 var(--divider); }
 .settings-card > .settings-empty { padding: 16px 0; }
+.settings-disclosure-body > .settings-empty { padding: 10px 0 2px; }
 
-/* A row: label and its first sentence on the left, the ⓘ, then the control. */
+/* A row: the title with its ⓘ and first sentence on the left, the control at the trailing edge,
+   and the rest of a long explanation beneath both once the ⓘ opens it. */
 .settings-row {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  column-gap: 12px;
-  row-gap: 8px;
+  column-gap: 14px;
+  row-gap: 6px;
   min-width: 0;
-  min-height: 44px;
+  min-height: 40px;
   padding: 9px 0;
 }
 .settings-row + .settings-row, .settings-row + .settings-disclosure, .settings-disclosure + .settings-row, .settings-disclosure + .settings-disclosure,
 .settings-row + .settings-error, .settings-card > .settings-form-actions:not(:first-child), .settings-card > .settings-disclosure:not(:first-child),
 .settings-card > .settings-list:not(:first-child), .settings-card > .settings-status:not(:first-child) { box-shadow: 0 -.5px 0 var(--divider); }
-.settings-label { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; font-size: 13px; line-height: 1.35; }
+/* The title and its ⓘ on one line, the explanation beneath; a grid, so the explanation always
+   takes its own line, and its trailing flexible track keeps the explanation from widening the
+   title's or the ⓘ's column. */
+.settings-text { flex: 1 1 240px; display: grid; grid-template-columns: minmax(0, max-content) auto minmax(0, 1fr); align-items: center; column-gap: 4px; min-width: 0; }
+.settings-label { min-width: 0; overflow-wrap: anywhere; font-size: 13px; line-height: 1.35; }
+.settings-text > .settings-note { grid-column: 1 / -1; margin-top: 2px; }
 .settings-row:has(.settings-switch):not(.has-more) { flex-wrap: nowrap; }
-.settings-row:has(.settings-switch) .settings-label { flex-basis: 0; }
-.settings-note { display: block; color: var(--muted); font-size: 11.5px; font-weight: 400; line-height: 1.45; overflow-wrap: anywhere; max-width: 62ch; }
-.settings-label .settings-note, .settings-group-title > .settings-note { margin-top: 2px; }
-.settings-more { flex: 1 1 100%; order: 4; margin: -2px 0 2px; padding: 8px 10px; border-radius: 8px; background: var(--hover); max-width: none; }
-.settings-info { flex: none; order: 2; width: 22px; height: 22px; min-width: 0; min-height: 0; padding: 0; border-radius: 50%; background: transparent; box-shadow: none; color: var(--muted); }
-.settings-info:hover:not(:disabled) { background: var(--hover); color: var(--text); }
-.settings-info[aria-expanded="true"] { color: var(--accent); background: var(--accent-soft); }
-.settings-control { order: 3; display: flex; flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; min-width: 0; max-width: 100%; margin-left: auto; }
+.settings-row:has(.settings-switch) .settings-text { flex-basis: 0; }
+.settings-note { display: block; color: var(--muted); font-size: 11px; font-weight: 400; line-height: 1.45; overflow-wrap: anywhere; max-width: 62ch; }
+.settings-group-title > .settings-note { margin-top: 2px; }
+.settings-more { flex: 1 1 100%; margin: 0 0 2px; padding: 8px 10px; border-radius: 8px; background: var(--hover); max-width: none; }
+.settings-info { flex: none; width: 17px; height: 17px; min-width: 0; min-height: 0; padding: 0; border-radius: 50%; background: transparent; box-shadow: none; color: var(--muted); }
+.settings-info:hover:not(:disabled) { background: transparent; color: var(--text); }
+.settings-info[aria-expanded="true"] { color: var(--accent); }
+.settings-control { display: flex; flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; min-width: 0; max-width: 100%; margin-left: auto; }
 .settings-status { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .settings-list { margin: 0; padding: 0; list-style: none; color: var(--muted); font-size: 12px; text-align: left; overflow-wrap: anywhere; }
 .settings-list li + li { margin-top: 4px; }
@@ -125,7 +147,8 @@
 .settings-list code { font-family: ui-monospace, "SF Mono", monospace; font-size: 11px; color: var(--text); }
 .settings-version { display: block; color: var(--muted); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; text-align: right; }
 .settings-readout { display: block; }
-.settings-readout .settings-label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.settings-readout .settings-label { font-size: 12px; color: var(--muted); }
+.settings-readout .settings-text { margin-bottom: 6px; }
 .settings-readout .settings-control { margin: 0; justify-content: flex-start; width: 100%; font-variant-numeric: tabular-nums; }
 .settings-readout .settings-status, .settings-readout .settings-list { color: var(--text); }
 .settings-readout .settings-control > .settings-note { flex-basis: 100%; }
@@ -135,8 +158,8 @@
 .settings-button {
   appearance: none;
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  min-height: 26px; max-width: 100%; padding: 3px 11px;
-  border: 0; border-radius: var(--radius); background: var(--raised); box-shadow: var(--control-shadow);
+  min-height: 24px; max-width: 100%; padding: 3px 11px;
+  border: 0; border-radius: var(--radius-sm); background: var(--raised); box-shadow: var(--control-shadow);
   color: var(--text); font: inherit; font-size: 13px; font-weight: 500; line-height: 1.3;
   text-align: center; overflow-wrap: anywhere; white-space: normal;
 }
@@ -148,33 +171,37 @@
 #settings-content button:disabled, #settings-content input:disabled, #settings-content select:disabled { opacity: .42; }
 #settings-content :is(input, select) { font: inherit; accent-color: var(--control); caret-color: var(--accent); }
 #settings-content :is(input[type="text"], input[type="password"], input[type="number"], input[type="time"]) { font-size: 13px; min-height: 26px; padding: 3px 8px; }
-/* Pop-up buttons in a row sit quietly until pointed at, as in System Settings. */
-#settings-content .settings-control select { max-width: min(100%, 320px); min-height: 26px; padding: 3px 26px 3px 10px; font-size: 13px; }
+#settings-content .settings-control select { max-width: min(100%, 320px); min-height: 24px; padding: 3px 26px 3px 10px; border-radius: var(--radius-sm); font-size: 13px; }
+/* A row's pop-up button sits quietly until pointed at, as in System Settings: no bezel, the chosen
+   item and its chevrons at the trailing edge, sized to what it shows. */
+#settings-content .settings-row > .settings-control > select { field-sizing: content; padding: 3px 22px 3px 8px; background-color: transparent; background-position: right 6px center; box-shadow: none; text-align: right; text-align-last: right; font-weight: 400; }
+#settings-content .settings-row > .settings-control > select:hover:not(:disabled), #settings-content .settings-row > .settings-control > select:focus-visible { background-color: var(--settings-group-hover); }
 #settings-content input[type="text"], #settings-content input[type="password"] { width: 200px; }
 #settings-content input.settings-number { width: 72px; text-align: right; font-variant-numeric: tabular-nums; }
 #settings-content input[type="range"] { width: 160px; max-width: 100%; margin: 4px 0; }
-.settings-unit { min-width: 26px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; }
+.settings-unit { min-width: 0; margin-left: -2px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.settings-control > output.settings-unit { min-width: 4ch; margin-left: 0; text-align: right; }
 .settings-segment.segmented > button, .settings-segment > .settings-segment-button { min-height: 24px; padding: 2px 12px; font-size: 12.5px; }
 .settings-segment:not(.segmented) { display: inline-flex; gap: 2px; padding: 2px; border-radius: 9px; background: var(--track); }
 .settings-segment:not(.segmented) > .settings-segment-button { appearance: none; border: 0; border-radius: 7px; background: transparent; box-shadow: none; color: var(--text); font: inherit; font-weight: 500; }
 .settings-segment:not(.segmented) > .settings-segment-button:hover:not(:disabled) { background: var(--hover); }
 .settings-segment:not(.segmented) > .settings-segment-button[aria-pressed="true"] { background: var(--segment-selected); box-shadow: 0 1px 2px rgb(0 0 0 / 22%), 0 0 0 .5px rgb(0 0 0 / 6%); }
 .settings-segment-button[aria-pressed="true"]:disabled { opacity: 1; }
-/* Switch: AppKit's NSSwitch, accent when on. */
-.settings-switch { position: relative; display: inline-flex; flex: 0 0 38px; width: 38px; height: 22px; }
-.settings-switch input { appearance: none; position: absolute; width: 100%; height: 100%; margin: 0; border: 0; border-radius: 11px; background: var(--track); box-shadow: inset 0 0 0 .5px rgb(0 0 0 / 10%); transition: background-color 180ms ease; }
+/* Switch: AppKit's small NSSwitch, the size System Settings rows use, accent when on. */
+.settings-switch { position: relative; display: inline-flex; flex: 0 0 32px; width: 32px; height: 19px; }
+.settings-switch input { appearance: none; position: absolute; width: 100%; height: 100%; margin: 0; border: 0; border-radius: 10px; background: var(--track); box-shadow: inset 0 0 0 .5px rgb(0 0 0 / 10%); transition: background-color 180ms ease; }
 .settings-switch input:checked { background: var(--primary); }
 .settings-switch input:focus-visible { outline: 3px solid color-mix(in srgb, var(--focus) 70%, transparent); outline-offset: 1px; }
-.settings-switch span { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2.5px rgb(0 0 0 / 30%), 0 0 0 .5px rgb(0 0 0 / 6%); pointer-events: none; transition: transform 220ms var(--ease-emphasized); }
-.settings-switch input:checked + span { transform: translateX(16px); }
-.settings-switch input:active:not(:disabled) + span { width: 22px; }
-.settings-switch input:checked:active:not(:disabled) + span { transform: translateX(12px); }
+.settings-switch span { position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 0 0 .5px rgb(0 0 0 / 6%); pointer-events: none; transition: transform 220ms var(--ease-emphasized), width 160ms var(--ease-out); }
+.settings-switch input:checked + span { transform: translateX(13px); }
+.settings-switch input:active:not(:disabled) + span { width: 18px; }
+.settings-switch input:checked:active:not(:disabled) + span { transform: translateX(10px); }
 .settings-switch input:disabled + span { opacity: .6; }
 .settings-shortcut { min-width: 64px; padding: 3px 9px; border-radius: 6px; background: var(--hover); box-shadow: inset 0 0 0 .5px var(--line); color: var(--text); font: inherit; font-size: 12.5px; font-variant-numeric: tabular-nums; text-align: center; letter-spacing: .04em; }
 .settings-hex { min-width: 62px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; letter-spacing: .04em; text-align: right; font-family: ui-monospace, "SF Mono", monospace; }
 
 /* ——— Disclosures: a row with a chevron at its trailing edge ——— */
-.settings-disclosure > summary { list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 40px; padding: 9px 0; color: var(--text); font-size: 13px; font-weight: 500; }
+.settings-disclosure > summary { list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 40px; padding: 9px 0; color: var(--text); font-size: 13px; font-weight: 400; }
 .settings-disclosure > summary::-webkit-details-marker { display: none; }
 .settings-disclosure-title { min-width: 0; overflow-wrap: anywhere; }
 .settings-disclosure-title > .settings-note { margin-top: 2px; }
@@ -183,17 +210,20 @@
 .settings-disclosure > summary:hover .settings-disclosure-indicator { color: var(--text); }
 .settings-disclosure-body { min-width: 0; padding: 0 0 10px; }
 .settings-disclosure-body p { color: var(--muted); font-size: 12px; line-height: 1.55; margin: 0 0 10px; max-width: 64ch; }
-.settings-disclosure-rows > .settings-disclosure-body { padding: 0 0 4px 14px; box-shadow: inset 2px 0 0 var(--divider); margin-bottom: 8px; }
-.settings-disclosure-rows > .settings-disclosure-body > .settings-note { padding-top: 10px; }
-/* Advanced on Performance: its own card whose groups appear inside once opened. */
+/* Rows a disclosure reveals sit indented under it, each with its own hairline. */
+.settings-disclosure-rows > .settings-disclosure-body { padding: 0 0 2px 16px; box-shadow: 0 -.5px 0 var(--divider); }
+.settings-disclosure-rows > .settings-disclosure-body > .settings-note { padding: 10px 0; }
+.settings-disclosure-rows > .settings-disclosure-body > .settings-note + .settings-row { box-shadow: 0 -.5px 0 var(--divider); }
+/* Advanced on Performance: a row in a box of its own; once opened, its groups follow as ordinary
+   groups rather than boxes inside a box. */
 .settings-card > .settings-performance-advanced { margin: 0; }
-.settings-performance-advanced { margin-top: 22px; padding: 0 14px; border-radius: var(--radius-md); background: var(--card); box-shadow: 0 0 0 .5px var(--divider), 0 1px 2px rgb(0 0 0 / 5%); }
-.settings-performance-advanced > summary { min-height: 52px; font-weight: 600; }
-.settings-performance-advanced > .settings-disclosure-body { padding: 0 0 14px; }
-.settings-performance-advanced .settings-group + .settings-group { margin-top: 16px; }
-.settings-performance-advanced .settings-card { background: var(--hover); box-shadow: none; }
-.settings-performance-diagnostics > .settings-disclosure-body { padding: 0 0 6px 14px; }
-.settings-page > .settings-disclosure:not(.settings-performance-advanced) { margin-top: 22px; padding: 0 14px; border-radius: var(--radius-md); background: var(--card); box-shadow: 0 0 0 .5px var(--divider); }
+.settings-performance-advanced { margin-top: 22px; }
+.settings-performance-advanced > summary { min-height: 52px; padding: 9px 12px; border-radius: var(--radius-lg); background: var(--settings-group); box-shadow: inset 0 0 0 .5px var(--settings-group-edge); }
+.settings-performance-advanced > summary .settings-disclosure-title { font-weight: 600; }
+.settings-performance-advanced > .settings-disclosure-body { padding: 22px 0 0; }
+.settings-performance-advanced > .settings-disclosure-body > .settings-group + .settings-group { margin-top: 22px; }
+.settings-performance-diagnostics > .settings-disclosure-body { padding: 0 0 6px 16px; }
+.settings-page > .settings-disclosure:not(.settings-performance-advanced) { margin-top: 22px; padding: 0 12px; border-radius: var(--radius-lg); background: var(--settings-group); box-shadow: inset 0 0 0 .5px var(--settings-group-edge); }
 .settings-energy-help > summary { min-height: 34px; padding: 6px 0; }
 .settings-notes h4 { color: var(--text); font-size: 12px; font-weight: 600; margin: 0 0 5px; }
 .settings-notes h4 + ul { margin-top: 0; }
@@ -202,7 +232,7 @@
 
 /* ——— Energy readout ——— */
 .settings-energy { padding: 12px 0 14px; }
-.settings-energy .settings-label { margin-bottom: 12px; }
+.settings-energy .settings-text { margin-bottom: 12px; }
 .settings-energy .settings-control { display: block; }
 .settings-energy-overview { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px 32px; }
 .settings-energy-total { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
@@ -224,27 +254,28 @@
 .qs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(196px, 1fr)); gap: 10px; }
 .qs-tile {
   display: flex; align-items: center; justify-content: flex-start; gap: 11px;
-  min-height: 60px; padding: 10px 12px; border-radius: var(--radius-lg);
-  background: var(--card); box-shadow: 0 0 0 .5px var(--divider), 0 1px 2px rgb(0 0 0 / 5%);
+  min-height: 58px; padding: 10px 12px; border-radius: 14px;
+  background: var(--settings-group); box-shadow: inset 0 0 0 .5px var(--settings-group-edge);
   text-align: left; white-space: normal; font-weight: 400;
   transition: background-color 160ms ease, box-shadow 160ms ease, transform 160ms var(--ease-out);
 }
-.qs-tile:hover:not(:disabled) { background: color-mix(in srgb, var(--card) 88%, var(--text)); }
+.qs-tile:hover:not(:disabled) { background: var(--settings-group-hover); }
 .qs-tile:active:not(:disabled) { transform: scale(.97); }
-.qs-icon { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--track); color: var(--text); transition: background-color 180ms ease, color 180ms ease, box-shadow 180ms ease; }
-.qs-tile.on .qs-icon { background: var(--primary); color: var(--on-primary); box-shadow: 0 3px 10px color-mix(in srgb, var(--primary) 40%, transparent); }
+.qs-icon { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--track); color: var(--text); transition: background-color 180ms ease, color 180ms ease, box-shadow 180ms ease; }
+.qs-tile.on .qs-icon { background: var(--primary); color: var(--on-primary); box-shadow: 0 3px 10px color-mix(in srgb, var(--primary) 35%, transparent); }
 .qs-text { min-width: 0; display: grid; gap: 1px; }
 .qs-title { font-size: 13px; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
-.qs-state { font-size: 11.5px; color: var(--muted); line-height: 1.3; overflow-wrap: anywhere; }
+.qs-state { font-size: 11px; color: var(--muted); line-height: 1.3; overflow-wrap: anywhere; }
 .qs-tile.on .qs-state { color: var(--accent); }
-.qs-modules { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; margin-top: 10px; }
-.qs-module { display: grid; gap: 10px; align-content: start; padding: 12px; border-radius: var(--radius-lg); background: var(--card); box-shadow: 0 0 0 .5px var(--divider), 0 1px 2px rgb(0 0 0 / 5%); }
+.qs-modules { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 10px; margin-top: 10px; }
+.qs-module { display: grid; gap: 10px; align-content: start; padding: 12px; border-radius: 14px; background: var(--settings-group); box-shadow: inset 0 0 0 .5px var(--settings-group-edge); }
 .qs-module-head { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .qs-module-title { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 .settings-go { min-width: 24px; min-height: 24px; padding: 2px; border-radius: 12px; background: transparent; box-shadow: none; color: var(--muted); }
 .settings-go:hover:not(:disabled) { background: var(--hover); color: var(--text); }
 .qs-module .segmented { display: flex; }
-.qs-module .segmented > button { flex: 1 1 0; min-width: 0; white-space: normal; padding: 3px 8px; font-size: 12px; line-height: 1.2; }
+/* Segments share the width by what they say, so a longer choice keeps to one line. */
+.qs-module .segmented > button { flex: 1 1 auto; min-width: 0; white-space: normal; padding: 3px 9px; font-size: 12px; line-height: 1.2; }
 .qs-note { color: var(--muted); font-size: 11.5px; line-height: 1.4; }
 
 /* ——— Appearance: miniature windows, swatches, icons ——— */
@@ -282,15 +313,16 @@
 #settings-content .settings-swatch-custom input[type="color"] { width: 30px; height: 22px; padding: 2px; border-radius: 6px; }
 .settings-icon-picker { margin: 0; padding: 14px 0 12px; border: 0; min-width: 0; }
 .settings-icon-picker > .settings-note { margin: 0 0 12px; max-width: 60ch; }
-.settings-icon-options { display: flex; flex-wrap: wrap; gap: 16px; }
-.settings-icon-option { display: grid; justify-items: center; gap: 4px; font-size: 12px; }
-.settings-icon-option img { display: block; width: 72px; height: 72px; border-radius: 16px; transition: transform 200ms var(--ease-out), filter 200ms ease; }
+/* Icons are chosen like the window pictures: a ring around the chosen one, the radio itself unseen. */
+.settings-icon-options { display: flex; flex-wrap: wrap; gap: 22px; padding: 0 4px; }
+.settings-icon-option { position: relative; display: grid; justify-items: center; gap: 8px; font-size: 12px; }
+.settings-icon-option img { display: block; width: 64px; height: 64px; border-radius: 15px; transition: transform 200ms var(--ease-out), box-shadow 160ms ease; }
 .settings-icon-option:hover img { transform: translateY(-2px); }
-.settings-icon-option:has(input:checked) img { filter: drop-shadow(0 0 0 var(--accent)) drop-shadow(0 4px 10px rgb(0 0 0 / 22%)); }
+.settings-icon-option:has(input:checked) img { box-shadow: 0 0 0 2.5px var(--bg), 0 0 0 5px var(--accent); }
 .settings-icon-option:has(input:checked) > span { color: var(--accent); font-weight: 600; }
-.settings-icon-option:has(input:focus-visible) img { outline: 3px solid color-mix(in srgb, var(--focus) 70%, transparent); outline-offset: 2px; }
+.settings-icon-option:has(input:focus-visible) img { outline: 3px solid color-mix(in srgb, var(--focus) 70%, transparent); outline-offset: 6px; }
 .settings-icon-option > span { display: flex; align-items: center; gap: 5px; }
-.settings-icon-option input { margin: 0; }
+.settings-icon-option input { position: absolute; opacity: 0; pointer-events: none; margin: 0; }
 .settings-icon-picker:disabled img { opacity: .45; }
 
 /* ——— Rules, playlists, automation ——— */
@@ -337,13 +369,15 @@
 .settings-inline { display: flex; align-items: center; gap: 7px; }
 .settings-inline input { flex: 1; }
 .settings-path { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; margin: 0 0 12px; line-height: 1.55; font-family: ui-monospace, "SF Mono", monospace; }
+.settings-card > .settings-path { margin: 0; padding: 12px 0 0; }
 .settings-help-links { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
-.settings-product { display: flex; align-items: center; gap: 16px; margin: 0 0 22px; padding: 18px; border-radius: var(--radius-lg); background: var(--card); box-shadow: 0 0 0 .5px var(--divider); }
+.settings-product { display: flex; align-items: center; gap: 16px; margin: 0 0 22px; padding: 16px 18px; border-radius: var(--radius-lg); background: var(--settings-group); box-shadow: inset 0 0 0 .5px var(--settings-group-edge); }
 .settings-product-icon { flex: none; width: 72px; height: 72px; }
 .settings-product > div { display: grid; gap: 2px; }
 .settings-product h3 { font-size: 18px; font-weight: 700; letter-spacing: -.02em; }
 .settings-product .settings-version { text-align: left; font-size: 12px; }
 .settings-update-status { padding: 12px 0 0; color: var(--text); font-size: 13px; }
+.settings-card > .settings-update-status + .settings-form-actions { box-shadow: none; padding-top: 10px; }
 .settings-attribution { padding: 12px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; max-width: 64ch; }
 .settings-footnote { margin: 16px 2px 0; color: var(--muted); font-size: 12px; line-height: 1.55; max-width: 64ch; }
 .settings-update-footnote { padding: 0 0 12px; }
@@ -366,17 +400,16 @@
 
 /* Folder paths use the full measure, with actions separated below. */
 .settings-row:is([data-key="library-path"], [data-key="candidate"]) { flex-direction: column; align-items: stretch; }
-.settings-row:is([data-key="library-path"], [data-key="candidate"]) > .settings-label { flex-basis: auto; font-weight: 600; }
-.settings-row:is([data-key="library-path"], [data-key="candidate"]) > .settings-label > .settings-note { max-width: none; margin-top: 6px; font-family: ui-monospace, "SF Mono", monospace; font-weight: 400; }
+.settings-row:is([data-key="library-path"], [data-key="candidate"]) > .settings-text { flex-basis: auto; }
+.settings-row:is([data-key="library-path"], [data-key="candidate"]) .settings-label { font-weight: 600; }
+.settings-row:is([data-key="library-path"], [data-key="candidate"]) .settings-text > .settings-note { max-width: none; margin-top: 6px; font-family: ui-monospace, "SF Mono", monospace; }
 .settings-row:is([data-key="library-path"], [data-key="candidate"]) > .settings-control { margin-left: 0; justify-content: flex-start; }
 #settings-storage [data-key="user-assets-note"] { margin: 0; }
 
 @container settings-page (max-width: 480px) {
   .settings-row:not(.settings-readout):not(:has(.settings-switch)) { flex-direction: column; align-items: stretch; }
-  .settings-row:not(.settings-readout):not(:has(.settings-switch)) > .settings-label { flex-basis: auto; }
+  .settings-row:not(.settings-readout):not(:has(.settings-switch)) > .settings-text { flex-basis: auto; }
   .settings-row:not(.settings-readout):not(:has(.settings-switch)) > .settings-control { margin-left: 0; justify-content: flex-start; }
-  .settings-row:not(.settings-readout):not(:has(.settings-switch)) > .settings-info { position: absolute; right: 0; }
-  .settings-row { position: relative; }
   .settings-energy-overview { flex-direction: column; align-items: flex-start; }
   .qs-modules { grid-template-columns: minmax(0, 1fr); }
 }

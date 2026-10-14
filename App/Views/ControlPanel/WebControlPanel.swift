@@ -779,7 +779,7 @@ final class WebPanelAssets: NSObject, WKURLSchemeHandler {
   private var tasks: [ObjectIdentifier: (ticket: UInt64, job: Task<Void, Never>)] = [:]
   private var nextTicket: UInt64 = 0
   private static let files: Set<String> = [
-    "index.html", "panel.js", "panel.css", "settings.js", "settings.css", "welcome.js",
+    "index.html", "panel.js", "panel.css", "settings.js", "settings.css", "settings-glyphs.js", "welcome.js",
     "welcome.css", "theme.js", "icons.js", "i18n.js", "property-label.js", "pixiv.js", "support-prompt.js",
     "collections.js", "presets.js", "placement.js", "compatibility.js", "letterbox.js", "plans.js", "backup.js", "playlist-order.js", "automation.js", "display-layouts.js",
     "app-icons/minimal.png", "app-icons/day.png", "app-icons/night.png",

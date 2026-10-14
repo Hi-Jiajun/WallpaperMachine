@@ -147,13 +147,17 @@ The sidebar opens the pages:
 
 Opening Settings swaps the sidebar's contents for **Back to library** (it returns
 to the library page Settings was opened from), a search field and the sections,
-each with a System Settings-style coloured glyph. Settings opens on **Quick
-Settings**; the sections, in order, are Quick Settings, General, Appearance,
+each with a System Settings-style glyph: a solid white symbol on a coloured rounded
+square, from the app's own drawn set (`WebUI/settings-glyphs.js`). Settings opens on
+**Quick Settings**; the sections, in order, are Quick Settings, General, Appearance,
 Desktop & Lock Screen, Playback & Power, Performance, Displays, Keyboard shortcuts,
-Library & Steam, Storage and About. Each section opens with a header: its glyph, its
-name and a one-line purpose. Groups are titled cards of rows. A long explanation
-keeps its first sentence on the row; the rest opens beneath the row from an ⓘ
-button, and that state is kept while the page lives.
+Library & Steam, Storage and About. Each section opens with a centred card: its glyph,
+its name and a one-line purpose. Groups are titled, translucent rounded boxes of rows,
+as System Settings draws them: the title and its explanation on the left, the control
+at the trailing edge. Pop-up buttons in a row show no bezel until pointed at, and
+switches are the small size. A long explanation keeps its first sentence under the
+title; the rest opens beneath the row from the ⓘ beside the title, and that state is
+kept while the page lives.
 
 - **Search** filters rows across every section by their own words in the language
   on show (labels, explanations and choices). Matching rows stay and sections without

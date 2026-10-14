@@ -4,6 +4,7 @@ import { backupGroup } from './backup.js';
 import { playlistOrderMarkup, movePlaylistItem, installPlaylistDrag } from './playlist-order.js';
 import { automationRows, solarLocationGroup, automationClick, automationInput, automationChange, automationSubmit, restoreAutomationFocus } from './automation.js';
 import { displayTransferRow, displayLayoutsGroup, displayLayoutInput, displayLayoutChange, displayLayoutClick, displayLayoutSubmit } from './display-layouts.js';
+import { settingsGlyph } from './settings-glyphs.js';
 
 const views = new WeakMap();
 let liveView = null;
@@ -11,21 +12,22 @@ let pendingSection = null;
 // Latest energy reading native pushed; it arrives every two seconds outside the snapshot.
 let energyReading = null;
 // Settings is laid out like System Settings: the window sidebar lists the sections, each with a
-// coloured glyph and a one-line purpose, and a search field that finds any setting by its words.
+// coloured glyph (settings-glyphs.js, keyed by the section's id) and a one-line purpose, and a
+// search field that finds any setting by its words.
 // Labels below are English source strings; every one is passed through t() where it is drawn.
 // The ids match SettingsSection in ControlPanelView.swift.
 const sections = [
-  ['quick', 'Quick Settings', 'toggleRight', 'blue', 'The switches people change most, in one place.'],
-  ['general', 'General', 'settings', 'gray', 'Language, startup and the welcome guide.'],
-  ['appearance', 'Appearance', 'sunMoon', 'indigo', 'How this window looks. Your wallpapers are not affected.'],
-  ['desktop', 'Desktop & Lock Screen', 'wallpaper', 'teal', 'How wallpapers meet the macOS desktop, lock screen and screen saver.'],
-  ['playback', 'Playback & Power', 'batteryCharging', 'green', 'When wallpapers pause, mute or stop on their own.'],
-  ['performance', 'Performance', 'gauge', 'orange', 'Energy use, picture quality and the renderers behind them.'],
-  ['displays', 'Displays', 'monitor', 'blue', 'Each display’s wallpaper, playlist and automatic changes.'],
-  ['shortcuts', 'Keyboard shortcuts', 'keyboard', 'gray', 'Shortcuts that work in any app, the Shortcuts app and links.'],
-  ['library', 'Library & Steam', 'folder', 'purple', 'Where wallpapers live, and the Steam tools that download them.'],
-  ['storage', 'Storage', 'hardDrive', 'gray', 'Disk space, backups and troubleshooting.'],
-  ['about', 'About', 'info', 'gray', 'Version, updates and credits.'],
+  ['quick', 'Quick Settings', 'blue', 'The switches people change most, in one place.'],
+  ['general', 'General', 'gray', 'Language, startup and the welcome guide.'],
+  ['appearance', 'Appearance', 'indigo', 'How this window looks. Your wallpapers are not affected.'],
+  ['desktop', 'Desktop & Lock Screen', 'teal', 'How wallpapers meet the macOS desktop, lock screen and screen saver.'],
+  ['playback', 'Playback & Power', 'green', 'When wallpapers pause, mute or stop on their own.'],
+  ['performance', 'Performance', 'orange', 'Energy use, picture quality and the renderers behind them.'],
+  ['displays', 'Displays', 'blue', 'Each display’s wallpaper, playlist and automatic changes.'],
+  ['shortcuts', 'Keyboard shortcuts', 'gray', 'Shortcuts that work in any app, the Shortcuts app and links.'],
+  ['library', 'Library & Steam', 'purple', 'Where wallpapers live, and the Steam tools that download them.'],
+  ['storage', 'Storage', 'gray', 'Disk space, backups and troubleshooting.'],
+  ['about', 'About', 'gray', 'Version, updates and credits.'],
 ];
 // A gap opens in the sidebar before these, grouping related sections as System Settings does.
 const sectionBreaks = new Set(['general', 'desktop', 'library', 'about']);
@@ -413,13 +415,13 @@ function draw(view) {
   const draft = (key, fallback) => drafts.has(key) ? drafts.get(key) : fallback;
   const attrs = (action, args = {}) => `data-action="${e(action)}" data-args="${e(JSON.stringify(args))}"`;
   const button = (label, action, args = {}, off = false, style = '') => `<button type="button" class="settings-button ${style}" ${attrs(action, args)}${disabled(off)}>${e(label)}</button>`;
-  // A row: its label and first sentence of explanation on the left, the control on the right, and
-  // an ⓘ between them that opens the rest of a long explanation beneath.
+  // A row: its title, the ⓘ that opens the rest of a long explanation, and the first sentence
+  // beneath the title on the left; the control at the trailing edge; the rest once opened below.
   const row = (key, label, control, note = '', style = '', controlKey = '') => {
     const [lead, more] = noteParts(note);
     const open = view.expanded.has(key);
-    const info = more ? `<button type="button" class="settings-info" data-action="moreInfo" data-args="${e(JSON.stringify({ key }))}" aria-expanded="${open}" aria-controls="settings-more-${e(key)}" title="${e(t('More about {label}', { label }))}" aria-label="${e(t('More about {label}', { label }))}">${helpers.icon('info', 15)}</button>` : '';
-    return `<div class="settings-row${style ? ` ${style}` : ''}${more ? ' has-more' : ''}" data-key="${e(key)}"><${controlKey ? `label for="settings-control-${e(controlKey)}"` : 'div'} class="settings-label">${e(label)}${lead ? `<span class="settings-note" id="settings-note-${e(key)}">${e(lead)}</span>` : ''}</${controlKey ? 'label' : 'div'}>${info}<div class="settings-control">${control}</div>${more ? `<p class="settings-note settings-more" id="settings-more-${e(key)}"${open ? '' : ' hidden'}>${e(more)}</p>` : ''}</div>`;
+    const info = more ? `<button type="button" class="settings-info" data-action="moreInfo" data-args="${e(JSON.stringify({ key }))}" aria-expanded="${open}" aria-controls="settings-more-${e(key)}" title="${e(t('More about {label}', { label }))}" aria-label="${e(t('More about {label}', { label }))}">${helpers.icon('info', 14)}</button>` : '';
+    return `<div class="settings-row${style ? ` ${style}` : ''}${more ? ' has-more' : ''}" data-key="${e(key)}"><div class="settings-text"><${controlKey ? `label for="settings-control-${e(controlKey)}"` : 'div'} class="settings-label">${e(label)}</${controlKey ? 'label' : 'div'}>${info}${lead ? `<span class="settings-note" id="settings-note-${e(key)}">${e(lead)}</span>` : ''}</div><div class="settings-control">${control}</div>${more ? `<p class="settings-note settings-more" id="settings-more-${e(key)}"${open ? '' : ' hidden'}>${e(more)}</p>` : ''}</div>`;
   };
   const toggle = (key, label, checked, data, off = false) => `<label class="settings-switch"><input id="settings-control-${e(key)}" data-key="${e(key)}" type="checkbox" role="switch" aria-label="${e(label)}" ${data}${checked ? ' checked' : ''}${disabled(off)}><span aria-hidden="true"></span></label>`;
   const select = (key, label, value, options, data, off = false) => `<select data-key="${e(key)}" aria-label="${e(label)}" ${data}${disabled(off)}>${options.map(([id, title]) => `<option value="${e(id)}"${String(value ?? '') === String(id) ? ' selected' : ''}>${e(title)}</option>`).join('')}</select>`;
@@ -427,9 +429,9 @@ function draw(view) {
   const disclosure = (key, title, content, style = '', note = '') => `<details class="settings-disclosure${style ? ` ${style}` : ''}" data-key="${e(key)}"><summary><span class="settings-disclosure-title">${e(title)}${note ? `<span class="settings-note">${e(note)}</span>` : ''}</span><span class="settings-disclosure-indicator" aria-hidden="true">${helpers.icon('chevronRight', 14)}</span></summary><div class="settings-disclosure-body">${content}</div></details>`;
   // A titled group of rows: the title above, the rows in one rounded card, as in System Settings.
   const group = (key, title, content) => `<section class="settings-group" data-key="${e(key)}"${title ? ` aria-labelledby="settings-group-${e(key)}"` : ''}>${title ? `<h3 class="settings-group-title" id="settings-group-${e(key)}">${e(title)}</h3>` : ''}<div class="settings-card">${content}</div></section>`;
-  const glyph = (id, size = 15) => { const entry = sections.find(([key]) => key === id); return `<span class="settings-glyph${size > 20 ? ' large' : ''}" data-color="${entry[3]}" aria-hidden="true">${helpers.icon(entry[2], size)}</span>`; };
+  const glyph = (id, size = 15) => { const entry = sections.find(([key]) => key === id); return `<span class="settings-glyph${size > 20 ? ' large' : ''}" data-color="${entry[2]}" aria-hidden="true">${settingsGlyph(id, size)}</span>`; };
   // A page opens with its glyph, its name and what it is for, so a section explains itself.
-  const section = (id, title, content, action = '') => `<section class="settings-page" id="settings-${id}" role="tabpanel" aria-labelledby="settings-tab-${id}" tabindex="0" data-key="page-${id}"${view.section === id ? '' : ' hidden'}><header class="settings-heading">${glyph(id, 26)}<div class="settings-heading-text"><h2>${e(title)}</h2><p class="settings-blurb">${e(t(sections.find(([key]) => key === id)[4]))}</p></div>${action}</header>${content}</section>`;
+  const section = (id, title, content, action = '') => `<section class="settings-page" id="settings-${id}" role="tabpanel" aria-labelledby="settings-tab-${id}" tabindex="0" data-key="page-${id}"${view.section === id ? '' : ' hidden'}><header class="settings-heading">${glyph(id, 34)}<div class="settings-heading-text"><h2>${e(title)}</h2><p class="settings-blurb">${e(t(sections.find(([key]) => key === id)[3]))}</p></div>${action}</header>${content}</section>`;
   const settingToggle = (key, label, off = false, note = '', extra = '') => row(key, t(label), toggle(key, t(label), draft(key, settings[key]), `data-setting="${key}"${note ? ` aria-describedby="settings-note-${key}"` : ''}`, off || busy || unavailable) + extra, note, '', key);
   // The login item is registered but switched off in System Settings; only the user can allow it there.
   const loginNote = !settings.launchAtLoginAvailable ? t('Move the app to Applications to enable.')
@@ -593,7 +595,7 @@ function draw(view) {
       ? t('Reduced quality applies while the Mac is hot, and wallpapers pause if it becomes very hot. Right now it is {state}.', { state: t(thermalStates[settings.thermalState] || 'normal') })
       : t('Applies while macOS reports the Mac as hot or very hot, which is when it starts slowing itself down. Right now it is {state}.', { state: t(thermalStates[settings.thermalState] || 'normal') }))
     + row('focus', t('Focus'), button(t('Open Focus Settings…'), 'openFocusSettings', {}, busy), settings.focusAction && settings.focusAction !== 'keepRunning' ? t('A Focus filter is in effect now: {action}.', { action: t(focusActions[settings.focusAction] || settings.focusAction) }) : t('In System Settings → Focus, add the WallpaperMachine filter to pause, mute, stop or temporarily switch wallpapers. No Focus filter is in effect now.'))
-    + row('app-rules', t('App rules'), '', t('Pause, mute or stop wallpapers while a chosen app is running or in front.')) + disclosure('app-rules-editor', t('Edit…'), rulesEditor));
+    + disclosure('app-rules-editor', t('App rules'), rulesEditor, 'settings-disclosure-rows', t('Pause, mute or stop wallpapers while a chosen app is running or in front.')));
   const quality = group('performance-quality', t('Quality'),
     row('quality-preset', t('Preset'), `<div class="settings-segment" role="group" aria-label="${e(t('Quality preset'))}">${presetButtons}</div>`, t('Low, Medium and High set the frame-rate limit and render scale together. Custom means the current values match none of those.'))
     + row('frame-rate-cap', t('Frame rate limit'), `<input data-key="frameRateCap" type="range" aria-label="${e(t('Frame rate limit'))}" min="10" max="${capSlider.max}" step="1" value="${e(capDraft)}" data-setting="frameRateCap"${disabled(busy || unavailable)}><output class="settings-unit" data-value-for="frameRateCap">${e(frameRateCapReadout(capDraft, capSlider.max))}</output>`, t('At the top of the slider there is no limit, and each display runs at its own frame rate: up to 60 fps unless you chose more for it. A lower value caps every display; saved per-display frame rates are not rewritten.'))
@@ -645,7 +647,7 @@ function draw(view) {
   // Appearance and tone are pictures of a window, the accent a row of swatches and a colour well.
   const choiceCards = (name, label, options, kind) => `<fieldset class="settings-choice-cards" data-key="${e(themeKey(`${name}-picker`))}"${disabled(themeBusy(name))}><legend class="sr-only">${e(label)}</legend>${options.map(([id, title]) => `<label class="settings-choice-card" data-key="${e(themeKey(`${name}-${id}`))}"><span class="window-mini" data-${kind}="${e(id)}" aria-hidden="true"><span class="window-mini-sidebar"></span><span class="window-mini-content"><span></span><span></span><span></span></span></span><input type="radio" name="theme-${e(name)}" value="${e(id)}" data-theme-setting="${e(name)}"${themeValue(name) === id ? ' checked' : ''}${disabled(themeBusy(name))}><span class="settings-choice-title">${e(t(title))}</span></label>`).join('')}</fieldset>`;
   const swatches = `<div class="settings-swatches" role="radiogroup" aria-label="${e(t('Accent color'))}" data-key="${e(themeKey('accent-swatches'))}">${accentPresets.map(hex => `<label class="settings-swatch" data-swatch="${e(hex)}" title="${e(hex.toUpperCase())}"><input type="radio" name="theme-accent" value="${e(hex)}" data-theme-setting="accent" aria-label="${e(hex.toUpperCase())}"${accent.toLowerCase() === hex ? ' checked' : ''}${disabled(themeBusy('accent'))}></label>`).join('')}<label class="settings-swatch settings-swatch-custom" title="${e(t('Custom color'))}"><input data-key="${e(themeKey('accent'))}" type="color" aria-label="${e(t('Accent color'))}" value="${e(accent)}" data-theme-setting="accent"${disabled(themeBusy('accent'))}></label><output class="settings-hex" data-value-for="${e(themeKey('accent'))}">${e(accent.toUpperCase())}</output></div>`;
-  const appearance = group('appearance-theme', t('Appearance'), choiceCards('mode', t('Appearance'), [['system', 'System (Auto)'], ['light', 'Light'], ['dark', 'Dark']], 'mode')
+  const appearance = group('appearance-theme', '', choiceCards('mode', t('Appearance'), [['system', 'System (Auto)'], ['light', 'Light'], ['dark', 'Dark']], 'mode')
       + row(themeKey('accent-row'), t('Accent color'), swatches, t('Colors buttons, links and focus rings.')))
     + group('appearance-tone', t('Surface tone'), choiceCards('tone', t('Surface tone'), [['neutral', 'Neutral'], ['warm', 'Warm'], ['cool', 'Cool']], 'tone'))
     + group('appearance-icon', t('App icon'), iconPicker)
@@ -806,7 +808,7 @@ function draw(view) {
     + `<div class="settings-form-actions">${button(t('GNU General Public License v2'), 'openExternal', { url: 'https://www.gnu.org/licenses/old-licenses/gpl-2.0.html' })}</div>`);
   // Quick Settings: the everyday switches as Control Center tiles, and the three choices people
   // reach for most as segmented controls, each leading to its full section.
-  const quickTile = (key, title, glyphName, on, { off = false, note = '', badge = '' } = {}) => `<button type="button" class="qs-tile${on ? ' on' : ''}" role="switch" aria-checked="${on}" data-key="qs-${e(key)}" data-action="setting" data-args="${e(JSON.stringify({ key, value: !on }))}" title="${e(note || title)}"${disabled(off || busy || unavailable)}><span class="qs-icon">${helpers.icon(glyphName, 17)}</span><span class="qs-text"><span class="qs-title">${e(title)}</span><span class="qs-state">${e(note || (on ? t('On') : t('Off')))}${badge ? ` · ${e(badge)}` : ''}</span></span></button>`;
+  const quickTile = (key, title, glyphName, on, { off = false, note = '', badge = '' } = {}) => `<button type="button" class="qs-tile${on ? ' on' : ''}" role="switch" aria-checked="${on}" data-key="qs-${e(key)}" data-action="setting" data-args="${e(JSON.stringify({ key, value: !on }))}" title="${e(note || title)}"${disabled(off || busy || unavailable)}><span class="qs-icon">${settingsGlyph(glyphName, 18)}</span><span class="qs-text"><span class="qs-title">${e(title)}</span><span class="qs-state">${e(note || (on ? t('On') : t('Off')))}${badge ? ` · ${e(badge)}` : ''}</span></span></button>`;
   const quickModule = (key, title, sectionID, body, note = '') => `<div class="qs-module" data-key="qs-${e(key)}"><div class="qs-module-head">${glyph(sectionID)}<span class="qs-module-title">${e(title)}</span><button type="button" class="settings-go" data-action="goSection" data-args="${e(JSON.stringify({ section: sectionID }))}" title="${e(t('Open {section}', { section: t(sections.find(([id]) => id === sectionID)[1]) }))}" aria-label="${e(t('Open {section}', { section: t(sections.find(([id]) => id === sectionID)[1]) }))}">${helpers.icon('chevronRight', 14)}</button></div>${body}${note ? `<p class="qs-note">${e(note)}</p>` : ''}</div>`;
   const segment = (key, label, value, options, action, args) => `<div class="segmented" role="group" aria-label="${e(label)}" data-key="${e(key)}">${options.map(([id, title]) => `<button type="button" aria-pressed="${String(value) === String(id)}" data-key="${e(`${key}-${id}`)}" data-action="${action}" data-args="${e(JSON.stringify(args(id)))}"${disabled(action === 'themeSetting' ? themeBusy('mode') : busy || unavailable)}>${e(t(title))}</button>`).join('')}</div>`;
   const lockState = settings.lockScreenBusy ? `${settings.lockScreenStatus || t('Updating')}…` : lockUnavailable ? t('Unavailable') : '';
@@ -816,8 +818,8 @@ function draw(view) {
     quickTile('wallpapersMuted', t('Mute All'), draft('wallpapersMuted', settings.wallpapersMuted) ? 'volumeX' : 'volume', draft('wallpapersMuted', settings.wallpapersMuted) === true),
     quickTile('lockScreenEnabled', t('Lock Screen'), 'lock', draft('lockScreenEnabled', settings.lockScreenEnabled) === true, { off: lockUnavailable || settings.lockScreenBusy, note: lockState, badge: t('Experimental') }),
     quickTile('screenSaverEnabled', t('Screen Saver'), 'monitorPlay', draft('screenSaverEnabled', settings.screenSaverEnabled) === true, { off: screenSaverUnavailable || settings.screenSaverBusy, note: saverState, badge: t('Experimental') }),
-    quickTile('writeDesktopPicture', t('Desktop Picture'), 'wallpaper', draft('writeDesktopPicture', settings.writeDesktopPicture) !== false, { off: settings.desktopPictureLocked === true }),
-    enabledDisplayCount >= 2 || settings.playOnlyOnActiveDisplay ? quickTile('playOnlyOnActiveDisplay', t('Active Display Only'), 'mousePointerClick', draft('playOnlyOnActiveDisplay', settings.playOnlyOnActiveDisplay) === true) : '',
+    quickTile('writeDesktopPicture', t('Desktop Picture'), 'desktop', draft('writeDesktopPicture', settings.writeDesktopPicture) !== false, { off: settings.desktopPictureLocked === true }),
+    enabledDisplayCount >= 2 || settings.playOnlyOnActiveDisplay ? quickTile('playOnlyOnActiveDisplay', t('Active Display Only'), 'pointer', draft('playOnlyOnActiveDisplay', settings.playOnlyOnActiveDisplay) === true) : '',
     quickTile('hideAfterActivating', t('Hide After Applying'), 'appWindow', draft('hideAfterActivating', settings.hideAfterActivating) === true),
     quickTile('livePropertyEdits', t('Live Edits'), 'eye', draft('livePropertyEdits', settings.livePropertyEdits) === true),
   ].join('');

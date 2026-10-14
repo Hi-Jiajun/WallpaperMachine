@@ -111,7 +111,11 @@ Adding a new target, source directory, resource or build setting means editing
 - Icons are Lucide glyphs vendored in `WebUI/icons.js` (ISC, version noted in the
   file header) and rendered through `panel.js`'s `icon(name)` helper. To add one, copy
   its node list from the Lucide package under the panel's name; never hand-draw SVG
-  paths or load an icon font.
+  paths there or load an icon font. The one exception is `WebUI/settings-glyphs.js`:
+  the solid, System Settings-style symbols for the Settings sections and Quick
+  Settings tiles are the project's own drawings on the same 24 × 24 grid, optically
+  centred on (12, 12) and rendered through `settingsGlyph(name)`. Never copy Apple's
+  symbols or icons into it.
 - Keep the accessibility scaffolding: `aria-label` on landmarks, `role="alert"`
   and `aria-live` on status regions, real `<button>`/`<dialog>` elements.
 

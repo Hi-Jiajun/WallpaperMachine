@@ -88,8 +88,7 @@ export function automationRows(ctx, display, off) {
   const failure = error(`automation-error-${id}`, value.error) + (value.error ? button(t('Retry automatic change'), 'automationRetry', { displayID: id }, off) : '');
   return disclosure(`automation-${id}`, t('Automatic wallpaper selection'), rows + body + focused + failure
     + `<p class="settings-note">${e(t('Choosing a wallpaper stops this display’s playlist. Choosing a saved playlist starts that plan. Focus choices temporarily override these rules.'))}</p>`
-    + button(t('Refresh Spaces'), 'automationRefreshSpaces', {}, off)
-    + button(t('Open Focus Settings…'), 'openFocusSettings', {}, off), 'settings-disclosure-rows');
+    + `<div class="settings-form-actions">${button(t('Refresh Spaces'), 'automationRefreshSpaces', {}, off)}${button(t('Open Focus Settings…'), 'openFocusSettings', {}, off)}</div>`, 'settings-disclosure-rows');
 }
 
 export function solarLocationGroup(ctx) {
