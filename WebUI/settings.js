@@ -877,6 +877,12 @@ function applySearch(view) {
       }
     }
     if (query) {
+      // An open disclosure whose title missed folds away too, unless a setting inside it matched,
+      // so no explanation or editor is left showing without the title it belongs to.
+      for (const details of page.querySelectorAll('details.settings-disclosure')) {
+        const titled = !details.querySelector(':scope > summary')?.classList.contains('search-miss');
+        details.classList.toggle('search-miss', !titled && !details.querySelector(`:scope > .settings-disclosure-body :is(${units}):not(.search-miss)`));
+      }
       for (const card of page.querySelectorAll('.settings-group')) {
         const titleMatch = card.querySelector(':scope > .settings-group-title')?.textContent.toLocaleLowerCase().includes(query);
         card.classList.toggle('search-miss', !titleMatch && !card.querySelector(`:is(${units}):not(.search-miss)`));
@@ -886,7 +892,7 @@ function applySearch(view) {
       page.hidden = !visible;
       counts.set(id, page.querySelectorAll(`:is(${units}):not(.search-miss)`).length);
     } else {
-      for (const card of page.querySelectorAll('.settings-group.search-miss')) card.classList.remove('search-miss');
+      for (const card of page.querySelectorAll('.settings-group.search-miss, details.settings-disclosure.search-miss')) card.classList.remove('search-miss');
       page.hidden = id !== view.section;
     }
   }

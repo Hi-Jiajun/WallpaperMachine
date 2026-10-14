@@ -1064,6 +1064,7 @@ final class ControlPanelShellTests: ControlPanelTestCase {
         field.value = '';
         field.dispatchEvent(new Event('input', {bubbles: true}));
         result.cleared = [...document.querySelectorAll('.settings-page')].filter(page => !page.hidden).map(page => page.id);
+
         return result;
         """) as? [String: Any]
       XCTAssertEqual(search?["title"] as? String, "Search results")
@@ -1071,6 +1072,27 @@ final class ControlPanelShellTests: ControlPanelTestCase {
       XCTAssertEqual(search?["row"] as? Bool, true, "The matching row is on show")
       XCTAssertGreaterThanOrEqual(search?["count"] as? Int ?? 0, 2, "The sidebar counts the section's matches")
       XCTAssertEqual(search?["dimmed"] as? Bool, true, "Sections without a match fade")
+
+      // A disclosure the user opened, in a group that does match, whose own words do not.
+      let folded = try await panel.js("""
+        const opened = document.querySelector('[data-key="app-rules-editor"]');
+        opened.open = true;
+        const field = document.querySelector('[data-settings-search]');
+        field.value = 'On battery';
+        field.dispatchEvent(new Event('input', {bubbles: true}));
+        const result = {
+          group: document.querySelector('[data-key="performance-playback"]').getClientRects().length > 0,
+          headless: opened.querySelector('.settings-disclosure-body').getClientRects().length > 0,
+        };
+        field.value = '';
+        field.dispatchEvent(new Event('input', {bubbles: true}));
+        result.reopened = opened.open && !opened.classList.contains('search-miss');
+        return result;
+        """) as? [String: Any]
+      XCTAssertEqual(folded?["group"] as? Bool, true, "The group holding the match stays")
+      XCTAssertEqual(
+        folded?["headless"] as? Bool, false, "An open disclosure without a match folds away with its title")
+      XCTAssertEqual(folded?["reopened"] as? Bool, true, "It is back, still open, once the search clears")
       XCTAssertEqual(search?["cleared"] as? [String], ["settings-quick"], "Clearing the search returns to the section")
 
       let explanation = try await panel.js("""
