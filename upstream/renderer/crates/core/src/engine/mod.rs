@@ -251,7 +251,9 @@ impl WallpaperEngine {
         let model = DisplayStateModel::from_config(config)?;
         let actor_state = EngineState::with_display_model(model);
         let initial_snapshot = actor_state.snapshot();
-        let mouse_buttons = Arc::new(Mutex::new(MouseButtonTracker::new()));
+        let mouse_buttons = Arc::new(Mutex::new(MouseButtonTracker::with_press_test(Box::new(
+            crate::window::press_lands_on_desktop,
+        ))));
         let snapshots = Arc::new(EngineSnapshotPublisher::new(initial_snapshot, mouse_buttons.clone()));
         let actor = EngineActorHandle::spawn(
             backend,

@@ -551,6 +551,21 @@ and skips the actor round trip when nothing changed. One sample delivers enter, 
 ordered button transitions in one actor turn. These are Rust/native runtime contracts, not
 persisted or uniffi snapshot fields.
 
+A button press reaches scenes only when it lands on the desktop, as in Wallpaper Engine,
+which sets its pointer-down flag only while the window under the cursor is the desktop or
+its own wallpaper. `MouseButtonTracker` (`core/src/window.rs`) learns a press from whichever
+sees it first, the global monitor's edge or a sample's level, and asks its injected hit test
+once, on the main thread: `press_lands_on_desktop` takes the window
+`windowNumberAtPoint:belowWindowWithWindowNumber:` names at the cursor and its
+`kCGWindowLayer`. A window below layer 0 (the system wallpaper, Finder's icons, desktop
+widgets, our wallpaper windows), no window, or one gone before its layer is read counts as
+the desktop, the rule `WebWallpaperMouseRouting` routes web wallpapers by; any other
+window, this app's own included, withholds the press, its held level and its release. A
+delivered press is always released, wherever the pointer ends. Motion, held samples and
+releases never hit-test. A button first seen already held after a monitor gap is adopted as
+a level only if the cursor is over the desktop then; a press seen before the gap keeps its
+verdict.
+
 Each renderer also reports whether its committed scene reads system audio through
 `owe_scene_wallpaper_set_audio_requirement_callback`. The report travels like pointer
 capability: a latest-value relay per renderer object into the core actor, an observer on

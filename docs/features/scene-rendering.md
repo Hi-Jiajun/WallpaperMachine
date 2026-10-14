@@ -58,6 +58,15 @@ own effects).
 `input.cursorWorldPosition` stays 2D (`z = 0`), so a scripted orbit drag may not
 match Wallpaper Engine.
 
+A scene follows the cursor anywhere on its display, but, as in Wallpaper Engine, a
+mouse press counts only where it lands on the desktop: the wallpaper, Finder's icons or
+a desktop widget. A click in another app's window, in the menu bar or the Dock, or in
+this app's own windows is not a click on the wallpaper, so neither scripts
+(`cursorDown`, `cursorClick`, `cursorUp`) nor effects that react to a held button
+(cursor ripples, fluid simulations) see it, or its release, even when the pointer is
+dragged onto the desktop before the button is let go. A press the wallpaper did get is
+always released, wherever the pointer ends up.
+
 Scene lighting is the author's own shader reading the light positions and
 premultiplied colours, which both renderers fill from the scene's lights the same
 way. Both renderers apply a material's depth state and cull mode the same way: a

@@ -582,6 +582,18 @@ engine to redo, and when.
   `::mouse_polling_in_a_monitor_gap_checks_the_cursor_without_engine_work` and
   `engine::snapshot::tests::a_paused_scene_is_not_a_pointer_consumer_and_its_resume_drops_paused_clicks`.
   A consumer with no input is never sampled; a paused scene is not a consumer.
+- **A press counts only on the desktop** — in `window::tests`:
+  `a_press_over_another_window_reaches_no_wallpaper_and_neither_does_its_release`,
+  `a_press_first_seen_by_a_sample_is_judged_once_and_stays_hidden_while_held`,
+  `a_press_the_wallpapers_received_is_released_wherever_the_pointer_ends`,
+  `a_desktop_tap_and_a_window_press_in_one_sample_deliver_only_the_tap`,
+  `a_button_held_through_the_gap_is_adopted_only_over_the_desktop`,
+  `a_press_seen_before_the_gap_keeps_its_verdict_through_it` and
+  `only_windows_stacked_beneath_application_windows_count_as_the_desktop`. A press over
+  another application's window must reach no scene, nor its level or release; a delivered
+  press is always released; the hit test runs once per press, never per move or sample.
+  The window-server query itself (`press_lands_on_desktop`) needs a live desktop and is
+  not exercised by any test.
 - **A global resume keeps covered displays paused** — `display_presentation::a_global_resume_never_restarts_a_display_that_is_still_covered`:
   the scene pause log must never show `paused=false` for a display that is still
   suspended.
