@@ -72,6 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var globalHotKeys: GlobalHotKeys?
     private var playbackPreferencesObserver: NSObjectProtocol?
     private var wallpaperEnergy: WallpaperEnergyRecorder?
+    private var telemetry: TelemetryService?
     /// Last presentation the bridge accepted, so leaving unloaded clears that flag first.
     private var appliedGlobalPresentation: GlobalPresentation = .running
     private var store: BridgeStore?
@@ -304,6 +305,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 // Any engine change (playback, assignment, quality) ends the interval
                 // being measured; its two ends could otherwise match across it.
                 self.wallpaperEnergy?.invalidate()
+                self.telemetry?.invalidateFrames()
                 // Web wallpapers live in host windows; open or close them before
                 // the poster sync and the presentation policy look at the desktop.
                 self.webWallpaperHost?.reconcile()
@@ -380,6 +382,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                         && presentation != .unloaded
                     let resuming = presentation == .running && self.appliedGlobalPresentation != .running
                     self.wallpaperEnergy?.invalidate()
+                    self.telemetry?.invalidateFrames()
                     Task {
                         // Whether the bridge took it or not: it folds presentation
                         // into each web and native video wallpaper's `paused`, and
@@ -473,6 +476,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                         stillVisible: suspended && self.presentationPolicy?.isSuspendedInPlainSight(displayID: displayID) == true)
                     self.nativeVideoHost?.setPresentationSuspended(suspended, forDisplay: displayID)
                     self.wallpaperEnergy?.invalidate()
+                    self.telemetry?.invalidateFrames()
                     Task {
                         // As on the global path: the display's own suspension is part
                         // of that display's `paused`, and nothing else reads it again.
@@ -542,6 +546,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             // it never unloads or pauses anything.
             let pressure = MemoryPressureMonitor(presentingScenes: { [weak store] in
                 MemoryPressureMonitor.presentingSceneCount(store?.settingsSnapshot.sceneUpdateModes ?? [])
+            }, report: { [weak self] report in
+                if report.isWarning { AppLog.warn(report.message) } else { AppLog.info(report.message) }
+                self?.telemetry?.recordPressure(report)
             })
             memoryPressureMonitor = pressure
             pressure.start()
@@ -583,6 +590,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             hotKeys.start()
             Task { await WallpaperFocusFilter.refreshState() }
             startWallpaperEnergyRecorder(store: store)
+            startTelemetry(store: store)
             do {
                 try lockScreen?.start()
                 if lockScreen?.isRequested != true { try startDesktopWallpaperSync() }
@@ -747,6 +755,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         recorder.start()
     }
 
+    /// See `TelemetryService`. It does nothing until **Send performance data** is on, and
+    /// opens no frame window in a run that asked for a diagnostic window through the
+    /// environment, so the two never switch the same counters.
+    private func startTelemetry(store: BridgeStore) {
+        let diagnosticsRequested = ProcessInfo.processInfo.environment[RuntimeDiagnosticsRequest.durationKey] != nil
+        let sampler = diagnosticsRequested
+            ? nil : TelemetrySampler(source: store) { [weak self] in self?.telemetryFrameContext() }
+        var inputs = TelemetryService.Inputs()
+        inputs.kind = { [weak store] id in store?.librarySnapshot.wallpapers.first { $0.id == id }?.kind }
+        inputs.energy = { [weak store] in store?.wallpaperEnergyRatings?.entries ?? [:] }
+        inputs.loadJournal = ClientPaths.supportURL.appendingPathComponent(DiagnosticsBundle.loadJournalFileName)
+        let service = TelemetryService(
+            preferences: TelemetryPreferences(), spool: TelemetrySpool(), uploader: TelemetryClient(),
+            sampler: sampler, inputs: inputs)
+        telemetry = service
+        store.telemetry = service
+        service.start()
+    }
+
+    /// The scenes a frame window credits, by display. Nil while nothing plays; a display
+    /// suspended on its own is left out, so its paused surface is not counted.
+    private func telemetryFrameContext() -> TelemetryFrameContext? {
+        guard let store, let policy = presentationPolicy, !shutdownInProgress,
+              policy.globalPresentation == .running,
+              store.appSnapshot.playbackState == .playing
+        else { return nil }
+        let settings = store.settingsSnapshot
+        let kinds = Dictionary(store.librarySnapshot.wallpapers.map { ($0.id, $0.kind) },
+                               uniquingKeysWith: { first, _ in first })
+        let modes = Dictionary(settings.sceneUpdateModes.map { ($0.displayId, $0.mode) },
+                               uniquingKeysWith: { first, _ in first })
+        var scenes: [UInt32: TelemetryFrameContext.Scene] = [:]
+        for scene in settings.sceneRenderers where !policy.suspendedDisplayIDs.contains(scene.displayId) {
+            scenes[scene.displayId] = TelemetryFrameContext.Scene(
+                wallpaperID: scene.wallpaperId, kind: TelemetryReport.Kind(kinds[scene.wallpaperId]),
+                backend: scene.backend, fallback: scene.fallbackReason != nil, mode: modes[scene.displayId])
+        }
+        let process = ProcessInfo.processInfo
+        return TelemetryFrameContext(
+            scenes: scenes, displays: TelemetryEnvironment.displaysByID(),
+            frameRateCap: settings.effectiveFrameRateCap, renderScale: settings.renderScale,
+            reducedQuality: !settings.qualityThrottle.isEmpty, battery: settings.onBatteryPower,
+            lowPower: process.isLowPowerModeEnabled, thermal: TelemetryVocabulary.thermal(process.thermalState))
+    }
+
     /// Nil whenever the app's energy is not one wallpaper's: playback paused or suspended
     /// (display sleep, lock, app rules, Low Power Mode, heat, a Focus filter, other audio,
     /// battery pause), the panel on screen
@@ -781,9 +834,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     /// Opens a bounded diagnostic window when the environment explicitly asks
-    /// for one. Absent the variable nothing is started, nothing is counted and
-    /// no timer exists: the renderer's counters stay off and the in-process
-    /// counters stay outside a session.
+    /// for one. Absent the variable this starts nothing, counts nothing and
+    /// creates no timer. The renderer's counters then run only in the frame
+    /// windows of **Send performance data** when the user has turned it on
+    /// (`TelemetryService`), and the in-process counters stay outside a session.
+    /// With the variable set, telemetry opens no frame window at all.
     ///
     /// `WALLPAPER_MACHINE_DIAGNOSTICS` is a duration in seconds, and
     /// `WALLPAPER_MACHINE_DIAGNOSTICS_DELAY` optionally opens the window that
@@ -842,6 +897,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         stopPlaybackMonitoring()
         wallpaperEnergy?.stop()
         wallpaperEnergy = nil
+        telemetry?.stop()
+        telemetry = nil
         presentationPolicy?.stop()
         presentationPolicy = nil
         windowAuditor?.stop()
@@ -1023,6 +1080,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 stopPlaybackMonitoring()
                 wallpaperEnergy?.stop()
                 wallpaperEnergy = nil
+                telemetry?.stop()
+                telemetry = nil
                 presentationPolicy?.stop()
                 presentationPolicy = nil
                 windowAuditor?.stop()
@@ -1946,6 +2005,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private func showWallpaperPreview(_ selection: WallpaperPreviewSession.Selection) {
         guard let store, !shutdownInProgress, !shutdownComplete else { return }
         wallpaperEnergy?.invalidate()
+        telemetry?.invalidateFrames()
         if previewWindow == nil {
             let loader = WallpaperPreviewLoader()
             let session = WallpaperPreviewSession(load: { [weak store] selection in
@@ -1971,6 +2031,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 guard let self, self.previewWindow === controller else { return }
                 self.previewWindow = nil
                 self.wallpaperEnergy?.invalidate()
+                self.telemetry?.invalidateFrames()
                 if self.controlPanelWindow?.isVisible != true, self.whatsNewWindow == nil {
                     NSApp.setActivationPolicy(.accessory)
                 }

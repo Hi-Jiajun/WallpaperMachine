@@ -32,6 +32,8 @@ enum ClientPaths {
         return candidates.first(where: { hasSceneAssets(at: $0) }) ?? managedAssetsURL
     }
     static var managedSteamCMDURL: URL { supportURL.appendingPathComponent("SteamCMD", isDirectory: true) }
+    /// Performance data waiting to be sent, kept only while sending is on (docs/features/telemetry.md).
+    static var telemetryURL: URL { supportURL.appendingPathComponent("Telemetry", isDirectory: true) }
     /// Everything below is rebuilt on demand, so it stays out of Time Machine.
     static var cacheURL: URL { supportURL.appendingPathComponent("Cache", isDirectory: true) }
     static var thumbnailCacheURL: URL { cacheURL.appendingPathComponent("WorkshopThumbnails", isDirectory: true) }

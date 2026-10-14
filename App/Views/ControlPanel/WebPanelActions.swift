@@ -16,6 +16,7 @@ extension WebPanelController {
     if try await performCompatibility(action, request: request) { return }
     if try await performLetterbox(action, request: request) { return }
     if try await performImagePlacement(action, request: request) { return }
+    if try await performTelemetry(action, request: request) { return }
     if try await performDisplayPosition(action, request: request) { return }
     switch action {
     case "ready":
@@ -157,22 +158,30 @@ extension WebPanelController {
       // offered once and afterwards only on request from Settings.
       welcomeSeen = true
       defaults.set(true, forKey: Self.welcomeSeenKey)
+      // The guide's Preferences page carries the performance data switch; someone who left
+      // before reaching it is asked once later instead.
+      if body["preferencesShown"] as? Bool == true { store.supportPrompt?.recordTelemetryAsked() }
       return
     case "dragSelectLearned":
       dragSelectLearned = true
       defaults.set(true, forKey: Self.dragSelectLearnedKey)
       return
     case "supportPromptShown":
-      store.supportPrompt?.markPresented()
+      store.supportPrompt?.markPresented(try promptKind(request))
       return
     case "supportPromptChoice":
+      let prompt = try promptKind(request)
       let url: URL
-      switch try request.string("choice") {
-      case "dismiss":
-        store.supportPrompt?.markPresented()
+      switch (prompt, try request.string("choice")) {
+      case (_, "dismiss"):
+        store.supportPrompt?.markPresented(prompt)
         return
-      case "star": url = AppUpdateConfiguration.repositoryURL
-      case "supporter":
+      case (.telemetry, "enableTelemetry"):
+        store.telemetry?.setEnabled(true)
+        store.supportPrompt?.markPresented(.telemetry)
+        return
+      case (.support, "star"): url = AppUpdateConfiguration.repositoryURL
+      case (.support, "supporter"):
         let path = language.hasPrefix("zh") ? "zh/pricing/" : "pricing/"
         url = URL(string: "https://www.wallpapermachine.app/\(path)")!
       default: throw WebPanelRequest.invalid
@@ -180,7 +189,7 @@ extension WebPanelController {
       guard openSupportURL(url) else {
         throw WallpaperActionError(message: String(localized: "The link could not be opened. Please try again."))
       }
-      store.supportPrompt?.markPresented()
+      store.supportPrompt?.markPresented(prompt)
       return
     case "workshopSelect":
       guard let id = body["id"] as? String, let item = workshop.workshopItem(id: id) else {
@@ -351,14 +360,14 @@ extension WebPanelController {
         }
         // Get out of the way so the freshly applied wallpaper is visible, unless another
         // switch is already waiting to replace it.
-        if hidesAfterActivating, store.supportPrompt?.isPending != true,
+        if hidesAfterActivating, pendingPrompt() == nil,
           !store.commands.hasWaiting(slot: slot) { NSApp.hide(nil) }
       }
     // One wallpaper on every enabled independent display. The transfer takes its own turn in
     // the queue, so it must not run inside `commands.run` here.
     case "activateAll":
       try await store.activateWallpaperEverywhereAsync(id: try wallpaperID(request))
-      if hidesAfterActivating, store.supportPrompt?.isPending != true, !store.commands.isBusy { NSApp.hide(nil) }
+      if hidesAfterActivating, pendingPrompt() == nil, !store.commands.isBusy { NSApp.hide(nil) }
     case "previousWallpaper":
       let displayID = try playlistDisplay(request)
       try await store.commands.run(slot: BridgeStore.activationSlot(displayId: displayID)) {
@@ -563,6 +572,17 @@ extension WebPanelController {
         playback.wallpapersMuted = try request.boolean("value")
       case "hideAfterActivating":
         defaults.set(try request.boolean("value"), forKey: Self.hideAfterActivatingKey)
+      case "telemetry":
+        let enabled = try request.boolean("value")
+        // The switch is disabled without a service; a stale page must not stall the guide's
+        // Continue, which stops at the first refused draft.
+        guard let telemetry = store.telemetry else {
+          AppLog.warn("telemetry: the switch was changed but sending is unavailable in this run")
+          return
+        }
+        telemetry.setEnabled(enabled)
+        // Chosen here, so the one-time question is answered.
+        store.supportPrompt?.recordTelemetryAsked()
       case "inspectWebWallpapers":
         WebWallpaperInspection.setEnabled(try request.boolean("value"), defaults: defaults)
       case "livePropertyEdits":
@@ -1430,6 +1450,15 @@ extension WebPanelController {
         continuation.resume(returning: $0 == .alertFirstButtonReturn)
       }
     }
+  }
+
+  /// Which one-time prompt a page message is about; pages from before there were three name none.
+  func promptKind(_ request: WebPanelRequest) throws -> SupportPromptStore.Prompt {
+    guard request.body["prompt"] != nil else { return .support }
+    guard let prompt = SupportPromptStore.Prompt(rawValue: try request.string("prompt")) else {
+      throw WebPanelRequest.invalid
+    }
+    return prompt
   }
 
   static func allowedExternalURL(_ url: URL) -> Bool {

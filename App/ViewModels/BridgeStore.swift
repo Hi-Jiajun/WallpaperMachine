@@ -100,6 +100,9 @@ final class BridgeStore {
     @ObservationIgnored var didAbandonWallpaperSwitch: (@MainActor ([UInt32]) -> Void)?
     /// Where the activation lines go: the app's log. A test collects them instead.
     @ObservationIgnored var activationLogWriter: (_ line: String, _ isFailure: Bool) -> Void = ActivationLog.write
+    /// Performance data, when the user has turned it on (`TelemetryService`). Each activation
+    /// is handed to it as the same facts its log line states.
+    @ObservationIgnored var telemetry: TelemetryService?
     private(set) var activatingWallpaperID: String?
     private(set) var applyingWallpaperID: String?
     @ObservationIgnored private var activationWaiters: [CheckedContinuation<Void, Never>] = []
@@ -420,6 +423,8 @@ final class BridgeStore {
             ActivationLog.line(kind, wallpaper: wallpaper, display: display, origin: origin,
                                outcome: outcome, milliseconds: milliseconds),
             outcome.isFailure)
+        telemetry?.recordActivation(kind, wallpaper: wallpaper, origin: origin,
+                                    outcome: outcome, milliseconds: milliseconds)
     }
 
     /// Restarts `id` on `displayId`: the inspector's **Reapply wallpaper**, for a wallpaper that

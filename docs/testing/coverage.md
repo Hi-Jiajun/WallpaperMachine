@@ -1041,7 +1041,11 @@ follows the developer's in-app language choice.
   a group with no words is dropped; Restore all defaults is offered when a listed
   value, a hidden one or text not yet sent differs from the default, but not for a
   chosen file alone or a wallpaper that cannot be rendered),
-  `WebPanelSupportPromptTests`, `WebPanelWorkshopSourceTests`,
+  `WebPanelSupportPromptTests` (including the performance data question for
+  someone who finished the guide earlier, answered from the page),
+  `WebPanelTelemetryTests` (the performance data switch round-trips, **Show in
+  Finder** writes the report it would send, and the guide answers the question only
+  if its switch was shown), `WebPanelWorkshopSourceTests`,
   `WebPanelWorkshopUpdateTests`, `WebPanelImagePlacementRaceTests` and
   `WebPanelAssetProvenanceTests`. `WallpaperEditorStateTests` cover locale
   scaling, invalid raw text and independent drafts; `PropertyImageCacheTests`
@@ -1187,7 +1191,9 @@ install and a no-login smoke run (see [README.md](README.md#opt-in-layers)).
 
 `SupportPromptStoreTests` — a downloaded wallpaper qualifies only after a
 successful activation, a pending prompt survives relaunch and further downloads,
-and a presented prompt never returns. `Support/` also holds the shared fixtures
+and a presented prompt never returns. Across the prompts: one a day in priority
+order, the performance data question only for someone who finished the guide
+without it, and state saved by earlier builds still loads. `Support/` also holds the shared fixtures
 (`TemporaryDefaults`, `TestAppLanguage`, bridge snapshots).
 
 ## SystemMedia
@@ -1202,6 +1208,28 @@ restart loop, the adapter-to-AppleScript fallback, artwork caching and
 downscaling, the cleared cover reaching scenes before metadata, and the wire
 format. Not covered: a real player or OS version publishing every field
 ([media integration](../features/media-integration.md#verification)).
+
+## Telemetry
+
+`TelemetryServiceTests`, `TelemetrySamplerTests` and `TelemetryClientTests` run
+against a fake uploader, a fake counter source, a `URLProtocol` stub and a
+temporary spool folder. They cover:
+
+- nothing written or sent while it is off;
+- one upload a day, carrying only rows not sent before;
+- rows kept after a failed upload;
+- local deletion and the deletion request when turned off, asked for again at the
+  next launch until confirmed;
+- a report built from home paths, user names, local folders and pixiv ids that
+  carries none of them;
+- the previous run's ending, length and memory pressure;
+- frame rows as deltas between two readings;
+- paused, covered, switched and invalidated windows reporting nothing;
+- counters always turned off again;
+- the POST and its user agent.
+
+Not covered: the live website endpoint, and the energy cost of a frame window
+([telemetry](../features/telemetry.md#frame-windows)).
 
 ## UserAssets
 

@@ -68,7 +68,7 @@ file; pass `rg -u` to search them deliberately.
 | Document | Purpose |
 |---|---|
 | [features/control-panel.md](features/control-panel.md) | Panel layout and language, tabs, selection versus apply, target display, filtering and local collections, recently used, deleting, downloads and import |
-| [features/first-run.md](features/first-run.md) | First-run guide and the one-time support prompt after the first downloaded wallpaper |
+| [features/first-run.md](features/first-run.md) | First-run guide, the one-time support prompt after the first downloaded wallpaper and the performance data question |
 | [features/wallpaper-properties.md](features/wallpaper-properties.md) | Inspector properties, live preview, property presets, image placement, the compatibility check and the black-bar check |
 | [features/backup-restore.md](features/backup-restore.md) | The Settings → Storage backup package (settings, allowlisted preferences, chosen user files) and restoring it |
 | [features/updates.md](features/updates.md) | In-app update checks, download and verification, installing, and the What's New window |
@@ -89,6 +89,7 @@ file; pass `rg -u` to search them deliberately.
 | [features/performance.md](features/performance.md) | Energy readout and per-wallpaper ratings, quality and playback settings, video backend, experimental switches, and background work only while it has a consumer |
 | [features/scene-rendering.md](features/scene-rendering.md) | Scene renderer choice (Compatibility or Native Metal preferred), scene render optimisation, skipping frames that would repeat, renderer memory and repeated-work reduction |
 | [features/crash-recovery.md](features/crash-recovery.md) | The load journal (a wallpaper that was being opened when the app died twice in a row is held back at launch, how strikes, the settle window and release by Apply, the panel's Try again or an update work, the banner and menu line), SIGTERM and SIGHUP as a quit, broken pipes, the one-copy-per-library lock and what a second launch does, and the limits |
+| [features/telemetry.md](features/telemetry.md) | Send performance data: what a report holds (no free text, Workshop ids only), the daily upload, 60 s frame windows and their cost, local files, deletion when turned off, and the website endpoint |
 | [features/diagnostics.md](features/diagnostics.md) | Application log format, load tagging and the line each wallpaper activation leaves, detailed logging, retention, how the log says the previous session ended, and the diagnostics report users attach to bug reports |
 
 ## Maintaining these docs

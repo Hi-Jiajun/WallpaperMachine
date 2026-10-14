@@ -101,6 +101,10 @@ the load.
   `previous session crash report: …` about 20 seconds later.
 - Startup milestones (`startup: …`).
 
+The same facts, as numbers and fixed words and without names, paths or the time zone,
+are what [Send performance data](telemetry.md) reports when the user has turned it on.
+Each upload, failed upload and deletion request leaves a `telemetry:` line.
+
 Each time the quality settings are applied (a battery-mode, frame-rate-limit or
 battery-profile change, a power-source change in reduced-quality mode, or a change
 of the reduced-quality request the app makes for reasons such as heat), the

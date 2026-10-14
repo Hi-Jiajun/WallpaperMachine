@@ -89,6 +89,8 @@ final class WebPanelController: NSObject, WKNavigationDelegate {
   /// Shows System Settings › General › Login Items, where the user allows a launch at login
   /// they switched off there. Tests capture the call so no Settings window opens.
   var openLoginItemsSettings: @MainActor () -> Void = { SMAppService.openSystemSettingsLoginItems() }
+  /// Shows a file in Finder; tests capture it instead.
+  var revealFile: @MainActor (URL) -> Void = { NSWorkspace.shared.activateFileViewerSelecting([$0]) }
   let displayTitles: DisplayTitleResolver
   weak var webView: WKWebView?
   let assets: WebPanelAssets

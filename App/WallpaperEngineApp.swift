@@ -39,8 +39,10 @@ struct WallpaperEngineApp {
         let previous = SessionLedger.beginProcessSession()
         let line = "previous session: \(previous.summary)"
         if previous.outcome.isAbnormal { AppLog.warn(line) } else { AppLog.info(line) }
+        TelemetryLaunchRecord.previousOutcome = previous.outcome
         UncaughtExceptionLog.install()
         guard previous.outcome.isUnexpectedEnd, let launch = previous.launch else { return }
+        TelemetryLaunchRecord.crashReportFound = false
         // The crash report is written by ReportCrash after the process is gone and may
         // not exist when the next launch begins. Looking later keeps the lookup off startup.
         Task.detached(priority: .utility) {
@@ -49,6 +51,7 @@ struct WallpaperEngineApp {
                 forPid: launch.pid, bootSession: launch.bootSession, notBefore: launch.startedAt,
                 in: CrashReportIndex.userReportsFolder()) else { return }
             AppLog.info("previous session crash report: \(report.summary)")
+            await MainActor.run { TelemetryLaunchRecord.crashReportFound = true }
         }
     }
 }

@@ -288,7 +288,14 @@ one aggregated report, headed by how long the window actually ran
 one when `WALLPAPER_MACHINE_DIAGNOSTICS=<seconds>` is set in the environment,
 `WALLPAPER_MACHINE_DIAGNOSTICS_DELAY=<seconds>` after launch when that is set
 too; a value that is not whole seconds starts nothing. Without the first
-variable nothing is started, nothing counts and no timer exists.
+variable this starts nothing, counts nothing and creates no timer.
+
+The renderer's counters have one other user: when **Send performance data** is on,
+a 60 s [frame window](../features/telemetry.md#frame-windows) every four hours turns
+the renderer half on and off again. A run with `WALLPAPER_MACHINE_DIAGNOSTICS` in
+its environment opens no such window, so a measured window is never mixed with one.
+For any other measurement, record in the manifest that **Send performance data** was
+off.
 
 The counters exist to answer one question per condition: did the work for a
 surface nobody can see actually stop? A count that keeps rising for an occluded
@@ -352,6 +359,12 @@ it and is never claimed to be one with no pre-buffering.
 | T6 | Lock screen, unlock, display sleep, system preview | Joint app/extension presentation ownership |
 | T7 | Rapid wallpaper switching, hot-plug, window and resolution changes | Reclaim, recovery, leaks |
 | T8 | Broken input, unsupported format, repeated web crashes | Whether error paths keep burning power |
+| T9 | One scene with Send performance data on, across a frame window, against off | What telemetry's 60 s counter window costs (not yet run) |
+
+Every condition is measured with **Send performance data** off, or with
+`WALLPAPER_MACHINE_DIAGNOSTICS` set, which keeps telemetry's frame windows closed.
+The cost of those windows themselves (T9, not yet run) is the same scene with the
+switch on against off, over a window that contains one.
 
 Wallpaper material comes from the local corpus
 ([wallpaper-corpus.md](wallpaper-corpus.md)) or synthetic fixtures. Copyrighted

@@ -819,6 +819,11 @@ nothing could see or hear.
   change instead of being dropped. The app can also ask it to read again when the Mac
   wakes ([Playback](#playback)), which wakes the thread once before it sleeps again.
   No power saving is claimed.
+- **Renderer counters.** They count only inside a bounded window: a
+  [diagnostic window](../testing/power-benchmark.md#runtime-counters) asked for
+  through the environment, or, when **Send performance data** is on, one 60 s
+  [frame window](telemetry.md#frame-windows) every four hours. Outside one, each
+  counted event costs one relaxed atomic load.
 
 The regression coverage for these is in
 [renderer verification](../testing/renderer.md#regression-areas-that-must-stay-covered).

@@ -911,7 +911,8 @@ final class ControlPanelShellTests: ControlPanelTestCase {
         await new Promise(resolve => setTimeout(resolve, 30));
         return { prefs: region.querySelectorAll('[data-pref]').length, value: select.value };
         """) as? [String: Any]
-      XCTAssertEqual(preferences?["prefs"] as? Int, 3)
+      // Launch at login, On battery, Keep windows in place and Send performance data.
+      XCTAssertEqual(preferences?["prefs"] as? Int, 4)
       XCTAssertEqual(preferences?["value"] as? String, "pause")
       XCTAssertEqual(panel.bridge.batteryModeCalls, [], "Changing the menu is a draft")
 

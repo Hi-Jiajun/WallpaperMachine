@@ -98,7 +98,7 @@
   ```sh
   gh attestation verify WallpaperMachine-*-arm64.dmg --repo WallpaperMachine/WallpaperMachine
   ```
-- **没有统计分析，没有追踪。** 应用只在你需要时联网：Steam 用于创意工坊，pixiv 在你打开它时使用，GitHub 用于检查更新。登录信息和密码保存在你的 Mac 上。
+- **没有追踪。** 应用只在你需要时联网：Steam 用于创意工坊，pixiv 在你打开它时使用，GitHub 用于检查更新；只有在你打开[发送性能数据](docs/features/telemetry.md)后，才会每天发送一份小报告，内容是加载耗时、帧率和你的 Mac 型号。报告不包含名称、文件或账户信息，关闭后会删除已发送的数据。登录信息和密码保存在你的 Mac 上。
 - **可校验的更新。** 内置更新程序只安装 SHA-256 与发布版本一致的磁盘映像；无法验证的会被[拒绝，绝不会未经校验就安装](docs/features/updates.md#downloading)。
 - **持续维护。** 新版本发布频繁，每一版都以英文和简体中文写进[更新日志](CHANGELOG.md)。
 - **问题有处可报。** 任意壁纸详情中的**无法正常使用？在 GitHub 上反馈**会打开一个预先填好的 [issue](https://github.com/WallpaperMachine/WallpaperMachine/issues)；[诊断报告](docs/features/diagnostics.md)会在你分享之前移除你的个人文件夹路径、Mac 用户名和 Steam 账户名。

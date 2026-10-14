@@ -34,10 +34,18 @@ extension WebPanelController {
     )
   }
 
+  /// The one-time prompt the page should show now, if any (`SupportPromptStore`). Without a
+  /// telemetry service there is nothing to offer, so that prompt never comes up.
+  func pendingPrompt() -> SupportPromptStore.Prompt? {
+    store.supportPrompt?.pendingPrompt(
+      welcomeSeen: welcomeSeen, telemetryOn: store.telemetry?.isEnabled ?? true)
+  }
+
   /// Register native dependencies without materializing a page payload while hidden.
   func trackSnapshotDependencies() {
     _ = store.appSnapshot
-    _ = store.supportPrompt?.isPending
+    _ = pendingPrompt()
+    _ = store.telemetry?.preferences.state
     _ = store.librarySnapshot
     _ = store.history.entries
     _ = store.libraryRefreshRevision
@@ -568,6 +576,8 @@ extension WebPanelController {
       "refreshDesktopPicture": playback.refreshesDesktopPicturePeriodically,
       "hotkeys": hotKeyRows,
       "hideAfterActivating": hidesAfterActivating,
+      "telemetry": store.telemetry?.isEnabled ?? false, "telemetryAvailable": store.telemetry != nil,
+      "telemetryLastSent": store.telemetry?.lastSentAt.map { $0.timeIntervalSince1970 * 1000 } as Any? ?? null,
       "inspectWebWallpapers": WebWallpaperInspection.isEnabled(defaults: defaults),
       "livePropertyEdits": LivePropertyEditing.isEnabled(defaults: defaults),
       "lockScreenEnabled": lock?.isRequested ?? false, "lockScreenAvailable": lock != nil,
@@ -691,7 +701,7 @@ extension WebPanelController {
       "libraryRevision": library.revision,
       "filtersCollapsed": filtersCollapsed,
       "welcomeSeen": welcomeSeen,
-      "supportPromptPending": store.supportPrompt?.isPending == true && presentationAllowsUpdates(),
+      "pendingPrompt": (presentationAllowsUpdates() ? pendingPrompt()?.rawValue : nil) as Any? ?? null,
       "dragSelectLearned": dragSelectLearned,
       "displays": displays,
       "playlists": playlistSnapshot, "playlistIntervals": DisplayPlaylist.intervals,

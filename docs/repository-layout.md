@@ -51,9 +51,11 @@ App/                               WallpaperMachine application target sources o
     Playlist/                      per-display playlists: model, planner, store and the scheduler that switches wallpapers
     Preview/                       isolated live preview inputs, lifecycle, WebKit and scene/video surfaces
     Steam/                         SteamCMD runtime discovery and setup state
-    Support/                       the support prompt shown after a downloaded wallpaper is applied
+    Support/                       the one-time prompts: support after a downloaded wallpaper is applied
+                                   and the performance data question
     SystemMedia/                   shared now-playing session (MediaRemote, Music/Spotify
                                    AppleScript fallback) and artwork for Web and Scene media integration
+    Telemetry/                     Send performance data: report schema, frame windows, local spool, upload
     UserAssets/                    importing, watching and picking for file/directory wallpaper properties;
                                    owns the app's copies under <support>/UserAssets/ and the derived,
                                    regenerable <project>/.mwe-user-assets/ bridge a page can read
