@@ -3448,6 +3448,135 @@ TEST(ShaderValueUpdaterCompat, EffectMatricesRetainOwnerScaleAndMapQuadToLayer) 
         EXPECT_NEAR(values.at("g_EffectModelViewProjectionMatrix")[i], final_expected.data()[i], 1e-5);
 }
 
+// Wallpaper Engine's simulation effects (cursor ripple, fluid simulation)
+// step by the frame's duration and by how far the cursor travelled since the
+// last frame, and push harder while the primary button is held; blend and skew
+// divide by the texture reduction scale. Left at zero, a ripple never starts,
+// the fluid never moves and a blend offset divides by zero.
+TEST(ShaderValueUpdaterCompat, SimulationEffectsSeeFrameTimeCursorTravelAndButtons) {
+    Scene scene;
+    auto  camera       = std::make_shared<SceneCamera>(1920, 1080, -1.0f, 1.0f);
+    scene.activeCamera = camera.get();
+    auto node          = std::make_shared<SceneNode>();
+    auto mesh          = std::make_shared<SceneMesh>();
+    mesh->AddMaterial(SceneMaterial {});
+    node->AddMesh(mesh);
+
+    WPShaderValueUpdater updater(&scene);
+    updater.InitUniforms(node.get(), [](std::string_view name) {
+        return name == "g_Frametime" || name == "g_PointerPosition" ||
+               name == "g_PointerPositionLast" || name == "g_PointerState" ||
+               name == "g_TextureReductionScale";
+    });
+    const auto frame = [&] {
+        updater.FrameBegin();
+        std::map<std::string, ShaderValue, std::less<>> values;
+        sprite_map_t                                    sprites;
+        updater.UpdateUniforms(node.get(), sprites,
+                               [&](std::string_view name, const ShaderValue& v) {
+                                   values[std::string(name)] = v;
+                               });
+        return values;
+    };
+
+    scene.frameTime = 1.0 / 30.0;
+    updater.MouseInput(0.25, 0.75);
+    auto values = frame();
+    for (const char* name : { "g_Frametime", "g_TextureReductionScale", "g_PointerPosition",
+                              "g_PointerPositionLast", "g_PointerState" }) {
+        ASSERT_TRUE(values.contains(name)) << name << " was never set";
+    }
+    EXPECT_FLOAT_EQ(values["g_Frametime"][0], 1.0f / 30.0f);
+    EXPECT_FLOAT_EQ(values["g_TextureReductionScale"][0], 1.0f);
+    EXPECT_FLOAT_EQ(values["g_PointerPosition"][0], 0.25f);
+    EXPECT_FLOAT_EQ(values["g_PointerPositionLast"][0], 0.5f) << "where the cursor started";
+    EXPECT_FLOAT_EQ(values["g_PointerPositionLast"][1], 0.5f);
+    for (std::size_t i = 0; i < 4; ++i) EXPECT_FLOAT_EQ(values["g_PointerState"][i], 0.0f);
+
+    updater.MouseInput(0.5, 0.25);
+    updater.MouseButtonsInput(1u);
+    values = frame();
+    EXPECT_FLOAT_EQ(values["g_PointerPosition"][0], 0.5f);
+    EXPECT_FLOAT_EQ(values["g_PointerPosition"][1], 0.25f);
+    EXPECT_FLOAT_EQ(values["g_PointerPositionLast"][0], 0.25f) << "the previous frame's cursor";
+    EXPECT_FLOAT_EQ(values["g_PointerPositionLast"][1], 0.75f);
+    EXPECT_FLOAT_EQ(values["g_PointerState"][0], 1.0f);
+    EXPECT_FLOAT_EQ(values["g_PointerState"][1], 1.0f);
+    EXPECT_FLOAT_EQ(values["g_PointerState"][2], 1.0f) << "the held button pushes the simulation";
+    EXPECT_FLOAT_EQ(values["g_PointerState"][3], 0.0f);
+
+    updater.MouseButtonsInput(2u);
+    values = frame();
+    EXPECT_FLOAT_EQ(values["g_PointerPositionLast"][0], values["g_PointerPosition"][0])
+        << "a still cursor travelled nowhere";
+    EXPECT_FLOAT_EQ(values["g_PointerPositionLast"][1], values["g_PointerPosition"][1]);
+    for (std::size_t i = 0; i < 4; ++i)
+        EXPECT_FLOAT_EQ(values["g_PointerState"][i], 0.0f) << "only the primary button pushes";
+
+    const uint32_t varying = updater.FrameVaryingUniforms(node.get(), 0, "");
+    EXPECT_NE(varying & frame_varying_uniform::kTime, 0u);
+    EXPECT_NE(varying & frame_varying_uniform::kPointer, 0u);
+
+    // Reading only the cursor's travel or the buttons still follows the cursor,
+    // so a still scene wakes for it.
+    auto pressed_only = std::make_shared<SceneNode>();
+    pressed_only->AddMesh(mesh);
+    updater.InitUniforms(pressed_only.get(),
+                         [](std::string_view name) { return name == "g_PointerState"; });
+    EXPECT_NE(updater.FrameVaryingUniforms(pressed_only.get(), 0, "") &
+                  frame_varying_uniform::kPointer,
+              0u);
+}
+
+// A lit effect shades by where its quad lands in the scene and unprojects
+// through the inverse of the effect's projection.
+TEST(ShaderValueUpdaterCompat, EffectModelMatrixAndInverseProjectionMatchTheEffectProjection) {
+    Scene scene;
+    auto  camera            = std::make_shared<SceneCamera>(1920, 1080, -1.0f, 1.0f);
+    scene.activeCamera      = camera.get();
+    scene.cameras["effect"] = std::make_shared<SceneCamera>(2, 2, -1.0f, 1.0f);
+    SceneNode owner;
+    owner.SetScale(Eigen::Vector3f(0.8f, 0.6f, 1.0f));
+    owner.SetTranslate(Eigen::Vector3f(100.0f, 200.0f, 0.0f));
+    owner.UpdateTrans();
+    auto node = std::make_shared<SceneNode>();
+    auto mesh = std::make_shared<SceneMesh>();
+    mesh->AddMaterial(SceneMaterial {});
+    node->AddMesh(mesh);
+    node->SetCamera("effect");
+    WPShaderValueData data;
+    data.effect_owner  = &owner;
+    data.effect_extent = Eigen::Vector2f(280, 300);
+    WPShaderValueUpdater updater(&scene);
+    updater.SetNodeData(node.get(), data);
+    updater.InitUniforms(node.get(), [](std::string_view name) {
+        return name == "g_EffectModelMatrix" || name == "g_EffectModelViewProjectionMatrix" ||
+               name == "g_EffectModelViewProjectionMatrixInverse";
+    });
+    sprite_map_t                                 sprites;
+    std::unordered_map<std::string, ShaderValue> values;
+    updater.UpdateUniforms(node.get(), sprites, [&](std::string_view name, const ShaderValue& v) {
+        values[std::string(name)] = v;
+    });
+    ASSERT_TRUE(values.contains("g_EffectModelMatrix"));
+    ASSERT_TRUE(values.contains("g_EffectModelViewProjectionMatrix"));
+    ASSERT_TRUE(values.contains("g_EffectModelViewProjectionMatrixInverse"));
+    const auto matrix = [&](std::string_view name) {
+        Eigen::Matrix4d m;
+        for (int i = 0; i < 16; ++i) m.data()[i] = values.at(std::string(name))[i];
+        return m;
+    };
+    // The unit quad's corner (1, 1) lands on the layer card's corner.
+    const Eigen::Vector4d corner = matrix("g_EffectModelMatrix") * Eigen::Vector4d(1, 1, 0, 1);
+    EXPECT_NEAR(corner.x(), 100.0 + 0.8 * 140.0, 1e-3);
+    EXPECT_NEAR(corner.y(), 200.0 + 0.6 * 150.0, 1e-3);
+    const Eigen::Matrix4d mvp = matrix("g_EffectModelViewProjectionMatrix");
+    EXPECT_TRUE((camera->GetViewProjectionMatrix() * matrix("g_EffectModelMatrix"))
+                    .isApprox(mvp, 1e-5));
+    EXPECT_TRUE((matrix("g_EffectModelViewProjectionMatrixInverse") * mvp)
+                    .isApprox(Eigen::Matrix4d::Identity(), 1e-4));
+}
+
 TEST(ScriptRuntimeCompat, CompiledExportsIgnoreSourceTextAndRecognizePlainFunctions) {
     auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
     auto node = std::make_shared<SceneNode>();

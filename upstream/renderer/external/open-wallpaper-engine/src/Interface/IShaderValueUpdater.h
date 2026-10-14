@@ -75,6 +75,9 @@ public:
     virtual void FrameEnd()                                                        = 0;
 
     virtual void MouseInput(double x, double y) = 0;
+    /// The pointer buttons held this frame, one bit per button with the
+    /// primary button in bit 0, as the host reports them to scripts.
+    virtual void MouseButtonsInput(uint32_t down) { (void)down; }
     virtual void SetTexelSize(float x, float y) = 0;
     virtual void SetScreenSize(i32 w, i32 h)    = 0;
 };

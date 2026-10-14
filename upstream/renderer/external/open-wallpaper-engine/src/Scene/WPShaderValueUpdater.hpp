@@ -33,12 +33,18 @@ struct WPUniformInfo {
     bool has_VP { false };
     bool has_layer_model { false };
     bool has_effect_mvp { false };
+    bool has_effect_model { false };
+    bool has_effect_mvpi { false };
 
     bool has_BONES { false };
     bool has_TIME { false };
     bool has_DAYTIME { false };
     bool has_DAYTIME_ALIAS { false };
     bool has_POINTERPOSITION { false };
+    bool has_POINTERPOSITIONLAST { false };
+    bool has_POINTERSTATE { false };
+    bool has_FRAMETIME { false };
+    bool has_TEXTUREREDUCTIONSCALE { false };
     bool has_PARALLAXPOSITION { false };
     bool has_TEXELSIZE { false };
     bool has_TEXELSIZEHALF { false };
@@ -104,6 +110,7 @@ public:
     uint32_t FrameVaryingUniforms(SceneNode*, uint32_t material_slot,
                                   const std::string& camera_override) const override;
     void MouseInput(double, double) override;
+    void MouseButtonsInput(uint32_t down) override { m_mouseButtonsDown = down; }
     void SetTexelSize(float x, float y) override;
 
     void SetNodeData(void*, const WPShaderValueData&);
@@ -134,6 +141,9 @@ private:
     std::array<float, 2> m_texelSize { 1.0f / 1920.0f, 1.0f / 1080.0f };
 
     std::array<float, 2> m_mousePos { 0.5f, 0.5f };
+    /// `m_mousePos` as the previous frame's shaders saw it.
+    std::array<float, 2> m_mousePosLast { 0.5f, 0.5f };
+    uint32_t             m_mouseButtonsDown { 0 };
     std::array<float, 2> m_mousePosInput { 0.5f, 0.5f };
     double               m_mouseDelayedTime { 0.0f };
     uint                 m_mouseInputCount { 0 };

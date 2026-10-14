@@ -1175,6 +1175,10 @@ private:
                 }
                 m_scene->pointerPosition = pos;
                 m_scene->shaderValueUpdater->MouseInput(pos[0], pos[1]);
+                const MouseButtonSnapshot buttons = consumeMouseButtonSnapshot();
+                // A click released before this frame ran still held the button
+                // for it, so shaders see the press at least once.
+                m_scene->shaderValueUpdater->MouseButtonsInput(buttons.down | buttons.pressed);
                 if (m_scene->runtime != nullptr) {
                     const auto mapping = m_render->CursorMapping(*m_scene);
                     if (mapping.valid) {
@@ -1193,7 +1197,6 @@ private:
                     }
                     m_scene->runtime->SetCursorInput(pos[0], pos[1]);
                     m_scene->runtime->SetCursorEnter(m_cursor_in_window.load());
-                    const MouseButtonSnapshot buttons = consumeMouseButtonSnapshot();
                     m_scene->runtime->SetCursorButtons(
                         buttons.down, buttons.pressed, buttons.released);
                     m_cursor_was_in_window =

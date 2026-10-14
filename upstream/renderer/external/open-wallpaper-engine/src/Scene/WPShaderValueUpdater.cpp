@@ -48,6 +48,7 @@ void WPShaderValueUpdater::FrameBegin() {
     } else {
         m_mouseDelayedTime = 0.0;
     }
+    m_mousePosLast     = m_mousePos;
     m_mousePos         = std::array { (float)algorism::lerp(t, m_mousePos[0], m_mousePosInput[0]),
                               (float)algorism::lerp(t, m_mousePos[1], m_mousePosInput[1]) };
 }
@@ -68,9 +69,10 @@ uint32_t WPShaderValueUpdater::FrameVaryingUniforms(SceneNode*          node,
 
     const auto& info  = it->second;
     uint32_t    flags = frame_varying_uniform::kNone;
-    if (info.has_TIME) flags |= frame_varying_uniform::kTime;
+    if (info.has_TIME || info.has_FRAMETIME) flags |= frame_varying_uniform::kTime;
     if (info.has_DAYTIME || info.has_DAYTIME_ALIAS) flags |= frame_varying_uniform::kDayTime;
-    if (info.has_POINTERPOSITION) flags |= frame_varying_uniform::kPointer;
+    if (info.has_POINTERPOSITION || info.has_POINTERPOSITIONLAST || info.has_POINTERSTATE)
+        flags |= frame_varying_uniform::kPointer;
     if (info.has_PARALLAXPOSITION) flags |= frame_varying_uniform::kParallax;
     if (info.has_BONES) flags |= frame_varying_uniform::kBones;
     if (info.has_AudioSpectrum16Left || info.has_AudioSpectrum16Right ||
@@ -153,14 +155,20 @@ void WPShaderValueUpdater::InitUniforms(SceneNode* pNode, uint32_t material_slot
     info.has_ETVPI              = existsOp(G_ETVPI);
 
     info.has_VP = existsOp(G_VP);
-    info.has_layer_model = existsOp("g_LayerModelMatrix");
-    info.has_effect_mvp = existsOp("g_EffectModelViewProjectionMatrix");
+    info.has_layer_model  = existsOp("g_LayerModelMatrix");
+    info.has_effect_mvp   = existsOp(G_EFFECTMVP);
+    info.has_effect_model = existsOp(G_EFFECTMODEL);
+    info.has_effect_mvpi  = existsOp(G_EFFECTMVPI);
 
     info.has_BONES            = existsOp(G_BONES);
     info.has_TIME             = existsOp(G_TIME);
     info.has_DAYTIME          = existsOp(G_DAYTIME);
     info.has_DAYTIME_ALIAS    = existsOp("g_Daytime");
     info.has_POINTERPOSITION  = existsOp(G_POINTERPOSITION);
+    info.has_POINTERPOSITIONLAST   = existsOp(G_POINTERPOSITIONLAST);
+    info.has_POINTERSTATE          = existsOp(G_POINTERSTATE);
+    info.has_FRAMETIME             = existsOp(G_FRAMETIME);
+    info.has_TEXTUREREDUCTIONSCALE = existsOp(G_TEXTUREREDUCTIONSCALE);
     info.has_PARALLAXPOSITION = existsOp(G_PARALLAXPOSITION);
     info.has_TEXELSIZE        = existsOp(G_TEXELSIZE);
     info.has_TEXELSIZEHALF    = existsOp(G_TEXELSIZEHALF);
@@ -237,7 +245,8 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, uint32_t material_sl
         if (data_it != slot_data.end()) nodeData = &data_it->second;
     }
     bool hasNodeData = nodeData != nullptr;
-    if (info.has_layer_model || info.has_effect_mvp) {
+    if (info.has_layer_model || info.has_effect_mvp || info.has_effect_model ||
+        info.has_effect_mvpi) {
         auto* owner = hasNodeData && nodeData->effect_owner != nullptr
             ? nodeData->effect_owner : pNode;
         owner->UpdateTrans();
@@ -245,16 +254,22 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, uint32_t material_sl
         if (info.has_layer_model) {
             updateOp("g_LayerModelMatrix", ShaderValue::fromMatrix(layer_model));
         }
-        if (info.has_effect_mvp && m_scene->activeCamera != nullptr) {
-            Matrix4d effect_model = layer_model;
-            // Intermediate passes use a unit quad; final passes use the layer card.
-            if (hasNodeData && nodeData->effect_owner != nullptr && cam_name == "effect") {
-                effect_model = layer_model * Affine3d(Scaling(
-                    double(nodeData->effect_extent.x()) * 0.5,
-                    double(nodeData->effect_extent.y()) * 0.5, 1.0)).matrix();
-            }
-            updateOp("g_EffectModelViewProjectionMatrix", ShaderValue::fromMatrix(
-                Matrix4d(m_scene->activeCamera->GetViewProjectionMatrix() * effect_model)));
+        Matrix4d effect_model = layer_model;
+        // Intermediate passes use a unit quad; final passes use the layer card.
+        if (hasNodeData && nodeData->effect_owner != nullptr && cam_name == "effect") {
+            effect_model = layer_model * Affine3d(Scaling(
+                double(nodeData->effect_extent.x()) * 0.5,
+                double(nodeData->effect_extent.y()) * 0.5, 1.0)).matrix();
+        }
+        // Where the effect quad lands in the scene, for lit effects that
+        // shade by world position.
+        if (info.has_effect_model) updateOp(G_EFFECTMODEL, ShaderValue::fromMatrix(effect_model));
+        if ((info.has_effect_mvp || info.has_effect_mvpi) && m_scene->activeCamera != nullptr) {
+            const Matrix4d effect_mvp =
+                m_scene->activeCamera->GetViewProjectionMatrix() * effect_model;
+            if (info.has_effect_mvp) updateOp(G_EFFECTMVP, ShaderValue::fromMatrix(effect_mvp));
+            if (info.has_effect_mvpi)
+                updateOp(G_EFFECTMVPI, ShaderValue::fromMatrix(Matrix4d(effect_mvp.inverse())));
         }
     }
     if (hasNodeData) {
@@ -427,6 +442,17 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, uint32_t material_sl
     }
 
     if (info.has_POINTERPOSITION) updateOp(G_POINTERPOSITION, m_mousePos);
+    // Simulation effects (cursor ripple, fluid) move by the cursor's travel
+    // since the last frame and push harder while the primary button is held.
+    if (info.has_POINTERPOSITIONLAST) updateOp(G_POINTERPOSITIONLAST, m_mousePosLast);
+    if (info.has_POINTERSTATE) {
+        const float down = (m_mouseButtonsDown & 1u) != 0 ? 1.0f : 0.0f;
+        updateOp(G_POINTERSTATE, std::array { down, down, down, 0.0f });
+    }
+    // The seconds this frame advances the scene, which simulation steps scale by.
+    if (info.has_FRAMETIME) updateOp(G_FRAMETIME, (float)m_scene->frameTime);
+    // Textures are always loaded at their authored size, never reduced.
+    if (info.has_TEXTUREREDUCTIONSCALE) updateOp(G_TEXTUREREDUCTIONSCALE, 1.0f);
 
     if (info.has_TEXELSIZE) updateOp(G_TEXELSIZE, m_texelSize);
 

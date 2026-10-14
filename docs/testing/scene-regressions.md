@@ -957,6 +957,17 @@ Rust regressions in `crates/shader/tests` (`legalize`, `preprocess`,
 `video_planes`, `pipeline`) cover these paths with synthetic shader sources;
 `pipeline` skips asset-dependent cases with a printed reason.
 
+- **Built-in simulation uniforms** —
+  `ShaderValueUpdaterCompat.SimulationEffectsSeeFrameTimeCursorTravelAndButtons`
+  checks that a shader declaring `g_Frametime`, `g_PointerPositionLast`,
+  `g_PointerState` or `g_TextureReductionScale` receives the frame's step, the
+  previous frame's cursor, the primary button (held in x, y and z) and 1, and
+  that such a pass counts as following the clock or the cursor. Left at zero,
+  Wallpaper Engine's cursor ripple and fluid simulation effects never moved and
+  `blend` with `TRANSFORMUV` divided by zero.
+  `.EffectModelMatrixAndInverseProjectionMatchTheEffectProjection` checks
+  `g_EffectModelMatrix` and `g_EffectModelViewProjectionMatrixInverse` against
+  the effect projection.
 - **Trailing commas** — `SceneSchema.EffectFilesWithTrailingCommasLoadTheirPasses`
   loads an effect and material whose arrays and objects end with a comma, as
   Wallpaper Engine's own `effects/fluidsimulation/effect.json` does; strict
