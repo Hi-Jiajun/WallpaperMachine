@@ -957,6 +957,10 @@ Rust regressions in `crates/shader/tests` (`legalize`, `preprocess`,
 `video_planes`, `pipeline`) cover these paths with synthetic shader sources;
 `pipeline` skips asset-dependent cases with a printed reason.
 
+- **Trailing commas** — `SceneSchema.EffectFilesWithTrailingCommasLoadTheirPasses`
+  loads an effect and material whose arrays and objects end with a comma, as
+  Wallpaper Engine's own `effects/fluidsimulation/effect.json` does; strict
+  parsing had dropped every fluid simulation effect.
 - **Pipeline revision** — `ShaderPipelineRevision::CURRENT`
   (`crates/shader/src/pipeline/revision.rs`) is part of the cache key. Bump it
   whenever codegen can produce different output for source that already

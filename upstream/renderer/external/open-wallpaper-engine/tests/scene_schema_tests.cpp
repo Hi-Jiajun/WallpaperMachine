@@ -2538,6 +2538,71 @@ void main() {
     EXPECT_EQ(parsed->runtime->scriptErrorCount(), 0u);
 }
 
+// Wallpaper Engine reads a comma before a closing `]` or `}`, and its own
+// fluid simulation effect is written that way. An effect file or material
+// with one has to load like any other instead of dropping the effect.
+TEST(SceneSchema, EffectFilesWithTrailingCommasLoadTheirPasses) {
+    fs::VFS vfs;
+    auto files = std::map<std::string, std::string> {
+        { "/image.json", R"({"width":64,"height":32,"material":"mat.json"})" },
+        { "/mat.json",
+          R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":["a.tex"]}]})" },
+        { "/effects/copy/effect.json",
+          R"({"name":"copy ,] and ,} stay",
+              "passes":[{"material":"effect_mat.json","bind":[{"name":"previous","index":0},],},
+              ],
+            })" },
+        { "/effect_mat.json",
+          R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":[null,],},]})" },
+        { "/shaders/genericimage.vert",
+          R"(attribute vec3 a_Position;
+attribute vec2 a_TexCoord;
+varying vec2 v_TexCoord;
+void main() {
+  gl_Position = vec4(a_Position, 1.0);
+  v_TexCoord = a_TexCoord;
+}
+)" },
+        { "/shaders/genericimage.frag",
+          R"(uniform sampler2D g_Texture0;
+varying vec2 v_TexCoord;
+void main() {
+  gl_FragColor = texture(g_Texture0, v_TexCoord);
+}
+)" },
+        { "/materials/a.tex.tex", "" },
+    };
+    EXPECT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+    audio::SoundManager sound_manager(audio::SoundManager::OutputBackend::Null);
+    const std::string   scene = R"({
+      "camera": {"center":[0,0,0], "eye":[0,0,1], "up":[0,1,0]},
+      "general": {
+        "ambientcolor":[0.2,0.2,0.2], "skylightcolor":[0.3,0.3,0.3],
+        "clearcolor":[0,0,0], "cameraparallax":false,
+        "cameraparallaxamount":0, "cameraparallaxdelay":0,
+        "cameraparallaxmouseinfluence":0,
+        "orthogonalprojection":{"width":640,"height":360}
+      },
+      "objects": [
+        {"id":2,"name":"with effect","image":"image.json",
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true,
+         "effects":[{"file":"effects/copy/effect.json","id":3,"visible":true}]}
+      ]
+    })";
+
+    auto parsed = WPSceneParser().Parse(SceneParseRequest { .scene_id = "trailing-commas" },
+                                        scene, vfs, sound_manager);
+    ASSERT_NE(parsed, nullptr);
+    auto node = FindRootChildByName(*parsed, "with effect");
+    ASSERT_NE(node, nullptr);
+    const auto camera = parsed->cameras.find(node->Camera());
+    ASSERT_NE(camera, parsed->cameras.end());
+    ASSERT_TRUE(camera->second->HasImgEffect()) << "the effect was dropped";
+    auto& layer = *camera->second->GetImgEffect();
+    ASSERT_EQ(layer.EffectCount(), 1u);
+    EXPECT_EQ(layer.GetEffect(0)->nodes.size(), 1u);
+}
+
 TEST(SceneSchema, PassthroughImageEffectBaseMeshUsesLayerLocalCardGeometry) {
     fs::VFS vfs;
     auto files = std::map<std::string, std::string> {
