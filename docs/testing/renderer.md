@@ -311,8 +311,8 @@ protects. Binaries in the `REGRESSION_BINARIES` registry run in
 `scripts/check_renderer.py`. These do not, and must be built and run by hand
 when their area changes (see [C++/CMake test binaries](#ccmake-test-binaries)):
 `scene_schema_tests`, `script_runtime_compat_test`, `mouse_input_test`,
-`mdl_schema_tests`, `tex_schema_tests`, `media_thumbnail_texture_smoke`,
-`scenescript_media_event_smoke` and `scenescript_sound_layer_smoke`. Rust tests
+`mdl_schema_tests`, `tex_schema_tests`, `media_thumbnail_texture_smoke` and
+`scenescript_media_event_smoke`. Rust tests
 (`module::test_name`) run through `python3 scripts/check_rust.py`; Swift tests
 (`TestClass.testName`) run through `python3 scripts/test.py`. Tests that need
 shipped Wallpaper Engine shaders or assets skip with a printed reason.
@@ -570,10 +570,10 @@ artifacts/renderer/bin/tests/scene_schema_tests --gtest_filter='SceneSchema.*Cam
 ```
 
 `scene_schema_tests`, `mdl_schema_tests`, `tex_schema_tests`,
-`script_runtime_compat_test`, `mouse_input_test`, `media_thumbnail_texture_smoke`,
-`scenescript_media_event_smoke` and `scenescript_sound_layer_smoke` are such
-binaries: they provide the parser, SceneScript, input and media-protocol coverage
-when those paths change. `tex_schema_tests` links `PkgConfig::TEST_LZ4` itself
+`script_runtime_compat_test`, `mouse_input_test`, `media_thumbnail_texture_smoke`
+and `scenescript_media_event_smoke` are such binaries: they provide the parser,
+SceneScript, input and media-protocol coverage when those paths change.
+`tex_schema_tests` links `PkgConfig::TEST_LZ4` itself
 (`tests/CMakeLists.txt`), the way the video suites re-resolve FFmpeg: the
 renderer links LZ4 `PRIVATE`, so the include directory does not propagate to a
 test that builds its own compressed `.tex` fixtures. Run it when touching

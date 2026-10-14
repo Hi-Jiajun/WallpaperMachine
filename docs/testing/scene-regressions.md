@@ -310,6 +310,15 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   `getVideoTexture().isPlaying()` reflects shared runtime pause/play state, so
   scripts that hide a layer during init can reveal it during update; `Vec*.mix`
   and `MediaPlaybackEvent` constants are available.
+- **Who hears a button's release** — `SceneSchema.APressedTransportButtonComesBackWhenItIsReleased`
+  and `.AButtonThatShrinksWhileHeldStillGetsItsRelease`;
+  `SceneScriptSoundLayerSmoke.LayerScriptReceivesCursorUpForItsPressAfterLeavingWindow`
+  and `.LayerScriptDoesNotReceiveCursorUpForAnotherPressAfterLeavingWindow` in
+  `scenescript_sound_layer_smoke`. A release goes to whatever took the press,
+  wherever the cursor has gone, the window included; re-testing the layer on the
+  way up leaves a button that shrinks while held, or a press dragged off the
+  desktop, latched for good. A layer that did not take the press hears a release
+  only under the cursor, and a scene-wide script hears one from anywhere.
 - **Creating layers from scripts** — SceneScript creation tests cover independent
   cloned layers, owner-local cached factories, bounded authored pools and lazy
   template loading. A script imported from the Workshop declares
