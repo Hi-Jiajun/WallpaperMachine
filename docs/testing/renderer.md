@@ -307,12 +307,9 @@ these conditions is in [performance](../features/performance.md).
 ## Regression areas that must stay covered
 
 Each entry names the test that guards a behavior and the invariant or trap it
-protects. Binaries in the `REGRESSION_BINARIES` registry run in
-`scripts/check_renderer.py`. These do not, and must be built and run by hand
-when their area changes (see [C++/CMake test binaries](#ccmake-test-binaries)):
-`scene_schema_tests`, `script_runtime_compat_test`, `mouse_input_test`,
-`mdl_schema_tests`, `tex_schema_tests`, `media_thumbnail_texture_smoke` and
-`scenescript_media_event_smoke`. Rust tests
+protects. Every C++ test binary these pages name is in the `REGRESSION_BINARIES`
+registry and runs in `scripts/check_renderer.py` (see
+[C++/CMake test binaries](#ccmake-test-binaries)). Rust tests
 (`module::test_name`) run through `python3 scripts/check_rust.py`; Swift tests
 (`TestClass.testName`) run through `python3 scripts/test.py`. Tests that need
 shipped Wallpaper Engine shaders or assets skip with a printed reason.
@@ -558,10 +555,22 @@ cargo test -p shader --test pipeline -- --nocapture
 
 CMake test binaries are built under `artifacts/renderer/bin/` (executables in
 its `tests/` folder). The authoritative routine build/run list is
-`REGRESSION_BINARIES` in `scripts/check_renderer.py`, covering the
-texture/cache/lifetime, audio, video, graph, particle, timer and Metal checks; a
-non-zero exit from any registered binary fails the check. Binaries outside the
-registry are built and run by hand, in the Homebrew environment from
+`REGRESSION_BINARIES` in `scripts/check_renderer.py`, covering the parsers
+(`scene_schema_tests`, `mdl_schema_tests`, `tex_schema_tests`), SceneScript, input
+and the media protocol (`script_runtime_compat_test`, `mouse_input_test`,
+`scenescript_sound_layer_smoke`, `scenescript_media_event_smoke`,
+`media_thumbnail_texture_smoke`), and the texture/cache/lifetime, audio, video,
+graph, particle, timer and Metal checks; a non-zero exit from any registered
+binary fails the check. A test binary that is not registered fails unnoticed, so a
+new one joins the registry in the change that adds it. Every registered binary
+runs on each check, in CI too, so it has to stay fast and headless: no Metal
+device unless its registry flag says so, no window, and no audio device. A test
+that mounts a sound layer passes `SoundManager::OutputBackend::Null`, because a
+mount opens the system output device even when nothing plays. Temporary files
+carry the process id, because other checkouts run the same binaries at the same
+time and share the temporary directory.
+
+To iterate on one test, build and run its binary in the Homebrew environment from
 `scripts/build.py`, once `check_renderer.py` has configured the build directory:
 
 ```sh
@@ -569,10 +578,6 @@ cmake --build artifacts/renderer/bin --target scene_schema_tests
 artifacts/renderer/bin/tests/scene_schema_tests --gtest_filter='SceneSchema.*CameraZoom*'
 ```
 
-`scene_schema_tests`, `mdl_schema_tests`, `tex_schema_tests`,
-`script_runtime_compat_test`, `mouse_input_test`, `media_thumbnail_texture_smoke`
-and `scenescript_media_event_smoke` are such binaries: they provide the parser,
-SceneScript, input and media-protocol coverage when those paths change.
 `tex_schema_tests` links `PkgConfig::TEST_LZ4` itself
 (`tests/CMakeLists.txt`), the way the video suites re-resolve FFmpeg: the
 renderer links LZ4 `PRIVATE`, so the include directory does not propagate to a

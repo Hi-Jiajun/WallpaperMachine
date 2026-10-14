@@ -23,6 +23,8 @@
 #include <string_view>
 #include <vector>
 
+#include <unistd.h>
+
 namespace wallpaper
 {
 namespace
@@ -242,7 +244,9 @@ TEST(MediaThumbnailTextureSmoke, TexturePropertyTakesTheSlotItNames) {
 }
 
 TEST(MediaThumbnailTextureSmoke, TexturePropertyCarriesTheUsersOwnFileThrough) {
-    const auto directory = std::filesystem::temp_directory_path() / "wpe-user-texture-slot";
+    // Per process: concurrent runs share the temporary directory.
+    const auto directory = std::filesystem::temp_directory_path() /
+                           ("wpe-user-texture-slot-" + std::to_string(::getpid()));
     std::filesystem::remove_all(directory);
     std::filesystem::create_directories(directory);
     const auto picture = directory / "photo.png";

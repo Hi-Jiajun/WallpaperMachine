@@ -3539,7 +3539,9 @@ TEST(SceneSchema, ImageAlignmentAnchorSurvivesScriptedOriginAndScale) {
 TEST(SceneSchema, DuplicateParsedImageClickScriptsGateRealAssetSoundLayers) {
     fs::VFS vfs;
     MountSceneFiles(vfs);
-    audio::SoundManager sound_manager;
+    // The parse mounts these sound layers, and a mount opens the output device
+    // on the system backend even though nothing plays.
+    audio::SoundManager sound_manager(audio::SoundManager::OutputBackend::Null);
     WPSceneParser       parser;
     ProjectProperties   properties {
           { "click_count", RuntimeScalarValue::String("2") },
@@ -5739,7 +5741,8 @@ TEST(SceneSchema, ASoundFollowsTheSliderValueTheUserActuallyHas) {
     EXPECT_FLOAT_EQ(object.volume, 0.3f) << "the author's number is still read";
     EXPECT_EQ(object.volume_user, "buttonsvolume");
 
-    audio::SoundManager sound_manager;
+    // Parse mounts the layer, which would open a system output device.
+    audio::SoundManager sound_manager(audio::SoundManager::OutputBackend::Null);
     WPSoundParser::Parse(object, vfs, sound_manager, runtime.get());
 
     ASSERT_TRUE(runtime->HasSoundLayer("button_press"));
@@ -5759,7 +5762,7 @@ TEST(SceneSchema, ASoundWithNoBindingKeepsTheAuthorsVolume) {
     ASSERT_TRUE(object.FromJson(json, vfs));
     EXPECT_TRUE(object.volume_user.empty());
 
-    audio::SoundManager sound_manager;
+    audio::SoundManager sound_manager(audio::SoundManager::OutputBackend::Null);
     WPSoundParser::Parse(object, vfs, sound_manager, runtime.get());
     EXPECT_FLOAT_EQ(runtime->SoundLayerVolume("click"), 0.75f);
 }
@@ -5784,7 +5787,7 @@ TEST(SceneSchema, AButtonSoundStartsSilentAndPlaysWhenAsked) {
     ASSERT_TRUE(object.FromJson(json, vfs));
     EXPECT_TRUE(object.startsilent);
 
-    audio::SoundManager sound_manager;
+    audio::SoundManager sound_manager(audio::SoundManager::OutputBackend::Null);
     WPSoundParser::Parse(object, vfs, sound_manager, runtime.get());
 
     ASSERT_TRUE(runtime->HasSoundLayer("button_press"))

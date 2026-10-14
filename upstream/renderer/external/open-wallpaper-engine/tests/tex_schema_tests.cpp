@@ -13,6 +13,8 @@
 #include <tuple>
 #include <vector>
 
+#include <unistd.h>
+
 #include <gtest/gtest.h>
 #include <lz4.h>
 
@@ -477,7 +479,10 @@ struct PkgEntry {
 class TempPkg {
 public:
     explicit TempPkg(std::vector<PkgEntry> entries) {
-        const auto unique = "owe_pkg_case_test_" + std::to_string(s_nextId++) + ".pkg";
+        // The process id keeps concurrent runs of this binary, which share the
+        // temporary directory, from rewriting or deleting each other's files.
+        const auto unique = "owe_pkg_case_test_" + std::to_string(::getpid()) + "_" +
+                            std::to_string(s_nextId++) + ".pkg";
         m_path = std::filesystem::temp_directory_path() / unique;
 
         std::ofstream out(m_path, std::ios::binary | std::ios::trunc);
@@ -702,7 +707,8 @@ TEST(TexSchema, FlaggedVideoUnknownTypeUsesExistingMetadataPath) {
 // A `scenetexture` property the user filled from the image picker holds an
 // absolute path to a picture of their own, which belongs to no VFS mount.
 TEST(TexSchema, AbsolutePathLoadsTheUsersOwnPicture) {
-    const auto directory = std::filesystem::temp_directory_path() / "wpe-host-asset-test";
+    const auto directory = std::filesystem::temp_directory_path() /
+                           ("wpe-host-asset-test-" + std::to_string(::getpid()));
     std::filesystem::remove_all(directory);
     std::filesystem::create_directories(directory);
     const auto picture = directory / "chosen.png";
@@ -787,7 +793,8 @@ TEST(TexSchema, PackagedLooseBmpDecodesItsPixels) {
 // with no picture behind it, and a relative one are all "not a picture we can
 // read", which is what decides whether a slot may be replaced at all.
 TEST(TexSchema, OnlyAReadableHostPictureCountsAsOne) {
-    const auto directory = std::filesystem::temp_directory_path() / "wpe-host-asset-readable";
+    const auto directory = std::filesystem::temp_directory_path() /
+                           ("wpe-host-asset-readable-" + std::to_string(::getpid()));
     std::filesystem::remove_all(directory);
     std::filesystem::create_directories(directory);
     const auto picture = directory / "chosen.png";
@@ -838,7 +845,8 @@ TEST(PkgFs, ExactPathWinsWhenPackageContainsCaseFoldCollision) {
 // preset's `scenetexture` properties name, e.g. `files/clip.mp4`. Only the
 // package was mounted, so those resolved to nothing and the layers drew black.
 TEST(SceneSourceMount, APresetFileBesideThePackageLoadsAndThePackageStillWins) {
-    const auto directory = std::filesystem::temp_directory_path() / "wpe-scene-source-mount";
+    const auto directory = std::filesystem::temp_directory_path() /
+                           ("wpe-scene-source-mount-" + std::to_string(::getpid()));
     std::filesystem::remove_all(directory);
     std::filesystem::create_directories(directory / "files");
     {
