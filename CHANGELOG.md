@@ -8,6 +8,192 @@ Simplified Chinese. The app's What's New window offers both translations; the
 GitHub Release body repeats only the English notes. See
 [docs/release.md](docs/release.md) for how a version is cut.
 
+## 1.4.1 — 2026-10-14
+
+### English
+
+Native Metal becomes the default scene renderer, live property previews and wallpaper positioning arrive, and many scene, video, experimental lock screen and Workshop download problems are fixed
+
+#### Breaking changes
+
+- Scene wallpapers now play on the Native Metal renderer by default, switched once on first launch; choose Compatibility in Performance settings to keep the previous renderer
+
+#### New
+
+- The Wallpaper Preview window now follows property edits as you make them, including sliders and colors while you drag, without reloading or touching your desktop
+- An optional setting, off by default, shows a scene wallpaper's property edits on your desktop as you make them, before you apply changes
+- Scene and video wallpapers can now be moved on each display with Horizontal position and Vertical position sliders in the inspector, following the slider live
+- In Settings > Performance > Playback, Low Power Mode, heat and low battery can now switch wallpapers to reduced quality instead of pausing or stopping them
+- A new When the battery is low rule, off by default, pauses or stops wallpapers on battery at 10%, 20% or 30% charge
+- An optional Playback switch, off by default, keeps playing only the display your pointer is on and pauses the others
+- Mute Wallpapers silences every wallpaper at once from the menu bar, Settings, links, Shortcuts or a shortcut key, without changing saved volumes
+- Random Wallpaper picks a different wallpaper for a display from all or only favorites, from the menu bar, links, Shortcuts or a shortcut key
+- With two or more displays, the menu bar menu has a submenu for each display with Previous, Next, Recently used and Remove from Display
+- Apply to all displays sets a wallpaper on every display in one step from the inspector, a link or Shortcuts
+- Workshop wallpapers in Discover can now be downloaded and applied to the target display in one step
+- Pasting a Workshop item link or id into the Discover search box now shows that item directly instead of searching for the text
+- Discover has a new Recently updated sort that lists wallpapers by when they last changed
+- Playlists can now change wallpaper each time the Mac is unlocked
+- A new switch in Settings > General lets you stop WallpaperMachine from changing the macOS desktop picture, so Mission Control keeps your own picture
+- Installed Workshop wallpapers can be reinstalled from the Workshop, keeping your options and the current copy until the new download completes
+- Wallpaper properties have a Restore all defaults link that resets every setting to the artist's values in one click
+- The inspector can check an installed video for baked-in black bars and set the scale factor that crops them in Fill mode
+- Import finds projects in Wallpaper Engine and Steam library folders, accepts a project's own files, recognizes renamed Workshop projects and can replace changed ones
+- Wallpaper settings now show the wallpaper's own translated names, and built-in Wallpaper Engine identifiers appear as readable words
+- Workshop downloads now show the time left, and the menu bar menu shows how many downloads are running and their progress
+- A wallpaper that crashed the app twice while loading is held back at launch, and a banner names it with a Try again button
+- A scene that stopped after a rendering failure has a Retry button in the live diagnostics of Performance settings
+- On a MacBook, the inspector's energy rating also shows about how much of a full battery charge a wallpaper uses per hour
+- An optional switch, off by default, lets Safari's Web Inspector debug web wallpapers
+- The diagnostics report now includes macOS resource and hang reports, the wallpaper load history and memory use, and the log explains why wallpapers changed
+
+#### Improved
+
+- Switching to a scene, web page or video on the optional native video playback now keeps the previous picture until the new one appears, instead of flashing black
+- Native Metal now draws wallpapers with scene lights, motion trails, fluid and ripple effects and perspective effects instead of handing them to Compatibility
+- Customizable scene wallpapers no longer hold memory for layers their settings hide, and Native Metal needs less image memory for heavy wallpapers
+- Web wallpapers now honor the frame-rate limit and Internal render scale, and can follow a fast display's full refresh rate when you choose it
+- Reapply wallpaper now restarts the wallpaper on the display, so a frozen or blank wallpaper can be revived without choosing another
+- Installed tiles show still covers and animate only the preview under the pointer, so a large library no longer keeps the panel busy
+- Installed keeps its search, sort, filters and scroll position when you close and reopen the control panel
+- The inspector now shows Displays and Collections before a wallpaper's properties, so long property lists no longer push them out of reach
+- Property groups now appear as section headings, making long property lists easier to scan
+- The Wallpaper Preview window now shows the wallpaper in the shape of the display it previews for
+- When launched at login, WallpaperMachine now waits in the menu bar instead of opening the control panel
+- Discover keeps listing wallpapers when Steam changes its Workshop page, with a note that the list may be incomplete
+- Importing a project identical to one already installed now skips it instead of copying it again
+- Backups no longer include the saved Steam sign-in, partial downloads or thumbnail caches, while your library is still backed up
+- The update available alert now waits until wallpapers are showing again instead of appearing over full-screen apps or the locked screen
+
+#### Fixed
+
+- Many Workshop effects that were silently missing now appear, including water caustics, sine wave, pixelate, audio bars, color grading, halftone, procedural noise and progress bars
+- Image layer colors chosen by a preset or your settings, and effects your settings switch on or off, now take effect
+- Wallpapers that change with the time of day now show the right picture instead of a clock on a black screen
+- Scene wallpapers whose scripts check the device, create layers from a model or rebuild their layers now run those scripts, so missing bars and elements appear
+- Text, clock, scan-line, wave and compose layer effects that read other layers or themselves now show instead of being blank or missing
+- A scene that stops after a rendering error, or after the Mac wakes, now restarts by itself instead of staying frozen
+- On Native Metal, 3D models no longer show hidden faces, parallax follows the cursor at the right speed and depth matches Compatibility
+- Clearing the shader cache while a wallpaper loaded on Native Metal no longer crashes the app
+- A scene wallpaper that fails to load no longer leaves the display black, and the previous wallpaper stays
+- Trails and echo effects no longer freeze partway with Update only when the scene changes turned on
+- Playlists no longer refill a display you cleared, replace a wallpaper you just chose, or forget their shuffle round after a relaunch
+- With optional native video playback, Fit, Original size and the scale factor now work, and portrait clips show upright in Mission Control
+- With optional native video playback, a clip that freezes after wake or never shows a picture is repaired or handed to Compatibility instead of staying black
+- With optional native video playback, a sleeping disk no longer holds up other displays and switching quickly no longer flashes the wallpapers in between
+- The experimental animated lock screen no longer goes black or loses its wallpaper because of a stale renderer or unanswered system requests
+- Turning on the experimental animated lock screen now explains a switched-off renderer and ends leftover renderers instead of timing out
+- The experimental animated lock screen no longer stays frozen after a missed wake, and one sleeping display no longer pauses another
+- On macOS 27, Mission Control shows the wallpaper picture again, and quitting is no longer blocked by a desktop picture macOS holds on to
+- Quitting, logging out, restarting and shutting down no longer hang while the desktop picture is restored, and a failed restore is explained
+- Stopping the app from Terminal now restores the desktop picture first, and an import file picker closing early no longer ends the app
+- Workshop downloads retry a dropped connection, restart after the Mac wakes and check free space first instead of stalling or blaming your purchase
+- Download progress no longer jumps backwards, and a preset whose base wallpaper failed to download now says so clearly
+- Audio-reactive wallpapers recover after you switch the output device, such as connecting headphones
+- A display that briefly drops out or reports no size while connecting no longer reloads wallpapers or makes applying fail on other displays
+- Plugging in or unplugging the charger while the Mac sleeps is now noticed on wake, so battery settings apply correctly
+- Opening a second copy of WallpaperMachine now brings the running one forward instead of sharing the library with it
+- The control panel and its windows open on the current Space, and a minimized panel comes back when you open it
+- Launch at login now explains when WallpaperMachine must be allowed in Login Items and offers a button to open them
+- Wallpaper settings that depend on other options now show and hide correctly for more of Wallpaper Engine's rules
+- Web wallpapers that load files inside a frame no longer stall, and audio visualizers no longer freeze mid-decay when music stops
+- Paused web wallpapers are now actually suspended, even when the page ignores the pause
+- Web wallpapers now receive only changed properties after the first update, so pages no longer redo setup on every edit
+- On a MacBook with macOS 27, Energy use in Performance settings shows the battery share per hour again
+
+### 简体中文
+
+Native Metal 成为默认场景渲染器，新增实时属性预览和壁纸位置调整，并修复了大量场景、视频、实验性锁定屏幕和 Workshop 下载问题
+
+#### 不兼容变更
+
+- 场景壁纸现在默认使用 Native Metal 渲染器，首次启动时会自动切换一次；如需继续使用原渲染器，请在性能设置中选择兼容渲染器
+
+#### 新增
+
+- 壁纸预览窗口现在会随你编辑属性实时更新，拖动滑块和颜色时也会跟随，且不会重新载入或影响桌面
+- 新增可选设置（默认关闭），可在应用更改之前就把场景壁纸的属性编辑实时显示在桌面上
+- 现在可以在检查器中用水平位置和垂直位置滑块调整场景和视频壁纸在每台显示器上的位置，拖动时实时跟随
+- 在 设置 > 性能 > 播放 中，低电量模式、Mac 过热和电池电量低时现在可以选择降低画质，而不是暂停或停止壁纸
+- 新增电池电量低规则（默认关闭），可在电池供电且电量降至 10%、20% 或 30% 时暂停或停止壁纸
+- 播放中新增可选开关（默认关闭），只让指针所在的显示器继续播放，其他显示器暂停
+- 静音壁纸功能可从菜单栏、设置、链接、快捷指令或快捷键一次静音所有壁纸，且不改变已保存的音量
+- 随机壁纸可从全部壁纸或仅收藏中为显示器换一张不同的壁纸，可通过菜单栏、链接、快捷指令或快捷键使用
+- 连接两台或更多显示器时，菜单栏菜单为每台显示器提供子菜单，包含上一张、下一张、最近使用和从显示器移除
+- 应用到所有显示器可通过检查器、链接或快捷指令一步将壁纸应用到每台显示器
+- 发现中的 Workshop 壁纸现在可以一步完成下载并应用到目标显示器
+- 在发现的搜索框中粘贴 Workshop 项目链接或编号，现在会直接显示该项目，而不是按文字搜索
+- 发现新增最近更新排序，按壁纸最后更新时间列出
+- 播放列表现在可以在每次解锁 Mac 时更换壁纸
+- 设置 > 通用 中新增开关，可让 WallpaperMachine 不再更改 macOS 桌面图片，使调度中心保留你自己的图片
+- 已安装的 Workshop 壁纸可以从 Workshop 重新安装，保留你的选项，并在新下载完成前保留当前副本
+- 壁纸属性新增恢复全部默认值链接，一键将所有设置恢复为作者设定的值
+- 检查器可以检查已安装视频中是否有内嵌黑边，并设置在填充模式下裁掉黑边的缩放比例
+- 导入现在能在 Wallpaper Engine 和 Steam 资料库文件夹中找到项目，接受项目自身的文件，识别改名的 Workshop 项目，并可替换已更改的项目
+- 壁纸设置现在显示壁纸自带的翻译名称，Wallpaper Engine 内置标识符也会显示为可读的文字
+- Workshop 下载现在会显示剩余时间，菜单栏菜单也会显示正在进行的下载数量和进度
+- 加载时两次导致应用崩溃的壁纸会在启动时暂缓载入，并有横幅指出该壁纸并提供重试按钮
+- 因渲染失败而停止的场景会在性能设置的实时诊断中提供重试按钮
+- 在 MacBook 上，检查器的能耗评级还会显示壁纸每小时大约消耗多少电池电量
+- 新增可选开关（默认关闭），允许用 Safari 的 Web 检查器调试网页壁纸
+- 诊断报告现在包含 macOS 资源和无响应报告、壁纸载入记录和内存占用，日志也会说明壁纸为何更换
+
+#### 改进
+
+- 切换到场景、网页或可选原生视频播放中的视频时，现在会保留上一张画面直到新壁纸出现，不再黑屏闪烁
+- Native Metal 现在可以绘制带场景光照、运动拖尾、流体和涟漪效果以及透视效果的壁纸，不再交给兼容渲染器
+- 可自定义的场景壁纸不再为设置隐藏的图层占用内存，Native Metal 绘制复杂壁纸所需的图像内存也更少
+- 网页壁纸现在遵循帧率上限和内部渲染比例，并可在你选择时跟随高刷新率显示器的完整刷新率
+- 重新应用壁纸现在会在显示器上重启该壁纸，无需先选择其他壁纸即可恢复卡住或空白的壁纸
+- 已安装中的缩略图显示静态封面，只播放指针所在的预览，大型壁纸库不再让面板一直忙碌
+- 关闭并重新打开控制面板时，已安装会保留搜索、排序、筛选和滚动位置
+- 检查器现在把显示器和收藏集放在壁纸属性之前，较长的属性列表不再把它们挤到远处
+- 属性分组现在显示为分节标题，让较长的属性列表更易浏览
+- 壁纸预览窗口现在按所预览显示器的比例显示壁纸
+- 登录时启动后，WallpaperMachine 现在会停留在菜单栏，而不会自动打开控制面板
+- Steam 更改 Workshop 页面时，发现仍会列出壁纸，并提示列表可能不完整
+- 导入与已安装项目完全相同的内容时，现在会跳过而不再重复复制
+- 备份不再包含已保存的 Steam 登录信息、未完成的下载和缩略图缓存，壁纸库仍会照常备份
+- 有可用更新的提醒现在会等到壁纸重新显示时再出现，不再弹在全屏应用或锁定屏幕上方
+
+#### 修复
+
+- 许多此前被悄悄略过的 Workshop 效果现在会显示，包括水面焦散、正弦波、像素化、音频条、调色、半色调、程序噪声和进度条
+- 由预设或你的设置选择的图层颜色，以及设置中开关的效果，现在都会生效
+- 随一天时间变化的壁纸现在会显示对应画面，不再只在黑屏上显示时钟
+- 脚本会检查设备、从模型创建图层或重建图层的场景壁纸，现在能正常运行这些脚本，缺失的音频条和元素会显示出来
+- 读取其他图层或自身的文字、时钟、扫描线、波形和组合图层效果现在会正常显示，不再空白或缺失
+- 因渲染错误或 Mac 唤醒后停止的场景现在会自动重新启动，而不是一直卡住
+- 在 Native Metal 上，3D 模型不再显示应隐藏的面，视差以正确速度跟随指针，深度表现与兼容渲染器一致
+- 在 Native Metal 载入壁纸时清除着色器缓存不再导致应用崩溃
+- 场景壁纸载入失败时不再让显示器变黑，会保留之前的壁纸
+- 开启仅在场景变化时更新后，拖尾和回声效果不再中途冻结
+- 播放列表不再为你清空的显示器重新放入壁纸，不再替换你刚选择的壁纸，重启后也不会忘记随机轮次
+- 使用可选的原生视频播放时，适应、原始大小和缩放比例现在都能生效，竖拍视频在调度中心中也会正立显示
+- 使用可选的原生视频播放时，唤醒后冻结或始终不出画面的视频会被修复或交给兼容模式，不再一直黑屏
+- 使用可选的原生视频播放时，休眠的磁盘不再拖慢其他显示器，快速切换时也不再闪现中间的壁纸
+- 实验性的动态锁定屏幕不再因旧的渲染进程或未响应的系统请求而变黑或丢失壁纸
+- 开启实验性的动态锁定屏幕时，现在会说明渲染器已被关闭并结束残留的渲染进程，不再等待超时
+- 实验性的动态锁定屏幕在漏掉唤醒通知后不再冻结，一台显示器休眠也不再暂停另一台
+- 在 macOS 27 上，调度中心重新显示壁纸画面，退出也不再被 macOS 保留的桌面图片阻止
+- 退出、注销、重启和关机时不再因恢复桌面图片而卡住，恢复失败时也会给出说明
+- 从终端停止应用时现在会先恢复桌面图片，导入文件选择器提前关闭也不再导致应用退出
+- Workshop 下载会在连接中断时重试、在 Mac 唤醒后重新开始，并预先检查可用空间，不再卡住或误报购买问题
+- 下载进度不再倒退，预设的基础壁纸下载失败时现在也会明确说明
+- 切换输出设备后（例如连接耳机），音频响应壁纸会恢复正常
+- 短暂断开或连接时未报告尺寸的显示器，不再导致壁纸重新载入或在其他显示器上应用失败
+- 在 Mac 睡眠时插拔充电器，现在会在唤醒时被识别，电池相关设置会正确生效
+- 打开第二个 WallpaperMachine 副本时，现在会把正在运行的副本调到前台，而不是与其共用壁纸库
+- 控制面板及其窗口会在当前空间中打开，最小化的面板在你打开时也会恢复
+- 登录时启动现在会说明何时需要在登录项中允许 WallpaperMachine，并提供打开登录项的按钮
+- 依赖其他选项的壁纸设置现在能按更多 Wallpaper Engine 规则正确显示和隐藏
+- 在框架内载入文件的网页壁纸不再卡住，音乐停止时音频可视化也不再在衰减中途冻结
+- 暂停的网页壁纸现在会被真正挂起，即使网页本身忽略暂停请求
+- 网页壁纸在首次更新后只接收已更改的属性，网页不再在每次编辑时重复初始化
+- 在运行 macOS 27 的 MacBook 上，性能设置中的能耗再次显示每小时电池占比
+
+**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.3.3...v1.4.1
+
 ## 1.4.0 — 2026-10-13
 
 ### English
