@@ -39,6 +39,14 @@ REGRESSION_BINARIES = {
     "vulkan_sample_count_smoke": False, "rendergraph_smoke": False,
     "rust_shader_bridge_test": False, "stb_image_regression_test": False,
     "surface_health_test": False, "wallpaper_scaling_test": False,
+    "shader_preprocessor_compat_test": False, "unpack_shader_compile_smoke": False,
+    "video_texture_submission_smoke": False, "vulkan_render_batch_planner_smoke": False,
+    "version_tests": False,
+}
+# Executables in tests/CMakeLists.txt that the check neither builds nor runs, and
+# why. Every other one is registered above or is one of the two probes below.
+MANUAL_BINARIES = {
+    "wpdump": "inspection tool, not a test: dumps one workshop item's parse to JSON",
 }
 OFFSCREEN_PROBE = "offscreen_scene_probe"
 RELOAD_PROBE = "scene_reload_cycle_probe"

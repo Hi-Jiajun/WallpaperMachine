@@ -556,19 +556,50 @@ cargo test -p shader --test pipeline -- --nocapture
 CMake test binaries are built under `artifacts/renderer/bin/` (executables in
 its `tests/` folder). The authoritative routine build/run list is
 `REGRESSION_BINARIES` in `scripts/check_renderer.py`, covering the parsers
-(`scene_schema_tests`, `mdl_schema_tests`, `tex_schema_tests`), SceneScript, input
-and the media protocol (`script_runtime_compat_test`, `mouse_input_test`,
-`scenescript_sound_layer_smoke`, `scenescript_media_event_smoke`,
-`media_thumbnail_texture_smoke`), and the texture/cache/lifetime, audio, video,
+(`scene_schema_tests`, `mdl_schema_tests`, `tex_schema_tests`, `version_tests`),
+SceneScript, input and the media protocol (`script_runtime_compat_test`,
+`mouse_input_test`, `scenescript_sound_layer_smoke`,
+`scenescript_media_event_smoke`, `media_thumbnail_texture_smoke`), the shader
+preprocessor (`shader_preprocessor_compat_test`, `unpack_shader_compile_smoke`),
+Compatibility pass batching (`vulkan_render_batch_planner_smoke`, plain asserts
+kept live in Release with `-UNDEBUG`), video playback-state merging
+(`video_texture_submission_smoke`), and the texture/cache/lifetime, audio, video,
 graph, particle, timer and Metal checks; a non-zero exit from any registered
 binary fails the check. A test binary that is not registered fails unnoticed, so a
-new one joins the registry in the change that adds it. Every registered binary
+new one joins the registry in the change that adds it. The few executables in
+`tests/CMakeLists.txt` that are neither registered nor one of the two probes are
+listed in `MANUAL_BINARIES` beside the registry with the reason, and
+`tests.test_check_renderer` fails on any other. Every registered binary
 runs on each check, in CI too, so it has to stay fast and headless: no Metal
 device unless its registry flag says so, no window, and no audio device. A test
 that mounts a sound layer passes `SoundManager::OutputBackend::Null`, because a
 mount opens the system output device even when nothing plays. Temporary files
 carry the process id, because other checkouts run the same binaries at the same
-time and share the temporary directory.
+time and share the temporary directory, and are removed when the test ends.
+
+Two registered binaries also read a local corpus when there is one; the roots
+and their defaults are in
+[wallpaper-corpus.md](wallpaper-corpus.md#pointing-the-tests-at-your-local-corpus).
+`version_tests` parses every `<id>/scene.pkg` under
+`WALLPAPER_MACHINE_WORKSHOP_ROOT` and checks each package, texture and model
+version it finds (a parsed model needs geometry; it may have no bones, which the
+renderer draws as a static mesh). Without a corpus it generates no cases and
+`CorpusSmoke.NonEmpty` skips, naming the folder it looked in; pointed at the app's
+`Library` folder (60 items) it takes about 3 seconds. `unpack_shader_compile_smoke`
+checks its compile-job building and path guards on every run. Its corpus sweep
+compiles every shader-bearing material of every scene under
+`WALLPAPER_MACHINE_UNPACK_ROOT`, with `WALLPAPER_MACHINE_ASSETS_ROOT` mounted, and
+took 5 to 6 minutes for 60 scenes, so it is disabled and runs only on request:
+
+```sh
+WALLPAPER_MACHINE_UNPACK_ROOT=<folder of id/scene.json> \
+  artifacts/renderer/bin/tests/unpack_shader_compile_smoke \
+  --gtest_also_run_disabled_tests --gtest_filter='*ParsesCorpus*'
+```
+
+Run by hand only (`MANUAL_BINARIES`): `wpdump <workshop folder> [out.json]` writes
+the snapshot `version_tests` checks for one item (package, scene, texture and
+model versions and fields) as JSON, to inspect what the parsers make of it.
 
 To iterate on one test, build and run its binary in the Homebrew environment from
 `scripts/build.py`, once `check_renderer.py` has configured the build directory:
