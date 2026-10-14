@@ -67,7 +67,7 @@ file; pass `rg -u` to search them deliberately.
 
 | Document | Purpose |
 |---|---|
-| [features/control-panel.md](features/control-panel.md) | Panel layout and language, tabs, selection versus apply, target display, filtering and local collections, recently used, deleting, downloads and import |
+| [features/control-panel.md](features/control-panel.md) | Panel layout and language, sidebar pages and Settings, selection versus apply, Now Playing, target display, filtering and local collections, recently used, deleting, downloads and import |
 | [features/first-run.md](features/first-run.md) | First-run guide, the one-time support prompt after the first downloaded wallpaper, the later star prompt and the performance data question |
 | [features/wallpaper-properties.md](features/wallpaper-properties.md) | Inspector properties, live preview, property presets, image placement, the compatibility check and the black-bar check |
 | [features/backup-restore.md](features/backup-restore.md) | The Settings → Storage backup package (settings, allowlisted preferences, chosen user files) and restoring it |
@@ -79,7 +79,7 @@ file; pass `rg -u` to search them deliberately.
 | [features/wallpaper-switching.md](features/wallpaper-switching.md) | The switch hold: the previous picture stays on screen, then fades, while a newly chosen wallpaper loads; which switches it covers, its limits and Reduce Motion |
 | [features/desktop-picture.md](features/desktop-picture.md) | The static desktop picture macOS shows (Mission Control, after quit): posters, the journal of originals, refused writes, macOS 27, restoring on quit |
 | [features/playlists.md](features/playlists.md) | Per-display rotation and day/night selection, local collection sources, reusable named plans, scheduling and storage |
-| [features/pixiv.md](features/pixiv.md) | pixiv tab: rankings and tag search, saving a page as a still wallpaper, pixiv sign-in and R-18 works |
+| [features/pixiv.md](features/pixiv.md) | pixiv page: rankings and tag search, saving a page as a still wallpaper, pixiv sign-in and R-18 works |
 | [features/audio-response.md](features/audio-response.md) | Audio response setting, system-audio capture permission, spectrum analysis and what scene and web wallpapers receive |
 | [features/web-wallpapers.md](features/web-wallpapers.md) | HTML/JS wallpapers hosted in a web view, host protocol, limits |
 | [features/user-files.md](features/user-files.md) | Files and folders chosen for wallpaper properties: the managed copy, its lifetime and cleanup, lock-screen publication and the inspector |

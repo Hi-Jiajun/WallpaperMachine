@@ -273,6 +273,9 @@
 
   adopt(window.__appTheme);
   paint();
+  /* The window draws the system sidebar material behind the page (native injects the flag
+     with the theme); without it the sidebar paints a plain surface of its own. */
+  if (window.__appVibrancy === true) root.dataset.vibrancy = '';
 
   if (media) {
     media.addEventListener('change', function () {

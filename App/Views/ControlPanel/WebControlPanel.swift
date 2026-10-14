@@ -116,9 +116,6 @@ final class WebPanelController: NSObject, WKNavigationDelegate {
   var actionError: String?
   var remembersSession = true
   var favoriteIDs: Set<String>
-  /// Each library page (`discover`, `pixiv`, `installed`) hides its filter sidebar when the
-  /// user closes it with the toolbar's Filter button; the choice outlives the page.
-  var filtersCollapsed: [String: Bool]
   /// Whether the first-run welcome has been dismissed. The page shows the welcome over
   /// the content while this is false and reports `welcomeSeen` once the user has read or
   /// skipped it, or started using the app; it is never shown again on its own.
@@ -152,12 +149,6 @@ final class WebPanelController: NSObject, WKNavigationDelegate {
   var dismissedLibraryError: String?
   var dismissedDownloadError: String?
   static let favoriteKey = "WallpaperMachine.favoriteWallpaperIDs"
-  /// Where each page's sidebar choice is stored; Discover keeps the key earlier builds used.
-  static let filtersCollapsedKeys = [
-    "discover": "WallpaperMachine.workshopFiltersCollapsed",
-    "pixiv": "WallpaperMachine.pixivFiltersCollapsed",
-    "installed": "WallpaperMachine.installedFiltersCollapsed",
-  ]
   static let welcomeSeenKey = "WallpaperMachine.welcomeSeen"
   static let dragSelectLearnedKey = "WallpaperMachine.dragSelectLearned"
   static let hideAfterActivatingKey = "WallpaperMachine.hideAfterActivating"
@@ -222,7 +213,6 @@ final class WebPanelController: NSObject, WKNavigationDelegate {
     self.compatibility = compatibility ?? WallpaperCompatibilityStore()
     self.letterbox = letterbox ?? Self.letterboxStore(for: store)
     self.chooseApplication = chooseApplication
-    filtersCollapsed = Self.filtersCollapsedKeys.mapValues { defaults.bool(forKey: $0) }
     welcomeSeen = defaults.bool(forKey: Self.welcomeSeenKey)
     dragSelectLearned = defaults.bool(forKey: Self.dragSelectLearnedKey)
     self.libraryMetrics = libraryMetrics ?? LibraryMetricsService()
@@ -260,7 +250,11 @@ final class WebPanelController: NSObject, WKNavigationDelegate {
     configuration.preferences.inactiveSchedulingPolicy = .suspend
     let view = WKWebView(frame: .zero, configuration: configuration)
     view.navigationDelegate = self
-    view.underPageBackgroundColor = .windowBackgroundColor
+    // Transparent, so the window's sidebar material shows through the page's sidebar
+    // (`PanelContentController`); the page paints every other region itself. WebKit has
+    // no public switch for this; `drawsBackground` is its long-standing KVC setter.
+    view.setValue(false, forKey: "drawsBackground")
+    view.underPageBackgroundColor = .clear
     view.allowsBackForwardNavigationGestures = false
     #if DEBUG
       view.isInspectable = true
@@ -349,7 +343,7 @@ final class WebPanelController: NSObject, WKNavigationDelegate {
     content.addUserScript(
       WKUserScript(
         source:
-          "window.__appTheme = {mode:'\(preferences.mode.rawValue)',accent:'\(preferences.accent)',tone:'\(preferences.tone.rawValue)',icon:'\(preferences.icon.rawValue)'};window.__appLanguage='\(language)';",
+          "window.__appTheme = {mode:'\(preferences.mode.rawValue)',accent:'\(preferences.accent)',tone:'\(preferences.tone.rawValue)',icon:'\(preferences.icon.rawValue)'};window.__appLanguage='\(language)';window.__appVibrancy=true;",
         injectionTime: .atDocumentStart, forMainFrameOnly: true))
   }
 

@@ -11,7 +11,6 @@ The wordmark is Manrope ("Wallpaper" bold, "Machine" medium), embedded as outlin
     python3 scripts/brand.py                      # native app, Dock choices, tray icon and DMG background
     python3 scripts/brand.py --dmg                # only Packaging/dmg/background.png and background@2x.png
     python3 scripts/brand.py --website ../Site    # plus logo, favicons and manifest there
-    python3 scripts/brand.py --panel-glyph        # the inline mark used by WebUI/panel.js
 
 The app icon exports vector layers for Icon Composer. Website app-icon PNGs reuse the
 native Dock renders; website vectors share their geometry and appearances. Quick Look
@@ -159,14 +158,6 @@ def mark_markup(color: str = "currentColor", variant: str = "regular") -> str:
     frame, gear, stroke = mark_parts(variant)
     return (f'<path d="{frame}" fill="none" stroke="{color}" stroke-width="{num(stroke)}" stroke-linecap="round"/>'
             f'<path d="{gear}" fill="{color}" fill-rule="evenodd"/>')
-
-
-def panel_glyph() -> str:
-    """Node list for `WebUI/panel.js` `brands.wallpaperMachine`: the panel's `icon()` wraps it in a
-    24x24 SVG that already sets `stroke="currentColor"`, `fill="none"` and round caps."""
-    frame, gear, stroke = mark_parts("small")
-    return (f'<path d="{frame}" stroke-width="{num(stroke)}"/>'
-            f'<path d="{gear}" fill="currentColor" stroke="none" fill-rule="evenodd"/>')
 
 
 def mark_svg(color: str = LOGO_ACCENT_ON_LIGHT, variant: str = "regular", *, centered: bool = False) -> str:
@@ -622,13 +613,9 @@ for (index, path) in spec.outputs.enumerated() {
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--website", type=Path, help="also write logo, favicons and manifest into this directory")
-    parser.add_argument("--panel-glyph", action="store_true", help="print the WebUI/panel.js brand glyph and exit")
     parser.add_argument("--skip-app", action="store_true", help="do not touch native app, Dock or tray assets")
     parser.add_argument("--dmg", action="store_true", help="write only the disk-image background pair (Packaging/dmg)")
     args = parser.parse_args()
-    if args.panel_glyph:
-        print(panel_glyph())
-        return 0
     if sys.platform != "darwin":
         print(f"{MARK.missing} brand.py rasterizes with qlmanage and sips; macOS only", file=sys.stderr)
         return 1

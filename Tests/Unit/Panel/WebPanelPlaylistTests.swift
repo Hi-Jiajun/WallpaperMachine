@@ -136,6 +136,38 @@ final class WebPanelPlaylistTests: XCTestCase {
     XCTAssertEqual(asked, ["primary"])
   }
 
+  /// Now Playing's Next follows the Next wallpaper shortcut: a rotating playlist moves along
+  /// (and says so when it has nothing else), a display without one takes the library's next
+  /// wallpaper instead of asking the scheduler, and a mirrored display is refused.
+  func testNextWallpaperMovesARotatingPlaylistAlongAndOtherwiseLeavesTheScheduler() async throws {
+    var asked: [String] = []
+    playlists.skipHandler = { display in
+      asked.append(display)
+      return asked.count == 1
+    }
+    playlists.update("primary") { $0.mode = .rotate }
+    try await controller.perform("nextWallpaper", body: ["displayID": "primary"])
+    XCTAssertEqual(asked, ["primary"])
+    do {
+      try await controller.perform("nextWallpaper", body: ["displayID": "primary"])
+      XCTFail("a playlist with nothing else to change to says so")
+    } catch {
+      XCTAssertEqual(
+        (error as? WallpaperActionError)?.message,
+        String(localized: "This display’s playlist has no other wallpaper to change to."))
+    }
+    do {
+      try await controller.perform("nextWallpaper", body: ["displayID": "mirrored"])
+      XCTFail("a mirrored display follows its source")
+    } catch {}
+    // Without a rotation Next takes the library's next supported wallpaper; with none to take
+    // it does nothing, and it never asks the scheduler.
+    playlists.update("primary") { $0.mode = .off }
+    store.librarySnapshot.wallpapers.removeAll { $0.supported }
+    try await controller.perform("nextWallpaper", body: ["displayID": "primary"])
+    XCTAssertEqual(asked, ["primary", "primary"], "Without a rotation, Next never asks the scheduler")
+  }
+
   /// A removal that holds the playlist shows in the snapshot as a paused playlist, and the
   /// panel's Resume reaches the scheduler for the display it names.
   func testResumeReachesTheSchedulerAndTheSnapshotReportsTheHold() async throws {

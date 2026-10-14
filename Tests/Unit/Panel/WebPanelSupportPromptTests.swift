@@ -31,7 +31,7 @@ final class WebPanelSupportPromptTests: ControlPanelTestCase {
 
       _ = try await panel.js("document.querySelector('#support-dialog [data-choice=\"dismiss\"]').click()")
       try await panel.waitJS("!document.getElementById('support-dialog').open")
-      try await panel.expectJS("return document.activeElement === document.querySelector('.tabs [aria-current=\"page\"]')", equals: true)
+      try await panel.expectJS("return document.activeElement === document.querySelector('#sidebar [aria-current=\"page\"]')", equals: true)
       try await self.pushSnapshot(panel)
       try await panel.expectJS("return document.getElementById('support-dialog').open", equals: false)
 

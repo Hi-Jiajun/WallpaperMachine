@@ -1,6 +1,6 @@
 # pixiv illustrations
 
-The **pixiv** tab browses pixiv's illustration rankings and tag search and saves
+The **pixiv** page browses pixiv's illustration rankings and tag search and saves
 any page of a work to the library as a still wallpaper that applies like any
 other. Browsing needs no account; signing in to pixiv adds the works pixiv shows
 only to members and, when the account allows them and the **Mature (R-18)** box
@@ -13,7 +13,7 @@ and each saved wallpaper links back to the work on pixiv.
 
 ## Browsing
 
-With the search field empty the tab shows a ranking; typing tags searches
+With the search field empty the page shows a ranking; typing tags searches
 pixiv instead, and the toolbar menu follows: rankings while the field is empty,
 search orders once it is not. Typing searches after a short pause, and Return or
 **Search** asks again at once.
@@ -33,7 +33,7 @@ read; a malformed entry is dropped instead of failing its page. A ranking or
 search that fails to open empties the grid instead of leaving the listing before
 it on show, where Next would page the one that failed; **Retry** asks for it again.
 
-The filter sidebar (the toolbar's **Filter** button, see
+The Filters popover (the toolbar's **Filter** button, see
 [control-panel](control-panel.md#filtering)) holds the pixiv account and these
 groups:
 
@@ -74,9 +74,9 @@ Selecting a tile fetches the work's page list; the inspector shows the page
 whole, a page stepper for works with several, **Download** (or **Download page
 N**) and **View on pixiv**. Double-clicking a tile downloads the page the
 inspector shows, and applies it once it is in the library. Downloads run two at
-a time in the order asked for, each with progress on its tile and in the
-activity bar and shared Downloads popover. They can be paused, resumed, cancelled
-or retried. Queue order and original-image checkpoints survive quitting and
+a time in the order asked for, each with progress on its tile and in the title
+bar's downloads button and shared Downloads popover; while one runs, a title bar
+pill leads back to this page. They can be paused, resumed, cancelled or retried. Queue order and original-image checkpoints survive quitting and
 relaunch in the app's `Downloads/Pixiv` directory; restored jobs wait for an
 explicit **Resume download**. No pixiv session cookie is stored with the queue.
 
@@ -118,8 +118,8 @@ library reloads, waiting for any wallpaper being applied to finish first.
 
 ## Signing in and R-18 works
 
-**Sign in to pixiv…** in the sidebar's pixiv account group opens pixiv's own
-sign-in page in a window of its own (`WebSignInWindowController`, the one Steam's
+**Sign in to pixiv…** in the Filters popover's pixiv account group, or the link beside
+the result count, opens pixiv's own sign-in page in a window of its own (`WebSignInWindowController`, the one Steam's
 sign-in for [subscriptions](workshop-downloads.md#subscriptions) uses too). The page
 runs in a private website data store that disappears with the window; the app
 reads exactly one thing from it, the `PHPSESSID` cookie pixiv sets on
@@ -145,9 +145,9 @@ Signed in, the Mature (R-18) box can be ticked; ticking it adds R-18 works to
 search and the two R-18 rankings to the menu. Unticking it, or signing out,
 returns an R-18 ranking to its all-ages counterpart (`PixivQuery.sanitized`,
 mirrored in `pixiv.js`). When pixiv reports that the account hides R-18 works,
-the sidebar says to turn them on under **Viewing restrictions** in pixiv's
+the popover says to turn them on under **Viewing restrictions** in pixiv's
 settings. pixiv refuses its R-18 rankings with 403 to anyone it does not know
-to be an adult; the tab then says whether a sign-in is missing or the account
+to be an adult; the page then says whether a sign-in is missing or the account
 hides R-18 works, and checks whether pixiv ended the session.
 
 A session pixiv no longer recognises is dropped, here and in the keychain, with
@@ -155,7 +155,7 @@ a note to sign in again; a failure to reach pixiv keeps it. **Log out** forgets
 the session in the app and the keychain, reloads what an anonymous visitor
 sees and deselects an R-18 work; pixiv itself keeps the session until it expires
 or is ended on pixiv. If the keychain refuses the session, the sign-in lasts
-until the app quits and the sidebar says so. Some third-party sign-in providers
+until the app quits and the popover says so. Some third-party sign-in providers
 refuse to run inside another app's web view; signing in with a pixiv ID or email
 and password always works.
 
@@ -176,7 +176,7 @@ and password always works.
 `Tests/Unit/Pixiv/` covers decoding against pixiv's answer shapes, addresses, ratings and
 query sanitising, request pacing, the session reaching only `www.pixiv.net`, sign-in, log
 out and expiry against an in-memory keychain, the download queue and packaging.
-`WebPanelPixivTests` and the offscreen `ControlPanelPixivTests` drive the tab's actions
+`WebPanelPixivTests` and the offscreen `ControlPanelPixivTests` drive the page's actions
 and page with a fixture pixiv and a closure in place of the sign-in window. Nothing in
 the suite reaches pixiv or opens a window, so the real sign-in page and pixiv's
 signed-in answers are checked by hand; see [Testing](../testing/README.md).

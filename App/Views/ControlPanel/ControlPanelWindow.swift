@@ -115,21 +115,31 @@ enum ControlPanelWindow {
 /// Keep the window's content coordinates unflipped while SwiftUI and WebKit retain
 /// their own coordinate systems. WebKit's native color popover uses a window-space
 /// rect as a content-view frame (https://bugs.webkit.org/show_bug.cgi?id=300025).
+///
+/// The sidebar material sits behind the whole page: the web view draws no background of
+/// its own, so the page's sidebar, which paints none, shows the system's translucent
+/// sidebar while every other region paints its own surface over it. macOS makes the
+/// material opaque under Reduce Transparency and dims it in an inactive window.
 @MainActor
 private final class PanelContentController: NSViewController {
     init(hosted: NSViewController) {
         super.init(nibName: nil, bundle: nil)
         view = NSView(frame: NSRect(origin: .zero, size: ControlPanelWindow.initialContentSize))
+        let backdrop = NSVisualEffectView()
+        backdrop.material = .sidebar
+        backdrop.blendingMode = .behindWindow
+        backdrop.state = .followsWindowActiveState
         addChild(hosted)
-        let hostedView = hosted.view
-        hostedView.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(hostedView)
-        NSLayoutConstraint.activate([
-            hostedView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            hostedView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            hostedView.topAnchor.constraint(equalTo: view.topAnchor),
-            hostedView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-        ])
+        for layer in [backdrop, hosted.view] {
+            layer.translatesAutoresizingMaskIntoConstraints = false
+            view.addSubview(layer)
+            NSLayoutConstraint.activate([
+                layer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                layer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                layer.topAnchor.constraint(equalTo: view.topAnchor),
+                layer.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            ])
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }

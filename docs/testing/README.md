@@ -171,7 +171,7 @@ The per-test `UserDefaults` suite is not only a parallelism concern: the unit
 bundle runs inside the real app as its test host, so `UserDefaults.standard`
 *is* `app.wallpapermachine`, the preferences of the installed app. Any
 `WebPanelController` (or other store) built without `defaults:` writes there —
-the first-run welcome's `welcomeSeen` flag, sidebar choices, favorites — and
+the first-run welcome's `welcomeSeen` flag, the learned drag-select hint, favorites — and
 silently changes what the app does at the next launch. Pass the test's own
 suite everywhere; `PanelFixture` does.
 

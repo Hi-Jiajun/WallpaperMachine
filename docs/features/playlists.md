@@ -41,13 +41,15 @@ clock times, so a daylight-saving day still switches at the time on the clock.
 **Change now** moves a rotating display along at once and starts a fresh
 interval; the row's note says roughly when the next change is due, or, for a rotation that
 waits for the unlock, that it changes then. The menu bar's
-**Next Wallpaper**, on the display it is shown for, and a link, Shortcuts action or
+**Next Wallpaper**, on the display it is shown for, the **Next wallpaper** button on the
+panel's Now Playing card (for the target display), and a link, Shortcuts action or
 shortcut key asking for the next wallpaper, on the panel's target display unless one is
 named, do the same for a display that rotates, and otherwise take the next wallpaper
 in library order. All of them are asked for, so they also change a display that is
 paused or covered; only the timer's own changes wait (see below). When the playlist has
-nothing else to change to (its only wallpaper is already on screen), Change now and a
-link, keyboard shortcut or Shortcuts action asking for the next wallpaper say so
+nothing else to change to (its only wallpaper is already on screen), Change now, the
+Now Playing button and a link, keyboard shortcut or Shortcuts action asking for the next
+wallpaper say so
 instead of succeeding without a change.
 
 This display's list is edited from Installed: the list button in a wallpaper's
@@ -281,8 +283,8 @@ the shuffle round it was in without repeating a wallpaper, an unlock changing an
 rotation once and ignoring a double report, waiting for a display that cannot play yet but
 only for the 30-second window, leaving timed rotations, cleared displays and a hand-chosen
 wallpaper alone, and never dating a display) and
-`WebPanelPlaylistTests` (the actions' validation, the trigger and the paused state in the
-snapshot). `WallpaperPresentationPolicyTests` checks the unlock edge: once per unlock, also
+`WebPanelPlaylistTests` (the actions' validation, Now Playing's Next wallpaper action, the
+trigger and the paused state in the snapshot). `WallpaperPresentationPolicyTests` checks the unlock edge: once per unlock, also
 when the notification was missed, after a wake or a user switch, and never at start or
 stop. `WallpaperBackupTests` checks that a backup carries the trigger and rejects an
 unknown one.

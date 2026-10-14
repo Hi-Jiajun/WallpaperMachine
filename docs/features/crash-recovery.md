@@ -21,7 +21,7 @@ names the build (`ClientPaths.buildStamp`).
 
 - After the second crash in a row while one wallpaper loads, the next launch starts
   normally and leaves that wallpaper's display without a live scene. The control panel
-  shows a **banner** under the top bar, one row per held wallpaper, with a sentence
+  shows a **banner** under the title bar, one row per held wallpaper, with a sentence
   naming it (`"<title>" was not restored: WallpaperMachine quit unexpectedly twice in a
   row while loading it. Nothing was deleted.`) and a **Try again** button. The menu-bar
   menu carries a disabled line, **A wallpaper was held back after a crash**, so a login

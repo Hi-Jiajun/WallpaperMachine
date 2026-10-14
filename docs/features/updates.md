@@ -11,8 +11,8 @@ notes marker, signing, assets) is in
 
 **Settings → About** is the update surface: an **Updates** group with the status,
 one action button, a progress bar while downloading and the latest release's notes
-([Tabs](control-panel.md#tabs) lists the rest of About). **Check for Updates…** in
-the application menu opens About and starts the same check.
+([Pages and Settings](control-panel.md#pages-and-settings) lists the rest of About).
+**Check for Updates…** in the application menu opens About and starts the same check.
 
 The app checks at launch once the library has loaded (whether or not it loaded
 cleanly, since the update may be the fix), every six hours after, because a

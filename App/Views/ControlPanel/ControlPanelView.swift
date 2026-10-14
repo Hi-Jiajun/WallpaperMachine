@@ -6,15 +6,17 @@ enum SidebarSelection: String {
   case wallpaper, workshop, pixiv, display, settings
 }
 
+/// The Settings sections, in sidebar order; the page draws one of each under the same id.
 enum SettingsSection: String, CaseIterable {
-  case performance, general, appearance, displays, library, storage, about
+  case quick, general, appearance, desktop, playback, performance, displays, shortcuts, library,
+    storage, about
 }
 
 @MainActor
 final class ControlPanelNavigation: ObservableObject {
   @Published var selection: SidebarSelection?
   @Published var targetDisplayID = "primary"
-  @Published private(set) var settingsSection = SettingsSection.performance
+  @Published private(set) var settingsSection = SettingsSection.quick
   @Published private(set) var settingsSectionToken: UInt64 = 0
   /// Installed's filters and the library scroll offsets the last page reported, handed to
   /// the next page when the window is reopened. Memory only, and not `@Published`: the page

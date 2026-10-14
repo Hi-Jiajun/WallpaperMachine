@@ -1,4 +1,4 @@
-import { renderSettings, revealSettingsSection, performanceLimitedFps, showEnergyUsage, milliwatts, energyLevelLabel, batteryShare } from './settings.js';
+import { renderSettings, revealSettingsSection, settingsTitle, performanceLimitedFps, showEnergyUsage, milliwatts, energyLevelLabel, batteryShare } from './settings.js';
 import { createWelcome, SIGN_IN_ID } from './welcome.js';
 import { glyphs } from './icons.js';
 import { t, applyStaticText, setLanguage, language } from './i18n.js';
@@ -15,7 +15,6 @@ const $ = (id) => document.getElementById(id);
 const escapeHTML = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 // GitHub brand mark: kept from the original panel; Lucide ships no brand icons.
 const brands = { github: '<path fill="currentColor" stroke="none" d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/>' };
-brands.wallpaperMachine = '<path d="M12.273 20H17.4A3.6 3.6 0 0 0 21 16.4V6.6A3.6 3.6 0 0 0 17.4 3H7.6A3.6 3.6 0 0 0 4 6.6V11.727" stroke-width="2.9"/><path d="M9.706 18.1Q9.706 18.37 9.952 18.481L10.735 18.836Q11.121 19.011 10.959 19.403L10.398 20.756Q10.236 21.148 9.839 20.998L9.034 20.696Q8.782 20.601 8.592 20.792L8.592 20.792Q8.401 20.982 8.496 21.234L8.798 22.039Q8.948 22.436 8.556 22.598L7.203 23.159Q6.811 23.321 6.636 22.935L6.281 22.152Q6.17 21.906 5.9 21.906L5.9 21.906Q5.63 21.906 5.519 22.152L5.164 22.935Q4.989 23.321 4.597 23.159L3.244 22.598Q2.852 22.436 3.002 22.039L3.304 21.234Q3.399 20.982 3.208 20.792L3.208 20.792Q3.018 20.601 2.766 20.696L1.961 20.998Q1.564 21.148 1.402 20.756L0.841 19.403Q0.679 19.011 1.065 18.836L1.848 18.481Q2.094 18.37 2.094 18.1L2.094 18.1Q2.094 17.83 1.848 17.719L1.065 17.364Q0.679 17.189 0.841 16.797L1.402 15.444Q1.564 15.052 1.961 15.202L2.766 15.504Q3.018 15.599 3.208 15.408L3.208 15.408Q3.399 15.218 3.304 14.966L3.002 14.161Q2.852 13.764 3.244 13.602L4.597 13.041Q4.989 12.879 5.164 13.265L5.519 14.048Q5.63 14.294 5.9 14.294L5.9 14.294Q6.17 14.294 6.281 14.048L6.636 13.265Q6.811 12.879 7.203 13.041L8.556 13.602Q8.948 13.764 8.798 14.161L8.496 14.966Q8.401 15.218 8.592 15.408L8.592 15.408Q8.782 15.599 9.034 15.504L9.839 15.202Q10.236 15.052 10.398 15.444L10.959 16.797Q11.121 17.189 10.735 17.364L9.952 17.719Q9.706 17.83 9.706 18.1ZM7.49 18.1A1.59 1.59 0 1 0 4.31 18.1A1.59 1.59 0 1 0 7.49 18.1Z" fill="currentColor" stroke="none" fill-rule="evenodd"/>';
 function icon(name, size = 16) { const px = Number(size) || 16; return `<svg width="${px}" height="${px}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${glyphs[name] || brands[name] || glyphs.info}</svg>`; }
 const pending = new Set();
 const drafts = new Map();
@@ -26,6 +25,10 @@ let localError = '';
 const activationFailures = new Map();
 let popover = null;
 let popoverTrigger = '';
+// The page the Filters popover was opened on; another page closes it.
+let popoverPage = '';
+// The library page Settings returns to.
+let lastLibraryPage = 'installed';
 let importWasBusy = false;
 let importReportUnseen = false;
 let queueExpanded = false;
@@ -270,25 +273,27 @@ function renderHeld() {
 function render() {
   renderError();
   renderHeld();
-  if (!state) return;
+  if (!state) { renderSidebar(); return; }
   const discover = state.page === 'discover';
   const settings = state.page === 'settings';
   const pixivPage = state.page === 'pixiv';
   if (livePage !== state.page) { releaseLivePreviews(); livePage = state.page; }
-  document.querySelectorAll('.tabs [data-page]').forEach(tab => { if (tab.dataset.page === state.page) tab.setAttribute('aria-current', 'page'); else tab.removeAttribute('aria-current'); });
-  document.documentElement.style.setProperty('--window-controls-inset', `${Math.max(0, Number(state.windowControlsInset) || 0)}px`);
-  morph($('app-identity'), `<span class="app-brand-mark">${icon('wallpaperMachine', 22)}</span><span class="app-title"><span class="app-name">WallpaperMachine</span></span>`);
-  morph($('top-actions'), `<label class="sr-only" for="target-display">${escapeHTML(t('Target display'))}</label><select id="target-display" data-change="target" aria-label="${escapeHTML(t('Target display'))}"${disabled(state.busy)}>${(state.displays || []).map(display => `<option value="${escapeHTML(display.id)}"${display.id === state.targetDisplayID ? ' selected' : ''}${disabled(!display.enabled || display.mode === 'mirror')}>${escapeHTML(display.title)}${display.mode === 'mirror' ? escapeHTML(t(' (mirrored)')) : !display.enabled ? escapeHTML(t(' (disabled)')) : ''}</option>`).join('')}</select>${queueButton()}`);
+  if (!settings) lastLibraryPage = state.page;
+  if (popover === 'filters' && popoverPage !== state.page) { popover = null; popoverPage = ''; }
+  $('app').classList.toggle('paused', Boolean(state.paused));
+  $('app').classList.toggle('settings-mode', settings);
+  const inset = Math.max(0, Number(state.windowControlsInset) || 0);
+  document.documentElement.style.setProperty('--window-controls-inset', `${inset}px`);
+  // Full screen and Split View draw no traffic lights in the page, so the sidebar needs no strip for them.
+  $('app').classList.toggle('bare-window', inset === 0);
+  renderSidebar();
+  morph($('top-actions'), topActions());
   $('library-page').hidden = settings;
   $('settings-content').hidden = !settings;
-  if (settings) renderSettings($('settings-content'), state, { send, escapeHTML, icon, requestAssets: (element) => run(requestDownload(null, element)), openDownloadDialog: (id, element) => openDialog(id, element), openWelcome: () => welcome.open() });
+  if (settings) renderSettings($('settings-content'), state, { send, escapeHTML, icon, nav: $('sidebar-settings-nav'), onSection: renderTitle, requestAssets: (element) => run(requestDownload(null, element)), openDownloadDialog: (id, element) => openDialog(id, element), openWelcome: () => welcome.open() });
   else {
-    // Both library pages share one right-hand filter sidebar; the toolbar's Filter button
-    // opens and closes it, and each page remembers its own choice natively.
-    const filtersOpen = !filtersCollapsed();
+    const filtersOpen = popover === 'filters';
     $('library-page').classList.toggle('discover', discover);
-    $('library-page').classList.toggle('filters-open', filtersOpen);
-    $('filter-sidebar').hidden = !filtersOpen;
     if (pixivPage) pixiv.render(state, filtersOpen);
     else {
       renderToolbar(discover);
@@ -297,10 +302,93 @@ function render() {
       renderInspector(discover);
     }
   }
-  renderActivity(); renderPopover(); renderDialog(); welcome.render(state); surfaceAuthRequests(); supportPrompt.render(state);
+  renderTitle();
+  renderPopover(); renderDialog(); welcome.render(state); surfaceAuthRequests(); supportPrompt.render(state);
   viewState.touch();
 }
-const filtersCollapsed = () => Boolean(state?.filtersCollapsed?.[state.page]);
+// The sidebar, as in the Music or Photos window: where to browse, the library and its
+// collections, then what the target display is playing and Settings. In Settings it gives
+// way to Settings' own sections, with the way back on top.
+const libraryViewKey = () => collections.active() ? `collection:${collections.active().id}` : installed.tags.includes('Favorite') ? 'favorites' : 'all';
+function navItem({ page, label, glyph, view = '', collectionID = '', count = null, badge = '', current = false, title = '' }) {
+  return `<button type="button" class="nav-item" data-page="${escapeHTML(page)}"${view ? ` data-view="${escapeHTML(view)}"` : ''}${collectionID ? ` data-collection-id="${escapeHTML(collectionID)}"` : ''} ${keyAttr(`nav-${page}${view ? `-${view}` : ''}${collectionID ? `-${collectionID}` : ''}`)}${current ? ' aria-current="page"' : ''} title="${escapeHTML(title || label)}">${icon(glyph)}<span class="nav-label">${escapeHTML(label)}</span>${badge ? '<span class="nav-dot" aria-hidden="true"></span>' : ''}${count == null ? '' : `<span class="nav-count">${escapeHTML(Number(count).toLocaleString())}</span>`}</button>`;
+}
+function renderSidebar() {
+  const page = state?.page;
+  const settings = page === 'settings';
+  $('sidebar-library').hidden = settings;
+  $('sidebar-settings').hidden = !settings;
+  // The library list stays current while Settings shows its own, so returning finds it as it is.
+  if (settings) morph($('sidebar-settings-back'), `<div class="sidebar-scroll sidebar-back-row">${navItem({ page: lastLibraryPage, label: t('Back to library'), glyph: 'chevronLeft' }).replace('class="nav-item"', 'class="nav-item nav-back"')}</div>`);
+  const wallpapers = state?.wallpapers || [];
+  const library = new Set(wallpapers.map(item => item.id));
+  const favorites = (state?.favorites || []).filter(id => library.has(id)).length;
+  const view = page === 'installed' ? libraryViewKey() : '';
+  const updates = Number(state?.workshopUpdates?.count) || 0;
+  const browse = `<div class="sidebar-section" role="group" aria-label="${escapeHTML(t('Browse'))}"><p class="sidebar-heading" aria-hidden="true">${escapeHTML(t('Browse'))}</p>`
+    + navItem({ page: 'discover', label: t('Steam Workshop'), glyph: 'compass', current: page === 'discover' })
+    + navItem({ page: 'pixiv', label: 'pixiv', glyph: 'palette', current: page === 'pixiv' }) + '</div>';
+  const mine = `<div class="sidebar-section" role="group" aria-label="${escapeHTML(t('Library'))}"><p class="sidebar-heading" aria-hidden="true">${escapeHTML(t('Library'))}</p>`
+    + navItem({ page: 'installed', view: 'all', label: t('All wallpapers'), glyph: 'layoutGrid', count: state ? wallpapers.length : null, badge: updates ? String(updates) : '', title: updates ? t(updates === 1 ? '1 wallpaper has an update' : '{count} wallpapers have updates', { count: updates }) : '', current: view === 'all' })
+    + navItem({ page: 'installed', view: 'favorites', label: t('Favorites'), glyph: 'heart', count: state ? favorites : null, current: view === 'favorites' }) + '</div>';
+  const footer = state ? `<div class="sidebar-footer">${nowPlaying()}${navItem({ page: 'settings', label: t('Settings'), glyph: 'settings', current: settings })}</div>`
+    : `<div class="sidebar-footer">${navItem({ page: 'settings', label: t('Settings'), glyph: 'settings' })}</div>`;
+  morph($('sidebar-library'), `<div class="sidebar-scroll" ${keyAttr('sidebar-scroll')}>${browse}${mine}${state ? collections.navSection({ navItem, current: page === 'installed' }) : ''}</div>${footer}`);
+}
+// A sidebar item: a page, and on the library one of its views. Favorites is the library's own
+// Favorite filter and a collection is the collection filter, so either can also be set from
+// the Filters popover and the sidebar follows.
+async function openPage(data) {
+  const page = data.page;
+  if (page === 'installed' && data.view) {
+    if (data.view === 'collection') collections.show(data.collectionId);
+    else collections.clearFilter();
+    installed.tags = data.view === 'favorites' ? uniqueTags([...installed.tags, 'Favorite']) : installed.tags.filter(tag => tag !== 'Favorite');
+    $('wallpaper-grid').scrollTop = 0;
+  }
+  if (state?.page !== page) await send('navigate', { page });
+  else render();
+}
+// What the target display shows, with the controls the window's footer used to carry: back to the
+// previous wallpaper, play or pause every wallpaper, on to the next, and what was used recently.
+function nowPlaying() {
+  const target = (state.displays || []).find(display => display.id === state.targetDisplayID);
+  const item = target?.wallpaperID ? (state.wallpapers || []).find(wallpaper => wallpaper.id === target.wallpaperID) : null;
+  const hasWallpaper = (state.displays || []).some(display => Boolean(display.wallpaperID));
+  const usable = Boolean(target?.enabled && target.mode !== 'mirror');
+  const still = item ? libraryStill(item) : null;
+  const image = still?.source || '';
+  const status = !hasWallpaper ? t('No wallpaper playing') : state.paused ? t('Playback paused') : t('Playback running');
+  const where = target?.title || '';
+  const title = item ? item.title : t('Nothing on this display');
+  return `<section class="now-playing${item ? '' : ' empty'}" ${keyAttr('now-playing')} aria-label="${escapeHTML(t('Now playing on {display}', { display: where }))}">`
+    + (image ? `<img class="now-playing-backdrop" ${keyAttr(`now-playing-backdrop-${still.key}`)} src="${escapeHTML(image)}" alt="" decoding="async"${image.startsWith('mwe-ui:') ? ' crossorigin="anonymous"' : ''}>` : '')
+    + (item ? `<button type="button" class="now-playing-art" data-action="showInstalled" data-id="${escapeHTML(item.id)}" title="${escapeHTML(t('Show {title} in your library', { title: item.title }))}" aria-label="${escapeHTML(t('Show {title} in your library', { title: item.title }))}">${icon('image', 18)}${image ? `<img ${keyAttr(`now-playing-art-${still.key}`)} src="${escapeHTML(image)}" alt="" decoding="async"${image.startsWith('mwe-ui:') ? ' crossorigin="anonymous"' : ''}>` : ''}</button>` : '')
+    // Play and pause act on every display, so the status line reports them even when this display is empty.
+    + `<div class="now-playing-meta"><p class="now-playing-title" title="${escapeHTML(title)}">${escapeHTML(title)}</p><p class="now-playing-sub" title="${escapeHTML(item ? `${where} · ${status}` : status)}">${item && !state.paused ? '<span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>' : ''}${item ? `<span class="now-playing-where">${escapeHTML(where)}</span>` : ''}<span class="now-playing-status${item ? ' sr-only' : ''}">${escapeHTML(hasWallpaper ? status : t('Pick a wallpaper and press Play to show it here.'))}</span></p></div>`
+    + `<div class="now-playing-controls">${button('', 'previousWallpaper', { displayID: state.targetDisplayID }, { icon: 'skipBack', title: t('Previous wallpaper'), disabled: !state.history?.previousID || !usable })}${button('', 'playback', {}, { icon: !hasWallpaper || state.paused ? 'play' : 'pause', title: !hasWallpaper ? t('No wallpaper playing') : state.paused ? t('Resume wallpaper playback') : t('Pause wallpaper playback'), className: 'now-playing-toggle', disabled: state.busy || !hasWallpaper })}${button('', 'nextWallpaper', { displayID: state.targetDisplayID }, { icon: 'skipForward', title: t('Next wallpaper'), disabled: !usable || !(state.wallpapers || []).some(wallpaper => wallpaper.supported !== false && wallpaper.id !== target?.wallpaperID) })}${button('', 'openHistory', {}, { icon: 'history', title: t('Recently used'), expanded: popover === 'history', controls: 'history-popover' })}</div></section>`;
+}
+// The title bar names the place on show, the way a Finder window names its folder.
+function renderTitle() {
+  if (!state) return;
+  const collection = collections.active();
+  const title = state.page === 'settings' ? settingsTitle()
+    : state.page === 'discover' ? t('Steam Workshop')
+      : state.page === 'pixiv' ? 'pixiv'
+        : collection ? collection.name : installed.tags.includes('Favorite') ? t('Favorites') : t('All wallpapers');
+  morph($('page-title'), `<h1 title="${escapeHTML(title)}">${escapeHTML(title)}</h1>`);
+}
+// The right end of the title bar: what is running in the background, the display that
+// actions apply to, and the downloads list.
+function topActions() {
+  const report = state.import?.report;
+  const importResult = report ? t('{imported} imported · {skipped} skipped', { imported: Number(report.imported), skipped: Number(report.skipped) }) : t('Import wallpapers');
+  const importSummary = state.import?.busy ? state.import.status || t('Importing…') : report && (report.failures?.length || report.cancelled) ? t('{summary} · needs attention', { summary: importResult }) : importResult;
+  const showImport = state.import?.busy || (report && importReportUnseen) || (popover === 'import' && popoverTrigger.startsWith('#top-actions '));
+  const pills = `${showImport ? button(importSummary, 'openImport', {}, { icon: 'folder', className: `quiet activity-pill${report && !state.import?.busy && (report.failures?.length || report.cancelled) ? ' attention' : ''}`, title: importSummary }) : ''}${state.setup?.busy ? `<span class="activity-pill" role="status">${icon('loader', 13)}<span class="button-label">${escapeHTML(t('Setting up SteamCMD…'))}</span></span>` : ''}${pixivActivity()}`;
+  const picker = `<label class="display-picker" title="${escapeHTML(t('Wallpapers you apply go to this display'))}">${icon('monitor')}<span class="sr-only">${escapeHTML(t('Target display'))}</span><select id="target-display" data-change="target" aria-label="${escapeHTML(t('Target display'))}"${disabled(state.busy)}>${(state.displays || []).map(display => `<option value="${escapeHTML(display.id)}"${display.id === state.targetDisplayID ? ' selected' : ''}${disabled(!display.enabled || display.mode === 'mirror')}>${escapeHTML(display.title)}${display.mode === 'mirror' ? escapeHTML(t(' (mirrored)')) : !display.enabled ? escapeHTML(t(' (disabled)')) : ''}</option>`).join('')}</select></label>`;
+  return `${pills}${state.page === 'settings' ? '' : picker}${queueButton()}`;
+}
 // Active filters on a page: every required tag plus every box that differs from the page's
 // defaults, so the count reads zero right after Clear.
 function filterCount(discover) {
@@ -308,15 +396,14 @@ function filterCount(discover) {
   return draft.tags.length + defaults.filter(tag => !draft.excludedTags.includes(tag)).length + draft.excludedTags.filter(tag => !defaults.includes(tag)).length + (!discover && collections.active() ? 1 : 0);
 }
 const filterCountPill = (count) => count ? `<span class="filter-count" title="${escapeHTML(t('{count} active', { count }))}">${count}</span>` : '';
-// The one control that opens and closes the sidebar: a filled button so it reads as the
-// place to go, a funnel so it reads as filtering, and the active count riding along. It
-// leads the toolbar so it sits right beside the sidebar it controls.
+// The one control that opens and closes the Filters popover: a funnel so it reads as
+// filtering, tinted while any filter applies, and the active count riding along.
 function filterButton(count) {
-  const open = !filtersCollapsed();
-  return `<button type="button" data-action="toggleFilters" class="filter-button" aria-expanded="${open}" aria-controls="filter-sidebar" title="${escapeHTML(open ? t('Hide filters') : t('Show filters'))}"${disabled(busy('filters'))}>${icon('filter')}<span class="button-label">${escapeHTML(t('Filter'))}</span>${filterCountPill(count)}</button>`;
+  const open = popover === 'filters';
+  return `<button type="button" data-action="toggleFilters" class="filter-button${count ? ' filtered' : ''}" aria-expanded="${open}" aria-haspopup="dialog" aria-controls="filter-sidebar" title="${escapeHTML(open ? t('Hide filters') : t('Show filters'))}">${icon('filter')}<span class="button-label">${escapeHTML(t('Filter'))}</span>${filterCountPill(count)}</button>`;
 }
-// Discover's source: one of Steam's lists, chosen from tabs above the toolbar so each reads as a
-// place to go (subscriptions went unnoticed as the last entry of a menu), or the author or
+// Discover's source: one of Steam's lists, chosen from a segmented control leading the toolbar so
+// each reads as a place to go (subscriptions went unnoticed as the last entry of a menu), or the author or
 // collection opened from a tile, with the way back to where it was opened. An opened one leaves
 // every tab unselected. Only Steam's own lists are searched and sorted.
 const workshopSource = () => state.workshop?.source || { key: 'browse', searchable: true, canGoBack: false };
@@ -326,7 +413,7 @@ function sourceHeading(source) {
   return source.name ? t('Collection: {title}', { title: source.name }) : t('Collection');
 }
 function sourceTabs(source) {
-  return `<nav class="source-tabs" aria-label="${escapeHTML(t('Workshop lists'))}">${workshopSources.map(([key, label, glyph]) => `<button type="button" data-action="workshopSource" data-source="${key}"${key === source.key ? ' aria-current="page"' : ''}>${icon(glyph, 15)}<span>${escapeHTML(t(label))}</span></button>`).join('')}</nav>`;
+  return `<nav class="source-tabs segmented" aria-label="${escapeHTML(t('Workshop lists'))}">${workshopSources.map(([key, label, glyph]) => `<button type="button" data-action="workshopSource" data-source="${key}"${key === source.key ? ' aria-current="page"' : ''}>${icon(glyph, 15)}<span>${escapeHTML(t(label))}</span></button>`).join('')}</nav>`;
 }
 function sourceBar(source) {
   if (!openedSource(source)) return '';
@@ -338,10 +425,10 @@ function renderToolbar(discover) {
   const source = discover ? workshopSource() : null;
   const searchable = !discover || source.searchable !== false;
   const sortPicker = searchable ? `<label class="sr-only" for="browser-sort">${escapeHTML(t('Sort wallpapers'))}</label><select id="browser-sort" data-change="sort">${selectOptions((discover ? workshopSorts : installedSorts).map(([key, label]) => [key, t(label)]), discover ? workshopDraft.sort : installed.sort)}</select>` : '';
-  morph($('browser-toolbar'), `${discover ? sourceTabs(source) : ''}${filterButton(filterCount(discover))}${discover ? sourceBar(source) : ''}${searchable ? `<form class="search-form" data-form="search" ${keyAttr(discover ? 'workshop-search' : 'installed-search')}>${icon('search')}<label class="sr-only" for="wallpaper-search">${escapeHTML(discover ? t('Search Steam Workshop') : t('Search installed wallpapers'))}</label><input id="wallpaper-search" type="search" autocomplete="off" placeholder="${escapeHTML(discover ? (source.key === 'browse' ? t('Search Workshop or paste a link') : t('Search Workshop')) : t('Search wallpapers'))}" value="${escapeHTML(search)}" data-input="search">${discover ? `<button type="submit" title="${escapeHTML(t('Search Workshop'))}">${escapeHTML(t('Search'))}</button>` : ''}</form>` : ''}<div class="toolbar-tools">${sortPicker}${discover ? `${button('', 'refreshWorkshop', {}, { icon: 'refresh', title: t('Refresh Workshop'), disabled: state.workshop.loading })}` : `${button('', 'toggleSortDirection', {}, { icon: installed.descending ? 'sortDescending' : 'sortAscending', title: installed.descending ? t('{sort}, descending. Click to sort ascending', { sort: sortLabel }) : t('{sort}, ascending. Click to sort descending', { sort: sortLabel }), className: 'icon-button sort-direction' })}${button(selecting ? t('Done') : t('Select'), 'toggleSelecting', {}, { icon: selecting ? 'close' : 'check', title: selecting ? t('Leave selection mode') : t('Select wallpapers to move to Trash. Holding a tile and dragging across others selects them too.'), className: selecting ? 'selecting' : '' })}${button('', 'refresh', {}, { icon: 'refresh', title: t('Refresh library'), disabled: state.libraryLoading })}${button(t('Import'), 'openImport', {}, { icon: 'plus', className: 'import-button', title: t('Import wallpapers'), disabled: state.import?.busy })}`}</div>`);
+  morph($('browser-toolbar'), `${discover ? sourceTabs(source) : ''}${discover ? sourceBar(source) : ''}${searchable ? `<form class="search-form" data-form="search" ${keyAttr(discover ? 'workshop-search' : 'installed-search')}>${icon('search')}<label class="sr-only" for="wallpaper-search">${escapeHTML(discover ? t('Search Steam Workshop') : t('Search installed wallpapers'))}</label><input id="wallpaper-search" type="search" autocomplete="off" placeholder="${escapeHTML(discover ? (source.key === 'browse' ? t('Search Workshop or paste a link') : t('Search Workshop')) : t('Search wallpapers'))}" value="${escapeHTML(search)}" data-input="search">${discover ? `<button type="submit" title="${escapeHTML(t('Search Workshop'))}">${escapeHTML(t('Search'))}</button>` : ''}</form>` : ''}<div class="toolbar-tools">${filterButton(filterCount(discover))}${sortPicker}${discover ? `${button('', 'refreshWorkshop', {}, { icon: 'refresh', title: t('Refresh Workshop'), className: 'icon-button', disabled: state.workshop.loading })}` : `${button('', 'toggleSortDirection', {}, { icon: installed.descending ? 'sortDescending' : 'sortAscending', title: installed.descending ? t('{sort}, descending. Click to sort ascending', { sort: sortLabel }) : t('{sort}, ascending. Click to sort descending', { sort: sortLabel }), className: 'icon-button sort-direction' })}<span class="toolbar-separator" aria-hidden="true"></span>${button(selecting ? t('Done') : t('Select'), 'toggleSelecting', {}, { icon: selecting ? 'close' : 'check', title: selecting ? t('Leave selection mode') : t('Select wallpapers to move to Trash. Holding a tile and dragging across others selects them too.'), className: selecting ? 'selecting' : '' })}${button('', 'refresh', {}, { icon: 'refresh', title: t('Refresh library'), className: 'icon-button', disabled: state.libraryLoading })}${button(t('Import'), 'openImport', {}, { icon: 'plus', className: 'import-button', title: t('Import wallpapers'), disabled: state.import?.busy })}`}</div>`);
 }
-const filterGroup = (key, title, body, open, count = 0) => `<details class="filter-group"${open ? ' open' : ''} ${keyAttr(key)}><summary><span class="filter-group-title">${escapeHTML(t(title))}${filterCountPill(count)}</span>${icon('chevronRight', 13)}</summary><div class="filter-options">${body}</div></details>`;
-const filterHeading = (count, clearAction) => `<div class="filter-heading"><h3>${escapeHTML(t('Filters'))}${filterCountPill(count)}</h3>${button(t('Clear'), clearAction, {}, { className: 'link', disabled: !count })}</div>`;
+const filterGroup = (key, title, body, open, count = 0) => `<details class="filter-group${key === 'genre' ? ' filter-tags' : ''}"${open ? ' open' : ''} ${keyAttr(key)}><summary><span class="filter-group-title">${escapeHTML(t(title))}${filterCountPill(count)}</span>${icon('chevronRight', 13)}</summary><div class="filter-options">${body}</div></details>`;
+const filterHeading = (count, clearAction) => `<div class="filter-heading"><h3>${icon('filter')}${escapeHTML(t('Filters'))}${filterCountPill(count)}</h3>${button(t('Clear'), clearAction, {}, { className: 'quiet', disabled: !count })}${button('', 'closePopover', {}, { icon: 'close', title: t('Close filters'), className: 'quiet icon-button' })}</div>`;
 // One sidebar for both pages: Discover's boxes go to Steam as `requiredtags[]` /
 // `excludedtags[]`; Installed's apply the same rules to the library in the page.
 function renderFilters(discover) {
@@ -358,7 +445,7 @@ function renderFilters(discover) {
     const head = title || quick ? `<div class="filter-section-head">${title ? `<h4>${escapeHTML(t(title))}</h4>` : ''}${quick ? `<span class="filter-quick">${button(t('All'), 'includeSection', { section: key }, { className: 'link', disabled: onCount === values.length })}${button(t('None'), 'excludeSection', { section: key }, { className: 'link', disabled: onCount === 0 })}</span>` : ''}</div>` : '';
     return `<div class="filter-section" ${keyAttr(key)}>${head}${values.map(({ tag, label }) => `<label class="check-label" ${keyAttr(tag)}><input type="checkbox" data-change="filterExclude" value="${escapeHTML(tag)}"${checked(!draft.excludedTags.includes(tag))}><span>${escapeHTML(t(label))}</span></label>`).join('')}</div>`;
   };
-  morph($('filter-sidebar'), `${filterHeading(filterCount(discover), discover ? 'clearWorkshop' : 'clearInstalled')}${discover ? '' : collections.sidebarGroup()}${filterGroup('show-only', 'Show only', `${showOnly.map(tag => required(tag)).join('')}${other.length ? `<div class="filter-section" ${keyAttr('other')}><div class="filter-section-head"><h4>${escapeHTML(t('Other selected tags'))}</h4></div>${other.map(tag => required(tag)).join('')}</div>` : ''}`, true, draft.tags.length)}${(discover ? excludeGroups : installedGroups).map(group => filterGroup(group.key, group.title, group.sections.map(section).join(''), true, groupCount(group))).join('')}`);
+  morph($('filter-sidebar'), `${filterHeading(filterCount(discover), discover ? 'clearWorkshop' : 'clearInstalled')}<div class="filter-scroll" ${keyAttr('filter-scroll')}>${filterGroup('show-only', 'Show only', `${showOnly.map(tag => required(tag)).join('')}${other.length ? `<div class="filter-section" ${keyAttr('other')}><div class="filter-section-head"><h4>${escapeHTML(t('Other selected tags'))}</h4></div>${other.map(tag => required(tag)).join('')}</div>` : ''}`, true, draft.tags.length)}${(discover ? excludeGroups : installedGroups).map(group => filterGroup(group.key, group.title, group.sections.map(section).join(''), true, groupCount(group))).join('')}</div>`);
 }
 function setExcluded(draft, tags, excluded) {
   const set = new Set(draft.excludedTags);
@@ -509,7 +596,7 @@ function emptyRecovery(discover) {
   };
   if (count) return {
     description: t(count === 1 ? 'The active filter hides every wallpaper.' : 'The {count} active filters hide every wallpaper.', { count }),
-    actions: button(t('Clear filters'), discover ? 'clearWorkshop' : 'clearInstalled') + (filtersCollapsed() ? button(t('Show filters'), 'toggleFilters') : ''),
+    actions: button(t('Clear filters'), discover ? 'clearWorkshop' : 'clearInstalled') + (popover !== 'filters' ? button(t('Show filters'), 'toggleFilters') : ''),
   };
   // Subscriptions, an author's or a collection's wallpapers, and collections while a rating is
   // hidden, are screened here, not by Steam, so the boxes can hide a whole page even at their
@@ -518,7 +605,7 @@ function emptyRecovery(discover) {
   const screened = workshopSource().searchable === false || workshopSource().key === 'collections';
   if (discover && screened && Number(workshop.totalCount) > 0) return {
     description: workshopSource().key === 'collections' ? t('The age rating filters hide every collection found for this page.') : t('The age rating and type filters hide every wallpaper on this page.'),
-    actions: (Number(workshop.page) < Number(workshop.totalPages) ? button(t('Next page'), 'workshopPage', { workshopPage: Number(workshop.page) + 1 }, { icon: 'chevronRight' }) : '') + (filtersCollapsed() ? button(t('Show filters'), 'toggleFilters') : ''),
+    actions: (Number(workshop.page) < Number(workshop.totalPages) ? button(t('Next page'), 'workshopPage', { workshopPage: Number(workshop.page) + 1 }, { icon: 'chevronRight' }) : '') + (popover !== 'filters' ? button(t('Show filters'), 'toggleFilters') : ''),
   };
   if (discover && workshopSource().key === 'subscriptions') return {
     description: t('Wallpapers you subscribe to on the Steam Workshop appear here.'),
@@ -569,7 +656,7 @@ function renderGrid(discover) {
   // focus. An installed wallpaper keeps its Workshop id, so a live entry left over from Discover
   // would mark its Installed tile as playing and hide that tile's still: render() retires them.
   retireLivePreviews(new Set(discover ? items.map(item => item.id) : installedLiveKeep(items)));
-  morph($('wallpaper-grid'), items.map(item => `<article class="wallpaper-tile${selection.has(item.id) ? ' checked' : ''}${!discover && sweepArmingID() === item.id ? ' arming' : ''}${live.get(item.id)?.playing ? ' playing' : ''}" ${keyAttr(item.id)}><button type="button" class="tile-select" data-action="${discover ? 'workshopSelect' : 'select'}" data-id="${escapeHTML(item.id)}" aria-pressed="${item.id === selectedID}" aria-label="${escapeHTML(item.title)}, ${escapeHTML(kindLabel(item))}${tileMarkNames(item, discover).map(name => `, ${escapeHTML(t(tileMarkGlyphs[name][1]))}`).join('')}${item.id === selectedID ? `, ${escapeHTML(t('selected'))}` : ''}"><span class="tile-placeholder">${icon('image', 28)}</span>${['loading', 'ready'].includes(live.get(item.id)?.status) ? `<img ${keyAttr(`live-${item.id}`)} class="tile-live" src="${escapeHTML(safeImage(item.animated))}" alt="" decoding="async" crossorigin="anonymous" referrerpolicy="no-referrer">` : ''}${tileStillMarkup(item, discover)}<span class="tile-caption"><span class="tile-title">${escapeHTML(item.title)}</span><span class="tile-kind">${escapeHTML(kindLabel(item))}</span></span></button>${tileMarksMarkup(item, discover)}${discover ? (item.collection ? '' : tileDownloadMarkup(item)) : tileApplyMarkup(item)}${!discover ? `<button type="button" class="tile-check" data-action="toggleSelect" data-id="${escapeHTML(item.id)}" aria-pressed="${selection.has(item.id)}" aria-label="${escapeHTML(selection.has(item.id) ? t('Deselect: {title}', { title: item.title }) : t('Select: {title}', { title: item.title }))}" title="${escapeHTML(t('Click to select, or drag from here across other tiles to select them too.'))}">${icon('check', 14)}</button><button type="button" class="tile-favorite" data-action="favorite" data-id="${escapeHTML(item.id)}" aria-pressed="${state.favorites.includes(item.id)}" aria-label="${escapeHTML(state.favorites.includes(item.id) ? t('Remove favorite: {title}', { title: item.title }) : t('Add favorite: {title}', { title: item.title }))}"${disabled(busy('favorite', { id: item.id }))}>${icon('heart', 14)}</button>${target?.wallpaperID === item.id ? `<span class="active-badge">${escapeHTML(t('Active'))}</span>` : item.active ? `<span class="active-badge">${escapeHTML(t('Other display'))}</span>` : ''}` : ''}</article>`).join(''));
+  morph($('wallpaper-grid'), items.map(item => `<article class="wallpaper-tile${selection.has(item.id) ? ' checked' : ''}${!discover && sweepArmingID() === item.id ? ' arming' : ''}${live.get(item.id)?.playing ? ' playing' : ''}" ${keyAttr(item.id)}><button type="button" class="tile-select" data-action="${discover ? 'workshopSelect' : 'select'}" data-id="${escapeHTML(item.id)}" aria-pressed="${item.id === selectedID}" aria-label="${escapeHTML(item.title)}, ${escapeHTML(kindLabel(item))}${tileMarkNames(item, discover).map(name => `, ${escapeHTML(t(tileMarkGlyphs[name][1]))}`).join('')}${item.id === selectedID ? `, ${escapeHTML(t('selected'))}` : ''}"><span class="tile-placeholder">${icon('image', 28)}</span>${['loading', 'ready'].includes(live.get(item.id)?.status) ? `<img ${keyAttr(`live-${item.id}`)} class="tile-live" src="${escapeHTML(safeImage(item.animated))}" alt="" decoding="async" crossorigin="anonymous" referrerpolicy="no-referrer">` : ''}${tileStillMarkup(item, discover)}<span class="tile-caption"><span class="tile-title">${escapeHTML(item.title)}</span><span class="tile-kind">${escapeHTML(kindLabel(item))}</span></span></button>${tileMarksMarkup(item, discover)}${discover ? (item.collection ? '' : tileDownloadMarkup(item)) : tileApplyMarkup(item)}${!discover ? `<button type="button" class="tile-check" data-action="toggleSelect" data-id="${escapeHTML(item.id)}" aria-pressed="${selection.has(item.id)}" aria-label="${escapeHTML(selection.has(item.id) ? t('Deselect: {title}', { title: item.title }) : t('Select: {title}', { title: item.title }))}" title="${escapeHTML(t('Click to select, or drag from here across other tiles to select them too.'))}">${icon('check', 14)}</button><button type="button" class="tile-favorite" data-action="favorite" data-id="${escapeHTML(item.id)}" aria-pressed="${state.favorites.includes(item.id)}" aria-label="${escapeHTML(state.favorites.includes(item.id) ? t('Remove favorite: {title}', { title: item.title }) : t('Add favorite: {title}', { title: item.title }))}"${disabled(busy('favorite', { id: item.id }))}>${icon('heart', 14)}</button>${target?.wallpaperID === item.id ? `<span class="active-badge current"><span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>${escapeHTML(t('Active'))}</span>` : item.active ? `<span class="active-badge">${escapeHTML(t('Other display'))}</span>` : ''}` : ''}</article>`).join(''));
   const empty = $('browser-empty'); empty.hidden = items.length > 0;
   $('wallpaper-grid').hidden = !items.length;
   const signInFirst = discover && workshopSource().key === 'subscriptions' && !workshop.steamSignedIn;
@@ -715,7 +802,7 @@ function canReinstall(item) {
 }
 function renderInspector(discover) {
   const item = discover ? state.workshop.items.find(item => item.id === state.workshop.selectedID) : state.wallpapers.find(item => item.id === state.selectedID);
-  if (!item) { morph($('inspector'), `<div class="inspector-empty"><h2>${escapeHTML(t('Select a wallpaper'))}</h2><p>${escapeHTML(t('Preview, details and options appear here.'))}</p></div>`); return; }
+  if (!item) { morph($('inspector'), `<div class="inspector-empty">${icon('image', 40)}<h2>${escapeHTML(t('Select a wallpaper'))}</h2><p>${escapeHTML(t('Preview, details and options appear here.'))}</p></div>`); return; }
   const isInstalled = state.wallpapers.some(wallpaper => wallpaper.id === item.id);
   const target = state.displays.find(display => display.id === state.targetDisplayID);
   const canActivate = isInstalled && !['Application', 'Unknown'].includes(item.kind) && target?.enabled && target.mode !== 'mirror';
@@ -771,7 +858,9 @@ function renderInspector(discover) {
   const activation = isInstalled ? button('', reapplies ? 'reapplyWallpaper' : 'activate', { id: item.id }, { icon: 'play', title: activateLabel, className: 'primary inspector-play', disabled: !canActivate }) : '';
   const previewAction = isInstalled && state.previewAvailable && !['Application', 'Unknown'].includes(item.kind)
     ? button(t('Preview wallpaper'), 'previewWallpaper', { id: item.id }, { icon: 'eye', className: 'wide', title: t('Open a live preview without changing your desktop') }) : '';
-  morph($('inspector'), `<div class="inspector-layout" ${keyAttr(`inspector-${item.id}-${discover}`)}><div class="inspector-scroll"><div class="inspector-heading">
+  // A still, never the animated preview: a blurred animation would be redrawn every frame.
+  const backdrop = discover ? safeImage(item.thumbnail || item.preview) : libraryStill(item).source;
+  morph($('inspector'), `<div class="inspector-layout" ${keyAttr(`inspector-${item.id}-${discover}`)}>${backdrop ? `<img class="inspector-backdrop" ${keyAttr(`backdrop-${backdrop}`)} src="${escapeHTML(backdrop)}" alt="" decoding="async" referrerpolicy="no-referrer">` : ''}<div class="inspector-scroll"><div class="inspector-heading">
     <div class="inspector-artwork"><div class="inspector-preview">${preview(item.preview)}</div>${activation}</div>
     <h2>${escapeHTML(item.title)}</h2>${discover && item.creator ? `<p class="inspector-creator">${escapeHTML(item.creator)}${moreByAuthor(item)}</p>` : ''}
     <p class="inspector-meta">${meta}</p>${energy ? `<p class="inspector-energy muted"><small>${escapeHTML(energy)}</small></p>` : ''}
@@ -1168,32 +1257,22 @@ function queueState() {
   return { downloads, requests, active, queued, attention, progress, percent, count, summary };
 }
 function queueButton() {
-  const { downloads, requests, attention, count, summary } = queueState();
-  // Tiles and the activity bar carry download state; the top-bar button only appears once there is a list to open.
+  const { downloads, requests, attention, active, progress, count, summary } = queueState();
+  // Tiles carry each download's state; the title-bar button only appears once there is a list to
+  // open, and rings itself with the batch's progress while anything transfers.
   if (!downloads.length && !requests.length) return '';
   const label = t('Downloads: {summary}', { summary: attention.length ? t('{summary} · needs attention', { summary }) : summary });
-  return `<button type="button" data-action="openDownloads" class="quiet icon-button queue-button" aria-haspopup="dialog" aria-expanded="${popover === 'downloads'}" title="${escapeHTML(label)}" aria-label="${escapeHTML(label)}">${icon('download')}${count ? `<span class="queue-badge${attention.length ? ' attention' : ''}" aria-hidden="true">${count}</span>` : ''}</button>`;
-}
-function renderActivity() {
-  const { summary, attention, active, progress } = queueState();
-  const hasWallpaper = (state.displays || []).some(display => Boolean(display.wallpaperID));
-  const downloadSummary = attention.length ? t('{summary} · needs attention', { summary }) : summary;
-  const report = state.import?.report;
-  const importResult = report ? t('{imported} imported · {skipped} skipped', { imported: Number(report.imported), skipped: Number(report.skipped) }) : t('Import wallpapers');
-  const importSummary = state.import?.busy ? state.import.status || t('Importing…') : report && (report.failures?.length || report.cancelled) ? t('{summary} · needs attention', { summary: importResult }) : importResult;
-  const showImport = state.import?.busy || (report && importReportUnseen) || (popover === 'import' && popoverTrigger.startsWith('#activity-bar '));
-  const transferring = active.filter(item => !item.authenticating);
-  const label = transferring.length === 1 ? t('{title} download progress', { title: transferring[0].title }) : t('{count} downloads progress', { count: transferring.length });
-  morph($('activity-bar'), `<div class="activity-left">${button('', 'previousWallpaper', { displayID: state.targetDisplayID }, { icon: 'chevronLeft', title: t('Previous wallpaper'), className: 'quiet icon-button', disabled: !state.history?.previousID || !state.displays?.some(display => display.id === state.targetDisplayID && display.enabled && display.mode !== 'mirror') })}${button('', 'playback', {}, { icon: !hasWallpaper || state.paused ? 'play' : 'pause', title: !hasWallpaper ? t('No wallpaper playing') : state.paused ? t('Resume wallpaper playback') : t('Pause wallpaper playback'), className: 'quiet icon-button', disabled: state.busy || !hasWallpaper })}<span class="activity-copy">${escapeHTML(!hasWallpaper ? t('No wallpaper playing') : state.paused ? t('Playback paused') : t('Playback running'))}</span>${button(t('Recently used'), 'openHistory', {}, { className: 'quiet', expanded: popover === 'history', controls: 'history-popover' })}</div><div class="activity-right">${showImport ? button(importSummary, 'openImport', {}, { icon: 'folder', className: 'quiet', title: importSummary }) : ''}${state.setup?.busy ? `<span class="activity-copy">${escapeHTML(t('Setting up SteamCMD…'))}</span>` : ''}${pixivActivity()}${transferring.length ? `<progress class="activity-progress" max="1"${progress !== null ? ` value="${progress}"` : ''} aria-label="${escapeHTML(label)}"></progress>` : ''}${button(downloadSummary, 'openDownloads', {}, { icon: 'download', className: 'quiet', title: downloadSummary })}</div>`);
+  const ring = active.length ? `<svg class="queue-ring" viewBox="0 0 28 28" aria-hidden="true"><circle class="ring-track" cx="14" cy="14" r="12"/><circle class="ring-value" cx="14" cy="14" r="12" pathLength="100" stroke-dasharray="${progress === null ? '26 74' : '100'}" stroke-dashoffset="${(progress === null ? 0 : 100 * (1 - progress)).toFixed(1)}" transform="rotate(-90 14 14)"/></svg>` : '';
+  return `<button type="button" data-action="openDownloads" class="quiet icon-button queue-button" aria-haspopup="dialog" aria-expanded="${popover === 'downloads'}" title="${escapeHTML(label)}" aria-label="${escapeHTML(label)}">${ring}${icon('download')}${count ? `<span class="queue-badge${attention.length ? ' attention' : ''}" aria-hidden="true">${count}</span>` : ''}</button>`;
 }
 // pixiv downloads are the app's own and brief, so they are not rows in the Steam downloads list;
-// while one runs, the activity bar says so on every tab and leads back to the pixiv tab.
+// while one runs, the title bar says so on every page and leads back to the pixiv page.
 function pixivActivity() {
   const jobs = (state.pixiv?.downloads || []).filter(job => job.pending);
   if (!jobs.length) return '';
   const percent = jobs.length === 1 && Number.isFinite(jobs[0].progress) ? Math.round(clamp(jobs[0].progress) * 100) : null;
   const summary = jobs.length === 1 ? t('pixiv: {title}', { title: jobs[0].title || t('Untitled') }) + (percent === null ? '' : ` · ${percent}%`) : t('{count} pixiv downloads', { count: jobs.length });
-  return button(summary, 'navigate', { page: 'pixiv' }, { icon: 'download', className: 'quiet', title: summary });
+  return button(summary, 'navigate', { page: 'pixiv' }, { icon: 'download', className: 'quiet activity-pill', title: summary });
 }
 function libraryThumb(item) { const still = libraryStill(item); return previewThumb(still.source, still.fallback); }
 function previewThumb(url, fallback = '') {
@@ -1206,6 +1285,10 @@ function renderPopover() {
     node.hidden = popover !== kind;
     if (popover === kind) { morph(node, markup()); placePopover(node); }
   }
+  // The library page draws the Filters popover's content itself (renderFilters, pixiv).
+  const filters = $('filter-sidebar');
+  filters.hidden = popover !== 'filters' || state?.page === 'settings';
+  if (!filters.hidden) placePopover(filters);
 }
 function historyMarkup() {
   const target = state.displays?.find(display => display.id === state.targetDisplayID);
@@ -1258,14 +1341,16 @@ function placePopover(node) {
   node.style.maxHeight = `${Math.floor(Math.max(0, Math.min(560, available)))}px`;
   const width = node.offsetWidth;
   const height = node.offsetHeight;
-  node.style.left = `${Math.round(Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8)))}px`;
+  // A sidebar trigger opens its popover into the window; everything else hangs from the trigger's trailing edge.
+  const start = trigger.closest('#sidebar') ? rect.left : rect.right - width;
+  node.style.left = `${Math.round(Math.max(8, Math.min(start, window.innerWidth - width - 8)))}px`;
   if (below + height <= window.innerHeight - 8) { node.style.top = `${Math.round(below)}px`; node.style.bottom = 'auto'; }
   else { node.style.top = 'auto'; node.style.bottom = `${Math.round(Math.max(8, window.innerHeight - rect.top + 6))}px`; }
 }
 function triggerSelector(trigger) {
   const action = trigger?.dataset?.action;
   if (!action) return '';
-  const host = ['#top-actions', '#activity-bar', '#browser-toolbar', '#inspector', '#queue-popover'].find(id => trigger.closest(id));
+  const host = ['#top-actions', '#sidebar', '#browser-toolbar', '#inspector', '#queue-popover'].find(id => trigger.closest(id));
   return `${host ? `${host} ` : ''}[data-action="${action}"]`;
 }
 function restorePanelFocus(selectors) {
@@ -1276,22 +1361,23 @@ function restorePanelFocus(selectors) {
 function openPopover(kind, trigger) {
   if (popover === kind) { closePopover(true); return; }
   if (popover === 'import') closePopover(false);
+  if (popover) closePopover(false);
   popover = kind;
+  popoverPage = state?.page || '';
   queueExpanded = false;
   popoverTrigger = triggerSelector(trigger) || popoverTrigger;
-  renderActivity();
-  renderPopover();
-  $({ downloads: 'queue-popover', import: 'import-popover', history: 'history-popover' }[kind]).focus();
+  render();
+  $({ downloads: 'queue-popover', import: 'import-popover', history: 'history-popover', filters: 'filter-sidebar' }[kind]).focus();
 }
 function closePopover(restore) {
   if (!popover) return;
   const selector = popoverTrigger;
   if (popover === 'import') importReportUnseen = false;
   popover = null;
+  popoverPage = '';
   queueExpanded = false;
-  renderActivity();
-  renderPopover();
-  if (restore) restorePanelFocus([selector, '#browser-toolbar .import-button', '.tabs [aria-current="page"]']);
+  render();
+  if (restore) restorePanelFocus([selector, '#browser-toolbar .import-button', '#sidebar [aria-current="page"]']);
   supportPrompt.render(state);
 }
 function openDialog(id, trigger) {
@@ -1323,7 +1409,7 @@ function closeDialog() {
   morph(node, '');
   node.removeAttribute('data-stage');
   // Closing must not leave focus stranded on the body, and must not pull it away from wherever the user went.
-  if (!document.activeElement || document.activeElement === document.body) restorePanelFocus([selector, '#top-actions [data-action="openDownloads"]', '#activity-bar [data-action="openDownloads"]', '.tabs [aria-current="page"]']);
+  if (!document.activeElement || document.activeElement === document.body) restorePanelFocus([selector, '#top-actions [data-action="openDownloads"]', '#sidebar [aria-current="page"]']);
   supportPrompt.render(state);
 }
 // The dialog only ever opens from an explicit request, so a later snapshot never reopens it.
@@ -1514,11 +1600,12 @@ async function handleAction(action, data, element) {
     case 'workshopCollection': await deliver(action, { id, title: data.title ?? state.workshop.items.find(item => item.id === id)?.title ?? '' }); $('wallpaper-grid').scrollTop = 0; return;
     case 'workshopBack': await deliver(action); $('wallpaper-grid').scrollTop = 0; return;
     case 'workshopSource': await deliver(action, { source: data.source }); $('wallpaper-grid').scrollTop = 0; return;
-    case 'toggleFilters': await deliver('filters', { page: state.page, collapsed: !filtersCollapsed() }); return;
+    case 'toggleFilters': if (popover === 'filters') closePopover(true); else openPopover('filters', document.querySelector('#browser-toolbar [data-action="toggleFilters"]') || element); return;
     case 'toggleSortDirection': installed.descending = !installed.descending; render(); return;
     case 'workshopPage': await deliver(action, { page: Math.min(workshopMaxPages(), Math.max(1, Number(data.workshopPage) || 1)) }); $('wallpaper-grid').scrollTop = 0; return;
     case 'openExternal': await deliver(action, { url: data.url }); return;
     case 'openPerformance': revealSettingsSection('performance'); await deliver('navigate', { page: 'settings' }); return;
+    case 'nextWallpaper': case 'previousWallpaper': await deliver(action, { displayID: data.displayId ?? state.targetDisplayID }); return;
     case 'import': await deliver(action, { duplicates: importDuplicates }); return;
     default: {
       const args = {};
@@ -1635,16 +1722,18 @@ $('wallpaper-grid').addEventListener('dragstart', event => { if (state?.page ===
 // window and double-clicks follow the system title-bar action. Controls keep their own clicks.
 function titleBarGesture(event) { return event.button === 0 && !event.target.closest('button, select, input, textarea, a, label, [role="dialog"]'); }
 function postTitleBarGesture(action) { const bridge = window.webkit?.messageHandlers?.native; if (bridge) Promise.resolve(bridge.postMessage({ action })).catch(() => {}); }
-document.querySelector('.topbar').addEventListener('mousedown', event => { if (!titleBarGesture(event)) return; event.preventDefault(); postTitleBarGesture('dragWindow'); });
-document.querySelector('.topbar').addEventListener('dblclick', event => { if (titleBarGesture(event)) postTitleBarGesture('titleDoubleClick'); });
+for (const strip of document.querySelectorAll('.topbar, .sidebar-titlebar')) {
+  strip.addEventListener('mousedown', event => { if (!titleBarGesture(event)) return; event.preventDefault(); postTitleBarGesture('dragWindow'); });
+  strip.addEventListener('dblclick', event => { if (titleBarGesture(event)) postTitleBarGesture('titleDoubleClick'); });
+}
 function run(promise) { Promise.resolve(promise).catch(error => { localError = error?.message || String(error); renderError(); }); }
 document.addEventListener('click', event => {
   if (swallowClick) { swallowClick = false; return; }
-  if (event.target.closest('#settings-content, #welcome, #support-dialog')) return;
+  if (event.target.closest('#settings-content, #sidebar-settings-nav, #welcome, #support-dialog')) return;
   const control = event.target.closest('[data-action]');
   if (!control) {
-    const tab = event.target.closest('.tabs [data-page]');
-    if (tab) { run(send('navigate', { page: tab.dataset.page })); return; }
+    const tab = event.target.closest('#sidebar [data-page]');
+    if (tab) { run(openPage(tab.dataset)); return; }
   }
   if (control && !control.disabled) {
     // An author link sits inside the control's label; don't also toggle that control.
@@ -1657,11 +1746,11 @@ document.addEventListener('click', event => {
       ? (state?.page === 'installed' ? 'activate' : tileDoubleClickAction(control.dataset.id)) : control.dataset.action;
     run(handleAction(action, control.dataset, control));
   }
-  if (popover && !event.target.closest('#queue-popover, #import-popover, #history-popover') && !['openDownloads', 'openImport', 'openHistory'].includes(control?.dataset.action)) closePopover(false);
+  if (popover && !event.target.closest('#queue-popover, #import-popover, #history-popover, #filter-sidebar') && !['openDownloads', 'openImport', 'openHistory', 'toggleFilters'].includes(control?.dataset.action)) closePopover(false);
 });
 document.addEventListener('input', event => {
   const element = event.target;
-  if (element.closest('#settings-content, #welcome')) return;
+  if (element.closest('#settings-content, #sidebar-settings-nav, #welcome')) return;
   if (collections.handleInput(element) || presets.handleInput(element) || placement.handleInput(element)) return;
   if (element.type === 'range') { const output = element.parentElement.querySelector('output'); if (output) output.textContent = element.dataset.setting === 'volume' || element.dataset.change === 'displayPosition' ? `${element.value}%` : element.value; }
   if (element.dataset.change === 'displayPosition') positionDrag.input(element);
@@ -1682,7 +1771,7 @@ document.addEventListener('input', event => {
 });
 document.addEventListener('change', event => {
   const element = event.target;
-  if (element.closest('#settings-content, #welcome')) return;
+  if (element.closest('#settings-content, #sidebar-settings-nav, #welcome')) return;
   const change = element.dataset.change;
   const value = element.type === 'checkbox' ? element.checked : element.type === 'number' || element.type === 'range' ? Number(element.value) : element.value;
   if (element.id === 'import-duplicates') { importDuplicates = value; renderPopover(); return; }
@@ -1710,7 +1799,7 @@ document.addEventListener('change', event => {
 });
 document.addEventListener('submit', event => {
   const form = event.target;
-  if (form.closest('#settings-content, #welcome')) return;
+  if (form.closest('#settings-content, #sidebar-settings-nav, #welcome')) return;
   event.preventDefault();
   if (form.dataset.form?.startsWith('pixiv') && state?.page === 'pixiv') { run(pixiv.handleSubmit(form)); return; }
   if (form.dataset.form === 'collectionName') { run(collections.handleSubmit(form)); return; }
@@ -1733,7 +1822,7 @@ document.addEventListener('submit', event => {
   }
 });
 document.addEventListener('keydown', event => {
-  if (event.target.closest('#settings-content, #welcome, #support-dialog')) return;
+  if (event.target.closest('#settings-content, #sidebar-settings-nav, #welcome, #support-dialog')) return;
   if (event.key === 'Escape') {
     endSweep();
     // An inline name field gives itself up first, as its own Cancel would.
@@ -1749,8 +1838,10 @@ document.addEventListener('keydown', event => {
     if (ids.length) { event.preventDefault(); run(send('deleteMany', { ids })); }
   }
   if (event.key === 'Enter' && event.target.dataset.input === 'property') { event.preventDefault(); run(commitProperty(event.target)); }
-  const tab = event.target.closest('.tabs [data-page], .source-tabs [data-source]');
+  const tab = event.target.closest('.source-tabs [data-source]');
   if (tab && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); const tabs = [...tab.parentElement.querySelectorAll('button')]; const index = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (tabs.indexOf(tab) + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length; tabs[index].focus(); }
+  const nav = event.target.closest('#sidebar-library .nav-item');
+  if (nav && ['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) { event.preventDefault(); const items = [...$('sidebar-library').querySelectorAll('.nav-item')]; const index = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : Math.max(0, Math.min(items.length - 1, items.indexOf(nav) + (event.key === 'ArrowDown' ? 1 : -1))); items[index].focus(); }
   const tile = event.target.closest('.tile-select');
   if (tile && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
     event.preventDefault();
@@ -1935,7 +2026,7 @@ const pixiv = createPixivPage({
 });
 // Installed's collections, the inspector's presets, picture placement, compatibility card and
 // black-bar card draw with the panel's helpers into the same page; each keeps only its own page state.
-const collections = createCollections({ send, render, announce, escapeHTML, icon, button, keyAttr, checked, disabled, busy, filterGroup, selection, filtersCollapsed });
+const collections = createCollections({ send, render, announce, escapeHTML, icon, button, keyAttr, checked, disabled, busy, selection });
 const presets = createPresets({ send, render, escapeHTML, icon, button, keyAttr, disabled, busy });
 const placement = createPlacement({ send, render, escapeHTML, icon, button, keyAttr, disabled, busy, safeImage });
 const compatibilityCard = createCompatibility({ escapeHTML, icon, button, keyAttr, busy, canReinstall });
@@ -1954,7 +2045,7 @@ const supportPrompt = createSupportPrompt({
       previous.focus();
       if (document.activeElement === previous) return;
     }
-    restorePanelFocus(['.tabs [aria-current="page"]']);
+    restorePanelFocus(['#sidebar [aria-current="page"]']);
   },
 });
 applyStaticText();

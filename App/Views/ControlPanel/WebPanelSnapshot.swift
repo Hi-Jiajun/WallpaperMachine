@@ -699,7 +699,6 @@ extension WebPanelController {
       "hostStates": hostStatesSnapshot(),
       "held": heldWallpapersSnapshot(),
       "libraryRevision": library.revision,
-      "filtersCollapsed": filtersCollapsed,
       "welcomeSeen": welcomeSeen,
       "pendingPrompt": (presentationAllowsUpdates() ? pendingPrompt()?.rawValue : nil) as Any? ?? null,
       "dragSelectLearned": dragSelectLearned,

@@ -9,18 +9,21 @@ in is described in [control panel](control-panel.md).
 
 ## First run
 
-The first time the panel opens, a guide covers the whole window, top bar included
-(`WebUI/welcome.js` + `welcome.css`; `#welcome` is fixed-position over the app and
-inherits its light/dark surfaces). It is a page, not a modal dialog; the download
-dialog can still open over it for an unrelated job. Background app regions are
+The first time the panel opens, a guide covers the whole window, sidebar and title
+bar included (`WebUI/welcome.js` + `welcome.css`; `#welcome` is fixed-position over the
+app and inherits its light/dark surfaces). A soft wash of the accent color drifts
+slowly behind it and holds still under Reduce Motion. It is a page, not a modal
+dialog; the download dialog can still open over it for an unrelated job. Background app regions are
 inert while the guide is open, and the body scrolls independently of the footer so
 it stays reachable at the 760×560 minimum. Steps can be jumped to freely except
 while language, appearance, the lock screen, performance or preferences are being
 committed; later pages have **Back**, and decision pages have **Skip**:
 
-1. **Language & appearance.** Radio tiles for the language (**System (Auto)** plus
-   every shipped language under its own name) and the appearance mode (**System
-   (Auto)**, **Light**, **Dark**, each with a drawn miniature). A choice applies at
+1. **Language & appearance.** The page leads with the image of the chosen Dock app
+   icon ([appearance](appearance.md#app-icon)). Radio tiles for the language
+   (**System (Auto)** plus every shipped language under its own name) and the
+   appearance mode (**System (Auto)**, **Light**, **Dark**, each with a drawn
+   miniature). A choice applies at
    once through the `languageSetting` / `themeSetting` actions, so the page
    repaints in the chosen language and theme. **Skip** puts back whatever was in
    force when the guide opened and moves on.
@@ -92,7 +95,7 @@ committed; later pages have **Back**, and decision pages have **Skip**:
 Leaving the guide by any of the closing actions is stored natively
 (`WebPanelController.welcomeSeenKey`, sent as the `welcomeSeen` action and reported
 in every snapshot), so the guide is shown on its own exactly once per Mac.
-**Settings → Library & Steam → Welcome guide → Show again** brings it back from the
+**Settings → General → Help → Welcome guide → Show again** brings it back from the
 first page; closing it then does not touch the stored flag. Every link passes the
 same external-URL allowlist as every other link in the panel. While the guide is
 open the panel's document-level handlers stay out of `#welcome`, and the download

@@ -147,13 +147,6 @@ extension WebPanelController {
     case "workshopRetry":
       workshop.retrySearch()
       return
-    case "filters":
-      guard let page = body["page"] as? String, let key = Self.filtersCollapsedKeys[page],
-        let collapsed = body["collapsed"] as? Bool
-      else { throw WebPanelRequest.invalid }
-      filtersCollapsed[page] = collapsed
-      defaults.set(collapsed, forKey: key)
-      return
     case "welcomeSeen":
       // Reading, skipping or simply starting to use the app all count; the welcome is
       // offered once and afterwards only on request from Settings.
@@ -374,6 +367,22 @@ extension WebPanelController {
       let displayID = try playlistDisplay(request)
       try await store.commands.run(slot: BridgeStore.activationSlot(displayId: displayID)) {
         try await store.activatePreviousWallpaperAsync(displayId: displayID)
+      }
+    // The Next wallpaper shortcut's rule: a rotating playlist moves along with a fresh
+    // interval, anything else takes the library's next supported wallpaper, measured from
+    // what the display shows when the switch gets its turn.
+    case "nextWallpaper":
+      let displayID = try playlistDisplay(request)
+      if playlists.playlist(for: displayID).mode == .rotate {
+        guard playlists.skipHandler?(displayID) == true else {
+          throw WallpaperActionError(
+            message: String(localized: "This display’s playlist has no other wallpaper to change to."))
+        }
+      } else {
+        try await store.commands.run(slot: BridgeStore.activationSlot(displayId: displayID)) {
+          guard let id = store.nextWallpaperID(displayId: displayID) else { return }
+          try await store.activateWallpaperAsync(id: id, displayId: displayID, origin: .user)
+        }
       }
     // Queues itself in the display's slot, like a switch, so it must not run inside the
     // queued commands below: a command that waits for the queue it holds never returns.

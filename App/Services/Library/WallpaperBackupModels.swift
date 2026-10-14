@@ -107,6 +107,8 @@ struct WallpaperBackupPreferences: Sendable {
         "WallpaperMachine.playOnlyOnActiveDisplay",
         "WallpaperMachine.hideAfterActivating", "WallpaperMachine.concurrentDownloads",
         "WallpaperMachine.workshopUpdateChecks", "WallpaperMachineAssetsPath",
+        // No longer read since filters became a popover; still accepted so that backups made
+        // by earlier versions, which carry them, keep restoring.
         "WallpaperMachine.workshopFiltersCollapsed", "WallpaperMachine.installedFiltersCollapsed",
         "WallpaperMachine.pixivFiltersCollapsed",
     ]

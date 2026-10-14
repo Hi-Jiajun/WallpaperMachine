@@ -59,7 +59,7 @@ final class ControlPanelDiscoverTests: ControlPanelTestCase {
         const next = document.querySelector('[data-action="workshopPage"][title="Next page"]');
         if (!next) throw new Error('Next page control missing');
         if (next.hasAttribute('data-page')) throw new Error('Pagination must not reuse the main tab data-page attribute');
-        if (next.closest('.tabs [data-page]')) throw new Error('Pagination was treated as a main tab');
+        if (next.closest('#sidebar [data-page]')) throw new Error('Pagination was treated as a main tab');
         next.click();
         await waitFor(() => {
           const banner = document.getElementById('error-banner');
@@ -770,13 +770,15 @@ final class ControlPanelDiscoverTests: ControlPanelTestCase {
         };
         const push = extra => window.wallpaperUI.receive(Object.assign({}, base, {
           downloads: [Object.assign({}, job, extra)], downloadRequests: [] }));
-        const activity = document.getElementById('activity-bar');
+        // The title bar's downloads button carries the batch summary in its label and its progress as a ring.
+        const activity = { get textContent() { return document.querySelector('#top-actions .queue-button')?.getAttribute('aria-label') || ''; } };
+        const ring = () => document.querySelector('#top-actions .queue-ring .ring-value');
         const queue = document.getElementById('queue-popover');
         push({});
         document.querySelector('#top-actions [data-action="openDownloads"]').click();
         await waitFor(() => !queue.hidden);
         const indeterminate = {
-          activityProgress: !!activity.querySelector('progress') && !activity.querySelector('progress').hasAttribute('value'),
+          activityProgress: ring()?.getAttribute('stroke-dasharray') === '26 74',
           queueProgress: !!queue.querySelector('progress') && !queue.querySelector('progress').hasAttribute('value'),
           rate: activity.textContent.includes('Network speed: 600 KB/s') && queue.textContent.includes('Network speed: 600 KB/s'),
           noPercentOrBytes: !queue.textContent.includes('%') && !queue.textContent.includes(' of ')
@@ -788,14 +790,14 @@ final class ControlPanelDiscoverTests: ControlPanelTestCase {
         push({status: 'Validating and adding to your library…', bytesPerSecond: null});
         const validating = activity.textContent.includes('Validating') && !activity.textContent.includes('Network speed:');
         push({id: 'scene-assets', wallpaperID: null, status: 'Downloading Wallpaper Engine files…', progress: 0.25, bytesReceived: 250, bytesExpected: 1000, bytesPerSecond: null});
-        await waitFor(() => !!activity.querySelector('progress') && activity.querySelector('progress').value === 0.25);
-        const byteProgress = activity.querySelector('progress').value === 0.25 && activity.textContent.includes('25%');
+        await waitFor(() => ring()?.getAttribute('stroke-dashoffset') === '75.0');
+        const byteProgress = ring().getAttribute('stroke-dashoffset') === '75.0' && activity.textContent.includes('25%');
         return {indeterminate, zeroRate, noRate, validating, byteProgress};
         """, arguments: ["base": base], in: nil, contentWorld: .page) as? [String: Any]
     let indeterminate = result?["indeterminate"] as? [String: Any]
     XCTAssertEqual(
       indeterminate?["activityProgress"] as? Bool, true,
-      "Activity bar must render a valueless progress bar while pending")
+      "The downloads button must ring without a value while pending")
     XCTAssertEqual(
       indeterminate?["queueProgress"] as? Bool, true,
       "Queue row must render a valueless progress bar while pending")
@@ -863,7 +865,9 @@ final class ControlPanelDiscoverTests: ControlPanelTestCase {
           secondsRemaining: null, authenticating: false, cancelled: false, error: null, prompt: null,
           securePrompt: false, challenge: null, warning: null }, extra);
         const push = downloads => window.wallpaperUI.receive(Object.assign({}, base, { downloads, downloadRequests: [] }));
-        const activity = document.getElementById('activity-bar');
+        // The title bar's downloads button carries the batch summary in its label and its progress as a ring.
+        const activity = { get textContent() { return document.querySelector('#top-actions .queue-button')?.getAttribute('aria-label') || ''; } };
+        const ring = () => document.querySelector('#top-actions .queue-ring .ring-value');
         const queue = document.getElementById('queue-popover');
         push([job('one')]);
         document.querySelector('#top-actions [data-action="openDownloads"]').click();

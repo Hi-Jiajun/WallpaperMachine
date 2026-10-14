@@ -118,10 +118,10 @@ final class ControlPanelShellTests: ControlPanelTestCase {
         const startedScrolled = scroll.scrollTop > 0;
         tab('performance').focus({preventScroll:true});
         tab('performance').dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowUp', bubbles:true}));
-        const navigated = !document.getElementById('settings-about').hidden
-          && document.activeElement === tab('about');
+        const navigated = !document.getElementById('settings-playback').hidden
+          && document.activeElement === tab('playback');
         const reset = scroll.scrollTop === 0;
-        tab('about').dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowDown', bubbles:true}));
+        tab('playback').dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowDown', bubbles:true}));
         const input = advanced.querySelector('input');
         input.focus();
         window.wallpaperUI.receive(state);
@@ -179,8 +179,8 @@ final class ControlPanelShellTests: ControlPanelTestCase {
           window.wallpaperUI.receive(await bridge.postMessage({action:'navigate',page:'settings'}));
           return {
             lang: document.documentElement.lang,
-            tab: document.querySelector('.tabs [data-page="discover"]').textContent,
-            navLabel: document.querySelector('.tabs').getAttribute('aria-label'),
+            tab: document.querySelector('#sidebar [data-page="discover"]').textContent,
+            navLabel: document.getElementById('sidebar').getAttribute('aria-label'),
             section: document.querySelector('#settings-tab-general').textContent,
             summary,
           };
@@ -255,8 +255,8 @@ final class ControlPanelShellTests: ControlPanelTestCase {
       const select = document.querySelector('[data-language-setting]');
       return {
         lang: document.documentElement.lang,
-        tab: document.querySelector('.tabs [data-page="discover"]').textContent,
-        navLabel: document.querySelector('.tabs').getAttribute('aria-label'),
+        tab: document.querySelector('#sidebar [data-page="discover"]').textContent,
+        navLabel: document.getElementById('sidebar').getAttribute('aria-label'),
         section: document.querySelector('#settings-tab-general').textContent,
         selected: select.value,
         options: Array.from(select.options).map(option => [option.value, option.textContent]),
@@ -405,7 +405,7 @@ final class ControlPanelShellTests: ControlPanelTestCase {
         }
       };
       window.wallpaperUI.receive(await window.webkit.messageHandlers.native.postMessage({action:'ready'}));
-      document.querySelector('.tabs [data-page="settings"]').click();
+      document.querySelector('#sidebar [data-page="settings"]').click();
       await waitFor(() => !document.getElementById('settings-content').hidden);
       document.querySelector('[data-section="about"]').click();
       const card = document.querySelector('[data-key="about-updates"]');
@@ -435,7 +435,7 @@ final class ControlPanelShellTests: ControlPanelTestCase {
           }
         };
         window.wallpaperUI.receive(await window.webkit.messageHandlers.native.postMessage({action:'ready'}));
-        document.querySelector('.tabs [data-page="settings"]').click();
+        document.querySelector('#sidebar [data-page="settings"]').click();
         await waitFor(() => !document.getElementById('settings-content').hidden);
         document.querySelector('[data-section="about"]').click();
         await waitFor(() => !document.getElementById('settings-about').hidden);
@@ -542,21 +542,28 @@ final class ControlPanelShellTests: ControlPanelTestCase {
           }
         };
         const root = document.documentElement;
-        const initialBackground = getComputedStyle(root).backgroundColor;
-        document.querySelector('.tabs [data-page="settings"]').click();
+        // The page itself is transparent over the window's sidebar material; its body paints the surface.
+        const surface = () => getComputedStyle(document.querySelector('.window-body')).backgroundColor;
+        const initialBackground = surface();
+        document.querySelector('#sidebar [data-page="settings"]').click();
         await waitFor(() => !document.getElementById('settings-content').hidden);
         document.querySelector('[data-section="appearance"]').click();
+        // Appearance and tone are picture choices (radios); an accent off the swatches goes through the colour well.
         const change = async (key, value) => {
-          const input = document.querySelector(`[data-theme-setting="${key}"]`);
+          const radio = document.querySelector(`[data-theme-setting="${key}"][value="${value}"]`);
+          const input = radio || document.querySelector(`input[type="color"][data-theme-setting="${key}"]`);
           await waitFor(() => !input.disabled);
-          input.value = value;
-          input.dispatchEvent(new Event('input', {bubbles:true}));
-          input.dispatchEvent(new Event('change', {bubbles:true}));
+          if (radio) radio.click();
+          else {
+            input.value = value;
+            input.dispatchEvent(new Event('input', {bubbles:true}));
+            input.dispatchEvent(new Event('change', {bubbles:true}));
+          }
           await waitFor(() => !input.disabled);
         };
         await change('mode', 'dark');
         await waitFor(() => root.dataset.theme === 'dark');
-        const darkBackground = getComputedStyle(root).backgroundColor;
+        const darkBackground = surface();
         await change('accent', '#b43271');
         await change('tone', 'warm');
         await waitFor(() => root.dataset.tone === 'warm');
@@ -641,33 +648,31 @@ final class ControlPanelShellTests: ControlPanelTestCase {
     await workshop.steamCMDSetup.shutdown()
   }
 
-  func testTopBarCentersTheBrandAndOwnsTitleBarGesturesWithoutWindow()
+  func testTitleBarNamesThePlaceOnShowAndOwnsTitleBarGesturesWithoutWindow()
     async throws
   {
     try await withPanel { panel in
-      // The default window width; narrower panels hide the identity entirely.
       panel.web.setFrameSize(NSSize(width: 1240, height: 640))
       panel.show()
       try await panel.finishWelcome()
       try await panel.waitJS("Math.round(window.innerWidth) === 1240")
-      try await panel.waitJS("document.querySelector('#app-identity .app-name') !== null")
-      let link = try await panel.js("""
-        const bar = document.querySelector('.topbar');
-        const barRect = bar.getBoundingClientRect();
-        const identity = document.getElementById('app-identity').getBoundingClientRect();
+      try await panel.waitJS("document.querySelector('#page-title h1') !== null")
+      let bar = try await panel.js("""
+        const sidebar = document.getElementById('sidebar').getBoundingClientRect();
+        const top = document.querySelector('.topbar').getBoundingClientRect();
         return {
           inset: getComputedStyle(document.documentElement).getPropertyValue('--window-controls-inset').trim(),
-          offCenter: Math.abs((identity.left + identity.right) / 2 - (barRect.left + barRect.right) / 2),
-          title: bar.querySelector('.app-name').textContent,
-          identityControls: document.querySelectorAll('#app-identity button, #app-identity a').length,
+          title: document.querySelector('#page-title h1').textContent,
+          titleControls: document.querySelectorAll('#page-title button, #page-title a').length,
+          beside: Math.abs(top.left - sidebar.right) <= 0.5,
+          strip: !!document.querySelector('#sidebar .sidebar-titlebar')?.getClientRects().length,
         };
         """) as? [String: Any]
-      XCTAssertEqual(link?["identityControls"] as? Int, 0, "The brand shows no version or repository button")
-      XCTAssertEqual(link?["inset"] as? String, "0px", "No window means no traffic lights to clear")
-      XCTAssertLessThanOrEqual(
-        link?["offCenter"] as? Double ?? .infinity, 1,
-        "The product name must sit on the window's horizontal center, not after the tabs")
-      XCTAssertEqual(link?["title"] as? String, "WallpaperMachine")
+      XCTAssertEqual(bar?["titleControls"] as? Int, 0, "The title bar's name is a name, not a button")
+      XCTAssertEqual(bar?["inset"] as? String, "0px", "No window means no traffic lights to clear")
+      XCTAssertEqual(bar?["title"] as? String, "All wallpapers", "The title bar names the library view on show")
+      XCTAssertEqual(bar?["beside"] as? Bool, true, "At full width the title bar starts after the sidebar")
+      XCTAssertEqual(bar?["strip"] as? Bool, true, "The sidebar keeps a title-bar strip for the traffic lights")
       XCTAssertEqual(panel.controller.windowControlsInset, 0)
       // Title-bar gestures reply without a snapshot and never fail when there is no window.
       for action in ["dragWindow", "titleDoubleClick"] {
@@ -679,21 +684,26 @@ final class ControlPanelShellTests: ControlPanelTestCase {
         """
         const before = window.powerProbe.received.length;
         document.querySelector('.topbar').dispatchEvent(new MouseEvent('mousedown', {bubbles: true, button: 0}));
-        document.getElementById('app-identity').dispatchEvent(new MouseEvent('mousedown', {bubbles: true, button: 0}));
+        document.querySelector('.sidebar-titlebar').dispatchEvent(new MouseEvent('mousedown', {bubbles: true, button: 0}));
         await new Promise(resolve => setTimeout(resolve, 150));
         return window.powerProbe.received.length - before;
         """, equals: 0)
+      // The title follows the place: Settings names its section.
+      _ = try await panel.js("document.querySelector('#sidebar [data-page=\"settings\"]').click()")
+      try await panel.waitJS("!document.getElementById('settings-content').hidden")
+      _ = try await panel.js("document.querySelector('[data-section=\"appearance\"]').click()")
+      try await panel.waitJS("document.querySelector('#page-title h1').textContent === 'Appearance'")
       XCTAssertNil(panel.controller.actionError)
     }
   }
 
-  func testTopBarNeverOverlapsAtTheMinimumWindowWidth() async throws {
+  func testTitleBarAndSidebarNeverOverlapAtTheMinimumWindowWidth() async throws {
     try await withPanel { panel in
       panel.show()
       try await panel.finishWelcome()
-      try await panel.waitJS("document.querySelector('#app-identity .app-name') !== null")
+      try await panel.waitJS("document.querySelector('#page-title h1') !== null")
       // From the minimum content width up to the default, with a download in flight so the queue button is present too.
-      let widths: [Double] = [760, 840, 900, 1040, 1240]
+      let widths: [Double] = [760, 840, 900, 960, 1040, 1240]
       for width in widths {
         panel.web.setFrameSize(NSSize(width: width, height: 640))
         // The frame change reaches the page asynchronously. Measuring straight
@@ -712,7 +722,7 @@ final class ControlPanelShellTests: ControlPanelTestCase {
           const bar = document.querySelector('.topbar');
           const barRect = bar.getBoundingClientRect();
           const rect = element => element.getBoundingClientRect();
-          const controls = [...bar.querySelectorAll('button, select')].filter(element => element.getClientRects().length);
+          const controls = [...bar.querySelectorAll('button, select, h1')].filter(element => element.getClientRects().length);
           const overlaps = [];
           for (let i = 0; i < controls.length; i += 1) for (let j = i + 1; j < controls.length; j += 1) {
             const a = rect(controls[i]), b = rect(controls[j]);
@@ -721,21 +731,28 @@ final class ControlPanelShellTests: ControlPanelTestCase {
           }
           const outside = controls.filter(element => rect(element).left < barRect.left - 0.5 || rect(element).right > barRect.right + 0.5)
             .map(element => element.textContent || element.getAttribute('aria-label'));
-          const name = document.querySelector('.app-name');
+          const title = rect(document.querySelector('#page-title h1'));
+          const sidebar = rect(document.getElementById('sidebar'));
+          const labels = [...document.querySelectorAll('#sidebar-library .nav-label')].filter(element => element.getClientRects().length).length;
           return {
-            width: barRect.width,
+            right: barRect.right, sidebar: sidebar.width, labels,
             overlaps, outside,
+            clearOfLights: title.left >= 70,
             queue: !!document.querySelector('#top-actions [data-action="openDownloads"]')?.getClientRects().length,
-            nameVisible: !!name && name.getClientRects().length > 0,
           };
           """) as? [String: Any]
-        XCTAssertEqual(layout?["width"] as? Double, width, "Top bar must span the panel at \(width)px")
-        XCTAssertEqual(layout?["overlaps"] as? [String], [], "Top bar controls must not overlap at \(width)px")
-        XCTAssertEqual(layout?["outside"] as? [String], [], "Top bar controls must stay inside the bar at \(width)px")
+        XCTAssertEqual(layout?["right"] as? Double, width, "Title bar must reach the window's edge at \(width)px")
+        XCTAssertEqual(layout?["overlaps"] as? [String], [], "Title bar controls must not overlap at \(width)px")
+        XCTAssertEqual(layout?["outside"] as? [String], [], "Title bar controls must stay inside the bar at \(width)px")
+        XCTAssertEqual(layout?["clearOfLights"] as? Bool, true, "The title must clear the traffic lights at \(width)px")
         XCTAssertEqual(layout?["queue"] as? Bool, true, "The downloads button stays available at \(width)px")
+        let narrow = width <= 960
         XCTAssertEqual(
-          layout?["nameVisible"] as? Bool, width > 840,
-          "The name hides in a narrow window and returns once there is room (\(width)px)")
+          (layout?["labels"] as? Int ?? -1) == 0, narrow,
+          "The sidebar shows only glyphs in a narrow window and names them once there is room (\(width)px)")
+        XCTAssertLessThan(
+          layout?["sidebar"] as? Double ?? .infinity, narrow ? 80 : .infinity,
+          "A narrow window keeps the sidebar to a rail (\(width)px)")
       }
     }
   }
@@ -759,7 +776,7 @@ final class ControlPanelShellTests: ControlPanelTestCase {
           step: region.querySelector('.welcome-page').dataset.step,
           covers: style.position === 'fixed' && rect.width === window.innerWidth && rect.height === window.innerHeight,
           background: style.backgroundColor,
-          windowBackground: getComputedStyle(document.documentElement).backgroundColor,
+          windowBackground: getComputedStyle(document.querySelector('.window-body')).backgroundColor,
           title: region.querySelector('#welcome-title').textContent,
           languages: [...region.querySelectorAll('[data-action="language"]')].map(b => b.dataset.value),
           themes: [...region.querySelectorAll('[data-action="theme"]')].map(b => b.dataset.value),
@@ -985,7 +1002,7 @@ final class ControlPanelShellTests: ControlPanelTestCase {
       let replay = try await panel.js("""
         const base = window.powerProbe.received.at(-1);
         window.wallpaperUI.receive(Object.assign({}, base, { page: 'settings', welcomeSeen: true }));
-        document.querySelector('#settings-content [data-section="library"]').click();
+        document.querySelector('#sidebar-settings-nav [data-section="library"]').click();
         const button = document.querySelector('#settings-content [data-action="openWelcome"]');
         const bridge = window.webkit.messageHandlers.native;
         const original = bridge.postMessage;
@@ -1012,6 +1029,73 @@ final class ControlPanelShellTests: ControlPanelTestCase {
       XCTAssertEqual(replay?["closed"] as? Bool, true)
       XCTAssertGreaterThanOrEqual(replay?["snapshots"] as? Int ?? 0, 1, "The replay tolerates unsolicited native snapshots")
       XCTAssertEqual(replay?["actions"] as? [String], [], "An already-seen guide closes without another native request")
+    }
+  }
+
+  /// Settings opens on Quick Settings, whose tiles switch the same preferences as the full
+  /// rows; search finds a setting in any section by its own words and counts the matches per
+  /// section; a long explanation keeps its first sentence on the row and the rest behind ⓘ.
+  func testQuickSettingsSearchAndExplanationsWithoutWindow() async throws {
+    try await withPanel { panel in
+      try await panel.finishWelcome()
+      panel.show()
+      _ = try await panel.js("document.querySelector('#sidebar [data-page=\"settings\"]').click()")
+      try await panel.waitJS(
+        "!document.getElementById('settings-content').hidden && !document.getElementById('settings-quick').hidden")
+      XCTAssertFalse(panel.controller.hidesAfterActivating)
+      _ = try await panel.js("document.querySelector('[data-key=\"qs-hideAfterActivating\"]').click()")
+      try await panel.waitUntil { panel.controller.hidesAfterActivating }
+      try await panel.waitJS("""
+        document.querySelector('[data-key="qs-hideAfterActivating"]').getAttribute('aria-checked') === 'true'
+          && document.getElementById('settings-control-hideAfterActivating').checked
+        """)
+
+      let search = try await panel.js("""
+        const field = document.querySelector('[data-settings-search]');
+        field.value = 'Mission Control';
+        field.dispatchEvent(new Event('input', {bubbles: true}));
+        const result = {
+          title: document.querySelector('#page-title h1').textContent,
+          pages: [...document.querySelectorAll('.settings-page')].filter(page => !page.hidden).map(page => page.id),
+          row: document.querySelector('[data-key="refreshDesktopPicture"]').getClientRects().length > 0,
+          count: Number(document.querySelector('[data-section="desktop"] .nav-count').textContent),
+          dimmed: document.querySelector('[data-section="about"]').classList.contains('search-dim'),
+        };
+        field.value = '';
+        field.dispatchEvent(new Event('input', {bubbles: true}));
+        result.cleared = [...document.querySelectorAll('.settings-page')].filter(page => !page.hidden).map(page => page.id);
+        return result;
+        """) as? [String: Any]
+      XCTAssertEqual(search?["title"] as? String, "Search results")
+      XCTAssertEqual(search?["pages"] as? [String], ["settings-desktop"], "Only the section holding the words stays")
+      XCTAssertEqual(search?["row"] as? Bool, true, "The matching row is on show")
+      XCTAssertGreaterThanOrEqual(search?["count"] as? Int ?? 0, 2, "The sidebar counts the section's matches")
+      XCTAssertEqual(search?["dimmed"] as? Bool, true, "Sections without a match fade")
+      XCTAssertEqual(search?["cleared"] as? [String], ["settings-quick"], "Clearing the search returns to the section")
+
+      let explanation = try await panel.js("""
+        document.querySelector('[data-section="desktop"]').click();
+        const row = document.querySelector('[data-key="writeDesktopPicture"]');
+        const more = row.querySelector('.settings-more');
+        const info = row.querySelector('.settings-info');
+        const before = { lead: row.querySelector('#settings-note-writeDesktopPicture').textContent, hidden: more.hidden,
+          expanded: info.getAttribute('aria-expanded'), described: row.querySelector('input').getAttribute('aria-describedby') };
+        info.click();
+        const opened = row.querySelector('.settings-more');
+        return { ...before, shown: !opened.hidden && opened.getClientRects().length > 0,
+          expandedAfter: row.querySelector('.settings-info').getAttribute('aria-expanded'), more: opened.textContent };
+        """) as? [String: Any]
+      XCTAssertEqual(
+        explanation?["lead"] as? String,
+        "Mission Control and the moment before a wallpaper loads show a still frame of the wallpaper.",
+        "The row keeps the first sentence")
+      XCTAssertEqual(explanation?["hidden"] as? Bool, true, "The rest waits behind ⓘ")
+      XCTAssertEqual(explanation?["expanded"] as? String, "false")
+      XCTAssertEqual(explanation?["described"] as? String, "settings-note-writeDesktopPicture")
+      XCTAssertEqual(explanation?["shown"] as? Bool, true, "ⓘ opens the rest beneath the row")
+      XCTAssertEqual(explanation?["expandedAfter"] as? String, "true")
+      XCTAssertTrue((explanation?["more"] as? String ?? "").hasPrefix("Turn this off"))
+      XCTAssertNil(panel.controller.actionError)
     }
   }
 
@@ -1102,7 +1186,7 @@ final class ControlPanelShellTests: ControlPanelTestCase {
         const base = await window.webkit.messageHandlers.native.postMessage({action:'ready'});
         const state = {...base, page:'settings', settings:{...base.settings, batteryMode:'reducedQuality', batteryTargetFps:30}};
         window.wallpaperUI.receive(state);
-        document.querySelector('[data-section="performance"]').click();
+        document.querySelector('[data-section="playback"]').click();
         const details = document.querySelector('[data-key="performance-context"]');
         details.querySelector('summary').click();
         const input = document.querySelector('[data-setting="batteryTargetFps"]');
@@ -1338,6 +1422,7 @@ final class ControlPanelShellTests: ControlPanelTestCase {
         const sort = document.getElementById('browser-sort');
         sort.value = 'type'; change(sort, 'change');
         document.querySelector('[data-action="toggleSortDirection"]').click();
+        document.querySelector('.browser-toolbar [data-action="toggleFilters"]').click();
         const sidebar = document.getElementById('filter-sidebar');
         const favorite = sidebar.querySelector('input[value="Favorite"]'); favorite.checked = true; change(favorite, 'change');
         const web = sidebar.querySelector('input[value="Web"]'); web.checked = false; change(web, 'change');
@@ -1375,7 +1460,10 @@ final class ControlPanelShellTests: ControlPanelTestCase {
       panel.web = controller.makeWebView()
       panel.web.setFrameSize(NSSize(width: 960, height: 640))
       try await panel.waitUntil(timeout: 15) { controller.isReady }
-      // The sidebar is drawn by the render that follows the first snapshot, restore included.
+      // The toolbar is drawn by the render that follows the first snapshot, restore included;
+      // the Filters popover then shows the restored boxes.
+      try await panel.waitJS("document.querySelector('.browser-toolbar [data-action=\"toggleFilters\"]')")
+      _ = try await panel.js("document.querySelector('.browser-toolbar [data-action=\"toggleFilters\"]').click()")
       try await panel.waitJS("document.querySelector('#filter-sidebar input[value=\"Favorite\"]')")
       let after = try await panel.js("""
         const sidebar = document.getElementById('filter-sidebar');
@@ -1464,22 +1552,22 @@ final class ControlPanelShellTests: ControlPanelTestCase {
       let before = panel.navigation.selection
       XCTAssertNotEqual(before, .settings)
       let failed = try await panel.js("""
-        const query = document.querySelectorAll;
+        const find = document.getElementById;
         let armed = true;
-        document.querySelectorAll = function (selector) {
-          if (armed && selector === '.tabs [data-page]') { armed = false; throw new Error('render failed'); }
-          return query.call(this, selector);
+        document.getElementById = function (id) {
+          if (armed && id === 'sidebar-library') { armed = false; throw new Error('render failed'); }
+          return find.call(this, id);
         };
-        document.querySelector('.tabs [data-page="settings"]').click();
+        document.querySelector('#sidebar [data-page="settings"]').click();
         return !armed;
         """) as? Bool
       XCTAssertEqual(failed, true, "the first tab click must reach the failing render")
       XCTAssertEqual(panel.navigation.selection, before)
 
-      _ = try await panel.js("document.querySelector('.tabs [data-page=\"settings\"]').click()")
+      _ = try await panel.js("document.querySelector('#sidebar [data-page=\"settings\"]').click()")
       try await panel.waitUntil { panel.navigation.selection == .settings }
       try await panel.waitJS(
-        "document.querySelector('.tabs [aria-current=\"page\"]')?.dataset.page === 'settings'")
+        "document.querySelector('#sidebar [aria-current=\"page\"]')?.dataset.page === 'settings'")
     }
   }
 
@@ -1500,8 +1588,8 @@ final class ControlPanelShellTests: ControlPanelTestCase {
           }
           return original(message);
         };
-        document.querySelector('.tabs [data-page="pixiv"]').click();
-        const settings = document.querySelector('.tabs [data-page="settings"]');
+        document.querySelector('#sidebar [data-page="pixiv"]').click();
+        const settings = document.querySelector('#sidebar [data-page="settings"]');
         const clickable = !settings.disabled;
         settings.click();
         return clickable;
@@ -1546,13 +1634,13 @@ final class ControlPanelShellTests: ControlPanelTestCase {
       try await panel.expectJS("""
         const title = document.getElementById('welcome-title');
         title.focus();
-        const background = document.querySelector('.tabs [data-page="settings"]');
+        const background = document.querySelector('#sidebar [data-page="settings"]');
         background.focus();
         return document.activeElement === title;
         """, equals: true)
       try await panel.finishWelcome()
       try await panel.expectJS("""
-        const background = document.querySelector('.tabs [data-page="settings"]');
+        const background = document.querySelector('#sidebar [data-page="settings"]');
         background.focus();
         return document.activeElement === background;
         """, equals: true)

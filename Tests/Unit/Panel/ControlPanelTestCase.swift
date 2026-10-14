@@ -423,7 +423,7 @@ final class PanelFixture {
       (() => {
         const error = document.getElementById('error-banner');
         if (error && !error.hidden) throw new Error(`Panel startup failed: ${error.textContent.trim()}`);
-        return Boolean(document.querySelector('.tabs [aria-current="page"]'));
+        return Boolean(document.querySelector('#sidebar [aria-current="page"]'));
       })()
       """)
     try await installRecorder()

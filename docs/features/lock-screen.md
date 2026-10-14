@@ -8,7 +8,7 @@ what the user gets and the rules that keep the two native modes consistent.
 
 ## Enabling it
 
-Apply a video or live scene to a display, then enable **Settings → General →
+Apply a video or live scene to a display, then enable **Settings → Desktop & Lock Screen →
 Animate lock screen**, or the same switch on the welcome guide's Preferences page
 (it applies at once there too; the guide's **Skip** turns it back to what it was
 when the guide opened). A status row next to the Settings switch reports the
@@ -113,7 +113,7 @@ WallpaperAgent abandons an extension that has not answered after about 31 second
 
 ## Use wallpaper as screen saver
 
-Enable **Settings → General → Screen saver → Use wallpaper as screen saver**. Each
+Enable **Settings → Desktop & Lock Screen → Screen saver → Use wallpaper as screen saver**. Each
 display follows its applied wallpaper and committed properties, including scene,
 video, web and still-image/pixiv projects. Committed means saved: a property edit
 that the desktop only shows while it is made ([edits on the

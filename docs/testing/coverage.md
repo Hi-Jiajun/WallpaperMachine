@@ -926,8 +926,13 @@ follows the developer's in-app language choice.
   `NSHostingController` accepts 760×560, 960×640 and 1240×800 proposals in every
   shipped language without forcing a taller window; the panel renders in the
   controller's language and switches in place, offering every shipped language
-  and refusing an unshipped tag; About/update actions; the top bar stays centered
-  and does not overlap at the minimum width; the first-run guide, background
+  and refusing an unshipped tag; About/update actions; the title bar names the place
+  on show (Settings names its section) and owns the title-bar gestures without a
+  window, and neither it nor the sidebar overlaps at the minimum width, the sidebar
+  being a rail of glyphs at 960px and below; Settings opens on Quick Settings, where a
+  tile switches the native preference and its row follows, search finds rows by their
+  words and counts and dims sections, and ⓘ reveals the rest of a long explanation;
+  the first-run guide, background
   focus isolation, Steam prompt focus, ownership notices and a revealed password
   that never reaches the HTML; settings keep drafts, disclosure and scroll across
   snapshots; the Performance profile rows follow any of the four Reduced quality choices
@@ -935,16 +940,22 @@ follows the developer's in-app language choice.
   Effective now name the cause (heat, then Low Power Mode, a low battery, the battery),
   the three condition menus offer Reduced quality and the battery mode and display
   sleep do not, and a display's frame-rate note follows the engine's ceiling; the
-  Downloads-at-once choice reaches the queue; tabs stay usable
+  Downloads-at-once choice reaches the queue; the sidebar's pages stay usable
   after a render throws mid-send; Installed's filters and scroll offset return in a
   second page built over the same navigation, with a stale required tag dropped,
   and the `viewState` report is stored without a snapshot reply or push and an
-  invalid one is ignored. `PanelViewStateTests` cover its limits.
-- `ControlPanelLibraryTests` — sorting, tile marks, filter sidebar, hold-and-drag
+  invalid one is ignored. `PanelViewStateTests` cover its limits. Not covered: the
+  sidebar material behind the page and its Reduce Transparency and inactive-window
+  looks, which need an on-screen window ([manual-smoke.md](manual-smoke.md)).
+- `ControlPanelLibraryTests` — sorting, tile marks, the Filters popover (it opens
+  from the toolbar's Filter button, floats over the grid, closes with Escape, a click
+  outside or a change of page, and reaches no native action) with the inspector width
+  following the window width, the sidebar's All wallpapers, Favorites and collections
+  as library views (title bar, counts, the Favorite filter), hold-and-drag
   selection, the inspector report link, download setup, a rejected download
   account staying visible, and error dismissal (library and download failures
   stay suppressed until they recur), Installed tiles showing cached covers and
-  animating only the pointed-at tile (dwell, sweep, drag, blur, hide, tab change),
+  animating only the pointed-at tile (dwell, sweep, drag, blur, hide, page change),
   the snapshot offering animation only to gif/webp/apng previews, a tile showing
   no image while its cover's stamp is read, a rescan that replaced no preview
   leaving every cover address and page node alone while a replaced preview
@@ -954,13 +965,15 @@ follows the developer's in-app language choice.
   it), and how the animation looks or what it saves in power.
 - `ControlPanelDiscoverTests` — pagination does not navigate with the page number
   and clamps to Steam's page limit, the grid keeps square tiles in at least three
-  columns, download rings and telemetry, the search field's handling of a pasted
+  columns, download rings and telemetry (read from the title-bar downloads button's
+  label and ring), the search field's handling of a pasted
   link (looked up at once) against a bare id (only on Return) and words (after
   their pause), the sort menu (one entry for each `WorkshopSort`, each searching by
   its own key), and previews that play without canvas
   readback and release offscreen images. This does not reproduce a GPU-process
   hang or prove on-screen smoothness.
-- `ControlPanelSyncTests` (hidden-panel pushes, option fetches, display titles),
+- `ControlPanelSyncTests` (hidden-panel pushes, option fetches, display titles, the
+  playback status read from Now Playing),
   `ControlPanelSnapshotDeliveryTests` (library reuse during download progress,
   full fallback for an unknown delta revision), `ControlPanelHostStateTests`
   (the inspector's per-display host states and exact retry) and
@@ -1083,7 +1096,10 @@ due rotation, a display the user emptied staying empty until a wallpaper, Change
 a relaunch finishing its shuffle round without a repeat, an unlock changing an
 unlock rotation once, waiting for a display that cannot play yet for 30 seconds at
 most, and leaving timed rotations, cleared displays and a hand-chosen wallpaper alone),
-`WebPanelPlaylistTests` and offscreen
+`WebPanelPlaylistTests` (including Now Playing's Next wallpaper: a rotating playlist
+moves along and says so when it has nothing else, a display without one takes the
+library's next wallpaper without asking the scheduler, and a mirrored display is
+refused) and offscreen
 `ControlPanelPlaybackToolsTests` (drag and button sorting, keyboard focus,
 stale-drag rejection, escaped history titles, clearing only the target display, the
 Resume row in two languages, the How often menu's unlock choice).

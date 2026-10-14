@@ -60,7 +60,7 @@ export function createPixivPage({ $, send, run, escapeHTML, icon, button, morph,
 
   function renderToolbar() {
     const [choices, current, label] = searching() ? [orders, draft.order, t('Search order')] : [showsR18() ? [...rankings, ...r18Rankings] : rankings, draft.ranking, t('Ranking')];
-    morph($('browser-toolbar'), `${filterButton(filterCount())}<form class="search-form" data-form="pixivSearch" ${keyAttr('pixiv-search')}>${icon('search')}<label class="sr-only" for="pixiv-search">${escapeHTML(t('Search pixiv by tag'))}</label><input id="pixiv-search" type="search" autocomplete="off" placeholder="${escapeHTML(t('Search pixiv tags'))}" value="${escapeHTML(draft.text)}" data-input="pixivSearch"><button type="submit" title="${escapeHTML(t('Search pixiv'))}">${escapeHTML(t('Search'))}</button></form><div class="toolbar-tools"><label class="sr-only" for="pixiv-sort">${escapeHTML(label)}</label><select id="pixiv-sort" data-change="pixivSort">${selectOptions(choices.map(([key, text]) => [key, t(text)]), current)}</select>${button('', 'pixivRefresh', {}, { icon: 'refresh', title: t('Refresh pixiv'), disabled: page().loading })}</div>`);
+    morph($('browser-toolbar'), `<form class="search-form" data-form="pixivSearch" ${keyAttr('pixiv-search')}>${icon('search')}<label class="sr-only" for="pixiv-search">${escapeHTML(t('Search pixiv by tag'))}</label><input id="pixiv-search" type="search" autocomplete="off" placeholder="${escapeHTML(t('Search pixiv tags'))}" value="${escapeHTML(draft.text)}" data-input="pixivSearch"><button type="submit" title="${escapeHTML(t('Search pixiv'))}">${escapeHTML(t('Search'))}</button></form><div class="toolbar-tools">${filterButton(filterCount())}<label class="sr-only" for="pixiv-sort">${escapeHTML(label)}</label><select id="pixiv-sort" data-change="pixivSort">${selectOptions(choices.map(([key, text]) => [key, t(text)]), current)}</select>${button('', 'pixivRefresh', {}, { icon: 'refresh', title: t('Refresh pixiv'), className: 'icon-button', disabled: page().loading })}</div>`);
   }
 
   function renderFilters() {
@@ -73,12 +73,12 @@ export function createPixivPage({ $, send, run, escapeHTML, icon, button, morph,
     const r18Note = !signedIn ? t('Sign in to pixiv to show R-18 works. R-18G works are never shown.')
       : account().showsR18 === false ? t('This pixiv account hides R-18 works. Turn them on in pixiv’s settings under Viewing restrictions.')
         : t('R-18G works are never shown.');
-    morph($('filter-sidebar'), `${filterHeading(filterCount(), 'pixivClearFilters')}`
+    morph($('filter-sidebar'), `${filterHeading(filterCount(), 'pixivClearFilters')}<div class="filter-scroll" ${keyAttr('filter-scroll')}>`
       + renderAccount(note)
       + filterGroup('pixiv-orientation', 'Orientation', orientations.map(radio('orientation')).join(''), true, Number(draft.orientation !== 'any'))
       + filterGroup('pixiv-size', 'Minimum size', sizes.map(radio('minimumSize')).join(''), true, Number(draft.minimumSize !== 'any'))
       + filterGroup('pixiv-rating', 'Age rating', ratings.map(rating).join('') + note(r18Note), true, ratingChanges)
-      + filterGroup('pixiv-ai', 'AI-generated', `<label class="check-label" ${keyAttr('hide-ai')}><input type="checkbox" data-change="pixivHideAI"${checked(draft.hideAI)}><span>${escapeHTML(t('Hide AI-generated works'))}</span></label>${note(t('Applies to search; pixiv keeps AI-generated works out of its rankings.'))}`, true, Number(draft.hideAI)));
+      + filterGroup('pixiv-ai', 'AI-generated', `<label class="check-label" ${keyAttr('hide-ai')}><input type="checkbox" data-change="pixivHideAI"${checked(draft.hideAI)}><span>${escapeHTML(t('Hide AI-generated works'))}</span></label>${note(t('Applies to search; pixiv keeps AI-generated works out of its rankings.'))}`, true, Number(draft.hideAI)) + '</div>');
   }
 
   // Signing in happens on pixiv's own page in a window of its own; the app keeps only the
@@ -137,7 +137,9 @@ export function createPixivPage({ $, send, run, escapeHTML, icon, button, morph,
     const grid = $('wallpaper-grid');
     grid.setAttribute('aria-busy', String(Boolean(pixiv.loading)));
     grid.classList.remove('selecting');
-    morph($('browser-summary'), escapeHTML(summary()));
+    // Signing in is offered beside the count as well as in Filters, so members' works are easy to find.
+    const { signedIn, signingIn } = account();
+    morph($('browser-summary'), `<div class="selection-bar"><span>${escapeHTML(summary())}</span>${signedIn ? '' : button(signingIn ? t('Show sign-in window') : t('Sign in to pixiv…'), 'pixivSignIn', {}, { icon: 'logIn', className: 'link' })}</div>`);
     morph(grid, items.map(tile).join(''));
     const empty = $('browser-empty');
     empty.hidden = items.length > 0;
@@ -166,7 +168,7 @@ export function createPixivPage({ $, send, run, escapeHTML, icon, button, morph,
 
   function renderInspector() {
     const item = page().selected;
-    if (!item) { morph($('inspector'), `<div class="inspector-empty"><h2>${escapeHTML(t('Select an illustration'))}</h2><p>${escapeHTML(t('Its preview, pages and download appear here.'))}</p></div>`); return; }
+    if (!item) { morph($('inspector'), `<div class="inspector-empty">${icon('palette', 40)}<h2>${escapeHTML(t('Select an illustration'))}</h2><p>${escapeHTML(t('Its preview, pages and download appear here.'))}</p></div>`); return; }
     const index = Number(item.page) || 0;
     const count = Math.max(1, Number(item.pageCount) || 1);
     const title = untitled(item);

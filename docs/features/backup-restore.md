@@ -2,7 +2,7 @@
 
 This page covers the backup package and the restore that follows it. Backup is one
 of the Settings → Storage tools; the Settings sections are listed in
-[control panel](control-panel.md#tabs).
+[control panel](control-panel.md#pages-and-settings).
 
 **Settings → Storage → Backup** exports a versioned `.wmbackup` directory package
 containing renderer/wallpaper settings, allowlisted preferences (collections,
@@ -20,7 +20,10 @@ sign-in](workshop-downloads.md#steam-sign-in)). Only
 preferences saved in the app’s persistent domain are included; inherited system
 languages and registered defaults are excluded, including during conflict checks
 and rollback. Export checks the complete manifest size before copying payload
-bytes and supports the full 48 MB preset archive limit.
+bytes and supports the full 48 MB preset archive limit. Three filter-sidebar
+preferences (`workshopFiltersCollapsed`, `installedFiltersCollapsed` and
+`pixivFiltersCollapsed`, under the `WallpaperMachine.` prefix) are on the allowlist
+although the panel does not read them, so backups made by earlier versions restore.
 
 Choose a backup to preview its contents, conflicts and missing-resource warnings.
 **Keep what is on this Mac** preserves conflicting per-display playlists, their

@@ -7,15 +7,27 @@ playback and display settings are untouched.
 
 | Setting | Values | Notes |
 | --- | --- | --- |
-| Appearance | **System (Auto)**, **Light**, **Dark** | System follows the macOS light/dark setting without reloading the panel; a manual choice also sets the native app appearance |
-| Accent color | Color picker | Colors buttons, links and focus rings |
-| Surface tone | **Neutral**, **Warm**, **Cool** | Warms or cools the window background |
+| Appearance | **System (Auto)**, **Light**, **Dark**, each shown as a picture of a window | System follows the macOS light/dark setting without reloading the panel; a manual choice also sets the native app appearance |
+| Accent color | A row of macOS-style swatches and a color well, with the chosen hex value beside them | The well takes any color the swatches lack. Colors buttons, links and focus rings |
+| Surface tone | **Neutral**, **Warm**, **Cool**, each shown as a picture of a window | Warms or cools the window background |
 | App icon | **Minimal**, **Day**, **Night** | Changes the running Dock icon immediately and restores the choice at launch; Finder and the menu bar stay unchanged |
 
 Accent shades adapt so text, buttons and focus rings stay readable against the
 resolved background. The theme runtime (`WebUI/theme.js`) resolves appearance, tone
 and accent tokens before first paint, so the panel does not flash an unstyled or
 wrong-appearance frame.
+
+## Window material
+
+The sidebar shows the system's translucent sidebar material. The web view draws no
+background, and `PanelContentController` (`ControlPanelWindow.swift`) places an
+`NSVisualEffectView` (`.sidebar` material, behind the window, following the window's
+active state) behind the whole page. The page's sidebar paints nothing, so the material
+shows through it; every other region paints its own surface token. macOS decides how the
+material looks: it is opaque under **Reduce Transparency** and dims in an inactive
+window. Native injects `window.__appVibrancy`, `theme.js` marks `<html data-vibrancy>`,
+and a page without that flag (the offscreen test page) paints a plain sidebar surface
+instead.
 
 ## Persistence and reset
 
@@ -38,8 +50,8 @@ selection is applied with `NSApplication.applicationIconImage` from
 `WebUI/app-icons/{minimal,day,night}.png`, without changing the app bundle or resetting
 system icon caches. Day is the default. The selected icon applies while the app is
 running; a pinned Dock entry can show the bundled icon after the app quits. The menu
-bar uses a monochrome template (`TrayIcon`), and the panel shows the mark in its title
-bar, first welcome page and Settings → About.
+bar uses a monochrome template (`TrayIcon`), and the panel shows the chosen icon's image
+on the first welcome page and at the top of Settings → About.
 
 ## Brand assets
 
@@ -51,7 +63,6 @@ assets on macOS (it uses Quick Look, `sips`, and Xcode's Icon Composer and Swift
 ```sh
 python3 scripts/brand.py                           # app icon, Dock choices, tray icon, DMG background
 python3 scripts/brand.py --website <site-checkout> # plus logo, favicons and manifest there
-python3 scripts/brand.py --panel-glyph             # print the glyph used by the panel
 ```
 
 - The app icon is generated as `App/Resources/AppIcon.icon`, an Icon Composer document
@@ -66,9 +77,8 @@ python3 scripts/brand.py --panel-glyph             # print the glyph used by the
   target's generation, not the newer preview default), keep a 100 px transparent outer
   margin and load as 512-point Retina images. The root README displays `day.png`;
   update its path there if the export is renamed.
-- The glyph printed by `--panel-glyph` is `brands.wallpaperMachine` in `WebUI/panel.js`;
-  update it when changing the mark's geometry. The small-size glyph is heavier and stays
-  reserved for the panel and menu bar.
+- The small-size mark is heavier and stays reserved for the menu bar; the panel shows the
+  Dock icon images instead.
 - Website export writes `brand/logo.svg` (light backgrounds), `brand/logo-dark.svg`,
   `brand/mark.svg`, `brand/app-icon-{minimal,day,night}.{svg,png}` (the unqualified
   `app-icon.*` is Day) and favicons, touch and manifest icons. Its PNGs are copied from

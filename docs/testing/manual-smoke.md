@@ -17,9 +17,15 @@ was run.
 
 - [ ] One library window opens, the starter wallpaper is visible, and there are
       no blank floating panels.
-- [ ] Switch between the Discover, pixiv, Installed and Settings tabs and through the
-      seven Settings categories: Performance, General, Appearance, Displays,
-      Library & Steam, Storage, About.
+- [ ] Switch between Steam Workshop, pixiv, All wallpapers, Favorites, a collection and
+      Settings from the sidebar, and through the eleven Settings sections: Quick
+      Settings (the one Settings opens on), General, Appearance, Desktop & Lock Screen,
+      Playback & Power, Performance, Displays, Keyboard shortcuts, Library & Steam,
+      Storage, About. The title bar names the place on show each time.
+- [ ] Narrow the window to 960px or less: the sidebar becomes a rail of glyphs under a
+      full-width title bar, Now Playing shrinks to its thumbnail with the controls
+      stacked, nothing overlaps the traffic lights, and widening the window restores
+      the sidebar.
 - [ ] Command-comma reuses the existing window.
 - [ ] Move the panel to another Space (or a desktop with another app full screen) and
       choose Control Panel from the status menu: it appears on the Space you are on,
@@ -42,12 +48,20 @@ was run.
       note says to allow it in Login Items, and **Open Login Items…** opens that pane.
       Allow it there and come back to the panel: the switch is on and the note goes
       away without any other action.
+- [ ] In Settings, flip a Quick Settings tile (try Mute All): its full row in
+      Playback & Power follows, and the other way round. Search for a word from a row's
+      explanation: matching rows stay, the sidebar counts matches per section and dims
+      the rest, a disclosure holding a match opens and closes again when the search
+      clears, Escape clears the field, and a word nothing contains reads "No settings
+      match …".
 
 ## Appearance
 
 - [ ] Choose Light and Dark, then System, and change the macOS appearance.
-- [ ] Check the titlebar, menus, controls, dialogs, inspector and download
-      popover in each mode.
+- [ ] Check the title bar, sidebar, menus, controls, dialogs, inspector, Filters
+      popover and download popover in each mode. The sidebar shows the system's
+      translucent material (it dims in an inactive window and turns opaque under
+      System Settings → Accessibility → Display → Reduce transparency).
 - [ ] Set an accent and a surface tone; relaunch and confirm both persist.
 - [ ] Try white and black accents, then Reset appearance. Wallpapers and
       playback must not change.
@@ -67,7 +81,7 @@ was run.
 - [ ] With animated GIF previews in the library, Installed shows every tile as a
       still, with nothing moving at rest. Resting the pointer on a tile plays only
       that tile, Tab or arrow keys play only the focused one, and leaving it, a
-      selection drag, another tab or another window stops it with no flicker when
+      selection drag, another page or another window stops it with no flicker when
       the grid re-renders. When a Workshop download finishes or the library is
       rescanned, the covers stay as they are with no flicker; after a preview
       file is replaced (import it again with Replace if changed), only that
@@ -111,27 +125,28 @@ was run.
 - [ ] Navigate away and back: query, page and selection stay.
 - [ ] A failed request's Retry repeats that request.
 - [ ] Open and dismiss the Downloads/Import pane.
-- [ ] Select tags in the filter sidebar across the resolution,
-      ultrawide/portrait, genre, age-rating and category groups: results contain
-      only items matching every selected tag, and Clear filters restores the
-      unfiltered query.
+- [ ] Open the Filters popover from the toolbar's Filter button and select tags across
+      the resolution, ultrawide/portrait, genre, age-rating and category groups:
+      results contain only items matching every selected tag, the popover floats over
+      the grid without reflowing it, and Clear filters restores the unfiltered query.
+      Escape, a click outside, the Filter button and another page each close the popover.
 - [ ] Filter changes never activate wallpapers.
 
 ## pixiv
 
-- [ ] The pixiv tab opens on the daily ranking; paging, a tag search and each
+- [ ] The pixiv page opens on the daily ranking; paging, a tag search and each
       filter group work, and Clear restores the defaults.
 - [ ] Select a work with several pages, step to another page and download it:
       it appears in Installed as a still wallpaper, applies, and Image fit and
       Background color change it.
 - [ ] **Sign in to pixiv…** opens pixiv's own sign-in page in its own window;
-      signing in with a pixiv ID or email closes it and the sidebar names the
+      signing in with a pixiv ID or email closes it and the Filters popover names the
       account. Closing the window instead changes nothing.
 - [ ] Quit and reopen: the sign-in is still there, with no keychain prompt on a
       release build.
 - [ ] With an account whose viewing restrictions allow R-18 works, tick Mature
       (R-18): search includes works with the R-18 badge and the R-18 rankings
-      join the menu. With an account that hides them, the sidebar says so.
+      join the menu. With an account that hides them, the Filters popover says so.
 - [ ] **Log out**: the Mature box unticks and disables, an R-18 ranking returns
       to its all-ages one, and Keychain Access no longer lists
       `app.wallpapermachine.pixiv`.
@@ -160,7 +175,8 @@ was run.
       no dialog opens, the tile's ring fills with a percentage that matches the
       inspector's received/total bytes, and clicking the ring cancels.
 - [ ] With a saved sign-in, queue at least four Workshop items: three transfer
-      at once (the activity bar reads "3 downloading" with a combined speed),
+      at once (the title bar's downloads button rings itself and its tooltip reads "3
+      downloading" with a combined speed),
       the fourth waits for a free slot, and the app log records each start.
 - [ ] With no saved sign-in, queue several items: only the first prompts, the
       rest wait for the sign-in, then start silently as soon as Steam accepts
@@ -221,7 +237,10 @@ reuse, or visual behavior, which is why these items are manual.
       apply runs, or use a wallpaper whose files fail to load on one display: the
       others return to what they showed.
 - [ ] Pause/resume and relaunch: the expected wallpaper and playback state
-      return.
+      return. Now Playing shows the target display's wallpaper with its equalizer
+      only while playing; its Previous, play/pause, Next and Recently used buttons
+      act as labelled, and with the target display empty it says "Nothing on this
+      display" while still reporting the global playback state.
 - [ ] Leave invalid scaling text, refresh or change routes, then return: the
       text is preserved and Apply changes is disabled. Return stages only that
       field, not unrelated properties.
@@ -634,8 +653,8 @@ closed lid has not been seen on a desktop
 - [ ] Verify that mute affects wallpaper playback only.
 - [ ] With a scene, a video (Native and Compatibility) and a Web wallpaper that all make
       sound, press **Mute Wallpapers** in the menu bar: every one goes silent at once while
-      the pictures keep playing, the item is ticked, and Settings → Performance → Playback
-      shows **Mute all wallpapers** on. Choose it again, or use `wallpapermachine://unmute`:
+      the pictures keep playing, the item is ticked, and Settings → Playback & Power
+      shows **Mute all wallpapers** on (and the Quick Settings Mute All tile is lit). Choose it again, or use `wallpapermachine://unmute`:
       each wallpaper is audible again at the volume it had, and the wallpapers' own **Mute
       audio** switches in Settings → Displays never changed. Apply another wallpaper while
       muted: it starts silent. Add an app rule that mutes, turn **Mute all wallpapers** off

@@ -30,10 +30,10 @@ final class ControlPanelSyncTests: ControlPanelTestCase {
       try await panel.expectJS("return powerProbe.received.at(-1).wallpapers.some(item => item.active)", equals: false)
       try await panel.expectJS("return powerProbe.received.at(-1).displays[0].wallpaperID === null", equals: true)
       let running = try await panel.js("""
-        const button = document.querySelector('#activity-bar [data-action="playback"]');
+        const button = document.querySelector('#sidebar [data-action="playback"]');
         button.focus();
         return {disabled: button.disabled, focused: document.activeElement === button,
-                name: button.getAttribute('aria-label'), status: document.querySelector('.activity-left .activity-copy').textContent};
+                name: button.getAttribute('aria-label'), status: document.querySelector('.now-playing .now-playing-status').textContent};
         """) as? [String: Any]
       XCTAssertEqual(running?["disabled"] as? Bool, false, "A non-target display still needs the global playback control")
       XCTAssertEqual(running?["focused"] as? Bool, true)
@@ -43,9 +43,9 @@ final class ControlPanelSyncTests: ControlPanelTestCase {
       panel.store.appSnapshot.playbackState = .paused
       try await panel.waitJS("powerProbe.received.at(-1)?.paused === true")
       let paused = try await panel.js("""
-        const button = document.querySelector('#activity-bar [data-action="playback"]');
+        const button = document.querySelector('#sidebar [data-action="playback"]');
         return {disabled: button.disabled, name: button.getAttribute('aria-label'),
-                status: document.querySelector('.activity-left .activity-copy').textContent};
+                status: document.querySelector('.now-playing .now-playing-status').textContent};
         """) as? [String: Any]
       XCTAssertEqual(paused?["disabled"] as? Bool, false, "Paused playback must remain resumable on the secondary display")
       let pausedName = try XCTUnwrap(paused?["name"] as? String)
@@ -55,22 +55,22 @@ final class ControlPanelSyncTests: ControlPanelTestCase {
 
       panel.store.appSnapshot.playbackState = .playing
       try await panel.waitJS("powerProbe.received.at(-1)?.paused === false")
-      try await panel.expectJS("return document.querySelector('#activity-bar [data-action=\"playback\"]').getAttribute('aria-label')", equals: runningName)
-      try await panel.expectJS("return document.querySelector('.activity-left .activity-copy').textContent", equals: runningStatus)
+      try await panel.expectJS("return document.querySelector('#sidebar [data-action=\"playback\"]').getAttribute('aria-label')", equals: runningName)
+      try await panel.expectJS("return document.querySelector('.now-playing .now-playing-status').textContent", equals: runningStatus)
 
       panel.store.monitorInformationSnapshot.rows.removeAll()
       panel.store.appSnapshot.activeWallpaperIds = []
       panel.store.snapshotRevision &+= 1
       try await panel.waitJS("powerProbe.received.at(-1)?.displays.every(display => display.wallpaperID === null)")
-      try await panel.expectJS("return document.querySelector('#activity-bar [data-action=\"playback\"]').disabled", equals: true)
-      let idleValue = try await panel.js("return document.querySelector('.activity-left .activity-copy').textContent")
+      try await panel.expectJS("return document.querySelector('#sidebar [data-action=\"playback\"]').disabled", equals: true)
+      let idleValue = try await panel.js("return document.querySelector('.now-playing .now-playing-status').textContent")
       let idleStatus = try XCTUnwrap(idleValue as? String)
       XCTAssertNotEqual(idleStatus, runningStatus, "No assignments must not report playback as running")
       XCTAssertNotEqual(idleStatus, pausedStatus)
       panel.store.appSnapshot.playbackState = .paused
       try await panel.waitJS("powerProbe.received.at(-1)?.paused === true")
-      try await panel.expectJS("return document.querySelector('#activity-bar [data-action=\"playback\"]').disabled", equals: true)
-      try await panel.expectJS("return document.querySelector('.activity-left .activity-copy').textContent", equals: idleStatus)
+      try await panel.expectJS("return document.querySelector('#sidebar [data-action=\"playback\"]').disabled", equals: true)
+      try await panel.expectJS("return document.querySelector('.now-playing .now-playing-status').textContent", equals: idleStatus)
     }
   }
 

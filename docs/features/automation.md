@@ -107,7 +107,7 @@ the foot of the menu bar menu; the Shortcuts app shows its own.
 
 ## Keyboard shortcuts
 
-**Settings → General → Keyboard shortcuts** records one shortcut each for
+**Settings → Keyboard shortcuts** records one shortcut each for
 **Play or pause wallpapers**, **Mute or unmute wallpapers**, **Previous wallpaper**, **Next wallpaper**, **Random wallpaper** (from every
 wallpaper, on the target display) and **Open the control panel**.
 None is set until recorded, so the app never takes a combination another app
@@ -193,7 +193,7 @@ any case; any other value, or a name given twice, is refused rather than guessed
 
 A link with an unknown command, a query value the command does not take, a value
 given twice, or a path is ignored and logged rather than guessed at. A browser
-asks before it opens the app. **Settings → General → Shortcuts app and links**
+asks before it opens the app. **Settings → Keyboard shortcuts → Shortcuts app and links**
 lists the links. Plan and preset IDs are the IDs in their saved records, not their
 display names; Shortcuts supplies name-based pickers without requiring these IDs.
 

@@ -1,13 +1,17 @@
 # Performance
 
-**Settings → Performance** is the first settings section and the one Settings
-opens on. It is a playback and quality page. Every engine control is applied
-through the bridge and the page re-renders from the snapshot the engine returns,
-so the page never shows a setting the engine did not accept. Playback choices
-that the app owns (muting everything, other-app audio, display sleep, app rules) are stored in
-`PlaybackPreferences` and published on the same snapshot.
+Two Settings sections hold the playback and quality controls: **Settings →
+Performance** (Energy use, Quality and Advanced) and **Settings → Playback & Power**
+(the [Playback](#playback) rules). Quick Settings, the section Settings opens on,
+repeats a few of them as tiles and segmented controls (the Quality preset, **On
+battery** and **When windows cover the desktop**) that change the same preferences.
+Every engine control is applied through the bridge and the page re-renders from the
+snapshot the engine returns, so the page never shows a setting the engine did not
+accept. Playback choices that the app owns (muting everything, other-app audio,
+display sleep, app rules) are stored in `PlaybackPreferences` and published on the
+same snapshot.
 
-Nothing on this page promises a measured power saving. A lower frame rate or
+Nothing in these sections promises a measured power saving. A lower frame rate or
 render scale is a quality tradeoff the user chooses. The **Energy use** readout
 shows what the app draws now and, after a change, what it drew before; it is a
 measurement, not a promise about any setting.
@@ -78,7 +82,7 @@ kernel's resource-coalition accounting (`CoalitionEnergySource`,
   cells from `BatteryData`'s `CellVoltage` or, where macOS 27 no longer lists it,
   from the pack voltage (a 99.6 Wh MacBook Pro reads about 98.5 Wh). A desktop Mac
   has no such entry and shows no line.
-- **Before and after.** A Performance setting that changes rendering work
+- **Before and after.** A setting on Performance or Playback & Power that changes rendering work
   (`WebPanelController.renderingSettings`: presets, frame-rate limit, render scale,
   battery mode and quality, what to do in Low Power Mode, when the Mac is hot and when
   the battery is low, video backend, scene renderer and the scene and
@@ -96,8 +100,8 @@ kernel's resource-coalition accounting (`CoalitionEnergySource`,
 - **Cost.** One sample is about 3 ms of kernel calls (every coalition on the Mac
   is read for the contention check), taken off the main thread. Sampling runs only
   while the panel window is visible with Settings open; otherwise no timer exists.
-  Settings tabs switch inside the page without telling native, so the other
-  Settings tabs sample too. Readings reach the page through
+  Settings sections switch inside the page without telling native, so the other
+  Settings sections sample too. Readings reach the page through
   `window.wallpaperUI.energy(reading)`, not the snapshot, so a two-second update
   patches one row instead of re-rendering the panel. The object carries `level`,
   `batteryPercentPerHour` and `comparison` (`beforeMilliwatts`, `afterMilliwatts`)
@@ -258,6 +262,8 @@ the old default and becomes the default; any other legacy value is kept — and 
 never written again.
 
 ## Playback
+
+These rules are on **Settings → Playback & Power**.
 
 A wallpaper nobody can see — behind a full-screen app, on a hidden Space or under
 windows that leave no pixel of it — pauses automatically, per display. There is no
@@ -530,7 +536,7 @@ diagnostics** disclosure: video shows the backend in use; scenes show the render
 and video path, whether optimisation is in force, and what is keeping the scene
 updating. These reports continue to update from snapshots, and their open state
 survives setting changes. **Renderer compatibility** remains beside the scene
-diagnostics, and **What these settings change** stays last, outside Advanced.
+diagnostics. **What these settings change** belongs to Playback & Power, not Advanced.
 What the three scene controls do (**Scene renderer**, **Scene render optimisation**
 and **Update only when the scene changes**) is described in
 [scene rendering](scene-rendering.md#scene-wallpapers).

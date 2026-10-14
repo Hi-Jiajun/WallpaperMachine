@@ -14,7 +14,7 @@ final class ControlPanelPixivTests: ControlPanelTestCase {
     try await withPanel { panel in
       try await panel.finishWelcome()
       panel.show()
-      _ = try await panel.js("document.querySelector('.tabs [data-page=\"pixiv\"]').click()")
+      _ = try await panel.js("document.querySelector('#sidebar [data-page=\"pixiv\"]').click()")
       try await panel.waitUntil(timeout: 5) { panel.pixiv.hasLoaded }
       try await panel.waitJS("document.querySelectorAll('#wallpaper-grid .tile-select').length === 2")
       try await panel.expectJS(
@@ -48,7 +48,7 @@ final class ControlPanelPixivTests: ControlPanelTestCase {
     try await withPanel { panel in
       try await panel.finishWelcome()
       panel.show()
-      _ = try await panel.js("document.querySelector('.tabs [data-page=\"pixiv\"]').click()")
+      _ = try await panel.js("document.querySelector('#sidebar [data-page=\"pixiv\"]').click()")
       try await panel.waitUntil(timeout: 5) { panel.pixiv.hasLoaded }
       let work = try XCTUnwrap(panel.pixiv.works.first { $0.id == "301" })
       panel.pixiv.requestDownload(work, page: 1)
@@ -74,8 +74,10 @@ final class ControlPanelPixivTests: ControlPanelTestCase {
       let mature = "#filter-sidebar [data-change=\"pixivRating\"][value=\"Mature\"]"
       try await panel.finishWelcome()
       panel.show()
-      _ = try await panel.js("document.querySelector('.tabs [data-page=\"pixiv\"]').click()")
+      _ = try await panel.js("document.querySelector('#sidebar [data-page=\"pixiv\"]').click()")
       try await panel.waitUntil(timeout: 5) { panel.pixiv.hasLoaded }
+      // The account and pixiv's own filters live in the Filters popover.
+      _ = try await panel.js("document.querySelector('.browser-toolbar [data-action=\"toggleFilters\"]').click()")
       try await panel.waitJS("document.querySelector('\(mature)')?.disabled === true")
 
       _ = try await panel.js("document.querySelector('#filter-sidebar [data-action=\"pixivSignIn\"]').click()")

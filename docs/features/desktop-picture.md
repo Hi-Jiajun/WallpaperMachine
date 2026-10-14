@@ -23,7 +23,7 @@ the renderer's real final pixels, not a screen capture and not a Workshop cover,
 scaling and cropping match the live wallpaper. Rendering, JPEG encoding and the
 system's thumbnail compositor still take time, so an update is not instant.
 
-**Settings › General › Startup & desktop › Update the Mission Control picture every 5
+**Settings › Desktop & Lock Screen › Desktop › Update the Mission Control picture every 5
 minutes** (`PlaybackPreferences.refreshesDesktopPicturePeriodically`, off by default)
 retakes the poster every five minutes while the wallpaper plays, for wallpapers that
 change over time; the wait may run up to 30 seconds longer so the system can share the
@@ -39,7 +39,7 @@ user's own wallpaper again.
 
 ### Leaving macOS's own wallpaper alone
 
-**Settings › General › Startup & desktop › Use the wallpaper as the macOS desktop
+**Settings › Desktop & Lock Screen › Desktop › Use the wallpaper as the macOS desktop
 picture** (`PlaybackPreferences.writesDesktopPicture`, on by default) decides whether
 the app installs posters at all. Turned off, the app never changes macOS's wallpaper
 settings: Mission Control and the Spaces bar show the user's own picture, as does the

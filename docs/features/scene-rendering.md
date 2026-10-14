@@ -622,7 +622,7 @@ WindowServer blending and energy cost has not been measured.
 
 Closing the control panel releases its web view and allows its WebKit helpers to
 exit, rather than keeping the whole page hidden. Reopening reloads the page; see
-[panel lifecycle](control-panel.md#tabs).
+[panel lifecycle](control-panel.md#pages-and-settings).
 
 The app records macOS memory-pressure events together with its process footprint and
 the scenes it is presenting ([diagnostics](diagnostics.md#memory-pressure)). It does

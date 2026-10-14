@@ -103,6 +103,11 @@ Adding a new target, source directory, resource or build setting means editing
   `:root`; `theme.js` sets `data-theme`, `data-theme-mode` and `data-tone` on
   `<html>` and injects contrast-fitted accent tokens. Never hardcode a hex value
   in a component rule.
+- The page is transparent over the window's sidebar material (`PanelContentController`).
+  Only the sidebar paints nothing; every other region paints its own surface token, so
+  the material never shows through content. A value that must be set per element at
+  runtime, such as an accent swatch's color, goes through the CSSOM
+  (`element.style.setProperty`), because the CSP forbids inline `style` attributes.
 - Icons are Lucide glyphs vendored in `WebUI/icons.js` (ISC, version noted in the
   file header) and rendered through `panel.js`'s `icon(name)` helper. To add one, copy
   its node list from the Lucide package under the panel's name; never hand-draw SVG

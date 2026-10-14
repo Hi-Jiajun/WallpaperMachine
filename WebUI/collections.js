@@ -1,4 +1,4 @@
-// Local collections on Installed. The sidebar's Collections group shows one collection at a
+// Local collections on Installed. The window sidebar lists them like albums and shows one at a
 // time in the grid, the selection bar adds or removes the checked tiles, and a wallpaper's
 // details tick the collections it belongs to. Native keeps the collections themselves
 // (`libraryOrganization.collections` in the snapshot: id, name, wallpaperIDs) and validates
@@ -6,7 +6,7 @@
 // shown, a name being typed, and a Delete waiting for its second click.
 import { t } from './i18n.js';
 
-export function createCollections({ send, render, announce, escapeHTML, icon, button, keyAttr, checked, disabled, busy, filterGroup, selection, filtersCollapsed }) {
+export function createCollections({ send, render, announce, escapeHTML, icon, button, keyAttr, checked, disabled, busy, selection }) {
   let state = null;
   let activeID = ''; // The collection the grid is filtered to; '' shows every wallpaper.
   let editor = null; // { mode: 'create' | 'rename', place: 'sidebar' | 'selection', collectionID, ids, name }
@@ -49,22 +49,23 @@ export function createCollections({ send, render, announce, escapeHTML, icon, bu
     return `<div class="confirm-row" ${keyAttr(`collection-confirm-${item.id}`)}><p class="muted"><small>${escapeHTML(t('Delete “{name}”? Its wallpapers stay in your library.', { name: item.name }))}</small></p><div class="actions">${button(t('Delete'), 'collectionDelete', { collectionID: item.id }, { className: 'danger', disabled: pendingChange() })}${button(t('Cancel'), 'collectionDisarm', {}, { className: 'quiet' })}</div></div>`;
   }
 
-  // The sidebar group: one radio per collection with its size, the current collection's own
-  // Rename and Delete, and the way to make a new one.
-  function sidebarGroup() {
+  // The sidebar section: one item per collection with its size, the way to make a new one in
+  // the heading, and the shown collection's own Rename and Delete beneath the list.
+  function navSection({ navItem, current }) {
     if (!available()) return '';
-    const total = (state.wallpapers || []).length;
-    const radio = (value, label, count) => `<label class="check-label collection-choice" ${keyAttr(`collection-${value || 'all'}`)}><input type="radio" name="collection-filter" data-change="collectionFilter" value="${escapeHTML(value)}"${checked(activeID === value)}><span>${escapeHTML(label)}</span><span class="collection-count">${count.toLocaleString()}</span></label>`;
-    const current = active();
-    const list = `<div class="collection-list" role="radiogroup" aria-label="${escapeHTML(t('Collections'))}">${radio('', t('All wallpapers'), total)}${collections().map(item => radio(item.id, item.name, members(item).size)).join('')}</div>`;
+    const shown = current ? active() : null;
     const sidebarEditor = editor?.place === 'sidebar' ? nameForm('collection-name', 'sidebar') : '';
-    const tools = current && !sidebarEditor && armed !== current.id
-      ? `<div class="collection-tools">${button(t('Rename…'), 'collectionRenameBegin', { collectionID: current.id }, { className: 'link', disabled: pendingChange() })}${button(t('Delete…'), 'collectionDeleteBegin', { collectionID: current.id }, { className: 'link danger', disabled: pendingChange() })}</div>`
+    const items = collections().map(item => navItem({ page: 'installed', view: 'collection', collectionID: item.id, label: item.name, glyph: 'folder', count: members(item).size, current: shown?.id === item.id })).join('');
+    const tools = shown && !sidebarEditor && armed !== shown.id
+      ? `<div class="collection-tools">${button(t('Rename…'), 'collectionRenameBegin', { collectionID: shown.id }, { className: 'link', disabled: pendingChange() })}${button(t('Delete…'), 'collectionDeleteBegin', { collectionID: shown.id }, { className: 'link danger', disabled: pendingChange() })}</div>`
       : '';
-    const confirm = current && armed === current.id && !sidebarEditor ? confirmDelete(current) : '';
-    const create = sidebarEditor ? '' : `<div class="collection-tools">${button(t('New collection…'), 'collectionNew', {}, { className: 'link', icon: 'plus', disabled: pendingChange() })}</div>`;
-    return filterGroup('collections', 'Collections', `${list}${tools}${confirm}${sidebarEditor}${create}`, true, activeID ? 1 : 0);
+    const confirm = shown && armed === shown.id && !sidebarEditor ? confirmDelete(shown) : '';
+    const empty = !items && !sidebarEditor ? `<p class="muted"><small>${escapeHTML(t('Group wallpapers for browsing and for playlists.'))}</small></p>` : '';
+    const add = button('', 'collectionNew', {}, { icon: 'plus', title: t('New collection…'), expanded: editor?.place === 'sidebar' && editor.mode === 'create', disabled: pendingChange() });
+    return `<div class="sidebar-section" role="group" aria-label="${escapeHTML(t('Collections'))}" ${keyAttr('collections-section')}><div class="sidebar-heading"><span aria-hidden="true">${escapeHTML(t('Collections'))}</span>${add}</div>${items}${tools || confirm || sidebarEditor || empty ? `<div class="sidebar-tools">${empty}${tools}${confirm}${sidebarEditor}</div>` : ''}</div>`;
   }
+  // Shows one collection in the grid; the sidebar follows.
+  function show(id) { if (byID(id)) { activeID = id; armed = ''; } }
 
   // In the selection bar: add the checked tiles to a collection, or take them out of the one on
   // show. Choosing New collection… turns the picker into the name field right there.
@@ -102,7 +103,6 @@ export function createCollections({ send, render, announce, escapeHTML, icon, bu
     switch (action) {
       case 'collectionNew':
         editor = { mode: 'create', place: 'sidebar', name: '' };
-        if (state?.page === 'installed' && filtersCollapsed()) await send('filters', { page: 'installed', collapsed: false });
         render(); focusEditor(); return true;
       case 'collectionRenameBegin': {
         const item = byID(data.collectionId);
@@ -136,7 +136,6 @@ export function createCollections({ send, render, announce, escapeHTML, icon, bu
 
   async function handleChange(element) {
     const change = element.dataset.change;
-    if (change === 'collectionFilter') { activeID = element.value; armed = ''; render(); return true; }
     if (change === 'collectionPick') {
       const value = element.value;
       element.value = '';
@@ -179,10 +178,13 @@ export function createCollections({ send, render, announce, escapeHTML, icon, bu
     await send('collectionCreate', ids.length ? { name, ids } : { name });
     if (editor === current) editor = null;
     const created = collections().find(item => !before.has(item.id));
-    if (created && current.place === 'sidebar') activeID = created.id;
+    if (created && current.place === 'sidebar') {
+      activeID = created.id;
+      if (state?.page !== 'installed') await send('navigate', { page: 'installed' });
+    }
     if (created && ids.length) say(t(ids.length === 1 ? 'Added 1 wallpaper to “{name}”.' : 'Added {count} wallpapers to “{name}”.', { count: ids.length.toLocaleString(), name: created.name }));
     render(); return true;
   }
 
-  return { sync, available, active, matches, clearFilter, sidebarGroup, selectionTools, inspectorSection, emptyState, handleAction, handleChange, handleInput, handleSubmit };
+  return { sync, available, active, matches, clearFilter, show, navSection, selectionTools, inspectorSection, emptyState, handleAction, handleChange, handleInput, handleSubmit };
 }

@@ -146,14 +146,14 @@ rules for the page (CSP, escaping, icons, no bundler) are in [conventions.md](co
 |---|---|
 | `App/Views/ControlPanel/ControlPanelView.swift` | SwiftUI container; `ControlPanelNavigation` (`SidebarSelection`, `targetDisplayID`, Settings section, and the last `PanelViewState` the page reported) shared with native menu commands |
 | `App/Views/ControlPanel/PanelViewState.swift` | Validated copy of Installed's filters and the library grid's scroll offsets that the page reports with the `viewState` action; kept in memory on `ControlPanelNavigation` and handed to the next page in the reply to its first `ready` |
-| `App/Views/ControlPanel/ControlPanelWindow.swift` | Builds the window and owns its size floor |
-| `App/Views/ControlPanel/WebControlPanel.swift` | `NSViewRepresentable` over `WKWebView`; `WebPanelController` coordinator, `WebPanelAssets` scheme handler, message proxy |
+| `App/Views/ControlPanel/ControlPanelWindow.swift` | Builds the window and owns its size floor; `PanelContentController` puts an `NSVisualEffectView` (`.sidebar` material, behind the window, following the window's active state) behind the page, which is the sidebar's translucent surface |
+| `App/Views/ControlPanel/WebControlPanel.swift` | `NSViewRepresentable` over a transparent `WKWebView` (`drawsBackground` off, `underPageBackgroundColor` clear); `WebPanelController` coordinator, `WebPanelAssets` scheme handler, message proxy |
 | `App/Views/ControlPanel/WebPanelSnapshot.swift` | Builds the `[String: Any]` state payload handed to the page |
 | `App/Views/ControlPanel/WebPanelActions.swift` | Decodes and executes page-originated actions (`WebPanelRequest`) |
 | `App/Views/ControlPanel/WebPanel<Feature>.swift` | One feature's share of the snapshot and actions (Automation, Backup, Compatibility, DisplayLayouts, DisplayPosition, ImagePlacement, LibraryOrganization, Letterbox, Pixiv, Presets); `WebPanelRecoveryBudget` limits WebContent restarts |
 | `App/Views/ControlPanel/WebSignInWindow.swift` | Separate sign-in window for pixiv and Steam: a private website data store, of which the app reads only the session cookie |
 | `App/Views/ControlPanel/WallpaperPreviewWindow.swift`, `WhatsNewViewController.swift` | Native preview window and release-notes window |
-| `WebUI/index.html`, `panel.js`, `settings.js`, `welcome.js`, `theme.js`, `i18n.js`, `icons.js`, the per-feature modules and the three stylesheets | The page itself; `welcome.js` is the full-window first-run guide; `locales/` holds one catalog per language |
+| `WebUI/index.html`, `panel.js`, `settings.js`, `welcome.js`, `theme.js`, `i18n.js`, `icons.js`, the per-feature modules and the three stylesheets | The page itself. `index.html` is the shell: the sidebar (which paints nothing, so the window material shows through), the title bar, and the window body with the library page or Settings. `panel.js` draws the sidebar, Now Playing, title bar and popovers; `settings.js` draws Settings, whose sections the sidebar lists; `welcome.js` is the full-window first-run guide; `locales/` holds one catalog per language |
 
 Protocol, both directions:
 
@@ -191,13 +191,14 @@ Protocol, both directions:
   ([reopening the panel](features/control-panel.md#reopening-the-panel)).
   `WebPanelController.receive` rejects any message that is not from the main frame of the
   `mwe-ui://app` origin. Post actions from event handlers, never from a render path such as
-  `settings.js` `draw()`. `send()` marks an action pending under a key that covers every tab
+  `settings.js` `draw()`. `send()` marks an action pending under a key that covers every page
   (and every value of one property), and a repeated `navigate`, `property` or similar action
   waits on the one in flight; anything that can throw between marking the key and posting
   belongs inside the `try` whose `finally` releases it.
 - **Theme and language.** `theme.js` and `i18n.js` read `window.__appTheme` and
-  `window.__appLanguage`, injected as the panel's only `WKUserScript` at document start so the
-  first paint is already correct; `window.appTheme.apply(theme)` runs on every snapshot.
+  `window.__appLanguage`, injected as the panel's only `WKUserScript` at document start (together
+  with `window.__appVibrancy`, which makes `theme.js` mark `<html data-vibrancy>` so the sidebar
+  leaves the window material showing) so the first paint is already correct; `window.appTheme.apply(theme)` runs on every snapshot.
 - **Recovery.** `webViewWebContentProcessDidTerminate` reloads the page under
   `WebPanelRecoveryBudget`: three restarts within 120 seconds, and a ready handshake earns the
   budget back only after 60 seconds of stable operation. Past the budget, or on a load failure,

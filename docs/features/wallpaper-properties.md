@@ -242,7 +242,7 @@ the sandboxed lock-screen extension, which keeps the authored texture there.
 
 ### Showing edits on the desktop
 
-**Settings → General → Startup & desktop → Show property edits on the desktop as I
+**Settings → Desktop & Lock Screen → Desktop → Show property edits on the desktop as I
 make them** lets the displays that draw a scene wallpaper follow its pending
 properties before **Apply changes**. It is off until the user turns it on, a choice
 kept on this Mac only (`WallpaperMachine.livePropertyEdits`, `LivePropertyEditing`)

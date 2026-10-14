@@ -9,7 +9,7 @@ in the app's own local prompts.
 
 ## Discover
 
-The **Discover** tab searches the Workshop and pages through results with
+The **Steam Workshop** page (Discover) searches the Workshop and pages through results with
 previous/next buttons or by typing a page number and pressing Return. A page is
 exactly one Steam page of 30 tiles, and the panel never offers more than 1,000
 pages (`WorkshopStore.maxPages`, mirrored in the snapshot as `maxPages`): the page
@@ -21,9 +21,9 @@ network; a new search always starts a fresh cache. Nothing about a page depends
 on the window: resizing only reflows the tiles and never re-fetches or re-cuts a
 page (grid rules: [control panel](control-panel.md#layout)).
 
-The filter sidebar on the left (opened and closed with the toolbar's **Filter**
-button, see [control panel](control-panel.md#filtering)) mirrors Wallpaper
-Engine's own sidebar, tag for tag and default for default:
+The Filters popover (opened from the toolbar's **Filter** button, see [control
+panel](control-panel.md#filtering)) mirrors Wallpaper Engine's own filter list, tag
+for tag and default for default:
 
 | Group | Boxes | Default |
 | --- | --- | --- |
@@ -73,7 +73,7 @@ The lookup answers from Steam's public details endpoint, the one that already su
 every other source's tiles, so the download ring, inspector, Installed mark and update
 mark work as on any tile, and a collection opens through **Open collection**. It is a
 page of one (`WorkshopService.itemPage`), and Open on Steam goes to the item's page.
-The sidebar's age rating, tags and Type, and the sort, do not apply to an item asked
+The filters' age rating, tags and Type, and the sort, do not apply to an item asked
 for by name; the summary line says so while it is on show (`lookup` in the
 snapshot). Creator names cost a profile page fetch, so a looked-up tile shows the
 generic name; **More by this author** still works from the creator id.
@@ -173,20 +173,20 @@ keeps the full-size preview for the selected item.
 
 ## Collections, authors and subscriptions
 
-A row of tabs heading Discover's toolbar chooses what it lists: **Wallpapers**
+A segmented control leading Discover's toolbar chooses what it lists: **Wallpapers**
 (the browse page above), **Collections** or **Your subscriptions**. In a narrow
-column they drop their glyphs instead of wrapping. An author's wallpapers and a
-collection's items are opened from a tile instead: no tab is current, and the
+column its segments drop their glyphs instead of wrapping. An author's wallpapers and a
+collection's items are opened from a tile instead: no segment is current, and the
 search field gives way to a back button and what is on show; back returns to the
 list, page 1, they were opened from (`WorkshopStore.open`, `back` and
-`sourceHistory`). Choosing a tab starts a new history. A list that fails to open
+`sourceHistory`). Choosing a segment starts a new history. A list that fails to open
 empties the grid rather than leaving the list it was to replace on show under its
-tab, where Next would page that other list; its error offers **Try again** for the
+segment, where Next would page that other list; its error offers **Try again** for the
 list that failed.
 
 Only Wallpapers and Collections are searched and sorted by Steam; the others come
 in their own order, so the panel hides the search field and the sort menu for
-them. The filter sidebar applies everywhere: Steam applies it to the two lists,
+them. The filters apply everywhere: Steam applies them to the two lists,
 and `WorkshopService.matching` applies the same rules to the other sources'
 pages, which can therefore show fewer than 30 tiles, or none while Steam's count
 says more exist; such a page says the filters hide everything on it and offers
@@ -308,7 +308,7 @@ imported. The full status sentence stays in the tooltip, the inspector and the
 downloads list.
 
 Double-clicking a tile that is already in the library applies it, as on the
-Installed tab.
+Installed page.
 
 ### Transfer progress
 
@@ -337,13 +337,13 @@ inside a run the new meter counts only what it fetches, so it is added to what w
 shown when it started (still capped by the tree): the bar holds its place at the
 relaunch and moves on with the first new bytes, even when Steam has little left to
 fetch. Beside the
-speed, the queue rows, the inspector and the activity bar say how long is left
+speed, the queue rows, the inspector and the title bar's downloads button say how long is left
 (for example "4 min left"). The estimate is the bytes gained over the last 20
 seconds, smoothed so one burst does not swing it, and it stays hidden until four
 seconds of history exist, while the pace is under 1 KB/s, at the 99% cap, and for
 an item listed without a size. Seconds show under a minute and a half, minutes
 under an hour and a half, then hours; the figure is capped at 99 hours. With
-several downloads running the activity bar shows the slowest job's time, and only
+several downloads running the downloads button shows the slowest job's time, and only
 when every running job has an estimate. The shared scene resources use SteamCMD's
 own byte counters for the same estimate.
 
@@ -454,9 +454,8 @@ needed. The implementation is `App/Services/Steam/SteamCMDPackages.swift`,
 
 ## The download queue
 
-Every download also appears in a compact popover from the bottom activity bar,
-and from the top-bar downloads button that is shown while there is download
-activity. Each transfer uses a private SteamCMD session and an account that owns
+Every download also appears in a compact popover opened from the title bar's
+downloads button, which is shown while there is download activity. Each transfer uses a private SteamCMD session and an account that owns
 Wallpaper Engine. Closing the popover, the sign-in dialog or the panel never stops
 work.
 
@@ -503,9 +502,11 @@ work.
   session the runtime preparation, whether a saved sign-in was restored, each
   status change, the sign-in handoff and SteamCMD's exit status, so a stalled
   batch can be diagnosed from **Show download logs**.
-- **Activity bar.** It carries the running job's status, percentage, speed and
-  time left, or the batch's count, mean percentage, summed speed and slowest time
-  left while several run. The queue footer states the slot rule.
+- **Downloads button.** The title bar's button carries, as its label and tooltip,
+  the running job's status, percentage, speed and time left, or the batch's count,
+  mean percentage, summed speed and slowest time left while several run, and it
+  rings itself with the batch's mean progress while anything transfers. The queue
+  footer states the slot rule.
 - **Menu bar.** While downloads run, the menu bar menu has a line right under **Control
   Panel**: **Downloads: 2 in progress, 40%**, or **Downloads: 2 in progress** when a figure
   cannot be given. It counts the downloads that are moving or waiting for a slot or a
@@ -513,7 +514,7 @@ work.
   failed or cancelled one and the sign-in that downloads nothing are left out, and so is
   a job that is pausing, which still holds its slot until its session closes. The percent
   is the share of the bytes all of them expect that has arrived, so a large download
-  weighs more than a small one (the activity bar averages each job's own percentage
+  weighs more than a small one (the downloads button averages each job's own percentage
   instead). It appears only when every counted job reports a size; a job that is queued,
   signing in or listed without a size leaves the figure out rather than guessing it,
   and it stops at 99% because only Steam's own success line claims the last percent.
@@ -539,7 +540,7 @@ work.
   "Signed in" card with the running job's status and progress (or notes that
   shared resources download first), offers **Done** and **Show downloads**, and
   closes by itself six seconds later. The transfer is already running on the tile
-  and in the activity bar throughout.
+  and on the downloads button throughout.
 - **Pause, resume, cancel.** **Pause download** releases the transfer's slot and
   retains its downloaded content. **Resume download** starts a fresh private
   SteamCMD runtime and lets Steam validate and reuse its partial content and

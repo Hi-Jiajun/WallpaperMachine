@@ -10,8 +10,27 @@ let liveView = null;
 let pendingSection = null;
 // Latest energy reading native pushed; it arrives every two seconds outside the snapshot.
 let energyReading = null;
+// Settings is laid out like System Settings: the window sidebar lists the sections, each with a
+// coloured glyph and a one-line purpose, and a search field that finds any setting by its words.
 // Labels below are English source strings; every one is passed through t() where it is drawn.
-const sections = [['performance', 'Performance', 'slidersVertical'], ['general', 'General', 'settings'], ['appearance', 'Appearance', 'sunMoon'], ['displays', 'Displays', 'monitor'], ['library', 'Library & Steam', 'folder'], ['storage', 'Storage', 'download'], ['about', 'About', 'info']];
+// The ids match SettingsSection in ControlPanelView.swift.
+const sections = [
+  ['quick', 'Quick Settings', 'toggleRight', 'blue', 'The switches people change most, in one place.'],
+  ['general', 'General', 'settings', 'gray', 'Language, startup and the welcome guide.'],
+  ['appearance', 'Appearance', 'sunMoon', 'indigo', 'How this window looks. Your wallpapers are not affected.'],
+  ['desktop', 'Desktop & Lock Screen', 'wallpaper', 'teal', 'How wallpapers meet the macOS desktop, lock screen and screen saver.'],
+  ['playback', 'Playback & Power', 'batteryCharging', 'green', 'When wallpapers pause, mute or stop on their own.'],
+  ['performance', 'Performance', 'gauge', 'orange', 'Energy use, picture quality and the renderers behind them.'],
+  ['displays', 'Displays', 'monitor', 'blue', 'Each display’s wallpaper, playlist and automatic changes.'],
+  ['shortcuts', 'Keyboard shortcuts', 'keyboard', 'gray', 'Shortcuts that work in any app, the Shortcuts app and links.'],
+  ['library', 'Library & Steam', 'folder', 'purple', 'Where wallpapers live, and the Steam tools that download them.'],
+  ['storage', 'Storage', 'hardDrive', 'gray', 'Disk space, backups and troubleshooting.'],
+  ['about', 'About', 'info', 'gray', 'Version, updates and credits.'],
+];
+// A gap opens in the sidebar before these, grouping related sections as System Settings does.
+const sectionBreaks = new Set(['general', 'desktop', 'library', 'about']);
+// Accent presets, after the macOS accent colours; the colour well beside them takes any other.
+const accentPresets = ['#80bbff', '#0a84ff', '#5e5ce6', '#bf5af2', '#ff375f', '#ff9f0a', '#ffd60a', '#30d158', '#8e8e93'];
 // Shared with the welcome guide's Performance page; WebPanelActions.applyQualityPreset holds the same values.
 export const qualityPresets = { low: { frameRateCap: 30, renderScale: 0.5 }, medium: { frameRateCap: 60, renderScale: 0.75 }, high: { frameRateCap: null, renderScale: 1 } };
 export const qualityPresetLabels = [['low', 'Low'], ['medium', 'Medium'], ['high', 'High']];
@@ -51,7 +70,6 @@ function changeTime(milliseconds) {
 }
 const appRuleConditions = [['running', 'Running'], ['frontmost', 'In front']];
 const appRuleActions = [['pause', 'Pause'], ['mute', 'Mute'], ['stop', 'Stop']];
-const compactNavigation = window.matchMedia('(max-width: 560px)');
 const renderScales = [[1, '100% (native)'], [0.75, '75%'], [0.5, '50%']];
 const videoBackends = [['compatibility', 'Compatibility'], ['native_preferred', 'Native video preferred']];
 const sceneRenderers = [['compatibility', 'Compatibility'], ['native_metal_preferred', 'Native Metal preferred']];
@@ -209,6 +227,32 @@ function qualityEffectiveText(cause, values) {
   }
 }
 
+// Long explanations stay a sentence long on their row; the ⓘ beside it opens the rest beneath.
+// Weighting CJK characters double keeps the cut comparable across languages.
+const noteWeight = (text) => [...text].reduce((sum, character) => sum + (/[\u2E80-\uFFEF]/.test(character) ? 2 : 1), 0);
+export function noteParts(text) {
+  const value = String(text ?? '').trim();
+  if (noteWeight(value) <= 120) return [value, ''];
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    const ends = '。！？'.includes(character) || ('.!?'.includes(character) && (index + 1 === value.length || /\s/.test(value[index + 1])));
+    if (!ends) continue;
+    const lead = value.slice(0, index + 1).trim();
+    // A label such as “Experimental.” alone says too little: the lead takes the next sentence too.
+    if (noteWeight(lead) < 36) continue;
+    const more = value.slice(index + 1).trim();
+    return more ? [lead, more] : [value, ''];
+  }
+  return [value, ''];
+}
+
+// The title bar names the section on show, or the search while one is typed.
+export function settingsTitle() {
+  if (liveView?.query?.trim()) return t('Search results');
+  const entry = sections.find(([id]) => id === (liveView?.section || 'quick')) || sections[0];
+  return t(entry[1]);
+}
+
 export function revealSettingsSection(section) {
   if (!sections.some(([id]) => id === section)) return;
   pendingSection = section;
@@ -286,14 +330,25 @@ export function renderSettings(container, state, helpers) {
   if (!view) {
     // `editor` is an inline name field in use (a saved playlist being named or renamed) and
     // `armed` a Delete that has been pressed once and waits for its confirmation.
-    view = { container, state, helpers, section: 'performance', settingsSectionToken: NaN, drafts: new Map(), pending: new Set(), error: '', recording: null, editor: null, armed: '' };
+    // `expanded` holds the rows whose ⓘ is open and `query` the search text; both are page state.
+    view = { container, nav: helpers.nav, state, helpers, section: 'quick', settingsSectionToken: NaN, drafts: new Map(), pending: new Set(), error: '', recording: null, editor: null, armed: '', expanded: new Set(), query: '', searchOpened: new Set() };
     views.set(container, view);
     installPlaylistDrag(view, (displayID, ids, expectedIDs, id) => submitPlaylistOrder(view, displayID, ids, expectedIDs, id));
-    container.addEventListener('click', event => onClick(view, event));
-    container.addEventListener('input', event => onInput(view, event));
-    container.addEventListener('change', event => onChange(view, event));
-    container.addEventListener('submit', event => onSubmit(view, event));
-    container.addEventListener('focusout', event => onFocusOut(view, event));
+    for (const host of [container, view.nav].filter(Boolean)) {
+      host.addEventListener('click', event => onClick(view, event));
+      host.addEventListener('input', event => onInput(view, event));
+      host.addEventListener('change', event => onChange(view, event));
+      host.addEventListener('submit', event => onSubmit(view, event));
+      host.addEventListener('focusout', event => onFocusOut(view, event));
+    }
+    // Escape in the search field clears it, as it does in System Settings.
+    view.nav?.addEventListener('keydown', event => {
+      if (event.key !== 'Escape' || !event.target.matches('[data-settings-search]') || !view.query) return;
+      event.preventDefault();
+      event.target.value = '';
+      view.query = '';
+      draw(view);
+    });
     // Escape in an inline name field gives the field up, as its Cancel does.
     container.addEventListener('keydown', event => {
       if (event.key === 'Escape' && view.layoutEditor && !view.pending.has('display-layout') && event.target.closest('[data-form="display-layout"]')) {
@@ -304,7 +359,6 @@ export function renderSettings(container, state, helpers) {
       endEditing(view);
       draw(view);
     });
-    compactNavigation.addEventListener('change', () => draw(view));
     // Recording a keyboard shortcut takes the next key press made in its row, before anything
     // else reads it; pressing Escape alone, or moving focus away, gives up.
     container.addEventListener('keydown', event => {
@@ -318,22 +372,19 @@ export function renderSettings(container, state, helpers) {
       if (event.key === 'Escape' && !event.metaKey && !event.ctrlKey && !event.altKey) { draw(view); return; }
       perform(view, `hotkey-${id}`, 'hotkeySet', { id, code: event.code, command: event.metaKey, option: event.altKey, control: event.ctrlKey, shift: event.shiftKey });
     }, true);
-    container.addEventListener('keydown', event => {
+    (view.nav || container).addEventListener('keydown', event => {
       const target = event.target.closest('[data-section]');
-      const previous = compactNavigation.matches ? 'ArrowLeft' : 'ArrowUp';
-      const nextKey = compactNavigation.matches ? 'ArrowRight' : 'ArrowDown';
-      if (!target || ![previous, nextKey, 'Home', 'End'].includes(event.key)) return;
+      if (!target || !['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
       event.preventDefault();
       const index = sections.findIndex(([id]) => id === view.section);
-      const next = event.key === 'Home' ? 0 : event.key === 'End' ? sections.length - 1 : (index + (event.key === nextKey ? 1 : -1) + sections.length) % sections.length;
-      view.section = sections[next][0];
-      draw(view);
-      container.querySelector('.settings-scroll').scrollTop = 0;
-      container.querySelector(`[data-section="${view.section}"]`).focus();
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? sections.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + sections.length) % sections.length;
+      showSection(view, sections[next][0]);
+      (view.nav || container).querySelector(`[data-section="${view.section}"]`).focus();
     });
   }
   view.state = state;
   view.helpers = helpers;
+  view.nav = helpers.nav || view.nav;
   const token = Number(state.settingsSectionToken);
   if (Number.isFinite(token) && token !== view.settingsSectionToken) {
     view.settingsSectionToken = token;
@@ -362,13 +413,23 @@ function draw(view) {
   const draft = (key, fallback) => drafts.has(key) ? drafts.get(key) : fallback;
   const attrs = (action, args = {}) => `data-action="${e(action)}" data-args="${e(JSON.stringify(args))}"`;
   const button = (label, action, args = {}, off = false, style = '') => `<button type="button" class="settings-button ${style}" ${attrs(action, args)}${disabled(off)}>${e(label)}</button>`;
-  const row = (key, label, control, note = '', style = '', controlKey = '') => `<div class="settings-row${style ? ` ${style}` : ''}" data-key="${e(key)}"><${controlKey ? `label for="settings-control-${e(controlKey)}"` : 'div'} class="settings-label">${e(label)}${note ? `<span class="settings-note" id="settings-note-${e(key)}">${e(note)}</span>` : ''}</${controlKey ? 'label' : 'div'}><div class="settings-control">${control}</div></div>`;
+  // A row: its label and first sentence of explanation on the left, the control on the right, and
+  // an ⓘ between them that opens the rest of a long explanation beneath.
+  const row = (key, label, control, note = '', style = '', controlKey = '') => {
+    const [lead, more] = noteParts(note);
+    const open = view.expanded.has(key);
+    const info = more ? `<button type="button" class="settings-info" data-action="moreInfo" data-args="${e(JSON.stringify({ key }))}" aria-expanded="${open}" aria-controls="settings-more-${e(key)}" title="${e(t('More about {label}', { label }))}" aria-label="${e(t('More about {label}', { label }))}">${helpers.icon('info', 15)}</button>` : '';
+    return `<div class="settings-row${style ? ` ${style}` : ''}${more ? ' has-more' : ''}" data-key="${e(key)}"><${controlKey ? `label for="settings-control-${e(controlKey)}"` : 'div'} class="settings-label">${e(label)}${lead ? `<span class="settings-note" id="settings-note-${e(key)}">${e(lead)}</span>` : ''}</${controlKey ? 'label' : 'div'}>${info}<div class="settings-control">${control}</div>${more ? `<p class="settings-note settings-more" id="settings-more-${e(key)}"${open ? '' : ' hidden'}>${e(more)}</p>` : ''}</div>`;
+  };
   const toggle = (key, label, checked, data, off = false) => `<label class="settings-switch"><input id="settings-control-${e(key)}" data-key="${e(key)}" type="checkbox" role="switch" aria-label="${e(label)}" ${data}${checked ? ' checked' : ''}${disabled(off)}><span aria-hidden="true"></span></label>`;
   const select = (key, label, value, options, data, off = false) => `<select data-key="${e(key)}" aria-label="${e(label)}" ${data}${disabled(off)}>${options.map(([id, title]) => `<option value="${e(id)}"${String(value ?? '') === String(id) ? ' selected' : ''}>${e(title)}</option>`).join('')}</select>`;
   const error = (key, message) => message ? `<div class="settings-error" role="alert" data-key="${key}">${e(message)}</div>` : '';
-  const disclosure = (key, title, content, style = '', note = '') => `<details class="settings-disclosure${style ? ` ${style}` : ''}" data-key="${e(key)}"><summary><span class="settings-disclosure-indicator" aria-hidden="true">${helpers.icon('chevronRight', 16)}</span><span class="settings-disclosure-title">${e(title)}${note ? `<span class="settings-note">${e(note)}</span>` : ''}</span></summary><div class="settings-disclosure-body">${content}</div></details>`;
-  const group = (key, title, content) => `<section class="settings-group" data-key="${e(key)}"${title ? ` aria-labelledby="settings-group-${e(key)}"` : ''}>${title ? `<h3 id="settings-group-${e(key)}">${e(title)}</h3>` : ''}${content}</section>`;
-  const section = (id, title, content, action = '') => `<section class="settings-page" id="settings-${id}" role="tabpanel" aria-labelledby="settings-tab-${id}" tabindex="0" data-key="page-${id}"${view.section === id ? '' : ' hidden'}><header class="settings-heading"><h2>${e(title)}</h2>${action}</header>${content}</section>`;
+  const disclosure = (key, title, content, style = '', note = '') => `<details class="settings-disclosure${style ? ` ${style}` : ''}" data-key="${e(key)}"><summary><span class="settings-disclosure-title">${e(title)}${note ? `<span class="settings-note">${e(note)}</span>` : ''}</span><span class="settings-disclosure-indicator" aria-hidden="true">${helpers.icon('chevronRight', 14)}</span></summary><div class="settings-disclosure-body">${content}</div></details>`;
+  // A titled group of rows: the title above, the rows in one rounded card, as in System Settings.
+  const group = (key, title, content) => `<section class="settings-group" data-key="${e(key)}"${title ? ` aria-labelledby="settings-group-${e(key)}"` : ''}>${title ? `<h3 class="settings-group-title" id="settings-group-${e(key)}">${e(title)}</h3>` : ''}<div class="settings-card">${content}</div></section>`;
+  const glyph = (id, size = 15) => { const entry = sections.find(([key]) => key === id); return `<span class="settings-glyph${size > 20 ? ' large' : ''}" data-color="${entry[3]}" aria-hidden="true">${helpers.icon(entry[2], size)}</span>`; };
+  // A page opens with its glyph, its name and what it is for, so a section explains itself.
+  const section = (id, title, content, action = '') => `<section class="settings-page" id="settings-${id}" role="tabpanel" aria-labelledby="settings-tab-${id}" tabindex="0" data-key="page-${id}"${view.section === id ? '' : ' hidden'}><header class="settings-heading">${glyph(id, 26)}<div class="settings-heading-text"><h2>${e(title)}</h2><p class="settings-blurb">${e(t(sections.find(([key]) => key === id)[4]))}</p></div>${action}</header>${content}</section>`;
   const settingToggle = (key, label, off = false, note = '', extra = '') => row(key, t(label), toggle(key, t(label), draft(key, settings[key]), `data-setting="${key}"${note ? ` aria-describedby="settings-note-${key}"` : ''}`, off || busy || unavailable) + extra, note, '', key);
   // The login item is registered but switched off in System Settings; only the user can allow it there.
   const loginNote = !settings.launchAtLoginAvailable ? t('Move the app to Applications to enable.')
@@ -385,21 +446,13 @@ function draw(view) {
   const languageOptions = [['system', t('System (Auto)')], ...(languageState.options || []).map(option => [option.id, option.name])];
   const languageValue = draft('language', languageState.preference || 'system');
   const general = group('general-language', t('Interface'), row('language', t('Language'), select('language', t('Language'), languageValue, languageOptions, 'data-language-setting', view.pending.has('language')), t('The interface and import picker switch at once. Quit and reopen the app to switch menus and other dialogs.')))
-    + group('general-behavior', t('Startup & desktop'), settingToggle('launchAtLogin', 'Launch at login', !settings.launchAtLoginAvailable, loginNote, loginAction)
-      + settingToggle('hideAfterActivating', 'Hide window after applying a wallpaper')
-      + settingToggle('livePropertyEdits', 'Show property edits on the desktop as I make them', false, t('While you edit a wallpaper’s properties, your displays follow each change before you press Apply changes, and Revert puts the saved look back. Pictures and options that switch an effect on or off still wait for Apply changes. The lock screen and the Mission Control picture keep the saved look until you apply.'))
+    + group('general-behavior', t('Startup'), settingToggle('launchAtLogin', 'Launch at login', !settings.launchAtLoginAvailable, loginNote, loginAction)
+      + settingToggle('hideAfterActivating', 'Hide window after applying a wallpaper'))
+    + group('general-welcome', t('Help'), row('welcome-guide', t('Welcome guide'), button(t('Show again'), 'openWelcome'), t('Shown on first launch: language and appearance, Steam sign-in, preferences and tips.')));
+  const desktop = group('general-desktop', t('Desktop'), settingToggle('writeDesktopPicture', 'Use the wallpaper as the macOS desktop picture', settings.desktopPictureLocked === true, settings.desktopPictureLocked === true ? t('Animate lock screen sets the desktop picture itself, so this cannot be changed while it is on.') : t('Mission Control and the moment before a wallpaper loads show a still frame of the wallpaper. Turn this off to leave macOS’s own wallpaper settings alone; your own picture comes back at once.'))
+      + settingToggle('refreshDesktopPicture', 'Update the Mission Control picture every 5 minutes', settings.writeDesktopPicture === false, t('Mission Control shows a still picture of the wallpaper, retaken when it starts, changes or resumes. This also retakes it while it plays. Not used while the lock screen is animated.'))
       + settingToggle('keepWindowsOnWallpaperClick', 'Keep windows in place when clicking the wallpaper', false, t('Turns off macOS’s “Click wallpaper to reveal desktop” so clicks reach interactive wallpapers.'))
-      + settingToggle('writeDesktopPicture', 'Use the wallpaper as the macOS desktop picture', settings.desktopPictureLocked === true, settings.desktopPictureLocked === true ? t('Animate lock screen sets the desktop picture itself, so this cannot be changed while it is on.') : t('Mission Control and the moment before a wallpaper loads show a still frame of the wallpaper. Turn this off to leave macOS’s own wallpaper settings alone; your own picture comes back at once.'))
-      + settingToggle('refreshDesktopPicture', 'Update the Mission Control picture every 5 minutes', settings.writeDesktopPicture === false, t('Mission Control shows a still picture of the wallpaper, retaken when it starts, changes or resumes. This also retakes it while it plays. Not used while the lock screen is animated.')))
-    + group('general-shortcuts', t('Keyboard shortcuts'), (settings.hotkeys || []).map(hotkey => {
-      const id = String(hotkey.id);
-      const recording = view.recording === id;
-      const control = recording
-        ? `<span class="settings-status" role="status">${e(t('Press the new shortcut…'))}</span>${button(t('Cancel'), 'hotkeyCancel', { id })}`
-        : `<kbd class="settings-shortcut">${e(hotkey.shortcut || t('Not set'))}</kbd>${button(hotkey.shortcut ? t('Change…') : t('Record…'), 'hotkeyRecord', { id }, busy)}${hotkey.shortcut ? button(t('Clear'), 'hotkeyClear', { id }, busy) : ''}`;
-      return row(`hotkey-${id}`, t(hotkeyTitles[id] || id), control) + error(`hotkey-error-${id}`, hotkey.error);
-    }).join('') + `<p class="settings-note" data-key="hotkeys-note">${e(t('They work whichever app is in front. Hold ⌘, ⌥ or ⌃ with the key; F13 to F20 work alone. No permission is needed.'))}</p>`)
-      + disclosure('general-automation', t('Shortcuts app and links'), paragraphs(t('The Shortcuts app can control playback, mute or unmute wallpapers, go to the previous or next wallpaper, apply a wallpaper, saved playlist or property preset, and open this window. Siri and Spotlight can run these actions too.'), t('Apply Display Layout restores a saved arrangement across its displays. Choose the layout by name in Shortcuts, or use its saved id in a layout link.'), t('Random Wallpaper changes a display to a wallpaper other than the one it shows, and goes through all of them before it repeats one. It can draw from your favorites only: choose Favorites in Shortcuts, or use from=favorites in a link.'), t('Links can run the same actions. Wallpaper and playlist actions accept display= for a specific screen; otherwise they use the target display. An apply link also accepts display=all, and Apply Wallpaper has an On all displays option, to use every display at once. Property presets affect their wallpaper on every display. Choose saved items by name in Shortcuts.')) + `<ul class="settings-list" data-key="automation-links">${automationLinks.map(link => `<li><code>${e(link)}</code></li>`).join('')}</ul>`)
+      + settingToggle('livePropertyEdits', 'Show property edits on the desktop as I make them', false, t('While you edit a wallpaper’s properties, your displays follow each change before you press Apply changes, and Revert puts the saved look back. Pictures and options that switch an effect on or off still wait for Apply changes. The lock screen and the Mission Control picture keep the saved look until you apply.')))
     + group('general-lock', t('Lock screen'), settingToggle('lockScreenEnabled', 'Animate lock screen', lockUnavailable || settings.lockScreenBusy, t('Experimental'))
       + row('lock-status', t('Lock screen status'), `<span class="settings-status" role="status">${e(lockUnavailable ? (settings.lockScreenAvailable === false && settings.lockScreenStatus) || t('Unavailable') : settings.lockScreenBusy ? `${settings.lockScreenStatus || t('Updating')}…` : settings.lockScreenStatus)}</span>${settings.lockScreenError ? button(t('Retry'), 'lockScreenRetry', {}, busy || settings.lockScreenBusy) : ''}`, '', 'settings-readout')
       + error('lock-error', settings.lockScreenError)
@@ -408,6 +461,15 @@ function draw(view) {
       + row('screen-saver-status', t('Screen saver status'), `<span class="settings-status" role="status">${e(screenSaverUnavailable ? (settings.screenSaverAvailable === false && settings.screenSaverStatus) || t('Unavailable') : settings.screenSaverStatus || t('Updating'))}</span>${settings.screenSaverError ? button(t('Retry'), 'screenSaverRetry', {}, busy || settings.screenSaverBusy || screenSaverUnavailable) : ''}`, '', 'settings-readout')
       + error('screen-saver-error', settings.screenSaverError)
       + disclosure('screen-saver-context', t('Compatibility & permissions'), paragraphs(t('Requires macOS 26 or later. Uses each display’s applied wallpaper as its screen saver, including scenes, videos, web wallpapers and still images. This experimental feature uses private macOS APIs and may stop working after an update.'), t('The screen saver choice is independent of lock screen animation. It changes only the Idle wallpaper selection and reloads the macOS wallpaper service. Turning it off restores the previous screen saver without changing the Desktop selection, and keeps screen saver changes made elsewhere. Pause and battery settings still apply.'))));
+  const shortcuts = group('general-shortcuts', t('Keyboard shortcuts'), (settings.hotkeys || []).map(hotkey => {
+      const id = String(hotkey.id);
+      const recording = view.recording === id;
+      const control = recording
+        ? `<span class="settings-status" role="status">${e(t('Press the new shortcut…'))}</span>${button(t('Cancel'), 'hotkeyCancel', { id })}`
+        : `<kbd class="settings-shortcut">${e(hotkey.shortcut || t('Not set'))}</kbd>${button(hotkey.shortcut ? t('Change…') : t('Record…'), 'hotkeyRecord', { id }, busy)}${hotkey.shortcut ? button(t('Clear'), 'hotkeyClear', { id }, busy) : ''}`;
+      return row(`hotkey-${id}`, t(hotkeyTitles[id] || id), control) + error(`hotkey-error-${id}`, hotkey.error);
+    }).join('') + `<p class="settings-note" data-key="hotkeys-note">${e(t('They work whichever app is in front. Hold ⌘, ⌥ or ⌃ with the key; F13 to F20 work alone. No permission is needed.'))}</p>`)
+    + group('general-automation-group', '', disclosure('general-automation', t('Shortcuts app and links'), paragraphs(t('The Shortcuts app can control playback, mute or unmute wallpapers, go to the previous or next wallpaper, apply a wallpaper, saved playlist or property preset, and open this window. Siri and Spotlight can run these actions too.'), t('Apply Display Layout restores a saved arrangement across its displays. Choose the layout by name in Shortcuts, or use its saved id in a layout link.'), t('Random Wallpaper changes a display to a wallpaper other than the one it shows, and goes through all of them before it repeats one. It can draw from your favorites only: choose Favorites in Shortcuts, or use from=favorites in a link.'), t('Links can run the same actions. Wallpaper and playlist actions accept display= for a specific screen; otherwise they use the target display. An apply link also accepts display=all, and Apply Wallpaper has an On all displays option, to use every display at once. Property presets affect their wallpaper on every display. Choose saved items by name in Shortcuts.')) + `<ul class="settings-list" data-key="automation-links">${automationLinks.map(link => `<li><code>${e(link)}</code></li>`).join('')}</ul>`));
 
   const scaleSupported = settings.renderScaleSupported !== false;
   // Compare what the engine published, not the quantized select step: leaving
@@ -554,9 +616,10 @@ function draw(view) {
     + settingToggle('sharedVideoDecode', 'Shared video decode', false, t('Experimental. Screens showing the same video share one decoder.'))
     + (sessions || consumers ? row('shared-decode-report', t('Shared decode in use'), `<span class="settings-status" role="status">${e(t('{sessions} serving {surfaces}', { sessions: t(sessions === 1 ? '{count} session' : '{count} sessions', { count: sessions }), surfaces: t(consumers === 1 ? '{count} surface' : '{count} surfaces', { count: consumers }) }))}</span>`, '', 'settings-readout') : '')
     + settingToggle('sceneVideoPlaneSampling', 'Direct video plane sampling', false, t('Experimental. In scenes drawn by Native Metal, lets a layer’s shader read video frames directly instead of converting them to a color image every frame. Only works with 8-bit NV12 video and shaders that support it; everything else converts as before. Live diagnostics under Scene wallpapers shows which path each scene uses.')));
-  const performance = energy + quality + playback
+  const performance = energy + quality
     + disclosure('performance-advanced', t('Advanced'), videoGroup + sceneGroup + experimentalGroup, 'settings-group settings-performance-advanced', t('Renderers & experimental options'))
-    + disclosure('performance-context', t('What these settings change'), paragraphs(
+  const playbackPage = playback
+    + group('performance-context-group', '', disclosure('performance-context', t('What these settings change'), paragraphs(
       t('Wallpapers you can’t see, such as behind a full-screen app, pause on their own. When windows cover the desktop, Pause keeps the last frame and Keep running keeps it moving in the gaps.'),
       t('With two or more displays, Only play on the display I’m using pauses the others a few seconds after your pointer leaves them.'),
       t('When another app plays sound, Mute uses each wallpaper’s output mute channel. Web mute availability is shown in its details. Pause stops every wallpaper until that sound ends.'),
@@ -569,7 +632,7 @@ function draw(view) {
       t('A quality preset sets the frame-rate limit and render scale together. The frame-rate limit caps every display without rewriting the frame rate saved for each wallpaper. Internal render scale sets how many pixels are rendered before the image is scaled to fit.'),
       t('Video playback picks a backend for each wallpaper. Native is used only for videos it supports; the rest play in Compatibility.'),
       t('Scene render optimisation reuses work inside a scene and produces the same picture. It only affects scene wallpapers.'),
-      t('Content pacing, shared video decode and direct video plane sampling are experimental. Shared decode merges only the decoding; each screen still draws its own frames. Direct plane sampling skips a color conversion when a layer’s shader can handle it; otherwise the picture is produced as before.')));
+      t('Content pacing, shared video decode and direct video plane sampling are experimental. Shared decode merges only the decoding; each screen still draws its own frames. Direct plane sampling skips a color conversion when a layer’s shader can handle it; otherwise the picture is produced as before.'))));
 
   // Theme preferences live natively and stay usable even when renderer settings are unavailable.
   const theme = { mode: 'system', accent: '#80bbff', tone: 'neutral', icon: 'day', ...(window.__appTheme || {}), ...(state.theme || {}) };
@@ -578,12 +641,15 @@ function draw(view) {
   const themePending = ['mode', 'accent', 'tone', 'icon', 'reset'].some(themeBusy);
   const themeValue = name => draft(themeKey(name), theme[name]);
   const accent = /^#[0-9a-f]{6}$/i.test(String(themeValue('accent'))) ? String(themeValue('accent')) : '#80bbff';
-  const iconPicker = `<fieldset class="settings-icon-picker" data-key="theme-icon-picker" aria-describedby="theme-icon-note"${disabled(themeBusy('icon'))}><legend>${e(t('App icon'))}</legend><p class="settings-note" id="theme-icon-note">${e(t('Changes the Dock icon while the app is running. Finder and the menu bar stay unchanged.'))}</p><div class="settings-icon-options">${localizedOptions([['minimal', 'Minimal'], ['day', 'Day'], ['night', 'Night']]).map(([id, label]) => `<label class="settings-icon-option" data-key="theme-icon-option-${id}"><img src="app-icons/${id}.png" width="96" height="96" alt=""><span><input type="radio" name="app-icon" value="${id}" data-key="theme-icon-${id}" data-theme-setting="icon"${themeValue('icon') === id ? ' checked' : ''}${disabled(themeBusy('icon'))}>${e(label)}</span></label>`).join('')}</div></fieldset>`;
-  const appearance = group('appearance-theme', '', row(themeKey('mode-row'), t('Appearance'), select(themeKey('mode'), t('Appearance'), themeValue('mode'), localizedOptions([['system', 'System (Auto)'], ['light', 'Light'], ['dark', 'Dark']]), 'data-theme-setting="mode"', themeBusy('mode')), t('System follows the macOS light and dark setting.'))
-    + row(themeKey('accent-row'), t('Accent color'), `<input data-key="${e(themeKey('accent'))}" type="color" aria-label="${e(t('Accent color'))}" value="${e(accent)}" data-theme-setting="accent"${disabled(themeBusy('accent'))}><output class="settings-hex" data-value-for="${e(themeKey('accent'))}">${e(accent.toUpperCase())}</output>`, t('Colors buttons, links and focus rings.'))
-    + row(themeKey('tone-row'), t('Surface tone'), select(themeKey('tone'), t('Surface tone'), themeValue('tone'), localizedOptions([['neutral', 'Neutral'], ['warm', 'Warm'], ['cool', 'Cool']]), 'data-theme-setting="tone"', themeBusy('tone')), t('Warms or cools the window background.'))
-    + iconPicker
-    + row(themeKey('reset-row'), t('Theme defaults'), button(t('Reset appearance'), 'resetTheme', {}, themePending), t('Restores System, the default accent, Neutral tone and the Day icon.')))
+  const iconPicker = `<fieldset class="settings-icon-picker" data-key="theme-icon-picker" aria-describedby="theme-icon-note"${disabled(themeBusy('icon'))}><legend class="sr-only">${e(t('App icon'))}</legend><p class="settings-note" id="theme-icon-note">${e(t('Changes the Dock icon while the app is running. Finder and the menu bar stay unchanged.'))}</p><div class="settings-icon-options">${localizedOptions([['minimal', 'Minimal'], ['day', 'Day'], ['night', 'Night']]).map(([id, label]) => `<label class="settings-icon-option" data-key="theme-icon-option-${id}"><img src="app-icons/${id}.png" width="96" height="96" alt=""><span><input type="radio" name="app-icon" value="${id}" data-key="theme-icon-${id}" data-theme-setting="icon"${themeValue('icon') === id ? ' checked' : ''}${disabled(themeBusy('icon'))}>${e(label)}</span></label>`).join('')}</div></fieldset>`;
+  // Appearance and tone are pictures of a window, the accent a row of swatches and a colour well.
+  const choiceCards = (name, label, options, kind) => `<fieldset class="settings-choice-cards" data-key="${e(themeKey(`${name}-picker`))}"${disabled(themeBusy(name))}><legend class="sr-only">${e(label)}</legend>${options.map(([id, title]) => `<label class="settings-choice-card" data-key="${e(themeKey(`${name}-${id}`))}"><span class="window-mini" data-${kind}="${e(id)}" aria-hidden="true"><span class="window-mini-sidebar"></span><span class="window-mini-content"><span></span><span></span><span></span></span></span><input type="radio" name="theme-${e(name)}" value="${e(id)}" data-theme-setting="${e(name)}"${themeValue(name) === id ? ' checked' : ''}${disabled(themeBusy(name))}><span class="settings-choice-title">${e(t(title))}</span></label>`).join('')}</fieldset>`;
+  const swatches = `<div class="settings-swatches" role="radiogroup" aria-label="${e(t('Accent color'))}" data-key="${e(themeKey('accent-swatches'))}">${accentPresets.map(hex => `<label class="settings-swatch" data-swatch="${e(hex)}" title="${e(hex.toUpperCase())}"><input type="radio" name="theme-accent" value="${e(hex)}" data-theme-setting="accent" aria-label="${e(hex.toUpperCase())}"${accent.toLowerCase() === hex ? ' checked' : ''}${disabled(themeBusy('accent'))}></label>`).join('')}<label class="settings-swatch settings-swatch-custom" title="${e(t('Custom color'))}"><input data-key="${e(themeKey('accent'))}" type="color" aria-label="${e(t('Accent color'))}" value="${e(accent)}" data-theme-setting="accent"${disabled(themeBusy('accent'))}></label><output class="settings-hex" data-value-for="${e(themeKey('accent'))}">${e(accent.toUpperCase())}</output></div>`;
+  const appearance = group('appearance-theme', t('Appearance'), choiceCards('mode', t('Appearance'), [['system', 'System (Auto)'], ['light', 'Light'], ['dark', 'Dark']], 'mode')
+      + row(themeKey('accent-row'), t('Accent color'), swatches, t('Colors buttons, links and focus rings.')))
+    + group('appearance-tone', t('Surface tone'), choiceCards('tone', t('Surface tone'), [['neutral', 'Neutral'], ['warm', 'Warm'], ['cool', 'Cool']], 'tone'))
+    + group('appearance-icon', t('App icon'), iconPicker)
+    + group('appearance-reset', '', row(themeKey('reset-row'), t('Theme defaults'), button(t('Reset appearance'), 'resetTheme', {}, themePending), t('Restores System, the default accent, Neutral tone and the Day icon.')))
     + `<p class="settings-footnote">${e(t('Appearance changes apply right away and only affect this app’s window, not your wallpapers.'))}</p>`;
 
   const displays = (state.displays || []).map(display => {
@@ -633,7 +699,7 @@ function draw(view) {
       + (held ? row(key('playlist-held-row'), t('Playlist paused'), button(t('Resume playlist'), 'playlistResume', { displayID: id }, off), t('This display’s wallpaper was removed, so its playlist waits until you choose a wallpaper or resume it.')) : '')
       + (playlist.mode === 'rotate' ? rotateRows : playlist.mode === 'dayNight' ? dayNightRows : '')
       + planRows(ctx, display, playlist, off), 'settings-disclosure-rows', held ? t('Playlist paused') : '');
-    return `<section class="settings-display settings-group" data-key="display-${e(id)}" aria-labelledby="settings-group-display-${e(id)}"><h3 id="settings-group-display-${e(id)}">${e(display.title)}${primary ? `<span class="settings-note">${e(t('Primary display'))}</span>` : ''}</h3>`
+    return `<section class="settings-display settings-group" data-key="display-${e(id)}" aria-labelledby="settings-group-display-${e(id)}"><h3 class="settings-group-title" id="settings-group-display-${e(id)}">${helpers.icon('monitor', 15)}<span>${e(display.title)}</span>${primary ? `<span class="settings-note">${e(t('Primary display'))}</span>` : ''}</h3><div class="settings-card">`
       + row(key('enabled-row'), t('Enable wallpaper'), toggle(key('enabled'), name(t('Enable wallpaper')), draft(key('enabled'), display.enabled), data('enabled'), busy || primary))
       + row(key('mode-row'), t('Display mode'), select(key('mode'), name(t('Display mode')), draft(key('mode'), display.mode), localizedOptions([['standalone', 'Independent'], ['mirror', 'Mirror another display']]), data('mode'), off || primary))
       + (mirror ? row(key('target-row'), t('Mirror source'), select(key('mirrorTarget'), name(t('Mirror source')), draft(key('mirrorTarget'), display.mirrorTarget), [['', t('Choose display')], ...(display.mirrorTargets || []).map(target => [target.id, target.title])], data('mirrorTarget'), off || !display.mirrorTargets?.length), !display.mirrorTargets?.length ? t('No compatible display available.') : '') : row(key('wallpaper-row'), t('Wallpaper'), button(t('Choose…'), 'chooseDisplayWallpaper', { displayID: id }, off) + button(t('Eject'), 'eject', { id: display.wallpaperID, displayID: id }, off || !display.wallpaperID), wallpaper?.title || (display.wallpaperID ? display.wallpaperID : t('None selected'))))
@@ -645,7 +711,7 @@ function draw(view) {
         + row(key('fps-row'), t('Frame rate'), number('fps', t('Frame rate'), 1, playback.maxFps || 60, 1, 'fps'))
         + (limited == null ? '' : `<p class="settings-note settings-limit-note" data-key="${e(key('fps-limit'))}">${e(t('Limited to {fps} fps by Performance settings', { fps: limited }))} ${button(t('Open Performance'), 'openPerformance')}</p>`)
         + row(key('muted-row'), t('Mute audio'), toggle(key('muted'), name(t('Mute audio')), draft(key('muted'), playback.muted), data('muted'), playbackOff))
-        + row(key('volume-row'), t('Volume'), `<input data-key="${e(key('volume'))}" type="range" aria-label="${e(name(t('Volume')))}" min="0" max="1" step="0.01" value="${e(draft(key('volume'), playback.volume))}" ${data('volume')}${disabled(playbackOff || playback.muted)}><output class="settings-unit" data-value-for="${e(key('volume'))}">${Math.round(Number(draft(key('volume'), playback.volume || 0)) * 100)}%</output>`), 'settings-disclosure-rows') + '</section>';
+        + row(key('volume-row'), t('Volume'), `<input data-key="${e(key('volume'))}" type="range" aria-label="${e(name(t('Volume')))}" min="0" max="1" step="0.01" value="${e(draft(key('volume'), playback.volume))}" ${data('volume')}${disabled(playbackOff || playback.muted)}><output class="settings-unit" data-value-for="${e(key('volume'))}">${Math.round(Number(draft(key('volume'), playback.volume || 0)) * 100)}%</output>`), 'settings-disclosure-rows') + '</div></section>';
   }).join('') || `<div class="settings-empty">${e(t('No displays connected.'))}</div>`;
   const displaysPage = displays + displayLayoutsGroup(ctx) + plansGroup(ctx) + solarLocationGroup(ctx);
 
@@ -660,7 +726,7 @@ function draw(view) {
     : sceneRequest ? sceneRequest.stage === 'setup' ? t('Waiting for SteamCMD setup.') : sceneRequest.stage === 'account' ? t('Waiting for your Steam sign-in.') : t('Waiting for your go-ahead on the download.')
       : settings.sceneAssetsReady ? t('Installed. Scene wallpapers can play.') : t('Not installed. Scene wallpapers cannot play yet.');
   // Downloading, signing in and Steam Guard all happen in the panel's download dialog; this is a summary with one way in.
-  const sceneSummary = `<section class="settings-group" data-key="scene-resources" aria-busy="${scenePending}" aria-labelledby="settings-group-scene-resources"><h3 id="settings-group-scene-resources">${e(t('Shared scene resources'))}</h3>${row('assets-ready', t('Installation'), `<span class="settings-status" role="status">${e(sceneStatus)}</span>`, '', 'settings-readout')}`
+  const sceneSummary = `<section class="settings-group" data-key="scene-resources" aria-busy="${scenePending}" aria-labelledby="settings-group-scene-resources"><h3 class="settings-group-title" id="settings-group-scene-resources">${e(t('Shared scene resources'))}</h3><div class="settings-card">${row('assets-ready', t('Installation'), `<span class="settings-status" role="status">${e(sceneStatus)}</span>`, '', 'settings-readout')}`
     + (scenePending ? `<progress class="settings-progress" max="1"${Number.isFinite(scene.progress) ? ` value="${Math.max(0, Math.min(1, scene.progress))}"` : ''} aria-label="${e(t('Shared resources download progress'))}"></progress>` : '')
     + error('scene-error', scene?.error)
     + (scene?.warning ? `<div class="settings-notice" role="status">${e(scene.warning)}</div>` : '')
@@ -671,7 +737,7 @@ function draw(view) {
     + (!scenePending && sceneRequest ? button(t('Continue setup…'), 'openSceneDialog', {}, busy, 'settings-primary') + button(t('Remove request'), 'removeDownloadRequest', { id: sceneRequest.id }, busy, 'settings-destructive') : '')
     + (!scenePending && !sceneRequest ? button(settings.sceneAssetsReady ? t('Download again…') : t('Download from Steam…'), 'requestSceneAssets', {}, busy, settings.sceneAssetsReady ? '' : 'settings-primary') : '')
     + (!scenePending ? button(t('Locate an installation…'), 'locateAssets', {}, busy || setup.busy) : '')
-    + `</div><p class="settings-note">${e(t('Steam downloads the full Windows version to a temporary folder, and only the shared resources are kept. No Windows programs are run. You need several GB of free space and a Steam account that owns Wallpaper Engine.'))}</p></section>`;
+    + `</div><p class="settings-note">${e(t('Steam downloads the full Windows version to a temporary folder, and only the shared resources are kept. No Windows programs are run. You need several GB of free space and a Steam account that owns Wallpaper Engine.'))}</p></div></section>`;
   // The setting is the ceiling; downloadSlots is what applies now (1 after Steam ended a session).
   const slots = Number(settings.concurrentDownloads) || 1;
   const slotChoices = Array.from({ length: Math.max(slots, Number(settings.concurrentDownloadsMax) || 1) }, (_, index) => [index + 1, String(index + 1)]);
@@ -689,7 +755,6 @@ function draw(view) {
       + error('workshop-update-error', updates.error))
     + group('library-downloads', t('Downloads'), row('concurrent-downloads', t('Downloads at once'), select('concurrentDownloads', t('Downloads at once'), draft('concurrentDownloads', slots), slotChoices, 'data-setting="concurrentDownloads" data-number aria-describedby="settings-note-concurrent-downloads"', busy || unavailable), serialNow ? t('Steam ended one of the sessions, so downloads run one at a time until you reopen the app.') : t('Each download signs in to Steam on its own. More at once mostly helps batches of small wallpapers; large ones share your connection.')))
     + group('library-account', '', row('steam-account', t('Steam account'), state.savedAccount ? button(t('Log out…'), 'logOutSteam', {}, anyDownload || busy, 'settings-destructive') : `<span class="settings-note">${e(t('Not signed in'))}</span>`, state.savedAccount ? `${t('Signed in as {account}', { account: state.savedAccount })}${anyDownload ? t(' · log out once downloads finish') : ''}` : t('You sign in when a download starts.'))
-    + row('welcome-guide', t('Welcome guide'), button(t('Show again'), 'openWelcome'), t('Shown on first launch: language and appearance, Steam sign-in, preferences and tips.'))
     + disclosure('library-context', t('Setup, compatibility & account privacy'), `${paragraphs(t('Scene wallpapers need shared resources from a purchased Wallpaper Engine installation. Videos do not. Locate its assets folder or download the shared assets once through Steam. Scene support is experimental; effects and scripts may differ from Windows.'), t('Steam downloads the Windows version to temporary storage; only shared assets are kept. Windows programs are never run. Allow several GB of temporary space. Imports are copied; original files and your Steam library stay untouched.'), t('SteamCMD is Valve’s download tool; installing it doesn’t require signing in. Downloading requires a Steam account that owns Wallpaper Engine. Your password and Steam Guard codes go straight to SteamCMD and are not saved by this app. “Keep me signed in” stores Steam’s sign-in on this Mac. Logging out only affects this Mac; other devices stay signed in.'), t('Approve Steam Guard in the Steam mobile app, or enter the fresh code when requested. Steam may require a new sign-in after expiry or security changes. If Steam reports too many attempts, wait before retrying.'), t('Allowing SteamCMD applies only to the downloaded copy you confirmed. Gatekeeper and signature checks stay on.'))}${settings.assetsPath ? `<div class="settings-path">${e(settings.assetsPath)}</div>` : ''}<div class="settings-help-links">${button(t('Wallpaper Engine on Steam'), 'openExternal', { url: 'https://store.steampowered.com/app/431960/Wallpaper_Engine/' })}${button(t('macOS app security'), 'openExternal', { url: 'https://support.apple.com/en-us/102445' })}</div>`));
   // Nil released-bytes means no purge has run this session; 0 means one ran and
   // found nothing. They read differently on purpose.
@@ -728,21 +793,118 @@ function draw(view) {
   const updateActions = (update.showsAction && update.action ? button(update.actionLabel || t('Check for Updates'), update.action, {}, update.action === 'cancelUpdate' ? view.pending.has('cancelUpdate') : updateBusy || busy, update.status === 'available' || update.status === 'ready' ? 'settings-primary' : '') : '')
     + (update.showsReleases ? button(update.releasesLabel || t('Open GitHub Releases'), 'openReleases', {}, updateBusy) : '')
     + (update.showsReveal ? button(update.revealLabel || t('Show in Finder'), 'revealDownloadedUpdate', {}, updateBusy) : '');
-  const about = `<div class="settings-product"><span class="settings-product-mark">${helpers.icon('wallpaperMachine', 48)}</span><div><h3>WallpaperMachine</h3><span class="settings-note">${e(t('Independent macOS client'))}</span></div></div>`
+  const about = `<div class="settings-product"><img class="settings-product-icon" src="app-icons/${e(['minimal', 'day', 'night'].includes(theme.icon) ? theme.icon : 'day')}.png" width="96" height="96" alt=""><div><h3>WallpaperMachine</h3><span class="settings-note">${e(t('Independent macOS client'))}</span><span class="settings-version">${e(state.version ? t('Version {version}', { version: state.version }) : '')}</span></div></div>`
     + group('about-versions', '', versionRow('app-version', t('App version'), state.version)
       + versionRow('git-version', t('Git revision'), settings.gitSha))
-    + `<section class="settings-group" data-key="about-updates" aria-busy="${updateBusy}" aria-labelledby="settings-group-about-updates"><h3 id="settings-group-about-updates">${e(t('Updates'))}</h3><div class="settings-status" role="status" aria-live="polite">${e(update.statusText || t('Updates not yet checked'))}</div>`
+    + `<section class="settings-group" data-key="about-updates" aria-busy="${updateBusy}" aria-labelledby="settings-group-about-updates"><h3 class="settings-group-title" id="settings-group-about-updates">${e(t('Updates'))}</h3><div class="settings-card"><div class="settings-status settings-update-status" role="status" aria-live="polite">${e(update.statusText || t('Updates not yet checked'))}</div>`
     + updateProgress
     + `<div class="settings-form-actions">${updateActions}</div>`
     + updateNotes
-    + `<p class="settings-note settings-update-footnote">${e(update.footnote || t('Updates are checked against the latest published GitHub Release. Download and restart-install happen only after you confirm.'))}</p></section>`
+    + `<p class="settings-note settings-update-footnote">${e(update.footnote || t('Updates are checked against the latest published GitHub Release. Download and restart-install happen only after you confirm.'))}</p></div></section>`
     + group('about-share', t('Spread the word'), `<div class="settings-form-actions">${button(t('Share WallpaperMachine…'), 'shareApp', {})}${button(t('Star on GitHub'), 'starRepository', {})}</div>`)
     + group('about-credits', '', `<div class="settings-attribution">${e(t('Not affiliated with Wallpaper Engine or Valve. Built on the GPLv2-only open-source renderer. Workshop browsing is independently implemented. No warranty is provided.'))}</div>`
     + `<div class="settings-form-actions">${button(t('GNU General Public License v2'), 'openExternal', { url: 'https://www.gnu.org/licenses/old-licenses/gpl-2.0.html' })}</div>`);
-  const html = `<div class="settings-layout" data-key="settings-layout"><nav class="settings-nav" aria-label="${e(t('Settings categories'))}" role="tablist" aria-orientation="${compactNavigation.matches ? 'horizontal' : 'vertical'}" data-key="settings-nav">${sections.map(([id, title, glyph]) => `<button type="button" id="settings-tab-${id}" role="tab" aria-selected="${id === view.section}" aria-controls="settings-${id}" tabindex="${id === view.section ? '0' : '-1'}" data-key="nav-${id}" data-section="${id}">${helpers.icon(glyph, 16)}<span>${e(t(title))}</span></button>`).join('')}</nav><div class="settings-scroll" data-key="settings-scroll">${error('settings-action-error', view.error || state.error)}${unavailable ? `<div class="settings-notice" role="status">${e(t('Settings are unavailable. Try refreshing the library.'))}</div>` : ''}${section('general', t('General'), general)}${section('appearance', t('Appearance'), appearance)}${section('performance', t('Performance'), performance)}${section('displays', t('Displays'), displaysPage, button(t('Refresh'), 'refreshDisplays', {}, busy))}${section('library', t('Library & Steam'), library)}${section('storage', t('Storage'), storage)}${section('about', t('About'), about)}</div></div>`;
+  // Quick Settings: the everyday switches as Control Center tiles, and the three choices people
+  // reach for most as segmented controls, each leading to its full section.
+  const quickTile = (key, title, glyphName, on, { off = false, note = '', badge = '' } = {}) => `<button type="button" class="qs-tile${on ? ' on' : ''}" role="switch" aria-checked="${on}" data-key="qs-${e(key)}" data-action="setting" data-args="${e(JSON.stringify({ key, value: !on }))}" title="${e(note || title)}"${disabled(off || busy || unavailable)}><span class="qs-icon">${helpers.icon(glyphName, 17)}</span><span class="qs-text"><span class="qs-title">${e(title)}</span><span class="qs-state">${e(note || (on ? t('On') : t('Off')))}${badge ? ` · ${e(badge)}` : ''}</span></span></button>`;
+  const quickModule = (key, title, sectionID, body, note = '') => `<div class="qs-module" data-key="qs-${e(key)}"><div class="qs-module-head">${glyph(sectionID)}<span class="qs-module-title">${e(title)}</span><button type="button" class="settings-go" data-action="goSection" data-args="${e(JSON.stringify({ section: sectionID }))}" title="${e(t('Open {section}', { section: t(sections.find(([id]) => id === sectionID)[1]) }))}" aria-label="${e(t('Open {section}', { section: t(sections.find(([id]) => id === sectionID)[1]) }))}">${helpers.icon('chevronRight', 14)}</button></div>${body}${note ? `<p class="qs-note">${e(note)}</p>` : ''}</div>`;
+  const segment = (key, label, value, options, action, args) => `<div class="segmented" role="group" aria-label="${e(label)}" data-key="${e(key)}">${options.map(([id, title]) => `<button type="button" aria-pressed="${String(value) === String(id)}" data-key="${e(`${key}-${id}`)}" data-action="${action}" data-args="${e(JSON.stringify(args(id)))}"${disabled(action === 'themeSetting' ? themeBusy('mode') : busy || unavailable)}>${e(t(title))}</button>`).join('')}</div>`;
+  const lockState = settings.lockScreenBusy ? `${settings.lockScreenStatus || t('Updating')}…` : lockUnavailable ? t('Unavailable') : '';
+  const saverState = settings.screenSaverBusy ? `${settings.screenSaverStatus || t('Updating')}…` : screenSaverUnavailable ? t('Unavailable') : '';
+  const tiles = [
+    quickTile('launchAtLogin', t('Open at Login'), 'power', draft('launchAtLogin', settings.launchAtLogin) === true, { off: !settings.launchAtLoginAvailable, note: !settings.launchAtLoginAvailable ? t('Unavailable') : settings.launchAtLoginNeedsApproval ? t('Needs approval') : '' }),
+    quickTile('wallpapersMuted', t('Mute All'), draft('wallpapersMuted', settings.wallpapersMuted) ? 'volumeX' : 'volume', draft('wallpapersMuted', settings.wallpapersMuted) === true),
+    quickTile('lockScreenEnabled', t('Lock Screen'), 'lock', draft('lockScreenEnabled', settings.lockScreenEnabled) === true, { off: lockUnavailable || settings.lockScreenBusy, note: lockState, badge: t('Experimental') }),
+    quickTile('screenSaverEnabled', t('Screen Saver'), 'monitorPlay', draft('screenSaverEnabled', settings.screenSaverEnabled) === true, { off: screenSaverUnavailable || settings.screenSaverBusy, note: saverState, badge: t('Experimental') }),
+    quickTile('writeDesktopPicture', t('Desktop Picture'), 'wallpaper', draft('writeDesktopPicture', settings.writeDesktopPicture) !== false, { off: settings.desktopPictureLocked === true }),
+    enabledDisplayCount >= 2 || settings.playOnlyOnActiveDisplay ? quickTile('playOnlyOnActiveDisplay', t('Active Display Only'), 'mousePointerClick', draft('playOnlyOnActiveDisplay', settings.playOnlyOnActiveDisplay) === true) : '',
+    quickTile('hideAfterActivating', t('Hide After Applying'), 'appWindow', draft('hideAfterActivating', settings.hideAfterActivating) === true),
+    quickTile('livePropertyEdits', t('Live Edits'), 'eye', draft('livePropertyEdits', settings.livePropertyEdits) === true),
+  ].join('');
+  const presetQuick = [...qualityPresetLabels, ['custom', 'Custom']].map(([id, label]) => `<button type="button" aria-pressed="${preset === id}" data-key="qs-preset-${id}"${id === 'custom' ? '' : ` data-action="setting" data-args="${e(JSON.stringify({ key: 'qualityPreset', value: id }))}"`}${disabled(id === 'custom' || busy || unavailable)}>${e(t(label))}</button>`).join('');
+  const quick = `<div class="qs-grid" data-key="qs-tiles">${tiles}</div>`
+    + `<div class="qs-modules" data-key="qs-modules">`
+    + quickModule('quality', t('Quality'), 'performance', `<div class="segmented" role="group" aria-label="${e(t('Quality preset'))}" data-key="qs-preset">${presetQuick}</div>`, t('Lower quality saves energy on every display.'))
+    + (settings.batteryPercent != null || settings.batteryMode !== 'keepRunning' ? quickModule('battery', t('On battery'), 'playback', segment('qs-battery', t('On battery'), draft('batteryMode', settings.batteryMode || 'keepRunning'), batteryModes, 'setting', value => ({ key: 'batteryMode', value }))) : '')
+    + quickModule('covered', t('When windows cover the desktop'), 'playback', segment('qs-covered', t('When windows cover the desktop'), draft('desktopCoveredAction', settings.desktopCoveredAction || 'pause'), desktopCoveredActions, 'setting', value => ({ key: 'desktopCoveredAction', value })))
+    + quickModule('appearance', t('Appearance'), 'appearance', segment('qs-appearance', t('Appearance'), themeValue('mode'), [['system', 'System (Auto)'], ['light', 'Light'], ['dark', 'Dark']], 'themeSetting', value => ({ key: 'mode', value })))
+    + `</div>`;
+
+  const pages = {
+    quick, general, appearance, desktop, playback: playbackPage, performance, displays: displaysPage, shortcuts, library, storage, about,
+  };
+  const actions = { displays: button(t('Refresh'), 'refreshDisplays', {}, busy) };
+  const searching = Boolean(view.query.trim());
+  const html = `<div class="settings-scroll${searching ? ' searching' : ''}" data-key="settings-scroll">${error('settings-action-error', view.error || state.error)}${unavailable ? `<div class="settings-notice" role="status">${e(t('Settings are unavailable. Try refreshing the library.'))}</div>` : ''}${sections.map(([id, title]) => section(id, t(title), pages[id], actions[id] || '')).join('')}<div class="settings-no-results" data-key="settings-no-results" role="status" hidden>${helpers.icon('search', 32)}<p>${e(t('No settings match “{query}”.', { query: view.query.trim() }))}</p></div></div>`;
   const template = document.createElement('template');
   template.innerHTML = html;
   reconcile(view.container, template.content);
+  if (view.nav) {
+    const nav = `<div class="settings-search" data-key="settings-search">${helpers.icon('search', 14)}<input type="search" data-settings-search data-key="settings-search-field" autocomplete="off" spellcheck="false" placeholder="${e(t('Search settings'))}" aria-label="${e(t('Search settings'))}" value="${e(view.query)}"></div>`
+      + `<nav class="settings-nav sidebar-scroll" aria-label="${e(t('Settings categories'))}" role="tablist" aria-orientation="vertical" data-key="settings-nav">${sections.map(([id, title]) => `<button type="button" class="nav-item settings-tab${sectionBreaks.has(id) ? ' settings-tab-break' : ''}" id="settings-tab-${id}" role="tab" aria-selected="${id === view.section && !searching}" aria-controls="settings-${id}" tabindex="${id === view.section ? '0' : '-1'}" data-key="nav-${id}" data-section="${id}" title="${e(t(title))}">${glyph(id)}<span class="nav-label">${e(t(title))}</span><span class="nav-count" data-key="nav-count-${id}"></span></button>`).join('')}</nav>`;
+    const navTemplate = document.createElement('template');
+    navTemplate.innerHTML = nav;
+    reconcile(view.nav, navTemplate.content);
+  }
+  // Swatch colours cannot be inline styles under the panel's CSP; the stylesheet reads them from here.
+  for (const swatch of view.container.querySelectorAll('[data-swatch]')) swatch.style.setProperty('--swatch', swatch.dataset.swatch);
+  applySearch(view);
+  view.helpers.onSection?.();
+}
+
+// Search reads every row's own words (its label, explanation and choices), so it finds a
+// setting in whatever language the panel shows. Matching rows stay, the rest of each page
+// folds away, pages without a match hide, and the sidebar counts the matches per section.
+function applySearch(view) {
+  const query = view.query.trim().toLocaleLowerCase();
+  const pages = [...view.container.querySelectorAll('.settings-page')];
+  const units = '.settings-row, .qs-tile, .qs-module, .settings-choice-cards, .settings-icon-picker, .settings-disclosure > summary, .settings-playlist-item, .settings-display-layout';
+  const counts = new Map();
+  for (const opened of view.searchOpened) if (!query && opened.isConnected) opened.open = false;
+  if (!query) view.searchOpened.clear();
+  for (const page of pages) {
+    const id = page.id.replace('settings-', '');
+    let hits = 0;
+    for (const unit of page.querySelectorAll(units)) {
+      const match = !query || unit.textContent.toLocaleLowerCase().includes(query);
+      unit.classList.toggle('search-miss', !match);
+      if (match && query) {
+        hits += 1;
+        // A match inside a closed disclosure opens it, and closes again once the search clears.
+        for (let details = unit.parentElement?.closest('details'); details; details = details.parentElement?.closest('details')) {
+          if (!details.open) { details.open = true; view.searchOpened.add(details); }
+        }
+      }
+    }
+    if (query) {
+      for (const card of page.querySelectorAll('.settings-group')) {
+        const titleMatch = card.querySelector(':scope > .settings-group-title')?.textContent.toLocaleLowerCase().includes(query);
+        card.classList.toggle('search-miss', !titleMatch && !card.querySelector(`:is(${units}):not(.search-miss)`));
+        if (titleMatch) for (const unit of card.querySelectorAll('.search-miss')) unit.classList.remove('search-miss');
+      }
+      const visible = page.querySelectorAll('.settings-group:not(.search-miss), .qs-tile:not(.search-miss), .qs-module:not(.search-miss)').length;
+      page.hidden = !visible;
+      counts.set(id, page.querySelectorAll(`:is(${units}):not(.search-miss)`).length);
+    } else {
+      for (const card of page.querySelectorAll('.settings-group.search-miss')) card.classList.remove('search-miss');
+      page.hidden = id !== view.section;
+    }
+  }
+  const empty = view.container.querySelector('[data-key="settings-no-results"]');
+  if (empty) empty.hidden = !query || pages.some(page => !page.hidden);
+  for (const tab of view.nav?.querySelectorAll('[data-section]') || []) {
+    const count = counts.get(tab.dataset.section) || 0;
+    tab.classList.toggle('search-dim', Boolean(query) && !count);
+    const badge = tab.querySelector('.nav-count');
+    if (badge) badge.textContent = query && count ? String(count) : '';
+  }
+}
+
+function showSection(view, section) {
+  view.section = section;
+  if (view.query) { view.query = ''; const field = view.nav?.querySelector('[data-settings-search]'); if (field) field.value = ''; }
+  draw(view);
+  view.container.querySelector('.settings-scroll').scrollTop = 0;
 }
 
 // Keep live controls, selection, IME composition, scroll positions and disclosures intact.
@@ -785,6 +947,7 @@ function reconcile(parent, desired) {
 
 function onInput(view, event) {
   const input = event.target;
+  if (input.matches('[data-settings-search]')) { view.query = input.value; draw(view); view.container.querySelector('.settings-scroll').scrollTop = 0; return; }
   if (displayLayoutInput(view, input)) return;
   if (automationInput(view, input, () => draw(view))) return;
   if (!input.matches('input[data-key]') || input.type === 'radio') return;
@@ -933,16 +1096,30 @@ async function onChange(view, event) {
 
 async function onClick(view, event) {
   const tab = event.target.closest('[data-section]');
-  if (tab) {
-    view.section = tab.dataset.section;
-    draw(view);
-    view.container.querySelector('.settings-scroll').scrollTop = 0;
-    return;
-  }
+  if (tab) { showSection(view, tab.dataset.section); return; }
   const button = event.target.closest('button[data-action]');
   if (!button || button.disabled) return;
   const action = button.dataset.action;
   const args = JSON.parse(button.dataset.args || '{}');
+  if (action === 'moreInfo') {
+    if (view.expanded.has(args.key)) view.expanded.delete(args.key); else view.expanded.add(args.key);
+    draw(view);
+    return;
+  }
+  if (action === 'goSection') {
+    showSection(view, args.section);
+    view.nav?.querySelector(`[data-section="${CSS.escape(args.section)}"]`)?.focus();
+    return;
+  }
+  // A tile or segment shows its new value at once, as a switch does, until native answers.
+  if (action === 'setting' || action === 'themeSetting') {
+    const draftKey = action === 'themeSetting' ? `theme-${args.key}` : args.key;
+    if (args.key !== 'qualityPreset') view.drafts.set(draftKey, args.value);
+    await perform(view, action === 'themeSetting' ? draftKey : `setting-${args.key}`, action, args);
+    view.drafts.delete(draftKey);
+    draw(view);
+    return;
+  }
   if (action.startsWith('layout') || ['displayLayoutApply', 'displayLayoutDelete', 'displayCopyWallpaper', 'displaySwapWallpapers'].includes(action)) {
     await displayLayoutClick(view, action, args, () => draw(view), (command, body, after, onError) => perform(view, 'display-layout', command, body, after, onError));
     return;
@@ -982,10 +1159,8 @@ async function onClick(view, event) {
     return;
   }
   if (action === 'openPerformance') {
-    view.section = 'performance';
-    draw(view);
-    view.container.querySelector('.settings-scroll').scrollTop = 0;
-    view.container.querySelector('[data-section="performance"]')?.focus();
+    showSection(view, 'performance');
+    view.nav?.querySelector('[data-section="performance"]')?.focus();
     return;
   }
   if (action === 'resetTheme') {

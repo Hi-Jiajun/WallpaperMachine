@@ -29,7 +29,7 @@ for them.
 - Mouse input reaches the page: hover, clicks, drags, right clicks and scrolling
   over the desktop are mirrored into the wallpaper. Finder keeps its icons and
   the desktop keeps every system behavior, so a click on an icon also reaches
-  the page. Settings → General → *Keep windows in place when clicking the
+  the page. Settings → Desktop & Lock Screen → *Keep windows in place when clicking the
   wallpaper* turns off macOS's "Click wallpaper to reveal desktop" option (the
   same value System Settings → Desktop & Dock writes) so a click no longer
   slides every window aside.

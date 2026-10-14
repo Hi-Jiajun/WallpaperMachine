@@ -27,13 +27,12 @@ final class ControlPanelLibraryTests: ControlPanelTestCase {
       """, arguments: [:], in: nil, contentWorld: .page)
   }
 
-  /// Both library pages share one right-hand filter sidebar whose only switch is the
-  /// toolbar's Filter button: no rail, no collapse control inside the sidebar, and no
-  /// popover on Installed. Each page remembers its own choice natively because the
-  /// page's website data store is not persistent. The inspector's width is a function of
-  /// the window width alone: there is no drag handle, nothing is stored, and a width
-  /// left behind by an earlier build is discarded rather than applied.
-  func testFilterSidebarTogglesFromTheToolbarPerPageAndInspectorFollowsWindowWidth() async throws {
+  /// Filters open in a popover from the toolbar's Filter button on every library page: it
+  /// floats over the grid instead of taking a column, closes with Escape, a click outside or
+  /// a change of page, and is page state only, so nothing reaches native. The inspector's
+  /// width is a function of the window width alone: there is no drag handle, nothing is
+  /// stored, and a width left behind by an earlier build is discarded rather than applied.
+  func testFiltersOpenInAPopoverFromTheToolbarAndInspectorFollowsWindowWidth() async throws {
     let fixture = makeStore()
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(
       "web-filters-\(UUID().uuidString)")
@@ -65,11 +64,13 @@ final class ControlPanelLibraryTests: ControlPanelTestCase {
       const waitFor = async predicate => {
         const deadline = Date.now() + 5000;
         while (!predicate()) {
-          if (Date.now() > deadline) throw new Error('Filter sidebar did not settle');
+          if (Date.now() > deadline) throw new Error('Filters popover did not settle');
           await new Promise(resolve => setTimeout(resolve, 20));
         }
       };
+      const sent = [];
       const native = { postMessage: async body => {
+        sent.push(body.action);
         try { return await window.webkit.messageHandlers.native.postMessage(body); }
         catch (error) { throw new Error(`${body.action} failed: ${error?.message || error}`); }
       } };
@@ -82,46 +83,55 @@ final class ControlPanelLibraryTests: ControlPanelTestCase {
       const columns = () => getComputedStyle(document.getElementById('library-page')).gridTemplateColumns.split(' ').map(v => Math.round(parseFloat(v)));
       const toggle = () => document.querySelector('.browser-toolbar [data-action="toggleFilters"]');
       const measure = () => {
-        const sidebar = document.getElementById('filter-sidebar');
-        const bar = document.querySelector('.browser-toolbar').getBoundingClientRect();
+        const popover = document.getElementById('filter-sidebar');
         const button = toggle();
         const rect = button.getBoundingClientRect();
+        const box = popover.getBoundingClientRect();
         return {
-          hidden: sidebar.hidden,
+          hidden: popover.hidden,
           expanded: button.getAttribute('aria-expanded'),
           glyph: !!button.querySelector('svg'),
-          // The button leads the toolbar and sits beside the sidebar it opens.
-          first: Math.round(rect.left - bar.left) <= 17,
-          besideSidebar: sidebar.hidden ? null : Math.round(sidebar.getBoundingClientRect().right) <= Math.round(rect.left),
-          sidebarLeftOfGrid: sidebar.hidden ? null : sidebar.getBoundingClientRect().right <= document.querySelector('.browser-column').getBoundingClientRect().left + 1,
-          sidebarAtLeftEdge: sidebar.hidden ? null : Math.round(sidebar.getBoundingClientRect().left) === 0,
-          insideToggles: sidebar.querySelectorAll('[data-action="toggleFilters"], .filter-rail, .filter-toggle').length,
-          popover: document.querySelectorAll('.installed-filter, .filter-popover').length,
+          role: popover.getAttribute('role'),
+          below: popover.hidden ? null : box.top >= rect.bottom - 0.5,
+          inside: popover.hidden ? null : box.left >= 0 && box.right <= window.innerWidth + 0.5,
+          insideToggles: popover.querySelectorAll('[data-action="toggleFilters"]').length,
+          closeButton: !!popover.querySelector('[data-action="closePopover"]'),
           direction: !!document.querySelector('.browser-toolbar [data-action="toggleSortDirection"]'),
-          selects: sidebar.querySelectorAll('select').length,
+          selects: popover.querySelectorAll('select').length,
+          favorite: !!popover.querySelector('input[value="Favorite"]'),
           filterCount: document.querySelector('.browser-toolbar .filter-count')?.textContent ?? null,
           columns: columns()
         };
       };
       await waitFor(() => Math.round(window.innerWidth) === 960);
-      showDiscover(await native.postMessage({action:'ready'}));
+      const reply = await native.postMessage({action:'ready'});
+      showDiscover(reply);
       const before = measure();
       toggle().click();
-      // The native reply re-renders on its own page (Installed, whose sidebar is still
-      // open), so the round trip is complete once native reports Discover's choice.
-      let reply;
-      const settle = Date.now() + 5000;
-      while (!(reply = await native.postMessage({action:'ready'})).filtersCollapsed?.discover) {
-        if (Date.now() > settle) throw new Error('Filter choice did not reach native');
-        await new Promise(resolve => setTimeout(resolve, 20));
-      }
-      showDiscover(reply);
-      const after = measure();
+      await waitFor(() => !document.getElementById('filter-sidebar').hidden);
+      const open = measure();
+      toggle().click();
+      await waitFor(() => document.getElementById('filter-sidebar').hidden);
+      const closed = measure();
+      toggle().click();
+      await waitFor(() => !document.getElementById('filter-sidebar').hidden);
+      document.getElementById('filter-sidebar').dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+      await waitFor(() => document.getElementById('filter-sidebar').hidden);
+      const escaped = measure();
+      toggle().click();
+      await waitFor(() => !document.getElementById('filter-sidebar').hidden);
       window.wallpaperUI.receive(Object.assign({}, reply, {page: 'installed'}));
+      const leftPage = document.getElementById('filter-sidebar').hidden;
+      toggle().click();
+      await waitFor(() => !document.getElementById('filter-sidebar').hidden);
       const installed = measure();
+      document.getElementById('wallpaper-grid').click();
+      await waitFor(() => document.getElementById('filter-sidebar').hidden);
       showDiscover(reply);
       const inspector = document.getElementById('inspector');
-      return {before, after, installed,
+      return {before, open, closed, escaped, leftPage, installed,
+              nativeFilters: sent.filter(action => action === 'filters').length,
+              snapshotKey: 'filtersCollapsed' in reply,
               separators: document.querySelectorAll('[role="separator"], [class*="resizer"]').length,
               snapshotWidth: 'inspectorWidth' in reply,
               inspectorWidth: Math.round(inspector.getBoundingClientRect().width),
@@ -132,48 +142,43 @@ final class ControlPanelLibraryTests: ControlPanelTestCase {
       try await web.callAsyncJavaScript(script, arguments: [:], in: nil, contentWorld: .page)
       as? [String: Any]
     let before = result?["before"] as? [String: Any]
-    XCTAssertEqual(before?["hidden"] as? Bool, false)
-    XCTAssertEqual(before?["expanded"] as? String, "true")
+    XCTAssertEqual(before?["hidden"] as? Bool, true, "Filters start closed")
+    XCTAssertEqual(before?["expanded"] as? String, "false")
     XCTAssertEqual(before?["glyph"] as? Bool, true, "…with a filter glyph beside the label")
-    XCTAssertEqual(before?["first"] as? Bool, true, "…leading the toolbar, beside the sidebar")
-    XCTAssertEqual(before?["besideSidebar"] as? Bool, true)
-    XCTAssertEqual(before?["sidebarLeftOfGrid"] as? Bool, true, "The sidebar is on the left of the grid")
-    XCTAssertEqual(before?["sidebarAtLeftEdge"] as? Bool, true, "…at the window's left edge; the inspector keeps the right")
-    XCTAssertEqual(before?["insideToggles"] as? Int, 0, "The sidebar carries no collapse control of its own")
-    XCTAssertEqual((before?["columns"] as? [Int])?.count, 3, "Discover starts with the sidebar column")
-    XCTAssertEqual((before?["columns"] as? [Int])?.first, 160, "The sidebar is the first column (160px below 1040px)")
+    XCTAssertEqual((before?["columns"] as? [Int])?.count, 2, "Filters take no column: grid and inspector only")
     XCTAssertEqual((before?["columns"] as? [Int])?.last, 290, "A 960px window gets a 290px inspector (15vw + 146px)")
-    let after = result?["after"] as? [String: Any]
-    XCTAssertEqual(after?["hidden"] as? Bool, true, "Closing removes the sidebar entirely; no rail remains")
-    XCTAssertEqual(after?["expanded"] as? String, "false")
-    XCTAssertEqual(after?["first"] as? Bool, true, "The Filter button stays where it was so it can reopen the sidebar")
-    XCTAssertEqual((after?["columns"] as? [Int])?.count, 2, "Closed, the grid takes the sidebar's column")
+    let open = result?["open"] as? [String: Any]
+    XCTAssertEqual(open?["hidden"] as? Bool, false, "The Filter button opens the popover")
+    XCTAssertEqual(open?["expanded"] as? String, "true")
+    XCTAssertEqual(open?["role"] as? String, "dialog")
+    XCTAssertEqual(open?["below"] as? Bool, true, "…hanging below the button")
+    XCTAssertEqual(open?["inside"] as? Bool, true, "…inside the window")
+    XCTAssertEqual(open?["insideToggles"] as? Int, 0, "The popover has no second Filter switch")
+    XCTAssertEqual(open?["closeButton"] as? Bool, true, "…but a close button of its own")
+    XCTAssertEqual(open?["columns"] as? [Int], before?["columns"] as? [Int], "Opening filters never reflows the grid")
+    XCTAssertEqual((result?["closed"] as? [String: Any])?["hidden"] as? Bool, true, "The same button closes it")
+    XCTAssertEqual((result?["escaped"] as? [String: Any])?["hidden"] as? Bool, true, "Escape closes it")
+    XCTAssertEqual(result?["leftPage"] as? Bool, true, "Another page closes it")
+    XCTAssertEqual(result?["nativeFilters"] as? Int, 0, "Opening and closing filters is page state only")
+    XCTAssertEqual(result?["snapshotKey"] as? Bool, false, "The snapshot carries no filter sidebar state")
     XCTAssertEqual(result?["separators"] as? Int, 0, "The inspector edge is not a drag handle")
     XCTAssertEqual(result?["snapshotWidth"] as? Bool, false, "The snapshot carries no inspector width")
     XCTAssertEqual(result?["inspectorWidth"] as? Int, 290, "The grid column and the rendered inspector agree")
     XCTAssertEqual(result?["inspectorCursor"] as? String, "auto", "Nothing invites resizing")
     let installed = result?["installed"] as? [String: Any]
-    XCTAssertEqual(installed?["hidden"] as? Bool, false, "Installed has its own sidebar, still open after Discover's was closed")
-    XCTAssertEqual(installed?["expanded"] as? String, "true")
-    XCTAssertEqual(installed?["first"] as? Bool, true)
-    XCTAssertEqual(installed?["popover"] as? Int, 0, "The old Filters popover is gone")
-    XCTAssertEqual(installed?["insideToggles"] as? Int, 0)
-    XCTAssertEqual((installed?["columns"] as? [Int])?.count, 3)
-    XCTAssertEqual(installed?["direction"] as? Bool, true, "…and a direction switch beside it")
+    XCTAssertEqual(installed?["hidden"] as? Bool, false, "Installed opens its own filters")
+    XCTAssertEqual(installed?["favorite"] as? Bool, true, "…with the library's own Show only boxes")
+    XCTAssertEqual(installed?["direction"] as? Bool, true, "…and a direction switch in the toolbar")
     XCTAssertEqual(installed?["selects"] as? Int, 0, "No type menu on Installed either")
     XCTAssertNil(installed?["filterCount"] as? String)
-    XCTAssertEqual(before?["direction"] as? Bool, false, "Discover's Steam sorts have no direction")
-    XCTAssertEqual(before?["selects"] as? Int, 0, "No type menu: types are boxes like Wallpaper Engine's")
+    XCTAssertEqual(open?["direction"] as? Bool, false, "Discover's Steam sorts have no direction")
+    XCTAssertEqual(open?["selects"] as? Int, 0, "No type menu: types are boxes like Wallpaper Engine's")
     XCTAssertNil(before?["filterCount"] as? String, "Defaults count as no active filter")
     XCTAssertNil(controller.actionError)
     XCTAssertNil(defaults.object(forKey: WebPanelController.legacyInspectorWidthKey))
     let relaunched = WebPanelController(
       store: fixture.store, navigation: ControlPanelNavigation(), workshop: workshop,
       defaults: defaults, appLanguage: .english())
-    XCTAssertEqual(relaunched.filtersCollapsed["discover"], true,
-      "Discover's collapsed choice must survive a relaunch")
-    XCTAssertEqual(relaunched.filtersCollapsed["installed"], false,
-      "Collapsing Discover must leave Installed open after relaunch")
     XCTAssertNil(relaunched.snapshot()["inspectorWidth"], "No inspector width is published")
 
     // The width is the same function of the window on both pages: 260px at the 760px
@@ -199,8 +204,10 @@ final class ControlPanelLibraryTests: ControlPanelTestCase {
             await new Promise(resolve => setTimeout(resolve, 20));
           }
           const columns = getComputedStyle(document.getElementById('library-page')).gridTemplateColumns.split(' ').map(v => Math.round(parseFloat(v)));
+          const library = document.getElementById('library-page').getBoundingClientRect();
           return {inspector: Math.round(document.getElementById('inspector').getBoundingClientRect().width),
-                  last: columns.at(-1), sum: columns.reduce((a, b) => a + b, 0)};
+                  last: columns.at(-1), sum: columns.reduce((a, b) => a + b, 0), page: Math.round(library.width),
+                  right: Math.round(library.right)};
           """, arguments: ["page": expectation.page, "expected": expectation.width], in: nil,
           contentWorld: .page) as? [String: Any]
       XCTAssertEqual(
@@ -208,8 +215,11 @@ final class ControlPanelLibraryTests: ControlPanelTestCase {
         "At \(Int(expectation.width))px on \(expectation.page) the inspector is \(expectation.inspector)px wide")
       XCTAssertEqual(measured?["last"] as? Int, expectation.inspector, "The grid column matches the inspector")
       XCTAssertEqual(
-        measured?["sum"] as? Int, Int(expectation.width),
-        "The columns fill the window exactly at \(Int(expectation.width))px on \(expectation.page)")
+        measured?["sum"] as? Int, measured?["page"] as? Int,
+        "The columns fill the library page exactly at \(Int(expectation.width))px on \(expectation.page)")
+      XCTAssertEqual(
+        measured?["right"] as? Int, Int(expectation.width),
+        "The library page reaches the window's edge at \(Int(expectation.width))px on \(expectation.page)")
     }
     XCTAssertNil(web.window)
     await workshop.steamCMDSetup.shutdown()
@@ -259,6 +269,49 @@ final class ControlPanelLibraryTests: ControlPanelTestCase {
     }
   }
 
+  /// The window sidebar lists the library's views like albums: All wallpapers, Favorites (the
+  /// library's own Favorite filter) and each collection with its size. Choosing one shows it in
+  /// the grid, names it in the title bar and marks it current; All wallpapers puts the rest back.
+  func testSidebarShowsFavoritesAndCollectionsAsLibraryViewsWithoutWindow() async throws {
+    try await withPanel { panel in
+      _ = try panel.collections.create(name: "Night", wallpaperIDs: ["night"])
+      try await panel.finishWelcome()
+      panel.show()
+      try await panel.waitJS("powerProbe.received.length >= 1 && !!document.querySelector('#sidebar [data-view=\"collection\"]')")
+      let result = try await panel.js("""
+        const base = window.powerProbe.received.at(-1);
+        const wallpaper = (id) => ({ id, title: id, kind: 'Scene', tags: [], approved: false, preview: null, active: false, supported: true, size: 1, addedAt: 1 });
+        window.wallpaperUI.receive(Object.assign({}, base, { page: 'installed', wallpapers: ['day', 'night', 'loved'].map(wallpaper), favorites: ['loved'] }));
+        const titles = () => [...document.querySelectorAll('.tile-title')].map(node => node.textContent);
+        const current = () => document.querySelector('#sidebar-library [aria-current="page"]')?.dataset.view;
+        const title = () => document.querySelector('#page-title h1').textContent;
+        const count = view => document.querySelector(`#sidebar [data-view="${view}"] .nav-count`)?.textContent;
+        const wait = async predicate => { const deadline = Date.now() + 5000; while (!predicate()) { if (Date.now() > deadline) throw new Error('sidebar view did not settle'); await new Promise(resolve => setTimeout(resolve, 20)); } };
+        const result = { all: titles(), allCurrent: current(), counts: [count('all'), count('favorites'), count('collection')] };
+        document.querySelector('#sidebar [data-view="favorites"]').click();
+        await wait(() => current() === 'favorites');
+        Object.assign(result, { favorites: titles(), favoritesTitle: title(), filterCount: document.querySelector('.browser-toolbar .filter-count')?.textContent ?? null });
+        document.querySelector('#sidebar [data-view="collection"]').click();
+        await wait(() => current() === 'collection');
+        Object.assign(result, { collection: titles(), collectionTitle: title() });
+        document.querySelector('#sidebar [data-view="all"]').click();
+        await wait(() => current() === 'all');
+        Object.assign(result, { back: titles(), backTitle: title() });
+        return result;
+        """) as? [String: Any]
+      XCTAssertEqual(result?["all"] as? [String], ["day", "loved", "night"])
+      XCTAssertEqual(result?["allCurrent"] as? String, "all")
+      XCTAssertEqual(result?["counts"] as? [String], ["3", "1", "1"], "Each view shows its size")
+      XCTAssertEqual(result?["favorites"] as? [String], ["loved"])
+      XCTAssertEqual(result?["favoritesTitle"] as? String, "Favorites")
+      XCTAssertEqual(result?["filterCount"] as? String, "1", "Favorites is the library's own Favorite filter")
+      XCTAssertEqual(result?["collection"] as? [String], ["night"])
+      XCTAssertEqual(result?["collectionTitle"] as? String, "Night")
+      XCTAssertEqual(result?["back"] as? [String], ["day", "loved", "night"])
+      XCTAssertEqual(result?["backTitle"] as? String, "All wallpapers")
+    }
+  }
+
   /// Installed's sidebar filters the library with Discover's rules: a ticked Show only box
   /// requires its tag (Favorites and Active on top of Steam's three), an unticked box
   /// excludes wallpapers carrying that tag, the type boxes read the wallpaper's kind, a
@@ -279,6 +332,7 @@ final class ControlPanelLibraryTests: ControlPanelTestCase {
         ];
         const display = Object.assign({}, base.displays[0], { wallpaperID: 'nature' });
         window.wallpaperUI.receive(Object.assign({}, base, { page: 'installed', wallpapers, favorites: ['plain'], displays: [display], targetDisplayID: display.id }));
+        document.querySelector('.browser-toolbar [data-action="toggleFilters"]').click();
         const sidebar = document.getElementById('filter-sidebar');
         const titles = () => [...document.querySelectorAll('.tile-title')].map(node => node.textContent);
         const box = value => sidebar.querySelector(`input[value="${value}"]`);
