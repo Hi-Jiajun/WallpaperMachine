@@ -457,7 +457,8 @@ device.
   a caption computed every tick keeps the clock on every frame, whatever the
   script returns. No script source is read, no repeated result is counted and no
   schedule is inferred.
-- **A history loop is never called still** — `UnchangedPresent.AHistoryLoopKeepsTheClockRunningWithoutATimeUniform`:
+- **A history loop is never called still** — `UnchangedPresent.AHistoryLoopKeepsTheClockRunningWithoutATimeUniform`
+  (it counts draws in a half-second wait, so it is named in `REALTIME_TESTS`):
   a layer sampling a target the graph fills only after it has drawn (the fixture
   uses `_rt_MipMappedFrameBuffer`; a motion-blur trail or an accumulation is the
   same shape) keeps changing the picture with no time uniform. Both backends
