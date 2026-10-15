@@ -78,6 +78,17 @@ yet pass the interface language on. `parallaxDepth` set on a layer reaches the
 layer, its effect passes and the layers below it, and one that starts or stops
 following the cursor rebuilds the render graph.
 
+A scene starts as a desktop with no player. On its first tick, after every script has
+started and before anything is drawn, its scripts are told `mediaPropertiesChanged`
+with no track and `mediaPlaybackChanged` with `PLAYBACK_STOPPED`, once, whether or not
+the user turned media integration on. Wallpaper Engine's media widgets are authored
+visible (a group layer, a cover, a mascot parented to it) and hide themselves on
+`PLAYBACK_STOPPED`, so a scene that was never told would show them on every start for
+anyone not playing music. The state names no one's music, so it does not wait for the
+consent that real events do. A real event that reached the scene first (the replay to
+a scene that has just attached) is not repeated as idle, per event type, and a real
+one after it is delivered as usual ([media integration](media-integration.md#scene-wallpapers)).
+
 A scene follows the cursor anywhere on its display, but, as in Wallpaper Engine, a
 mouse press counts only where it lands on the desktop: the wallpaper, Finder's icons or
 a desktop widget. A click in another app's window, in the menu bar or the Dock, or in

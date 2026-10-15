@@ -2536,6 +2536,155 @@ TEST_F(MetalSceneDraw, AScriptCanShowAHiddenLayerItNamesOnBothRenderers)
     }
 }
 
+/// A media widget in the shape Wallpaper Engine's templates ship: a group layer
+/// that draws nothing itself and whose `visible` is `area_visible_json`
+/// verbatim, a card parented to it at the middle of the scene, and a small
+/// marker card apart from both that shows the scene drew at all.
+std::filesystem::path WriteMediaWidgetFixture(const std::filesystem::path& root,
+                                              std::string_view            area_visible_json)
+{
+    const auto project = WriteFixture(root);
+    const auto file    = [&](const std::string& path, const std::string& text) {
+        std::filesystem::create_directories((root / path).parent_path());
+        std::ofstream(root / path) << text;
+    };
+    file("shaders/area.vert",
+         "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\n"
+         "attribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+         "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+         "  v_TexCoord = a_TexCoord;\n}\n");
+    file("shaders/area.frag", "void main() {\n  gl_FragColor = vec4(0.0);\n}\n");
+    file("materials/area.json",
+         R"({"passes":[{"shader":"area","blending":"translucent","cullmode":"nocull",)"
+         R"("depthtest":"disabled","depthwrite":"disabled"}]})");
+    file("models/area.json", R"({"width":64,"height":64,"material":"materials/area.json"})");
+    file("layout.json",
+         R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+         R"("general":{"clearcolor":[0,0,0],"bloom":false,"cameraparallax":false,)"
+         R"("orthogonalprojection":{"width":384,"height":256}},)"
+         R"("objects":[{"id":1,"name":"Media Area","image":"models/area.json",)"
+         R"("origin":[192,128,0],"scale":[1,1,1],"angles":[0,0,0],"visible":)" +
+             std::string(area_visible_json) +
+             R"(},{"id":2,"name":"Cover","parent":1,"image":"models/tile.json",)"
+             R"("origin":[0,0,0],"scale":[0.5,0.5,1],"angles":[0,0,0],"visible":true},)"
+             R"({"id":3,"name":"marker","image":"models/tile.json","origin":[30,128,0],)"
+             R"("scale":[0.1,0.1,1],"angles":[0,0,0],"visible":true}]})");
+    return project;
+}
+
+/// The group hides itself on `PLAYBACK_STOPPED`, as the templates' do, after a
+/// start that shows it: whatever `init` does, the player's state decides.
+constexpr const char* kHideWhenStoppedVisible =
+    R"({"value":true,"script":"export function init(value) { thisLayer.visible = true; }\n)"
+    R"(export function mediaPlaybackChanged(event) { )"
+    R"(thisLayer.visible = event.state !== MediaPlaybackEvent.PLAYBACK_STOPPED; }"})";
+
+std::array<int, 3> RgbAt(const RendererPicture& picture, std::size_t x, std::size_t y)
+{
+    const std::size_t i = (y * picture.width + x) * 3u;
+    return { picture.rgb[i], picture.rgb[i + 1], picture.rgb[i + 2] };
+}
+
+TEST_F(MetalSceneDraw, AMediaWidgetIsHiddenWhileNothingPlaysOnBothRenderers)
+{
+    // Wallpaper Engine tells a scene when nothing plays, and a widget that
+    // hides itself on `PLAYBACK_STOPPED` is gone from the first frame, the
+    // cards parented to it with it. This scene has no player and the setting
+    // off, which is how the app starts every wallpaper: it is still a scene
+    // with nothing playing, not one that has not been told.
+    std::map<bool, RendererPicture> pictures;
+    for (const bool native : { false, true }) {
+        const std::string name    = native ? "media-idle-native" : "media-idle-compat";
+        const auto        project = WriteMediaWidgetFixture(root_ / name, kHideWhenStoppedVisible);
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+        if (native) {
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+        }
+        pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+        ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+        ASSERT_EQ(pictures[native].rgb.size(), 384u * 256u * 3u);
+        EXPECT_EQ(loaded.scene->runtime->scriptErrorCount(), 0u);
+    }
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        const auto& picture = pictures[native];
+        EXPECT_EQ(RgbAt(picture, 192, 128), (std::array<int, 3> { 0, 0, 0 }))
+            << "the widget's card stayed on screen though nothing plays";
+        EXPECT_NE(RgbAt(picture, 30, 128), (std::array<int, 3> { 0, 0, 0 }))
+            << "the scene drew nothing at all, so the check above says nothing";
+    }
+    EXPECT_EQ(pictures[true].rgb, pictures[false].rgb);
+}
+
+TEST_F(MetalSceneDraw, AMediaWidgetShowsWhileSomethingPlaysOnBothRenderers)
+{
+    // The counterpart: with a player that is playing, the same widget is on
+    // screen, so the idle state is a default and not a rule. The event comes
+    // before the first frame, as a replay to a scene that has just attached.
+    std::map<bool, RendererPicture> pictures;
+    for (const bool native : { false, true }) {
+        const std::string name    = native ? "media-playing-native" : "media-playing-compat";
+        const auto        project = WriteMediaWidgetFixture(root_ / name, kHideWhenStoppedVisible);
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+        if (native) {
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+        }
+        loaded.scene->runtime->SetMediaIntegrationEnabled(true);
+        loaded.scene->runtime->DispatchMediaEventJson(R"({"type":"mediaPlaybackChanged","state":1})");
+        pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+        ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+        ASSERT_EQ(pictures[native].rgb.size(), 384u * 256u * 3u);
+    }
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        const auto centre = RgbAt(pictures[native], 192, 128);
+        EXPECT_NEAR(centre[0], 128, 3) << "the widget's card is missing while something plays";
+        EXPECT_NEAR(centre[1], 128, 3);
+        EXPECT_NEAR(centre[2], 64, 3);
+    }
+    EXPECT_EQ(pictures[true].rgb, pictures[false].rgb);
+}
+
+TEST_F(MetalSceneDraw, ANoMusicPlaceholderShowsWhileNothingPlaysOnBothRenderers)
+{
+    // The other way round: a group that starts hidden and shows itself on
+    // `PLAYBACK_STOPPED` is a "nothing playing" placeholder. It has to appear
+    // on its own, with no player to tell it, which also means a layer the first
+    // graph left out is brought in by a script that runs after the graph.
+    const std::string placeholder =
+        R"({"value":false,"script":"export function mediaPlaybackChanged(event) { )"
+        R"(thisLayer.visible = event.state === MediaPlaybackEvent.PLAYBACK_STOPPED; }"})";
+    std::map<bool, RendererPicture> pictures;
+    for (const bool native : { false, true }) {
+        const std::string name    = native ? "media-placeholder-native" : "media-placeholder-compat";
+        const auto        project = WriteMediaWidgetFixture(root_ / name, placeholder);
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+        if (native) {
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+        }
+        pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+        ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+        ASSERT_EQ(pictures[native].rgb.size(), 384u * 256u * 3u);
+    }
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        const auto centre = RgbAt(pictures[native], 192, 128);
+        EXPECT_NEAR(centre[0], 128, 3) << "the placeholder never appeared though nothing plays";
+        EXPECT_NEAR(centre[1], 128, 3);
+        EXPECT_NEAR(centre[2], 64, 3);
+    }
+    EXPECT_EQ(pictures[true].rgb, pictures[false].rgb);
+}
+
 TEST_F(MetalSceneDraw, ACompositingEffectSeesTheScreenUprightOnBothRenderers)
 {
     // An effect that composes a layer over the screen (Wallpaper Engine's

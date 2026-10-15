@@ -375,6 +375,20 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   `getVideoTexture().isPlaying()` reflects shared runtime pause/play state, so
   scripts that hide a layer during init can reveal it during update; `Vec*.mix`
   and `MediaPlaybackEvent` constants are available.
+- **A scene with no player is told nothing plays** — `scenescript_media_event_smoke`:
+  `SceneScriptMediaEventSmoke.ASceneNoPlayerFeedsIsToldNothingIsPlayingOnItsFirstTick`
+  (integration off and no event: the first tick delivers an empty
+  `mediaPropertiesChanged` and `PLAYBACK_STOPPED` once, and a real event is still
+  dropped), `.ARealStateTheSceneHeardBeforeItsFirstTickIsNotRepeatedAsIdle`,
+  `.TheIdleStateFillsInOnlyWhatNoRealEventSaid` (per event type) and
+  `.ARealEventAfterTheIdleStateIsDeliveredLikeAnyOther`; in `metal_scene_draw_smoke`
+  on both renderers `MetalSceneDraw.AMediaWidgetIsHiddenWhileNothingPlaysOnBothRenderers`
+  (a group hiding itself on `PLAYBACK_STOPPED` takes its parented card with it, after
+  an `init` that shows it), `.AMediaWidgetShowsWhileSomethingPlaysOnBothRenderers` and
+  `.ANoMusicPlaceholderShowsWhileNothingPlaysOnBothRenderers` (a hidden group that
+  shows itself on `PLAYBACK_STOPPED` is brought into the graph). Without the idle
+  state the media widget's cover and mascot stayed on screen for every user with media
+  integration off.
 - **Who hears a button's release** — `SceneSchema.APressedTransportButtonComesBackWhenItIsReleased`
   and `.AButtonThatShrinksWhileHeldStillGetsItsRelease`;
   `SceneScriptSoundLayerSmoke.LayerScriptReceivesCursorUpForItsPressAfterLeavingWindow`

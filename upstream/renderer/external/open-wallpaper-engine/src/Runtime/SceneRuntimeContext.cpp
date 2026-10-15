@@ -16,6 +16,7 @@
 #include "WPSoundParser.hpp"
 
 #include <Eigen/Geometry>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <array>
@@ -653,6 +654,9 @@ void SceneRuntimeContext::Tick(double frame_time) {
         auto* script = m_scene_scripts[index].script.get();
         if (script != nullptr) script->Tick(*m_host_context);
     }
+    // Once every script has started and before anything is drawn: a widget that
+    // hides itself on `PLAYBACK_STOPPED` is not on screen for a frame first.
+    DispatchIdleMediaState();
     ApplySceneZoomAnimation();
     // After every visibility and origin writer of this tick, scripts included,
     // so the shot shown is the one this tick left visible, at the origin this
@@ -3431,7 +3435,42 @@ bool SceneRuntimeContext::MediaIntegrationEnabled() const { return m_media_integ
 
 void SceneRuntimeContext::DispatchMediaEventJson(std::string_view event_json) {
     if (! m_media_integration_enabled || event_json.empty()) return;
+    if (m_media_idle_pending) NoteMediaEventTold(event_json);
     ForEachEventScript([&](auto* script) { script->DispatchMediaEventJson(event_json); });
+}
+
+void SceneRuntimeContext::NoteMediaEventTold(std::string_view event_json) {
+    const auto parsed = nlohmann::json::parse(event_json, nullptr, false);
+    if (! parsed.is_object()) return;
+    const auto type = parsed.find("type");
+    if (type == parsed.end() || ! type->is_string()) return;
+    const auto& name = type->get_ref<const std::string&>();
+    if (name == "mediaPlaybackChanged") m_media_playback_told = true;
+    if (name == "mediaPropertiesChanged") m_media_properties_told = true;
+}
+
+// A scene starts in the state of a desktop with no player: no track and
+// `PLAYBACK_STOPPED`. Media widgets are authored visible and hide themselves on
+// that state, so a scene that was never told it would show every one of them,
+// covers and mascots included, whenever media integration is off (the app's
+// default) or no player runs. The state is the same one the app sends with
+// integration on and nothing playing, and it names no one's music, so it does
+// not wait for the user's consent: what a player really reports still does.
+// Only the first tick says it, and only what no real event said before it.
+void SceneRuntimeContext::DispatchIdleMediaState() {
+    if (! m_media_idle_pending) return;
+    m_media_idle_pending = false;
+    constexpr std::string_view kIdleProperties =
+        R"({"type":"mediaPropertiesChanged","title":"","artist":"","subTitle":"",)"
+        R"("albumTitle":"","albumArtist":"","genres":"","contentType":"music"})";
+    constexpr std::string_view kIdlePlayback = R"({"type":"mediaPlaybackChanged","state":0})";
+    // In the order a relay with no player sends them.
+    if (! m_media_properties_told) {
+        ForEachEventScript([&](auto* script) { script->DispatchMediaEventJson(kIdleProperties); });
+    }
+    if (! m_media_playback_told) {
+        ForEachEventScript([&](auto* script) { script->DispatchMediaEventJson(kIdlePlayback); });
+    }
 }
 
 void SceneRuntimeContext::RequestUserShortcut(std::string_view property_name,

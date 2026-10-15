@@ -706,6 +706,12 @@ private:
     };
     std::shared_ptr<WPSoundStream> LockSoundLayer(std::string_view name) const;
     void DispatchMediaPlaybackChanged(std::string_view name, bool playing);
+    /// Tells the scripts nothing is playing, once, for whatever no real media
+    /// event has said by the time the scene first runs. See `Tick`.
+    void DispatchIdleMediaState();
+    /// Notes which media event types a real event has already told the scripts,
+    /// until the idle state has been decided.
+    void NoteMediaEventTold(std::string_view event_json);
     void ApplyNodeTransform(std::string_view name);
     void ApplyAnchoredNodeTransform(std::string_view name);
     /// Re-derives the presented margins from the cursor viewport and moves every
@@ -918,6 +924,12 @@ private:
     std::mutex            m_audio_requirement_mutex;
     std::function<void()> m_audio_requirement_listener;
     bool m_media_integration_enabled { false };
+    /// The scene has not yet been told what it is like to have no player. The
+    /// first tick does, for each of the two states a widget hides itself on that
+    /// no real event reported first; real events after it replace it as usual.
+    bool m_media_idle_pending { true };
+    bool m_media_playback_told { false };
+    bool m_media_properties_told { false };
     bool m_scene_graph_mutated { false };
     /// The display's size or the language changed since the scripts were told.
     bool m_screen_resize_pending { false };

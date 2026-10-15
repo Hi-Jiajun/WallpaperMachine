@@ -96,6 +96,20 @@ Color arrays are exposed as `Vec3` (`.x` / `.y` / `.z`). Artwork is uploaded as 
 before `mediaThumbnailChanged` so `$mediaThumbnail` is valid when the script reads
 it.
 
+**Idle state.** Every scene starts as a desktop with no player, with or without the
+setting. On its first tick, after its scripts have started and before the first frame,
+the runtime tells them `mediaPropertiesChanged` with an empty track (the same object
+the app sends with the setting on and nothing playing) and `mediaPlaybackChanged` with
+`PLAYBACK_STOPPED`. Wallpaper Engine's media widgets are authored visible and hide on
+`PLAYBACK_STOPPED`, so without this every user with the setting off (the default) saw
+their covers and mascots on screen all the time. The idle state reveals nothing about
+what is playing, so it does not wait for consent: what a player really reports is
+still dropped while the setting is off. It is said once, and only for an event type no
+real event had said before that tick (the replay of the current state to a scene that
+has just attached, with the setting on, wins); a real event afterwards replaces it
+like any other. No timeline or thumbnail event is sent, as for a web page with no
+player.
+
 **Covers.** A new cover is pixels, not a new scene: `PublishSystemMediaArtwork`
 replaces the image behind `$mediaThumbnail` and moves the outgoing one to
 `$mediaPreviousThumbnail`, which is what a wallpaper cross-fades from. Each

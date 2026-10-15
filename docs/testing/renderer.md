@@ -179,7 +179,7 @@ audio device):
 | `WE_TEST_CLICK_OFFSET` | `offscreen_scene_probe` | World-space `"dx dy"` added to the click layer's origin, to hit a covered or transparent texel instead of the centre |
 | `WE_TEST_CLICK_VIEWPORT` | `offscreen_scene_probe` | `"<px_w>x<px_h>@<scale>:<fill\|fit\|stretch\|none>"`; maps the click the way a desktop does — the presented viewport is published and the cursor arrives window-normalized — instead of handing the runtime a world position, so hit testing is exercised against a real display's geometry |
 | `WE_TEST_INPUT_JSON` | both scene probes | Ordered synthetic pointer events: `[{"frame":600,"layer":42,"inside":true,"buttons":1},{"frame":601,"buttons":0}]`. `layer` follows that parsed node's projected centre; `x`/`y` supply normalized coordinates instead. An exit uses `inside:false` |
-| `WE_TEST_MEDIA_EVENTS` | both scene probes | JSON array of SceneScript media event objects, dispatched in order after the warm-up ticks. Enables media integration for the run, so a wallpaper that only draws its player while something is playing can be rendered without a system media source or Automation permission |
+| `WE_TEST_MEDIA_EVENTS` | both scene probes | JSON array of SceneScript media event objects, dispatched in order after the warm-up ticks. Enables media integration for the run, so a wallpaper that only draws its player while something is playing can be rendered without a system media source or Automation permission. Without events a scene is still told on its first tick that nothing plays, as in the app, so a widget that hides itself on `PLAYBACK_STOPPED` is hidden |
 | `WE_TEST_MEDIA_ARTWORK` | both scene probes | `<width>x<height>:<rrggbb>`; publishes one opaque cover through the same path the app uses, so `$mediaThumbnail` and `$mediaPreviousThumbnail` carry a color that is legible in the rendered frame. Without it a background drawn from the current cover renders flat grey on both backends and a comparison says nothing |
 | `WE_TEST_MEDIA_JSON` | `offscreen_scene_probe` | A JSON array of media events dispatched right after the parse, before the warm-up ticks |
 | `WE_TEST_AUDIO_HZ` | both scene probes | Synthetic PCM at `0..24000` Hz; `0` means silence. Each frame submits one analysis window (1,600 frames at 48 kHz) through the same service the desktop tap feeds, and the Metal gate enables audio response for the run. The 64 bands follow Wallpaper Engine's layout: one ~23 Hz bin each up to about 400 Hz (band 0 ≈ 23 Hz, band 3 ≈ 95 Hz), then widening to ~15 kHz, so a shader reading only the lowest bands needs a bass tone, not 440 Hz |
@@ -745,6 +745,14 @@ into private textures; the three that draw skip visibly without a Metal device.
   `general` fog keys bound to user properties keep the value the scene loaded
   with. Wallpaper Engine's user-level post-processing quality (off, LDR, HDR,
   display HDR) is fixed at its highest SDR level.
+- **A layer's `scale` and `angles` timelines are not followed, and neither is an `origin`
+  timeline on an origin that also has a script or a user property.** The layer keeps the
+  value the scene file stores (`ResolveVec3Setting` has no animation path;
+  `RegisterNodeOriginSetting` registers only the script or property). A relative,
+  start-paused timeline whose first frame moves or shrinks a layer therefore shows its
+  rest value from the first frame. Whether Wallpaper Engine applies the first frame of
+  such a paused timeline before anything plays has not been established, so no rule is
+  implemented.
 - **The `perspective` flag of an image or text layer is not applied.** `WPTextObject`
   and `WPModelObject` read it, `WPImageObject` does not, and only models use it: image
   and text layers always draw through the orthographic camera, so a layer at a depth
