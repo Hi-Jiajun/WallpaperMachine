@@ -71,7 +71,10 @@ surface-coloured gap so blue artwork does not hide it. Each grid fills its width
 many columns as fit at a preferred tile size (140 points, 14-point gaps) that shrinks
 with the column, and never fewer than three, so a narrower window shows smaller tiles
 and more of them; the column count is a pure function of the width. The grids are lazy:
-only the rows near the screen are built. On Installed, the target display's tile wears an
+only the rows near the screen are built. While a trackpad or wheel scroll (and its glide)
+is under way, tiles ignore the pointer: no lift, no hover controls, no live preview; they
+come back under the pointer when the scroll stops, so content moving under a still pointer
+does not cost frames. On Installed, the target display's tile wears an
 accent **Active** capsule with a small equalizer that moves only while playback runs
 and the window is on screen; a wallpaper that another enabled, independent display shows
 wears a dark **Other display** capsule.

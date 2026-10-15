@@ -39,12 +39,25 @@ struct PropertyTopLineLayout: Layout {
   }
 
   /// Where each part goes for a width.
-  private struct Arrangement {
+  fileprivate struct Arrangement {
     var size: CGSize
     var label: CGRect
     var marks: CGRect
     var control: CGRect
   }
+
+  /// The parts' measurements, kept until a part changes (SwiftUI then makes a new cache).
+  ///
+  /// SwiftUI asks a row for its size several times in one layout pass, and lays the open inspector
+  /// out again whenever anything in the window changes. Measuring the parts afresh each time (the
+  /// control is often an AppKit slider) made the inspector most of the panel's main-thread time and
+  /// dropped frames while the grid beside it scrolled.
+  struct Cache {
+    fileprivate var ideal: (label: CGSize, marks: CGSize, control: CGSize)?
+    fileprivate var arrangements: [CGFloat: Arrangement] = [:]
+  }
+
+  func makeCache(subviews: Subviews) -> Cache { Cache() }
 
   private func parts(_ subviews: Subviews) -> (label: LayoutSubview?, marks: LayoutSubview?, control: LayoutSubview?) {
     (
@@ -53,16 +66,37 @@ struct PropertyTopLineLayout: Layout {
     )
   }
 
-  private func arrangement(width proposed: CGFloat?, _ subviews: Subviews) -> Arrangement {
+  private func arrangement(width proposed: CGFloat?, _ subviews: Subviews, cache: inout Cache)
+    -> Arrangement
+  {
     let (label, marks, control) = parts(subviews)
-    let marksSize = marks?.sizeThatFits(.unspecified) ?? .zero
-    let controlSize = control?.sizeThatFits(.unspecified) ?? .zero
-    let labelIdeal = label?.sizeThatFits(.unspecified) ?? .zero
+    let measured =
+      cache.ideal
+      ?? (
+        label?.sizeThatFits(.unspecified) ?? .zero, marks?.sizeThatFits(.unspecified) ?? .zero,
+        control?.sizeThatFits(.unspecified) ?? .zero
+      )
+    cache.ideal = measured
+    let (labelIdeal, marksSize, controlSize) = measured
     let marksGap = marksSize.width > 0 ? spacing : 0
     let controlGap = controlSize.width > 0 ? spacing : 0
     // No width, or an unbounded one, asks for the ideal size: everything on one line.
     let ideal = labelIdeal.width + marksGap + marksSize.width + controlGap + controlSize.width
     let width = proposed.map { $0.isFinite ? $0 : ideal } ?? ideal
+    if let known = cache.arrangements[width] { return known }
+    let made = arrangement(
+      width: width, label: label, control: control, labelIdeal: labelIdeal, marksSize: marksSize,
+      controlSize: controlSize)
+    cache.arrangements[width] = made
+    return made
+  }
+
+  private func arrangement(
+    width: CGFloat, label: LayoutSubview?, control: LayoutSubview?, labelIdeal: CGSize,
+    marksSize: CGSize, controlSize: CGSize
+  ) -> Arrangement {
+    let marksGap = marksSize.width > 0 ? spacing : 0
+    let controlGap = controlSize.width > 0 ? spacing : 0
     let beside = Self.fitsBeside(
       label: labelIdeal.width, marks: marksSize.width + reserve, control: controlSize.width,
       spacing: spacing, width: width)
@@ -101,14 +135,14 @@ struct PropertyTopLineLayout: Layout {
         height: controlHeight))
   }
 
-  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-    arrangement(width: proposal.width, subviews).size
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
+    arrangement(width: proposal.width, subviews, cache: &cache).size
   }
 
   func placeSubviews(
-    in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache
   ) {
-    let arrangement = arrangement(width: bounds.width, subviews)
+    let arrangement = arrangement(width: bounds.width, subviews, cache: &cache)
     let (label, marks, control) = parts(subviews)
     func place(_ subview: LayoutSubview?, _ frame: CGRect) {
       subview?.place(

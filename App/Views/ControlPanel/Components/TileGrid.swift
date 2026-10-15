@@ -41,6 +41,12 @@ enum TileGridLayout {
 /// what the window shows. Every cell can take keyboard focus: the arrow keys move between cells (up
 /// and down by a whole row), Home and End jump to the first and last, and Return or Space calls
 /// `onActivate`. A cell draws its own focus ring from `\.isFocused`; `WallpaperTile` does.
+///
+/// While the person scrolls (a trackpad or wheel gesture, and the glide after it) the cells take
+/// no pointer: content moving under a still pointer otherwise has every cell's hover, gestures
+/// and cursor tested again at every frame, about a fifth of the main thread's time while
+/// scrolling. Hover comes back where the pointer rests once the scroll stops. A scroll the grid
+/// makes itself (a sweep's autoscroll, a focused cell brought into view) keeps them.
 struct TileGrid<Item: Identifiable, Cell: View>: View where Item.ID: Hashable {
   let items: [Item]
   let spacing: CGFloat
@@ -49,6 +55,7 @@ struct TileGrid<Item: Identifiable, Cell: View>: View where Item.ID: Hashable {
   let cell: (Item) -> Cell
 
   @State private var width: CGFloat = 0
+  @State private var isUserScrolling = false
   @FocusState private var focused: Item.ID?
 
   init(
@@ -84,6 +91,11 @@ struct TileGrid<Item: Identifiable, Cell: View>: View where Item.ID: Hashable {
           }
         }
         .padding(insets)
+        .allowsHitTesting(!isUserScrolling)
+      }
+      .onScrollPhaseChange { _, phase in
+        let scrolling = phase == .interacting || phase == .decelerating
+        if scrolling != isUserScrolling { isUserScrolling = scrolling }
       }
       .onGeometryChange(for: CGFloat.self) {
         $0.size.width

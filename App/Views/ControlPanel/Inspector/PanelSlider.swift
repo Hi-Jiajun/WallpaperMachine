@@ -29,6 +29,17 @@ final class PanelNSSlider: NSSlider {
 
   /// Whether the pointer is tracking the thumb now.
   private(set) var isTrackingPointer = false
+  private var measuredHeight: (size: NSControl.ControlSize, height: CGFloat)?
+
+  /// The slider's own height, measured once for its control size. `intrinsicContentSize` has the
+  /// cell measure itself on every call, and SwiftUI asks at every layout pass of the inspector, so
+  /// asking it each time was a large share of the panel's main-thread time.
+  var naturalHeight: CGFloat {
+    if let measuredHeight, measuredHeight.size == controlSize { return measuredHeight.height }
+    let height = intrinsicContentSize.height
+    measuredHeight = (controlSize, height)
+    return height
+  }
   private var valueAtBegin = 0.0
   private var lastDragged: Double?
 
@@ -178,6 +189,6 @@ struct PanelSlider: NSViewRepresentable {
   func sizeThatFits(_ proposal: ProposedViewSize, nsView: PanelNSSlider, context: Context)
     -> CGSize?
   {
-    CGSize(width: proposal.width ?? 120, height: nsView.intrinsicContentSize.height)
+    CGSize(width: proposal.width ?? 120, height: nsView.naturalHeight)
   }
 }
