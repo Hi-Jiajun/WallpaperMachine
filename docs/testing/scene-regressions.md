@@ -761,9 +761,10 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   padded by a tenth of a percent so a skybox scaled to exactly `far` is not
   clipped off-centre. An image layer's `alpha` `update` script or user property
   is applied to `g_Alpha`, not only an animation timeline. Perspective particle
-  billboards keep object scale while authored 2D canvases keep their pixel-size
-  compensation; quantity remains the documented emission-rate factor, not a
-  replacement for the authored maximum count.
+  billboards scale with their layer, in an authored 2D canvas as in 3D, since
+  Wallpaper Engine draws them through the layer's model matrix, unless the particle
+  file is `worldspace`, which it draws through none; quantity remains the documented
+  emission-rate factor, not a replacement for the authored maximum count.
 - **Layer textures tiled across models** — `LayerTextureReference.CompositeAddressingFollowsTheSourceLayersClampUvs`
   in `layer_texture_reference_test`. `_rt_imageLayerComposite_<id>` repeats when
   the source layer says `"clampuvs": false` and clamps when it is true or absent;
@@ -986,7 +987,8 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   `ControlpointOperators.*` and `Collision.*`: the integrators and damping, that only
   the movement operators advance a particle (a file without them keeps its particles
   still) and that they keep the previous position only while an operator asks for it,
-  gravity kept in screen axes with the layer's scale, falloff and flags, a delete
+  gravity kept in screen axes with the layer's scale in a layer-space system (a
+  `worldspace` system's gravity is left as written), falloff and flags, a delete
   threshold tested on the path of the last step, the instance speed override on the
   attract pull, turbulence speed and position-oscillation frequency (and the file flag
   that ignores it), the oscillator formula and blend window, per-particle turbulence,
@@ -995,10 +997,15 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   default sphere origin of a pixel scene, and flag 1 carrying a plane or sphere with a
   turned control point). `Prewarm.*`: a start time
   populates the first frame, the 0.05/0.2 s step, the bound on a huge start time, an
-  event child's instance (and the number of steps it costs, capped at 6000) and a
-  static child. `EventFollow.*`: a follower keeps its
+  event child's instance (and the number of steps it costs, capped at 6000), a
+  static child, and a worldspace system or a pinned control point prewarmed by the
+  matrix its layer ends up with under its parent groups. `EventFollow.*`: a follower keeps its
   particles after the followed one ends and stays where it ended. `WorldSpace.*`:
-  live particles stay in the scene when the layer moves or turns. `ParseLevel.*`:
+  live particles and their velocity stay in the scene when the layer moves, turns
+  or is rescaled, a follower hangs where the layer's matrix puts its worldspace
+  parent's particle, every renderer's node of a worldspace system draws from the
+  layer's origin alone, and a layer under a scaled group is spread by the whole
+  chain. `ParseLevel.*`:
   renderer defaults, truncation and clamps, smoothing only without scrolling,
   override control points, pinned control points, the pixel-canvas flag and the
   particle defaults a scene gets with and without a projection key. `InstanceOverride.*`:
@@ -1015,7 +1022,7 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   simulated seconds of every particle file there, no non-finite value, never more than
   `maxcount`; `ParticleCorpus.PrewarmCostOfTheLocalLibraryIsReported` times the prewarm of
   every file with its own start time and prints the slowest. `particle_mouse_controlpoint_test` keeps the audio-emitter,
-  override, mouse control point and size-compensation cases, with the attract,
+  override, mouse control point and layer-scale size cases (`RawParticleSizeIsTheAuthoredSizeWhateverTheLayerScale`, `AuthoredCanvasBillboardsScaleWithTheirLayer`), with the attract,
   movement and audio-band cases updated to the rules above.
 - **Rope and rope-trail geometry** — `particle_rope_geometry_test` and
   `RopeGeometry.ATrailIsDrawnAsOnePiecePerSubdivisionBetweenItsRecordedPoints`
@@ -1382,6 +1389,41 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   placeholders. `MetalSceneDraw.ALayerWhoseEffectsAScriptHasAllSwitchedOffIsStillDrawnOnBothRenderers`
   switches a layer's only effect off: the passthrough at the end of the chain
   must still draw the layer, inside its bounds.
+- **Worldspace particle files** — a `worldspace` system is in scene units from its
+  layer's origin and is drawn through that origin alone.
+  `ParticleMouseControlpoint.AWorldspaceSystemKeepsItsBillboardSizeWhateverItsLayerScale`
+  draws one billboard under a layer scaled 0.25, 24 by 1 and flipped, and turned,
+  and requires the authored size and an identity draw matrix apart from the origin;
+  `ParticleMouseControlpoint.AWorldspaceEmitterStretchesItsSpawnsAndTheirHeadingButNotTheirSpeed`
+  gives the emitter a layer matrix and requires the spawn offset and the heading
+  stretched, the origin not, and the speed as authored;
+  `ParticleMouseControlpoint.AWorldspaceLayersMatrixScalesTheVelocityInitializersDraw`
+  requires a `velocityrandom` velocity scaled by that matrix in a worldspace system
+  and left alone in a layer-space one;
+  `SceneSchema.AWorldspaceLayerStretchesItsSpawnsButNotTheSpeedOfItsParticles`
+  parses a layer 24 times wider than tall and compares the drawn first step of a
+  layer-space file (about 17 times the authored length, the speed stretched with the
+  layer) with a `worldspace` one (the authored length);
+  `ParticleMouseControlpoint.AWorldspaceSystemsControlpointsAreWhereItsLayersMatrixPutsThem`
+  turns and scales a layer and requires an authored control point offset to be the
+  layer's matrix applied to it, a cursor-linked one the cursor less the layer's origin,
+  and one pinned to the world (never the first) the scene place less the origin with
+  none of the layer's matrix; `ParticleMouseControlpoint.AWorldspaceEmitterOnAPinnedControlpointIsNotStretchedByItsLayer`
+  requires an emitter on such a control point to spread and launch its particles as
+  authored, and one on an ordinary control point to follow the layer;
+  `WorldSpace.ARotatingOrScalingLayerLeavesLiveParticlesAndTheirVelocityAlone`,
+  `WorldSpace.AFollowerHangsWhereItsLayersMatrixPutsAWorldspaceParentsParticle`,
+  `WorldSpace.EveryRendererOfAFileIsDrawnFromItsLayersOriginAloneOrThroughItsWholeMatrix`
+  and `WorldSpace.ALayerUnderAScaledGroupIsDrawnFromItsOriginAndSpreadByTheWholeChain`
+  (in `particle_parity_test`) keep live particles and velocities as they are when the
+  layer turns or is rescaled, hang a follower where the layer's matrix puts the
+  parent's particle, give a file's second renderer the same draw matrix as its first,
+  and spread the particles of a layer under a scaled group by the group too;
+  `Prewarm.AWorldspaceSystemIsPrewarmedAgainstTheMatrixItsLayerEndsUpWith` and
+  `Prewarm.AStaticChildIsPrewarmedOnceItsLayerHasJoinedItsGroup` require the particles
+  a prewarm spawns to sit where the layer's finished matrix, its groups' included,
+  puts them; `Movement.FlagOneGravityOfAWorldspaceSystemNeedsNoTurningByItsLayer`
+  requires gravity to be left as written.
 - **Hidden layers scripts reach** — `MetalSceneDraw.AHiddenLayersScriptsStillRunOnBothRenderers`
   drives an effect from a value a hidden layer's script writes to `shared`, and
   `MetalSceneDraw.AScriptCanShowAHiddenLayerItNamesOnBothRenderers` shows a hidden

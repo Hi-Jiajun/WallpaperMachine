@@ -1256,6 +1256,39 @@ TEST(Movement, FlagOneGravityKeepsTheLayersScale) {
     EXPECT_NEAR(subsystem.Instances()[0]->Particles()[0].velocity.y(), -2.0f, 1.0e-4f);
 }
 
+TEST(Movement, FlagOneGravityOfAWorldspaceSystemNeedsNoTurningByItsLayer) {
+    // A worldspace system is already in the scene's own axes: gravity authored in
+    // them is not carried through the layer's matrix, whatever the layer's scale.
+    for (const bool world_space : { true, false }) {
+        SCOPED_TRACE(world_space);
+        Scene scene;
+        scene.frameTime = 0.1;
+        ParticleSystem system(scene);
+        system.gener = std::make_unique<SilentGener>();
+        ParticleSubSystem subsystem(system, std::make_shared<SceneMesh>(MeshUpdate::PerFrame), 4, 1.0,
+                                    1, 1.0, ParticleSubSystem::SpawnType::STATIC,
+                                    [](const Particle&, const ParticleRawGenSpec&) {});
+        auto owner = std::make_shared<SceneNode>();
+        owner->SetScale(Eigen::Vector3f(2.0f, 2.0f, 2.0f));
+        subsystem.SetOwnerNode(owner);
+        subsystem.SetWorldSpace(world_space);
+        subsystem.SetNeedsWorldAxes(true);
+        subsystem.AddOperator(
+            MakeOperator({ { "name", "movement" }, { "gravity", "0 -10 0" }, { "flags", 1 } }));
+        subsystem.AddEmitter([](std::vector<Particle>& particles, std::vector<ParticleInitOp>&,
+                                uint32_t, double, std::span<const ParticleControlpoint>) {
+            if (! particles.empty()) return;
+            Particle p;
+            PM::InitLifetime(p, 100.0f);
+            particles.push_back(p);
+        });
+        subsystem.Emitt();
+        ASSERT_EQ(subsystem.Instances().size(), 1u);
+        EXPECT_NEAR(subsystem.Instances()[0]->Particles()[0].velocity.y(),
+                    world_space ? -1.0f : -2.0f, 1.0e-4f);
+    }
+}
+
 TEST(AngularMovement, DragDampsTheSpinInsteadOfPullingTheAngleBack) {
     const auto op = MakeOperator({ { "name", "angularmovement" }, { "drag", 0.5 } });
     std::array<Particle, 1> particles { LivingParticle() };
@@ -2061,6 +2094,62 @@ TEST(Prewarm, AStaticChildPrewarmsAtConstructionWithItsOwnStartTime) {
     EXPECT_NEAR(static_cast<double>(LiveParticles(*instances[0]).size()), 20.0, 1.0);
 }
 
+TEST(Prewarm, AWorldspaceSystemIsPrewarmedAgainstTheMatrixItsLayerEndsUpWith) {
+    // A layer joins its parent group after its particle system is built, and
+    // the layer's matrix shapes where a worldspace system's particles are born.
+    // The particle the prewarm spawns must sit where one born on the first frame
+    // does: 5 units out, stretched by the layer's 2 and the group's 3, not by
+    // the layer's 2 alone. A file that is not worldspace keeps its particles in
+    // the layer's own space, where the matrix above changes nothing.
+    for (const auto& [flags, out] : { std::pair<int, float> { 1, 30.0f }, { 0, 5.0f } }) {
+        SCOPED_TRACE(flags);
+        ParticleScene scene(
+            { { "/particle.json",
+                ParticleFile(R"({"name":"boxrandom","id":1,"rate":0,"instantaneous":1,)"
+                             R"("directions":"1 0 0","distancemin":"5 0 0","distancemax":"5 0 0"})",
+                             R"("maxcount":4,"starttime":1,"flags":)" + std::to_string(flags)) } },
+            R"([{"id":10,"name":"group","origin":"100 50 0","scale":"3 3 1","visible":true},)"
+            R"({"id":1,"name":"layer","parent":10,"particle":"particle.json","visible":true,)"
+            R"("origin":"20 10 0","scale":"2 2 1"}])");
+        ASSERT_NE(scene.scene, nullptr);
+        ASSERT_EQ(scene.Sub().WorldSpace(), flags == 1);
+        ASSERT_EQ(scene.Sub().Instances().size(), 1u);
+        const auto live = LiveParticles(*scene.Sub().Instances()[0]);
+        ASSERT_EQ(live.size(), 1u);
+        EXPECT_NEAR(std::abs(live[0].position.x()), out, 1.0e-3f);
+        EXPECT_NEAR(live[0].position.y(), 0.0f, 1.0e-3f);
+    }
+}
+
+TEST(Prewarm, AStaticChildIsPrewarmedOnceItsLayerHasJoinedItsGroup) {
+    // A pinned control point is a place in the scene, carried into the layer's
+    // space through the layer's matrix. The static child hangs under the layer
+    // node, itself under a group, and the child's prewarm reads that whole chain.
+    ParticleScene scene(
+        { { "/particle.json",
+            ParticleFile(R"({"name":"sphererandom","id":1,"rate":0,"distancemax":0})",
+                         R"("maxcount":4,"starttime":0,"children":[{"name":"child.json","type":"static"}])") },
+          { "/child.json",
+            ParticleFile(R"({"name":"boxrandom","id":2,"rate":0,"instantaneous":1,"controlpoint":1,)"
+                         R"("directions":"0 0 0"})",
+                         R"("maxcount":4,"starttime":1,"controlpoint":[{"id":0},)"
+                         R"({"id":1,"flags":2,"offset":"700 400 0"}])") } },
+        R"([{"id":10,"name":"group","origin":"100 50 0","scale":"2 2 1","visible":true},)"
+        R"({"id":1,"name":"layer","parent":10,"particle":"particle.json","visible":true,)"
+        R"("origin":"20 10 0"}])");
+    ASSERT_NE(scene.scene, nullptr);
+    ASSERT_EQ(scene.Sub().Children().size(), 1u);
+    const auto& instances = scene.Sub().Children()[0]->Instances();
+    ASSERT_EQ(instances.size(), 1u);
+    const auto live = LiveParticles(*instances[0]);
+    ASSERT_EQ(live.size(), 1u);
+    // The group puts the layer at 100 + 2 * 20 = 140, 50 + 2 * 10 = 70, drawn
+    // twice as large: the scene place 700, 400 is 280, 165 from it in the
+    // layer's own units.
+    EXPECT_NEAR(live[0].position.x(), 280.0f, 1.0e-2f);
+    EXPECT_NEAR(live[0].position.y(), 165.0f, 1.0e-2f);
+}
+
 /// How many simulation steps one event child instance runs through when it is
 /// spawned, for a child file of `maxcount` particles and `starttime` seconds.
 int StepsOfAnEventChildPrewarm(double starttime, u32 maxcount) {
@@ -2224,7 +2313,10 @@ TEST(WorldSpace, LiveParticlesStayPutWhenTheLayerMovesAndNewOnesFollowIt) {
     }
 }
 
-TEST(WorldSpace, ARotatingLayerTurnsTheVelocityOfLiveParticlesBack) {
+TEST(WorldSpace, ARotatingOrScalingLayerLeavesLiveParticlesAndTheirVelocityAlone) {
+    // The particles of a worldspace system are in the scene's own axes and
+    // units: turning or rescaling their layer changes neither where they are nor
+    // which way, or how fast, they go. Only the layer's origin carries them.
     Scene scene;
     scene.frameTime = 0.01;
     ParticleSystem system(scene);
@@ -2242,17 +2334,112 @@ TEST(WorldSpace, ARotatingLayerTurnsTheVelocityOfLiveParticlesBack) {
         spawned = true;
         Particle p;
         PM::InitLifetime(p, 100.0f);
+        p.position = { 5.0f, 7.0f, 0.0f };
         p.velocity = { 1.0f, 0.0f, 0.0f };
         particles.push_back(p);
     });
     subsystem.Emitt();
     owner->SetRotation(Eigen::Vector3f(0.0f, 0.0f, static_cast<float>(M_PI / 2.0)));
+    owner->SetScale(Eigen::Vector3f(24.0f, 1.0f, 1.0f));
     subsystem.Emitt();
     const auto& p = subsystem.Instances()[0]->Particles()[0];
-    // Still heading along world +x, which is local -y or +y after a quarter
-    // turn: its length is unchanged and it no longer points along local x.
-    EXPECT_NEAR(p.velocity.norm(), 1.0f, 1.0e-3f);
-    EXPECT_NEAR(p.velocity.x(), 0.0f, 1.0e-3f);
+    EXPECT_NEAR(p.velocity.x(), 1.0f, 1.0e-4f);
+    EXPECT_NEAR(p.velocity.y(), 0.0f, 1.0e-4f);
+    EXPECT_NEAR(p.position.x(), 5.0f, 1.0e-4f);
+    EXPECT_NEAR(p.position.y(), 7.0f, 1.0e-4f);
+}
+
+TEST(WorldSpace, AFollowerHangsWhereItsLayersMatrixPutsAWorldspaceParentsParticle) {
+    // A worldspace parent's particles are scene units from the layer's origin;
+    // its follower lives in the layer's own space and is drawn through the
+    // layer's matrix, so it is hung where that matrix puts the same place.
+    for (const bool world_space : { true, false }) {
+        SCOPED_TRACE(world_space);
+        FollowerRig rig;
+        auto        owner      = std::make_shared<SceneNode>();
+        auto        child_node = std::make_shared<SceneNode>();
+        owner->AppendChild(child_node);
+        owner->SetTranslate(Eigen::Vector3f(10.0f, 0.0f, 0.0f));
+        owner->SetScale(Eigen::Vector3f(2.0f, 2.0f, 1.0f));
+        rig.parent->SetOwnerNode(owner);
+        rig.parent->SetWorldSpace(world_space);
+        rig.child->SetOwnerNode(child_node);
+        for (int i = 0; i < 12; ++i) rig.parent->Emitt();
+        ASSERT_EQ(rig.child->Instances().size(), 2u);
+        const float anchored = rig.child->Instances()[1]->GetBoundedData().pos.x();
+        // The second parent particle is 100 out. In the layer's space that is
+        // already the follower's coordinate; in scene units it is 50 of them.
+        EXPECT_NEAR(anchored, world_space ? 50.0f : 100.0f, 1.0e-3f);
+        child_node->UpdateTrans();
+        const Eigen::Vector3d hung =
+            (child_node->ModelTrans() * Eigen::Vector4d(anchored, 0.0, 0.0, 1.0)).head<3>();
+        EXPECT_NEAR(hung.x(), world_space ? 10.0 + 100.0 : 10.0 + 200.0, 1.0e-3);
+    }
+}
+
+TEST(WorldSpace, EveryRendererOfAFileIsDrawnFromItsLayersOriginAloneOrThroughItsWholeMatrix) {
+    // A file with two renderers draws its particles through two nodes, the
+    // second a child of the layer's that draws in the layer's own place. A
+    // worldspace system hands both the matrix that is only the layer's origin;
+    // any other system's nodes draw through the layer's whole matrix.
+    for (const bool world_space : { true, false }) {
+        SCOPED_TRACE(world_space);
+        ParticleScene scene(
+            { { "/particle.json",
+                ParticleFile(R"({"name":"sphererandom","id":1,"rate":0,"instantaneous":3,"distancemax":10})",
+                             std::string(R"("maxcount":8,"flags":)") + (world_space ? "1" : "0") +
+                                 R"(,"renderer":[{"name":"sprite"},{"name":"spritetrail"}])") } },
+            OneParticleObject(R"("scale":"24 1 1")"));
+        scene.Step();
+        SceneNode* layer = nullptr;
+        for (const auto& node : scene.scene->sceneGraph->GetChildren()) {
+            if (node != nullptr && node->Name() == "layer") layer = node.get();
+        }
+        ASSERT_NE(layer, nullptr);
+        ASSERT_NE(layer->Mesh(), nullptr);
+        ASSERT_EQ(layer->GetChildren().size(), 1u);
+        SceneNode& second = *layer->GetChildren().front();
+        ASSERT_NE(second.Mesh(), nullptr);
+        for (SceneNode* node : { layer, &second }) {
+            node->UpdateTrans();
+            const Eigen::Matrix4d drawn = node->RenderTrans();
+            EXPECT_NEAR(drawn(0, 0), world_space ? 1.0 : 24.0, 1.0e-9);
+            EXPECT_NEAR(drawn(1, 1), 1.0, 1.0e-9);
+            EXPECT_NEAR(drawn(0, 3), 320.0, 1.0e-9);
+            EXPECT_NEAR(drawn(1, 3), 180.0, 1.0e-9);
+        }
+    }
+}
+
+TEST(WorldSpace, ALayerUnderAScaledGroupIsDrawnFromItsOriginAndSpreadByTheWholeChain) {
+    // The matrix a worldspace system is born by is its layer's world matrix, its
+    // parent groups' included; the matrix it is drawn by is only where that puts
+    // the layer's origin.
+    ParticleScene scene(
+        { { "/particle.json",
+            ParticleFile(R"({"name":"boxrandom","id":1,"rate":0,"instantaneous":1,)"
+                         R"("directions":"1 0 0","distancemin":"5 0 0","distancemax":"5 0 0"})",
+                         R"("maxcount":4,"flags":1)") } },
+        R"([{"id":10,"name":"group","origin":"100 50 0","scale":"3 3 1","visible":true},)"
+        R"({"id":1,"name":"layer","parent":10,"particle":"particle.json","visible":true,)"
+        R"("origin":"20 10 0","scale":"2 2 1"}])");
+    scene.Step();
+    SceneNode* group = nullptr;
+    for (const auto& node : scene.scene->sceneGraph->GetChildren()) {
+        if (node != nullptr && node->Name() == "group") group = node.get();
+    }
+    ASSERT_NE(group, nullptr);
+    ASSERT_EQ(group->GetChildren().size(), 1u);
+    SceneNode& layer = *group->GetChildren().front();
+    layer.UpdateTrans();
+    const Eigen::Matrix4d drawn = layer.RenderTrans();
+    EXPECT_TRUE(Eigen::Matrix3d(drawn.topLeftCorner<3, 3>()).isIdentity(1.0e-12));
+    EXPECT_NEAR(drawn(0, 3), 100.0 + 3.0 * 20.0, 1.0e-9);
+    EXPECT_NEAR(drawn(1, 3), 50.0 + 3.0 * 10.0, 1.0e-9);
+    ASSERT_EQ(scene.Sub().Instances().size(), 1u);
+    const auto live = LiveParticles(*scene.Sub().Instances()[0]);
+    ASSERT_EQ(live.size(), 1u);
+    EXPECT_NEAR(std::abs(live[0].position.x()), 5.0 * 2.0 * 3.0, 1.0e-3);
 }
 
 TEST(WorldSpace, TheFlagIsReadFromTheParticleFile) {

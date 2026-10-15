@@ -264,6 +264,11 @@ struct ParseContext {
     std::unordered_map<int32_t, WPPuppetLayer>              layer_puppet_animations;
     std::unordered_set<int32_t>                             attached_layer_nodes;
     std::vector<int32_t>                                    layer_node_order;
+    /// Particle systems that have a prewarm to run, a child's before its parent's.
+    /// It waits for the finished scene graph: the matrix a system is born by is
+    /// its layer's world matrix, parent groups included, and a layer joins its
+    /// group only once every object exists.
+    std::vector<ParticleSubSystem*>                         pending_prewarms;
     std::vector<std::pair<std::string, std::string>>        pending_scene_scripts;
     std::unordered_map<std::string, uint32_t>               layer_name_counts;
     std::unordered_map<int32_t, std::string>                object_runtime_names;
@@ -557,6 +562,13 @@ void AttachRemainingLayerNodes(ParseContext& context) {
     for (const auto layer_id : context.layer_node_order) {
         AttachLayerNode(context, layer_id);
     }
+}
+
+// Runs the prewarms the particle layers queued, now that every layer sits under
+// its parent.
+void PrewarmParticleSystems(ParseContext& context) {
+    for (auto* system : context.pending_prewarms) system->Prewarm();
+    context.pending_prewarms.clear();
 }
 
 bool ParseLayerObject(const nlohmann::json& json, const nlohmann::json& objects,
@@ -1118,7 +1130,8 @@ void LoadOperator(ParticleSubSystem& pSys, const wpscene::Particle& wp,
 void LoadEmitter(ParticleSubSystem& pSys, const wpscene::Particle& wp,
                  const std::shared_ptr<const wpscene::ParticleInstanceoverride>& over,
                  bool ordered_slots, Scene* scene, i32 cp_start_index = 0,
-                 Eigen::Vector3f world_scale = Eigen::Vector3f::Ones()) {
+                 Eigen::Vector3f world_scale = Eigen::Vector3f::Ones(),
+                 bool in_scene_units = false) {
     bool sort = ordered_slots;
     for (const auto& em : wp.emitters) {
         if (em.audioprocessingmode != 0) {
@@ -1130,15 +1143,23 @@ void LoadEmitter(ParticleSubSystem& pSys, const wpscene::Particle& wp,
         }
         auto newEm = em;
         if (newEm.controlpoint >= 0) newEm.controlpoint += cp_start_index;
-        for (int i = 0; i < 3; ++i) {
-            const float scale = world_scale[i];
-            if (std::abs(scale) > 1.0e-6f) newEm.origin[i] /= scale;
+        // A layer's own worldspace system is already measured in scene units, so
+        // its emitter origin is left as authored; any other system is held at the
+        // scaled-down value the layer's matrix brings back.
+        if (! in_scene_units) {
+            for (int i = 0; i < 3; ++i) {
+                const float scale = world_scale[i];
+                if (std::abs(scale) > 1.0e-6f) newEm.origin[i] /= scale;
+            }
         }
-        pSys.AddEmitter(WPParticleParser::genParticleEmittOp(newEm, sort, over, [scene]() {
-            return scene != nullptr && scene->runtime != nullptr
-                       ? scene->runtime->CurrentAudioSpectrumSnapshot()
-                       : audio::AudioSpectrumSnapshot {};
-        }));
+        pSys.AddEmitter(WPParticleParser::genParticleEmittOp(
+            newEm, sort, over,
+            [scene]() {
+                return scene != nullptr && scene->runtime != nullptr
+                           ? scene->runtime->CurrentAudioSpectrumSnapshot()
+                           : audio::AudioSpectrumSnapshot {};
+            },
+            pSys.SpawnContext()));
     }
 }
 
@@ -5196,7 +5217,8 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
                     ordered_slots,
                     context.scene.get(),
                     is_child ? child_data.controlpointstartindex : 0,
-                    node_world_scale);
+                    node_world_scale,
+                    ! is_child && particle_obj.flags[wpscene::Particle::FlagEnum::wordspace]);
         LoadInitializer(*particleSub, particle_obj, override_state, context.scene.get(),
                         context.pixel_canvas);
         LoadOperator(*particleSub, particle_obj, override_state, context.scene.get(),
@@ -5263,7 +5285,9 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
 
     // A top-level or static system has already lived for its `starttime` when
     // the first frame draws; an event child prewarms each instance it spawns.
-    particleSub->Prewarm();
+    // The layer is not under its parent group yet, so the prewarm is queued for
+    // when the scene graph is whole. A mirror has no start time of its own.
+    if (! is_mirror) context.pending_prewarms.push_back(particleSub.get());
 
     if (is_mirror)
         child_ptr.mirror_of->AddMirror(std::move(particleSub));
@@ -6215,6 +6239,7 @@ std::shared_ptr<Scene> WPSceneParser::Parse(const SceneParseRequest& request,
 
     ApplyDefaultDepthTarget(context);
     AttachRemainingLayerNodes(context);
+    PrewarmParticleSystems(context);
     RegisterLayerAttachments(context);
     SyncImageEffectFinalTransforms(context);
 

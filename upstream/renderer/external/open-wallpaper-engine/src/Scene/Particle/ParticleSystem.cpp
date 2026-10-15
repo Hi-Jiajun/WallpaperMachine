@@ -115,43 +115,16 @@ ParticleSubSystem::SpawnType ParticleSubSystem::Type() const { return m_spawn_ty
 
 u32 ParticleSubSystem::MaxInstanceCount() const { return m_maxcount_instance; };
 
-namespace
-{
-float InverseScaleOrIdentity(float scale) {
-    if (! std::isfinite(scale) || scale <= 1.0e-6f) return 1.0f;
-    return 1.0f / scale;
-}
-} // namespace
-
 ParticleRenderScale ParticleSubSystem::RenderScale() const {
-    auto owner = m_owner_node.lock();
-    // A 3D particle's size is in scene units: the model/projection transform
-    // must scale its billboard along with the emitter. Only authored 2D
-    // canvases compensate the owner scale to preserve their pixel-size policy.
-    if (! owner || m_sys.scene.display_sized) {
-        ParticleRenderScale scale {};
-        scale.rope_subdivision = m_rope_subdivision;
-        scale.trail_fraction   = TrailPeriodFraction();
-        scale.uv_scale         = m_uv_scale;
-        scale.uv_scrolling     = m_uv_scrolling;
-        scale.uv_smoothing     = m_uv_smoothing && ! m_uv_scrolling;
-        return scale;
-    }
-
-    owner->UpdateTrans();
-    const auto& transform = owner->RenderTrans();
-    const float scale_x = static_cast<float>(transform.block<3, 1>(0, 0).norm());
-    const float scale_y = static_cast<float>(transform.block<3, 1>(0, 1).norm());
-
+    // The size goes out as authored: the layer's model matrix scales the
+    // billboard, so a particle layer scaled up draws its sprites larger, in a
+    // 2D canvas as in 3D, as Wallpaper Engine's particle shader does.
     return {
-        .inverse_x         = InverseScaleOrIdentity(scale_x),
-        .inverse_y         = InverseScaleOrIdentity(scale_y),
-        .isotropic_inverse = InverseScaleOrIdentity((scale_x + scale_y) * 0.5f),
-        .rope_subdivision  = m_rope_subdivision,
-        .trail_fraction    = TrailPeriodFraction(),
-        .uv_scale          = m_uv_scale,
-        .uv_scrolling      = m_uv_scrolling,
-        .uv_smoothing      = m_uv_smoothing && ! m_uv_scrolling,
+        .rope_subdivision = m_rope_subdivision,
+        .trail_fraction   = TrailPeriodFraction(),
+        .uv_scale         = m_uv_scale,
+        .uv_scrolling     = m_uv_scrolling,
+        .uv_smoothing     = m_uv_smoothing && ! m_uv_scrolling,
     };
 }
 
@@ -176,7 +149,11 @@ void ParticleSubSystem::UpdateMouseControlpoints() {
         0.0,
     };
     Eigen::Vector3d mouse_local = mouse_world;
-    if (auto owner = m_owner_node.lock()) {
+    if (const auto world = m_world_space ? OwnerWorldFrame() : std::nullopt) {
+        // A world-space system measures from its layer's origin along the
+        // scene's own axes.
+        mouse_local = mouse_world - world->origin;
+    } else if (auto owner = m_owner_node.lock()) {
         owner->UpdateTrans();
         const Eigen::Vector4d local =
             owner->ModelTrans().inverse() * Eigen::Vector4d(mouse_world.x(), mouse_world.y(), 0.0, 1.0);
@@ -188,6 +165,7 @@ void ParticleSubSystem::UpdateMouseControlpoints() {
 }
 
 void ParticleSubSystem::AddChild(std::unique_ptr<ParticleSubSystem>&& child) {
+    child->m_parent_system = this;
     m_children.emplace_back(std::move(child));
 }
 
@@ -231,28 +209,59 @@ void ParticleSubSystem::BindInstance(ParticleInstance& inst) {
     inst.SetBoundVersion(m_ops_version);
 }
 
+std::optional<ParticleSubSystem::WorldFrame> ParticleSubSystem::OwnerWorldFrame() const {
+    const auto owner = m_owner_node.lock();
+    if (! owner) return std::nullopt;
+    owner->UpdateTrans();
+    const Eigen::Matrix4d model = owner->ModelTrans();
+    WorldFrame            frame;
+    frame.linear = model.topLeftCorner<3, 3>();
+    frame.origin = model.topRightCorner<3, 1>();
+    return frame;
+}
+
 void ParticleSubSystem::UpdateControlpoints() {
     if (m_cp_source) m_cp_source(m_controlpoints);
     UpdateMouseControlpoints();
 
-    // A control point pinned to the world (flag 2, never the first) holds its
-    // authored position in scene coordinates; the simulation lives in the
-    // layer's local space, so it is carried back through the layer's matrix
-    // as the layer moves. Every other control point keeps the offset it was
-    // given.
-    std::shared_ptr<SceneNode> owner;
-    for (usize i = 1; i < m_controlpoints.size(); ++i) {
-        auto& cp = m_controlpoints[i];
-        if (cp.link_mouse || ! cp.worldspace) continue;
-        if (! owner) {
-            owner = m_owner_node.lock();
-            if (owner) owner->UpdateTrans();
+    // A world-space system's control points are where its layer's matrix puts
+    // them, measured from the layer's origin: the authored offset turned and
+    // scaled by the layer. A control point pinned to the world (flag 2, never
+    // the first) is a place in the scene whose matrix Wallpaper Engine leaves as
+    // authored, without the layer's: its offset is that place less the layer's
+    // origin, and an emitter on it is neither spread nor launched by the layer's
+    // scale. The system and its emitters both read them in this frame.
+    const auto world = m_world_space ? OwnerWorldFrame() : std::nullopt;
+    if (world) {
+        for (usize i = 0; i < m_controlpoints.size(); ++i) {
+            auto&      cp     = m_controlpoints[i];
+            const bool pinned = cp.worldspace && ! cp.link_mouse && i != 0;
+            cp.has_world_linear = ! pinned;
+            cp.world_linear     = pinned ? Eigen::Matrix3d(Eigen::Matrix3d::Identity()) : world->linear;
+            if (cp.link_mouse) continue;
+            cp.offset = pinned ? Eigen::Vector3d(cp.base_offset - world->origin)
+                               : Eigen::Vector3d(world->linear * cp.base_offset);
         }
-        if (! owner) continue;
-        const Eigen::Vector4d local =
-            owner->ModelTrans().inverse() *
-            Eigen::Vector4d(cp.base_offset.x(), cp.base_offset.y(), cp.base_offset.z(), 1.0);
-        cp.offset = local.head<3>();
+    } else {
+        // A control point pinned to the world (flag 2, never the first) holds
+        // its authored position in scene coordinates; the simulation lives in
+        // the layer's local space, so it is carried back through the layer's
+        // matrix as the layer moves. Every other control point keeps the offset
+        // it was given.
+        std::shared_ptr<SceneNode> owner;
+        for (usize i = 1; i < m_controlpoints.size(); ++i) {
+            auto& cp = m_controlpoints[i];
+            if (cp.link_mouse || ! cp.worldspace) continue;
+            if (! owner) {
+                owner = m_owner_node.lock();
+                if (owner) owner->UpdateTrans();
+            }
+            if (! owner) continue;
+            const Eigen::Vector4d local =
+                owner->ModelTrans().inverse() *
+                Eigen::Vector4d(cp.base_offset.x(), cp.base_offset.y(), cp.base_offset.z(), 1.0);
+            cp.offset = local.head<3>();
+        }
     }
 
     if (! m_cp_primed) {
@@ -266,27 +275,40 @@ void ParticleSubSystem::UpdateControlpoints() {
 void ParticleSubSystem::KeepWorldPositions() {
     if (! m_world_space) return;
     const auto owner = m_owner_node.lock();
-    if (! owner) return;
-    owner->UpdateTrans();
-    const Eigen::Matrix4d current = owner->ModelTrans();
-    if (m_have_prev_model && ! current.isApprox(m_prev_model, 1.0e-12) &&
-        std::abs(current.determinant()) > 1.0e-18) {
-        // Old layer space to new layer space: what a point kept at one place
-        // in the scene has to be called now.
-        const Eigen::Matrix4d delta  = current.inverse() * m_prev_model;
-        const Eigen::Matrix3d linear = delta.topLeftCorner<3, 3>();
+    const auto world = OwnerWorldFrame();
+    if (! owner || ! world) return;
+    // The matrix the system is drawn by is the layer's origin and nothing else:
+    // the particles are already in scene units. Every node that draws one of its
+    // renderers takes it; a node under the layer keeps its own place.
+    Eigen::Matrix4d draw = Eigen::Matrix4d::Identity();
+    draw.topRightCorner<3, 1>() = world->origin;
+    const auto place = [&draw](SceneNode& node) {
+        Eigen::Matrix4d placed = draw;
+        if (! node.HasRenderTransformOverride() ||
+            ! (node.RenderTrans().array() == placed.array()).all()) {
+            node.SetRenderTransformOverride(placed);
+        }
+    };
+    place(*owner);
+    for (auto& mirror : m_mirrors) {
+        if (const auto node = mirror->m_owner_node.lock()) place(*node);
+    }
+    if (m_have_prev_model && ! draw.isApprox(m_prev_model, 1.0e-12)) {
+        // Where the layer was, relative to where it is: what a point kept at one
+        // place in the scene has to be called now. Only the move counts; a turn
+        // or a rescale of the layer is not a move of the scene.
+        const Eigen::Vector3f shift = (m_prev_model.topRightCorner<3, 1>() - world->origin).cast<float>();
+        Eigen::Matrix4d       delta = Eigen::Matrix4d::Identity();
+        delta.topRightCorner<3, 1>() = shift.cast<double>();
         for (auto& inst : m_instances) {
             for (auto& p : inst->ParticlesVec()) {
                 if (! ParticleModify::LifetimeOk(p)) continue;
-                const Eigen::Vector4d moved =
-                    delta * Eigen::Vector4d(p.position.x(), p.position.y(), p.position.z(), 1.0);
-                p.position = moved.head<3>().cast<float>();
-                p.velocity = (linear * p.velocity.cast<double>()).cast<float>();
+                p.position += shift;
             }
             for (auto& trail : inst->TrailsVec()) trail.Transform(delta);
         }
     }
-    m_prev_model      = current;
+    m_prev_model      = draw;
     m_have_prev_model = true;
 }
 
@@ -343,6 +365,16 @@ void ParticleSubSystem::AdvanceInstance(ParticleInstance& inst, double dt, doubl
             auto& p          = particles[bounded_data.particle_idx];
             parent_particle  = &p;
             bounded_data.pos = ParticleModify::GetPos(p);
+            // A world-space parent's particles are scene units from its layer's
+            // origin; this system lives in the layer's own space, drawn through
+            // its matrix, and is hung where that matrix puts the same place.
+            if (m_parent_system != nullptr && m_parent_system->m_world_space) {
+                if (const auto frame = m_parent_system->OwnerWorldFrame();
+                    frame && std::abs(frame->linear.determinant()) > 1.0e-18) {
+                    bounded_data.pos =
+                        (frame->linear.inverse() * bounded_data.pos.cast<double>()).cast<float>();
+                }
+            }
             // only update pos once when event_death
             if (m_spawn_type == SpawnType::EVENT_DEATH) bounded_data.particle_idx = -1;
 
@@ -395,7 +427,9 @@ void ParticleSubSystem::AdvanceInstance(ParticleInstance& inst, double dt, doubl
         .time_pass     = dt,
     };
     info.track_previous_position = m_tracks_prev_position;
-    if (m_needs_world_axes) {
+    // A world-space system is already in the scene's own axes: gravity needs no
+    // turning.
+    if (m_needs_world_axes && ! m_world_space) {
         if (auto owner = m_owner_node.lock()) {
             owner->UpdateTrans();
             // The layer's 3x3 as it stands, scale included: Wallpaper Engine
@@ -519,9 +553,9 @@ void ParticleSubSystem::Prewarm() {
     };
     for (int i = 0; i < steps; ++i) step(*this);
     if (skipped > 0.0) add_time(*this);
-    // The layer is not in its final place yet (its parents are attached after
-    // the system is built): the first frame sets the matrix the particles are
-    // kept against, so the prewarmed ones are not carried away from it.
+    // A script or a timeline can still place the layer after the parse: the
+    // first frame sets the matrix the particles are kept against, so the
+    // prewarmed ones are not carried away from it.
     m_have_prev_model = false;
     // The mesh is built by the first frame that draws it.
     m_mesh_rebuilt = false;

@@ -184,7 +184,10 @@ TEST(ParticleMouseControlpoint, DisplaySizedBillboardsFollowObjectScaleAndPerspe
     EXPECT_NEAR(inherited.y(), 0.15, 1.0e-6);
 }
 
-TEST(ParticleMouseControlpoint, AuthoredCanvasBillboardsKeepPixelSizeWhenOwnerScaleChanges) {
+TEST(ParticleMouseControlpoint, AuthoredCanvasBillboardsScaleWithTheirLayer) {
+    // In a 2D canvas as in 3D, Wallpaper Engine draws a particle's billboard
+    // through the layer's model matrix: a layer scaled up draws its sprites
+    // larger by the same factor, flipped or not, through either camera.
     Scene scene;
     scene.display_sized = false;
     scene.frameTime = 1.0 / 60.0;
@@ -199,17 +202,232 @@ TEST(ParticleMouseControlpoint, AuthoredCanvasBillboardsKeepPixelSizeWhenOwnerSc
     AddSingleSizedParticleEmitter(*subsystem, 2.0f);
 
     for (float scale : { 0.25f, 0.75f, -1.5f }) {
+        SCOPED_TRACE(scale);
         owner->SetScale(Eigen::Vector3f(scale, scale, 1.0f));
+        subsystem->Emitt();
+        const double factor = std::abs(scale);
+        const auto   extent = ProjectFirstBillboardExtent(*mesh, *owner, camera);
+        EXPECT_NEAR(extent.x(), 0.04 * factor, 1.0e-6);
+        EXPECT_NEAR(extent.y(), 0.04 * factor, 1.0e-6);
+        SceneCamera perspective(1.0f, 0.1f, 100.0f, 90.0f);
+        const auto perspective_extent = ProjectFirstBillboardExtent(*mesh, *owner, perspective);
+        EXPECT_NEAR(perspective_extent.x(), 0.2 * factor, 1.0e-6);
+        EXPECT_NEAR(perspective_extent.y(), 0.2 * factor, 1.0e-6);
+    }
+}
+
+TEST(ParticleMouseControlpoint, AWorldspaceSystemKeepsItsBillboardSizeWhateverItsLayerScale) {
+    // A worldspace particle file is drawn through no model matrix of its layer's:
+    // its particles are in scene units, so a layer scaled up, down, flipped or
+    // stretched to an extreme draws every billboard at the size the file
+    // authored. Only the layer's origin carries them.
+    Scene scene;
+    scene.display_sized = false;
+    scene.frameTime = 1.0 / 60.0;
+    SceneCamera camera(100, 100, 0.1f, 100.0f);
+    auto owner = std::make_shared<SceneNode>();
+    owner->SetTranslate(Eigen::Vector3f(0.0f, 0.0f, -10.0f));
+    auto mesh = MakeParticleMesh(1);
+    ParticleSystem system(scene);
+    system.gener = std::make_unique<WPParticleRawGener>();
+    auto subsystem = MakeTestSubsystem(system, mesh);
+    subsystem->SetOwnerNode(owner);
+    subsystem->SetWorldSpace(true);
+    AddSingleSizedParticleEmitter(*subsystem, 2.0f);
+
+    for (const Eigen::Vector3f scale : { Eigen::Vector3f { 0.25f, 0.25f, 1.0f },
+                                         Eigen::Vector3f { 24.0f, 1.0f, 1.05f },
+                                         Eigen::Vector3f { -1.5f, 3.0f, 1.0f } }) {
+        SCOPED_TRACE(testing::Message() << "scale " << scale.transpose());
+        owner->SetScale(scale);
+        owner->SetRotation(Eigen::Vector3f(0.0f, 0.0f, 0.4f));
         subsystem->Emitt();
         const auto extent = ProjectFirstBillboardExtent(*mesh, *owner, camera);
         EXPECT_NEAR(extent.x(), 0.04, 1.0e-6);
         EXPECT_NEAR(extent.y(), 0.04, 1.0e-6);
-        // An authored 2D canvas may opt into perspective particles without
-        // changing the layer's established scale compensation policy.
-        SceneCamera perspective(1.0f, 0.1f, 100.0f, 90.0f);
-        const auto perspective_extent = ProjectFirstBillboardExtent(*mesh, *owner, perspective);
-        EXPECT_NEAR(perspective_extent.x(), 0.2, 1.0e-6);
-        EXPECT_NEAR(perspective_extent.y(), 0.2, 1.0e-6);
+        // Drawn from the layer's origin, with none of its turn or scale.
+        const Eigen::Matrix4d drawn  = owner->RenderTrans();
+        const Eigen::Matrix3d linear = drawn.topLeftCorner<3, 3>();
+        EXPECT_TRUE(linear.isIdentity(1.0e-12));
+        EXPECT_NEAR(drawn(2, 3), -10.0, 1.0e-9);
+    }
+}
+
+TEST(ParticleMouseControlpoint, AWorldspaceEmitterStretchesItsSpawnsAndTheirHeadingButNotTheirSpeed) {
+    // The layer's matrix turns and scales the offset a worldspace emitter places
+    // a particle at, and the origin is added after it, as authored. The particle
+    // leaves along the offset's new direction, at the speed the file wrote.
+    ParticleBoxEmitterArgs args {};
+    args.directions    = { 1.0f, 1.0f, 0.0f };
+    args.minDistance   = { 5.0f, 5.0f, 0.0f };
+    args.maxDistance   = { 5.0f, 5.0f, 0.0f };
+    args.emitSpeed     = 1.0f;
+    args.orgin         = { 10.0f, 20.0f, 30.0f };
+    args.instantaneous = 1;
+    args.minSpeed      = 3.0f;
+    args.maxSpeed      = 3.0f;
+
+    std::array<ParticleControlpoint, 8> controlpoints {};
+    controlpoints[0].world_linear     = Eigen::Vector3d(24.0, 1.0, 1.0).asDiagonal();
+    controlpoints[0].has_world_linear = true;
+
+    for (int i = 0; i < 8; ++i) {
+        auto           emitter  = ParticleBoxEmitterArgs::MakeEmittOp(args);
+        const Particle particle = FirstSpawnedParticle(emitter, controlpoints);
+        EXPECT_FLOAT_EQ(std::abs(particle.position.x() - 10.0f), 120.0f);
+        EXPECT_FLOAT_EQ(std::abs(particle.position.y() - 20.0f), 5.0f);
+        EXPECT_FLOAT_EQ(particle.position.z(), 30.0f);
+        EXPECT_NEAR(particle.velocity.norm(), 3.0f, 1.0e-5f);
+        EXPECT_NEAR(std::abs(particle.velocity.x()) / std::abs(particle.velocity.y()), 24.0f,
+                    1.0e-3f);
+    }
+}
+
+TEST(ParticleMouseControlpoint, AWorldspaceLayersMatrixScalesTheVelocityInitializersDraw) {
+    // The engine hands the spawning emitter's control point matrix, which carries
+    // a worldspace layer's rotation and scale, to the velocity initializers: a
+    // layer stretched along x launches its particles faster along x. A layer-space
+    // system, whose layer draws its particles, leaves the velocity as authored.
+    const nlohmann::json json {
+        { "name", "velocityrandom" },
+        { "min", { 2.0f, 2.0f, 0.0f } },
+        { "max", { 2.0f, 2.0f, 0.0f } },
+    };
+    for (const bool world : { true, false }) {
+        SCOPED_TRACE(world);
+        auto spawn              = std::make_shared<ParticleSpawnContext>();
+        spawn->world_linear     = Eigen::Vector3d(24.0, 1.0, 1.0).asDiagonal();
+        spawn->has_world_linear = world;
+        ParticleParseContext ctx;
+        ctx.spawn = spawn;
+        auto init = WPParticleParser::genParticleInitOp(json, ctx);
+
+        Particle particle;
+        init(particle, 0.0);
+        EXPECT_NEAR(particle.velocity.x(), world ? 48.0f : 2.0f, 1.0e-4f);
+        EXPECT_NEAR(particle.velocity.y(), 2.0f, 1.0e-4f);
+    }
+}
+
+TEST(ParticleMouseControlpoint, AWorldspaceSystemsControlpointsAreWhereItsLayersMatrixPutsThem) {
+    // A worldspace system measures from its layer's origin along the scene's own
+    // axes. Wallpaper Engine multiplies the layer's matrix into the control
+    // point matrices of such a system, so an authored offset is turned and scaled
+    // by the layer. The one exception is a control point pinned to the world
+    // (flag 2, never the first), whose matrix is left as authored: it is a place
+    // in the scene, so its offset is that place less the layer's origin, and the
+    // layer's turn and scale are no part of it. A cursor-linked control point is
+    // the cursor's place less the origin.
+    Scene scene;
+    scene.ortho[0]        = 200;
+    scene.ortho[1]        = 100;
+    scene.frameTime       = 1.0;
+    scene.pointerPosition = { 0.75f, 0.25f };
+    ParticleSystem system(scene);
+    auto subsystem = MakeTestSubsystem(system, std::make_shared<SceneMesh>(MeshUpdate::PerFrame));
+    subsystem->SetDrawn(false);
+    subsystem->SetWorldSpace(true);
+    auto owner = std::make_shared<SceneNode>();
+    owner->SetTranslate(Eigen::Vector3f(100.0f, 50.0f, 0.0f));
+    owner->SetScale(Eigen::Vector3f(2.0f, 3.0f, 1.0f));
+    owner->SetRotation(Eigen::Vector3f(0.0f, 0.0f, static_cast<float>(M_PI / 2.0)));
+    subsystem->SetOwnerNode(owner);
+
+    auto controlpoints = subsystem->Controlpoints();
+    // The flag on the first control point does not pin it.
+    controlpoints[0].worldspace   = true;
+    controlpoints[0].base_offset  = Eigen::Vector3d(1.0, 2.0, 0.0);
+    controlpoints[1].worldspace   = true;
+    controlpoints[1].base_offset  = Eigen::Vector3d(500.0, 400.0, 0.0);
+    controlpoints[2].base_offset  = Eigen::Vector3d(10.0, 0.0, 0.0);
+    controlpoints[3].link_mouse   = true;
+    controlpoints[3].base_offset  = Eigen::Vector3d(1.0, 2.0, 3.0);
+
+    subsystem->Emitt();
+
+    // Scaled by (2, 3), then a quarter turn: (x, y) -> (-y, x).
+    EXPECT_NEAR(controlpoints[0].offset.x(), -6.0, 1.0e-5);
+    EXPECT_NEAR(controlpoints[0].offset.y(), 2.0, 1.0e-5);
+    EXPECT_NEAR(controlpoints[2].offset.x(), 0.0, 1.0e-5);
+    EXPECT_NEAR(controlpoints[2].offset.y(), 20.0, 1.0e-5);
+    // The pinned one: the scene place 500, 400 seen from the layer's origin.
+    EXPECT_NEAR(controlpoints[1].offset.x(), 400.0, 1.0e-9);
+    EXPECT_NEAR(controlpoints[1].offset.y(), 350.0, 1.0e-9);
+    // The cursor at 150, 75 seen from the layer's origin, plus the authored offset.
+    EXPECT_NEAR(controlpoints[3].offset.x(), 51.0, 1.0e-9);
+    EXPECT_NEAR(controlpoints[3].offset.y(), 27.0, 1.0e-9);
+    EXPECT_NEAR(controlpoints[3].offset.z(), 3.0, 1.0e-9);
+
+    // Whose matrix carries the layer's: every control point but the pinned one.
+    EXPECT_TRUE(controlpoints[0].has_world_linear);
+    EXPECT_FALSE(controlpoints[1].has_world_linear);
+    EXPECT_TRUE(controlpoints[2].has_world_linear);
+    EXPECT_TRUE(controlpoints[3].has_world_linear);
+    owner->UpdateTrans();
+    const Eigen::Matrix3d linear = owner->ModelTrans().topLeftCorner<3, 3>();
+    EXPECT_TRUE(controlpoints[2].world_linear.isApprox(linear, 1.0e-9));
+}
+
+TEST(ParticleMouseControlpoint, AWorldspaceEmitterOnAPinnedControlpointIsNotStretchedByItsLayer) {
+    // An emitter takes the matrix of the control point it names, for the offset
+    // it places a particle at and, handed on, for the velocity initializers. On
+    // the first or an ordinary control point that matrix carries the layer of a
+    // worldspace system, so a layer 24 times wider than tall spreads the spawns 24
+    // times wider and launches them 24 times faster along x. On a control point
+    // pinned to the world it does not: the layer's scale touches neither.
+    struct Case {
+        bool   pinned;
+        double spread;
+        double velocity_x;
+    };
+    for (const auto& [pinned, spread, velocity_x] :
+         { Case { true, 5.0, 2.0 }, Case { false, 120.0, 48.0 } }) {
+        SCOPED_TRACE(pinned);
+        Scene scene;
+        scene.frameTime = 1.0 / 60.0;
+        ParticleSystem system(scene);
+        auto subsystem = MakeTestSubsystem(system, std::make_shared<SceneMesh>(MeshUpdate::PerFrame));
+        subsystem->SetDrawn(false);
+        subsystem->SetWorldSpace(true);
+        auto owner = std::make_shared<SceneNode>();
+        owner->SetTranslate(Eigen::Vector3f(100.0f, 50.0f, 0.0f));
+        owner->SetScale(Eigen::Vector3f(24.0f, 1.0f, 1.0f));
+        subsystem->SetOwnerNode(owner);
+        auto controlpoints          = subsystem->Controlpoints();
+        controlpoints[1].worldspace = pinned;
+        controlpoints[1].base_offset =
+            pinned ? Eigen::Vector3d(500.0, 400.0, 0.0) : Eigen::Vector3d(10.0, 0.0, 0.0);
+
+        ParticleBoxEmitterArgs args {};
+        args.directions    = { 1.0f, 0.0f, 0.0f };
+        args.minDistance   = { 5.0f, 0.0f, 0.0f };
+        args.maxDistance   = { 5.0f, 0.0f, 0.0f };
+        args.emitSpeed     = 1.0f;
+        args.instantaneous = 1;
+        args.controlpoint  = 1;
+        args.spawn         = subsystem->SpawnContext();
+        subsystem->AddEmitter(ParticleBoxEmitterArgs::MakeEmittOp(args));
+        subsystem->AddInitializer([](Particle& particle, double) {
+            ParticleModify::InitLifetime(particle, 10.0f);
+        });
+        ParticleParseContext ctx;
+        ctx.spawn = subsystem->SpawnContext();
+        subsystem->AddInitializer(WPParticleParser::genParticleInitOp(
+            { { "name", "velocityrandom" }, { "min", { 2.0f, 2.0f, 0.0f } },
+              { "max", { 2.0f, 2.0f, 0.0f } } },
+            ctx));
+
+        subsystem->Emitt();
+
+        ASSERT_EQ(subsystem->Instances().size(), 1u);
+        const auto particles = subsystem->Instances().front()->Particles();
+        ASSERT_EQ(particles.size(), 1u);
+        // The control point's place seen from the layer's origin: the pinned
+        // one at 400 across, the ordinary one 24 times its authored 10.
+        const double centre = pinned ? 400.0 : 240.0;
+        EXPECT_NEAR(std::abs(particles[0].position.x() - centre), spread, 1.0e-3);
+        EXPECT_NEAR(particles[0].velocity.x(), velocity_x, 1.0e-3);
+        EXPECT_NEAR(particles[0].velocity.y(), 2.0, 1.0e-3);
     }
 }
 
@@ -870,140 +1088,46 @@ TEST(ParticleMouseControlpoint, MissingAndExpiredOwnersUseWorldCoordinates) {
     EXPECT_EQ(cp.offset, Eigen::Vector3d(151.0, 77.0, 3.0));
 }
 
-TEST(ParticleMouseControlpoint, RawParticleSizeCompensatesOwnerScale) {
-    Scene scene;
-    scene.frameTime = 1.0;
+TEST(ParticleMouseControlpoint, RawParticleSizeIsTheAuthoredSizeWhateverTheLayerScale) {
+    // Wallpaper Engine's particle shader builds each billboard in the layer's
+    // own space and draws it through the layer's model matrix, so a scaled
+    // particle layer draws its sprites scaled with it. The generator writes the
+    // authored size, whatever the owner's or a parent's scale, flipped, uneven
+    // or turned.
+    struct Case {
+        Eigen::Vector3f parent;
+        Eigen::Vector3f owner;
+        float           angle;
+    };
+    for (const auto& c : { Case { { 1.0f, 1.0f, 1.0f }, { 2.0f, 2.0f, 1.0f }, 0.0f },
+                           Case { { 1.0f, 1.0f, 1.0f }, { -6.0f, -6.0f, 1.0f }, 0.0f },
+                           Case { { 1.0f, 1.0f, 1.0f }, { 2.0f, 6.0f, 1.0f }, 0.5f },
+                           Case { { 2.0f, 3.0f, 1.0f }, { 4.0f, 2.0f, 1.0f }, 0.0f } }) {
+        SCOPED_TRACE(testing::Message() << "owner " << c.owner.transpose() << ", parent "
+                                        << c.parent.transpose());
+        Scene scene;
+        scene.frameTime = 1.0;
 
-    auto owner = std::make_shared<SceneNode>();
-    owner->SetScale(Eigen::Vector3f(6.0f, 6.0f, 1.0f));
+        auto parent = std::make_shared<SceneNode>();
+        parent->SetScale(c.parent);
+        auto owner = std::make_shared<SceneNode>();
+        owner->SetScale(c.owner);
+        owner->SetRotation(Eigen::Vector3f(0.0f, 0.0f, c.angle));
+        parent->AppendChild(owner);
 
-    auto mesh = MakeParticleMesh(1);
+        auto mesh = MakeParticleMesh(1);
 
-    ParticleSystem system(scene);
-    system.gener = std::make_unique<WPParticleRawGener>();
+        ParticleSystem system(scene);
+        system.gener = std::make_unique<WPParticleRawGener>();
 
-    auto subsystem = MakeTestSubsystem(system, mesh);
-    subsystem->SetOwnerNode(owner);
-    subsystem->AddEmitter([](std::vector<Particle>& particles,
-                             std::vector<ParticleInitOp>&,
-                             uint32_t,
-                             double,
-                             std::span<const ParticleControlpoint>) {
-        if (! particles.empty()) return;
+        auto subsystem = MakeTestSubsystem(system, mesh);
+        subsystem->SetOwnerNode(owner);
+        AddSingleSizedParticleEmitter(*subsystem, 48.0f);
 
-        Particle particle;
-        ParticleModify::InitLifetime(particle, 10.0f);
-        ParticleModify::InitSize(particle, 48.0f);
-        particles.emplace_back(particle);
-    });
+        subsystem->Emitt();
 
-    subsystem->Emitt();
-
-    EXPECT_FLOAT_EQ(FirstParticleRawRenderHalfSize(*mesh), 4.0f);
-}
-
-TEST(ParticleMouseControlpoint, RawParticleSizeUsesAbsoluteOwnerScale) {
-    Scene scene;
-    scene.frameTime = 1.0;
-
-    auto owner = std::make_shared<SceneNode>();
-    owner->SetScale(Eigen::Vector3f(-6.0f, -6.0f, 1.0f));
-
-    auto mesh = MakeParticleMesh(1);
-
-    ParticleSystem system(scene);
-    system.gener = std::make_unique<WPParticleRawGener>();
-
-    auto subsystem = MakeTestSubsystem(system, mesh);
-    subsystem->SetOwnerNode(owner);
-    subsystem->AddEmitter([](std::vector<Particle>& particles,
-                             std::vector<ParticleInitOp>&,
-                             uint32_t,
-                             double,
-                             std::span<const ParticleControlpoint>) {
-        if (! particles.empty()) return;
-
-        Particle particle;
-        ParticleModify::InitLifetime(particle, 10.0f);
-        ParticleModify::InitSize(particle, 48.0f);
-        particles.emplace_back(particle);
-    });
-
-    subsystem->Emitt();
-
-    EXPECT_FLOAT_EQ(FirstParticleRawRenderHalfSize(*mesh), 4.0f);
-}
-
-TEST(ParticleMouseControlpoint, RawParticleSizeUsesIsotropicNonuniformOwnerScale) {
-    Scene scene;
-    scene.frameTime = 1.0;
-
-    auto owner = std::make_shared<SceneNode>();
-    owner->SetScale(Eigen::Vector3f(2.0f, 6.0f, 1.0f));
-    owner->SetRotation(Eigen::Vector3f(0.0f, 0.0f, 0.5f));
-
-    auto mesh = MakeParticleMesh(1);
-
-    ParticleSystem system(scene);
-    system.gener = std::make_unique<WPParticleRawGener>();
-
-    auto subsystem = MakeTestSubsystem(system, mesh);
-    subsystem->SetOwnerNode(owner);
-    AddSingleSizedParticleEmitter(*subsystem, 48.0f);
-
-    subsystem->Emitt();
-
-    EXPECT_FLOAT_EQ(FirstParticleRawRenderHalfSize(*mesh), 6.0f);
-}
-
-TEST(ParticleMouseControlpoint, RawParticleSizeUsesEffectiveParentAndChildScale) {
-    Scene scene;
-    scene.frameTime = 1.0;
-
-    auto parent = std::make_shared<SceneNode>();
-    parent->SetScale(Eigen::Vector3f(2.0f, 3.0f, 1.0f));
-
-    auto owner = std::make_shared<SceneNode>();
-    owner->SetScale(Eigen::Vector3f(4.0f, 2.0f, 1.0f));
-    parent->AppendChild(owner);
-
-    auto mesh = MakeParticleMesh(1);
-
-    ParticleSystem system(scene);
-    system.gener = std::make_unique<WPParticleRawGener>();
-
-    auto subsystem = MakeTestSubsystem(system, mesh);
-    subsystem->SetOwnerNode(owner);
-    AddSingleSizedParticleEmitter(*subsystem, 48.0f);
-
-    subsystem->Emitt();
-
-    EXPECT_NEAR(FirstParticleRawRenderHalfSize(*mesh), 24.0f / 7.0f, 1.0e-5f);
-}
-
-TEST(ParticleMouseControlpoint, RawGeneratorReceivesIndependentOwnerScaleAxes) {
-    Scene scene;
-    scene.frameTime = 1.0;
-
-    auto owner = std::make_shared<SceneNode>();
-    owner->SetScale(Eigen::Vector3f(2.0f, 6.0f, 1.0f));
-    owner->SetRotation(Eigen::Vector3f(0.0f, 0.0f, 0.5f));
-
-    auto* rawGener = new CapturingParticleRawGener();
-    auto  mesh     = std::make_shared<SceneMesh>(MeshUpdate::PerFrame);
-
-    ParticleSystem system(scene);
-    system.gener.reset(rawGener);
-
-    auto subsystem = MakeTestSubsystem(system, mesh);
-    subsystem->SetOwnerNode(owner);
-    AddSingleSizedParticleEmitter(*subsystem, 48.0f);
-
-    subsystem->Emitt();
-
-    EXPECT_FLOAT_EQ(rawGener->last_render_scale.inverse_x, 0.5f);
-    EXPECT_FLOAT_EQ(rawGener->last_render_scale.inverse_y, 1.0f / 6.0f);
-    EXPECT_FLOAT_EQ(rawGener->last_render_scale.isotropic_inverse, 0.25f);
+        EXPECT_FLOAT_EQ(FirstParticleRawRenderHalfSize(*mesh), 24.0f);
+    }
 }
 
 TEST(ParticleMouseControlpoint, MovementMovesTheParticleAtItsPlaceAmongTheOperators) {

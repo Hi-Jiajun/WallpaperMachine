@@ -58,7 +58,7 @@ gtest_discover_tests(
 )
 
 add_executable(scene_schema_tests scene_schema_tests.cpp)
-target_link_libraries(scene_schema_tests PRIVATE ${PROJECT_NAME} wpAudio wpFs wpScene nlohmann_json::nlohmann_json GTest::gtest_main)
+target_link_libraries(scene_schema_tests PRIVATE ${PROJECT_NAME} wpAudio wpFs wpScene wpParticle nlohmann_json::nlohmann_json GTest::gtest_main)
 target_include_directories(scene_schema_tests PRIVATE .)
 target_compile_features(scene_schema_tests PRIVATE cxx_std_20)
 gtest_discover_tests(

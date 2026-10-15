@@ -318,14 +318,13 @@ TEST(ParticleRopeGeometry, ThickFormatWritesEndColourAndEndHalfSize) {
     instances.push_back(MakeInstance({ start, end }));
 
     ParticleRenderScale scale;
-    scale.isotropic_inverse = 0.5f;
-    scale.rope_subdivision  = 1;
+    scale.rope_subdivision = 1;
     GenRope(instances, mesh, scale);
 
     ASSERT_EQ(mesh.GetIndexArray(0).RenderDataCount(), 1u * 3);
     const float* vertex = QuadVertex(mesh.GetVertexArray(0), 0, 0);
-    EXPECT_FLOAT_EQ(vertex[3], 2.0f);
-    EXPECT_FLOAT_EQ(vertex[15], 3.0f);
+    EXPECT_FLOAT_EQ(vertex[3], 4.0f);
+    EXPECT_FLOAT_EQ(vertex[15], 6.0f);
     EXPECT_FLOAT_EQ(vertex[16], 0.0f);
     EXPECT_FLOAT_EQ(vertex[17], 1.0f);
     EXPECT_FLOAT_EQ(vertex[18], 0.0f);

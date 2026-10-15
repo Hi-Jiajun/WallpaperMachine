@@ -163,8 +163,21 @@ system the scene already has (animation layers, their play, pause, stop, rate,
 blend and visibility, and any script or user property driving them); the renderer
 only uploads the resulting bone matrices. Rope and rope-trail geometry is generated
 once by the shared particle simulation, with the rope renderers' *UV scale*, scrolling
-and smoothing; a puppet model whose animation block the model
-parser cannot read is drawn in its bind pose on both, with a log line when it
+and smoothing. A particle's sprite, rope or trail is sized as authored and drawn
+through its layer's model matrix, so a particle layer scaled up draws its
+particles larger by the same factor, in a 2D canvas as in 3D, as Wallpaper
+Engine's particle shader does. A `worldspace` file is the exception: Wallpaper
+Engine draws it through none of its layer's matrix, so its particles are in scene
+units from the layer's origin and keep the size they were authored with, whatever
+the layer's scale or turn (a rope on a layer stretched to 24 times its height is as
+wide as the file wrote it, not 24 times as wide). The layer's turn and scale reach
+such a system once, at a particle's birth: in the offset an emitter or a control
+point places it at and in the velocity the velocity initializers give it, so a layer
+stretched along x spreads and launches its particles along x; the emitter's origin
+is added after, unscaled, and every force acts in scene units. A control point
+pinned to the world (flag 2, never the first) keeps the matrix it was authored
+with, so an emitter on it is neither spread nor launched by the layer. A puppet model whose animation block the
+model parser cannot read is drawn in its bind pose on both, with a log line when it
 loads. A text layer is an ordinary layer: it takes its place in the layer order and
 carries its transform, opacity, blend, effect chain, camera and the final
 composition, appears in desktop posters, and uses the engine's one text system on
@@ -177,8 +190,9 @@ Particle systems follow Wallpaper Engine 2.8's own rules, on both renderers, bec
 one simulation feeds both. A system is simulated for its file's `starttime` before the
 first frame (steps of 0.05 s, or 0.2 s once the file holds 500 or more particles; at most
 6000 steps are run, and an even longer start time only advances the system clock), so
-it opens populated; an event child's instance does the same with the child file's own
-start time. A `sphererandom` spawn is a uniform point of the unit ball stretched by
+it opens populated, run once the scene is assembled so that a layer's parent groups have
+a say in where the particles are born; an event child's instance does the same with the
+child file's own start time. A `sphererandom` spawn is a uniform point of the unit ball stretched by
 `directions` (a flat `directions` fills toward the middle, `cone` narrows it about +x), a
 `boxrandom` spawn folds each axis' signed draw onto `distancemin`..`distancemax`, and a
 particle born exactly on the centre leaves along a random direction. An emitter's
@@ -193,7 +207,8 @@ phase and frequency, its turbulence speed and phase, and its `randomframe` sprit
 damping `velocity * (1 - drag * dt)`, and nothing else does: a particle file without
 them keeps its particles where they were placed, whatever velocity they were given (a
 movement operator with `flags` 1 keeps gravity in screen axes by multiplying it with the
-layer's transposed matrix, scale included); `controlpointattract` pulls hardest at the
+layer's transposed matrix, scale included, in a system that is not `worldspace`; a
+`worldspace` system is already in the scene's own axes and takes it as written); `controlpointattract` pulls hardest at the
 control point and not at all at its threshold, and with `flags` 1 removes a particle
 whose path over the last step, from where the movement operator found it, came within
 `deletethreshold` of the control point; `vortex` swirls about the control point
@@ -224,7 +239,7 @@ speeds, the pull of `controlpointattract` and the frequency of `oscillatepositio
 particle file sets the "ignore speed override" flag (16). An `eventfollow` child whose bound
 particle ends stops emitting but keeps the particles it already emitted until they die.
 A file with the `worldspace` flag leaves its live particles where they are in the scene
-when the layer moves. A file that lists several `renderer` entries draws the same
+when the layer moves, and when it turns or is rescaled. A file that lists several `renderer` entries draws the same
 particles through a mesh and material for each entry (each entry has its own copy of
 the file's material, so a rope entry's shader never reaches a sprite entry, and the
 particles stay in birth order for a rope entry in any position); a file whose `renderer`

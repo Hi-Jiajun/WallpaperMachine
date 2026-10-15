@@ -51,7 +51,8 @@ public:
     static ParticleEmittOp
     genParticleEmittOp(const wpscene::Emitter&, bool sort = false,
                        std::shared_ptr<const wpscene::ParticleInstanceoverride> override = nullptr,
-                       std::function<audio::AudioSpectrumSnapshot()> audio_spectrum      = {});
+                       std::function<audio::AudioSpectrumSnapshot()> audio_spectrum      = {},
+                       std::shared_ptr<ParticleSpawnContext>         spawn               = nullptr);
     static ParticleInitOp
         genOverrideInitOp(std::shared_ptr<const wpscene::ParticleInstanceoverride>,
                           ParticleColorDefinition color = {}, bool speed_override = true);

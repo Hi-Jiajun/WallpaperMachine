@@ -27,6 +27,16 @@ struct ParticleControlpoint {
     Eigen::Matrix3d rotation { Eigen::Matrix3d::Identity() };
     /// Whether `rotation` is a real orientation (not the identity default).
     bool has_rotation { false };
+    /// A world-space system only: the rotation and scale of its layer's matrix.
+    /// Wallpaper Engine's control point matrices carry the layer's world matrix
+    /// when the particle file is `worldspace`, except a control point pinned to
+    /// the world, which keeps the matrix it was authored with. An emitter turns
+    /// and scales its spawn offset by the matrix of its control point, so a
+    /// layer scaled up spreads the particles it spawns wider while each one
+    /// keeps its size. Identity, with `has_world_linear` clear, for a layer-space
+    /// system and for a pinned control point.
+    Eigen::Matrix3d world_linear { Eigen::Matrix3d::Identity() };
+    bool            has_world_linear { false };
 };
 
 struct ParticleInfo {
@@ -57,6 +67,15 @@ struct ParticleSpawnContext {
     /// For an event child: the parent particle the instance is bound to, else
     /// null. Valid only while the spawn it was set for runs.
     const Particle* parent { nullptr };
+    /// The layer matrix (rotation and scale) the spawning emitter's control point
+    /// carries, clear when it carries none: a layer-space system, or a control
+    /// point pinned to the world. The engine hands that control point's matrix to
+    /// the velocity initializers, and they turn and scale the velocity they draw
+    /// by it: a layer stretched along x launches its particles faster along x.
+    /// Each emitter writes it before its particles are initialized (see
+    /// `ParticleBoxEmitterArgs::spawn`).
+    Eigen::Matrix3d world_linear { Eigen::Matrix3d::Identity() };
+    bool            has_world_linear { false };
 };
 
 using ParticleInitOp = std::function<void(Particle&, double)>;
@@ -99,6 +118,11 @@ struct ParticleBoxEmitterArgs {
     std::shared_ptr<const float> countMultiplier;
     std::function<float()>       audioResponse;
     ParticleEmitterTiming        timing {};
+    /// The owning system's spawn context. Before an emission the emitter writes
+    /// the layer's matrix its control point carries into it, so the velocity
+    /// initializers of the particles it spawns read the matrix of the control
+    /// point that spawned them. Null: the context is left as it stands.
+    std::shared_ptr<ParticleSpawnContext> spawn;
 
     static ParticleEmittOp MakeEmittOp(ParticleBoxEmitterArgs);
 };
@@ -121,6 +145,11 @@ struct ParticleSphereEmitterArgs {
     ParticleEmitterTiming        timing {};
     /// 0 spawns over the whole sphere, 1 along +x only.
     float                        cone { 0.0f };
+    /// The owning system's spawn context. Before an emission the emitter writes
+    /// the layer's matrix its control point carries into it, so the velocity
+    /// initializers of the particles it spawns read the matrix of the control
+    /// point that spawned them. Null: the context is left as it stands.
+    std::shared_ptr<ParticleSpawnContext> spawn;
 
     static ParticleEmittOp MakeEmittOp(ParticleSphereEmitterArgs);
 };

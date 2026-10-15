@@ -24,6 +24,7 @@
 #include "Fs/VFS.h"
 #include "Audio/SoundManager.h"
 #include "Project/ProjectProperties.hpp"
+#include "Particle/ParticleSystem.h"
 #include "Runtime/DynamicValue.hpp"
 #include "Runtime/SceneRuntimeContext.hpp"
 #include "Runtime/SceneSettingResolver.hpp"
@@ -5825,6 +5826,73 @@ struct AudioProbeScene {
 
 constexpr std::string_view kPlainImageObjects =
     R"([{"id":1,"name":"plain","image":"image.json","visible":true}])";
+}
+
+TEST(SceneSchema, AWorldspaceLayerStretchesItsSpawnsButNotTheSpeedOfItsParticles) {
+    // A stretched layer (24 times wider than tall) carries a particle file whose
+    // emitter sends each particle out from its spawn point at 60 units a second.
+    // A layer-space file draws the particles and their motion through the
+    // layer's matrix, so the speed is stretched along with everything else (about
+    // 17 times faster on screen for a particle that leaves at 45 degrees), while a
+    // worldspace file is in scene units: the spawn offset is stretched, the
+    // particle heads along it, and goes at the speed the file wrote.
+    constexpr double kAlong = 0.70710678118654752;
+    struct Case {
+        int    flags;
+        double first_x;
+        double step_length;
+    };
+    // After the first step the particle has gone a sixtieth of its speed.
+    // Layer space: 5 units out along the diagonal, 0.7071 further on each axis,
+    // all drawn 24 wide. Worldspace: 120 out along x (24 * 5), and the unit step
+    // along the heading (120, 5), which is 0.99913 on x.
+    const double heading_x = 120.0 / std::hypot(120.0, 5.0);
+    for (const auto& [flags, first_x, step_length] :
+         { Case { 0, 24.0 * (5.0 + kAlong), kAlong * std::hypot(24.0, 1.0) },
+           Case { 1, 120.0 + heading_x, 1.0 } }) {
+        SCOPED_TRACE(flags);
+        fs::VFS vfs;
+        MountSceneFiles(vfs);
+        auto files = std::map<std::string, std::string> {
+            { "/stretched_particle.json",
+              R"({"emitter":[{"name":"boxrandom","id":1,"origin":"0 0 0","directions":"1 1 0",)"
+              R"("distancemin":"5 5 0","distancemax":"5 5 0","speedmin":60,"speedmax":60,)"
+              R"("rate":100,"instantaneous":1}],)"
+              R"("initializer":[{"name":"lifetimerandom","min":10,"max":10}],)"
+              R"("operator":[{"name":"movement","id":2}],)"
+              R"("material":"mat.json","maxcount":1,"starttime":0,"flags":)" +
+                  std::to_string(flags) + "}" },
+        };
+        ASSERT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+        audio::SoundManager sound_manager;
+        auto scene = WPSceneParser().Parse(
+            SceneParseRequest { .scene_id = "stretched" },
+            R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},
+                "general":{"clearcolor":[0,0,0],"cameraparallax":false,"bloom":false,
+                           "orthogonalprojection":{"width":640,"height":360}},
+                "objects":[{"id":1,"name":"haze","particle":"stretched_particle.json",
+                            "origin":[320,180,0],"scale":[24,1,1],"visible":true}]})",
+            vfs, sound_manager);
+        ASSERT_NE(scene, nullptr);
+        ASSERT_FALSE(scene->paritileSys->subsystems.empty());
+        const auto layer = FindRootChildByName(*scene, "haze");
+        ASSERT_NE(layer, nullptr);
+        scene->frameTime = 1.0 / 60.0;
+        const auto drawn_position = [&] {
+            scene->paritileSys->Emitt();
+            const auto& subsystem = *scene->paritileSys->subsystems.front();
+            const auto  particles = subsystem.Instances().front()->Particles();
+            EXPECT_FALSE(particles.empty());
+            layer->UpdateTrans();
+            const auto& at = particles.front().position;
+            return Eigen::Vector3d((layer->RenderTrans() * Eigen::Vector4d(at.x(), at.y(), at.z(), 1.0))
+                                       .head<3>());
+        };
+        const auto first  = drawn_position();
+        const auto second = drawn_position();
+        EXPECT_NEAR(std::abs(first.x() - 320.0), first_x, 1.0e-3);
+        EXPECT_NEAR((second - first).norm(), step_length, 1.0e-3);
+    }
 }
 
 TEST(SceneSchema, AudioRequirementComesOnlyFromContentThatReadsAudio) {

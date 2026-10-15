@@ -562,8 +562,10 @@ ParticleInitOp WPParticleParser::genParticleInitOp(const nlohmann::json&        
                 r.max = { 1.0f, 1.0f, 1.0f };
             }
             VecRandom::ReadFromJson(wpj, r);
+            const auto spawn = ctx.spawn;
             return [=](Particle& p, double) {
-                auto result = GenRandomVec3(r.min, r.max, r.exponent);
+                Vector3d result = GenRandomVec3(r.min, r.max, r.exponent);
+                if (spawn && spawn->has_world_linear) result = spawn->world_linear * result;
                 PM::ChangeVelocity(p, result[0], result[1], result[2]);
             };
         } else if (name == "rotationrandom") {
@@ -823,6 +825,7 @@ ParticleInitOp WPParticleParser::genParticleInitOp(const nlohmann::json&        
             Vector3f forward(r.forward.data());
             Vector3f right(r.right.data());
             Vector3f pos = GenRandomVec3({ 0, 0, 0 }, { 10.0f, 10.0f, 10.0f }).cast<float>();
+            const auto spawn = ctx.spawn;
             return [=](Particle& p, double duration) mutable {
                 float speed = Random::get(r.speedmin, r.speedmax);
                 if (duration > 10.0f) {
@@ -848,6 +851,9 @@ ParticleInitOp WPParticleParser::genParticleInitOp(const nlohmann::json&        
                 // offset
                 result = AngleAxisf(r.offset, right) * result;
                 result *= speed;
+                if (spawn && spawn->has_world_linear) {
+                    result = (spawn->world_linear * result.cast<double>()).cast<float>();
+                }
                 PM::ChangeVelocity(p, result[0], result[1], result[2]);
             };
         }
@@ -1531,7 +1537,8 @@ ParticleOperatorOp WPParticleParser::genParticleOperatorOp(const nlohmann::json&
 ParticleEmittOp WPParticleParser::genParticleEmittOp(
     const wpscene::Emitter& wpe, bool sort,
     std::shared_ptr<const wpscene::ParticleInstanceoverride> override,
-    std::function<audio::AudioSpectrumSnapshot()>            audio_spectrum) {
+    std::function<audio::AudioSpectrumSnapshot()>            audio_spectrum,
+    std::shared_ptr<ParticleSpawnContext>                    spawn) {
     std::shared_ptr<const float> count_multiplier;
     if (override != nullptr && override->enabled) {
         count_multiplier = std::shared_ptr<const float>(override, &override->count);
@@ -1561,6 +1568,7 @@ ParticleEmittOp WPParticleParser::genParticleEmittOp(
         box.countMultiplier = count_multiplier;
         box.audioResponse   = MakeEmitterAudioResponse(wpe, std::move(audio_spectrum));
         box.timing          = timing;
+        box.spawn           = std::move(spawn);
         return ParticleBoxEmitterArgs::MakeEmittOp(box);
     } else if (wpe.name == "sphererandom") {
         ParticleSphereEmitterArgs sphere;
@@ -1580,6 +1588,7 @@ ParticleEmittOp WPParticleParser::genParticleEmittOp(
         sphere.audioResponse   = MakeEmitterAudioResponse(wpe, std::move(audio_spectrum));
         sphere.timing          = timing;
         sphere.cone            = wpe.cone;
+        sphere.spawn           = std::move(spawn);
         return ParticleSphereEmitterArgs::MakeEmittOp(sphere);
     } else
         return [](std::vector<Particle>&,

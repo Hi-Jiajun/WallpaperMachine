@@ -117,6 +117,10 @@ struct EmitterFrame {
     Eigen::Vector3d origin { Eigen::Vector3d::Zero() };
     Eigen::Matrix3d rotation { Eigen::Matrix3d::Identity() };
     bool            rotated { false };
+    /// The layer's rotation and scale, for a world-space system: the spawn
+    /// offset is turned and scaled by it, the origin added after, as it is.
+    Eigen::Matrix3d world_linear { Eigen::Matrix3d::Identity() };
+    bool            world { false };
 };
 
 inline EmitterFrame ResolveEmitterFrame(std::span<const ParticleControlpoint> cps, i32 cp_index,
@@ -137,8 +141,22 @@ inline EmitterFrame ResolveEmitterFrame(std::span<const ParticleControlpoint> cp
             frame.rotation = cp.rotation;
             frame.rotated  = true;
         }
+        if (cp.has_world_linear) {
+            frame.world_linear = cp.world_linear;
+            frame.world        = true;
+        }
     }
     return frame;
+}
+
+/// The velocity initializers of the particles this emitter spawns read the
+/// matrix of its control point, as Wallpaper Engine hands it to them: the layer's
+/// for a worldspace system, unless the control point is pinned to the world.
+inline void HandOnWorldLinear(const std::shared_ptr<ParticleSpawnContext>& spawn,
+                              const EmitterFrame&                          frame) {
+    if (spawn == nullptr) return;
+    spawn->has_world_linear = frame.world;
+    spawn->world_linear     = frame.world_linear;
 }
 
 inline float ResolveMultiplier(const std::shared_ptr<const float>& multiplier) {
@@ -161,6 +179,7 @@ inline Eigen::Vector3d SpawnDirection(const Eigen::Vector3d& offset,
         static_cast<double>(directions[2]) * (2.0 * UnitRandom() - 1.0),
     };
     if (frame.rotated) random = frame.rotation * random;
+    if (frame.world) random = frame.world_linear * random;
     const double length = random.norm();
     return length > 1.0e-12 ? Eigen::Vector3d(random / length) : Eigen::Vector3d(Eigen::Vector3d::Zero());
 }
@@ -358,6 +377,7 @@ ParticleEmittOp ParticleBoxEmitterArgs::MakeEmittOp(ParticleBoxEmitterArgs a) {
                       std::span<const ParticleControlpoint>
                           controlpoints) mutable {
         const EmitterFrame frame = ResolveEmitterFrame(controlpoints, a.controlpoint, a.orgin);
+        HandOnWorldLinear(a.spawn, frame);
         auto               GenBox = [&]() {
             // Per axis a signed draw scaled by `directions`; the minimum bounds
             // the distance from the centre, so a hollow box leaves its centre
@@ -372,6 +392,10 @@ ParticleEmittOp ParticleBoxEmitterArgs::MakeEmittOp(ParticleBoxEmitterArgs a) {
             }
             auto p = Particle();
             if (frame.rotated) pos = frame.rotation * pos;
+            // A world-space system's layer turns and scales the offset, and the
+            // particle leaves along the offset's new direction at its authored
+            // speed.
+            if (frame.world) pos = frame.world_linear * pos;
             ParticleModify::MoveTo(p, pos);
             ParticleModify::ChangeVelocity(
                 p,
@@ -397,6 +421,7 @@ ParticleEmittOp ParticleSphereEmitterArgs::MakeEmittOp(ParticleSphereEmitterArgs
                       std::span<const ParticleControlpoint>
                           controlpoints) mutable {
         const EmitterFrame frame = ResolveEmitterFrame(controlpoints, a.controlpoint, a.orgin);
+        HandOnWorldLinear(a.spawn, frame);
         const double       cone_floor = -std::cos(EIGEN_PI * static_cast<double>(a.cone));
         auto               GenSphere = [&]() {
             auto p = Particle();
@@ -426,6 +451,7 @@ ParticleEmittOp ParticleSphereEmitterArgs::MakeEmittOp(ParticleSphereEmitterArgs
                          direction;
             }
             if (frame.rotated) offset = frame.rotation * offset;
+            if (frame.world) offset = frame.world_linear * offset;
 
             ParticleModify::MoveTo(p, offset);
             ParticleModify::ChangeVelocity(

@@ -859,12 +859,20 @@ into private textures; the three that draw skip visibly without a Metal device.
   the drag uses, the half step at low frame rates, and an `eventspawn` child's emitters
   outliving its particle are unchanged. Turbulence uses Perlin noise where the
   engine's own noise function is not identified. `maxcount` is still capped at 20 000
-  particles per file. A `worldspace` file keeps live particles in place when its layer moves;
-  its spawn-time matrix rules (emitter origin added unscaled, velocity not scaled by
-  the layer) are not reproduced. A sprite or rope keeps its authored pixel size when
-  its layer is scaled in a pixel scene: Wallpaper Engine's shader builds the billboard in
-  model space, which would scale it with the layer, but that policy is the authored
-  canvas's established one and changing it needs a reference render first. Emitter
+  particles per file. A `worldspace` file is simulated and drawn in scene units from its
+  layer's origin, as the binary's draw replaces the model matrix with the scene's own
+  for it: the layer's turn and scale shape the offset an emitter or a control point
+  places a particle at (the emitter's origin is added after, unscaled) and the
+  velocity a `velocityrandom` or `turbulentvelocityrandom` initializer draws (an
+  emitter's own `speed` follows the stretched offset at its authored value), while
+  size and the operators' forces do not follow the layer; a control point pinned to
+  the world keeps its authored matrix, so an emitter on it, and the velocity
+  initializers its particles meet, are not stretched; live particles stay in
+  place when the layer moves, turns or is rescaled. The system's child systems still
+  draw through the layer's matrix times their own, as the binary draws a child that
+  is not itself `worldspace`; what the draw's base matrix is while a layer draws its
+  own child objects was not traced, so a `worldspace` layer there keeps the scene
+  origin. Emitter
   defaults for a scene without a pixel canvas (sphere `distancemax`, box `directions`)
   are still the pixel set. A scene that names no `orthogonalprojection` is still
   drawn here as the default orthogonal canvas, while Wallpaper Engine's scene

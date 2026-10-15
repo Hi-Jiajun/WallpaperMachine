@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <functional>
+#include <optional>
 
 namespace wallpaper
 {
@@ -117,9 +118,10 @@ public:
     void SetStartTime(double seconds) { m_starttime = seconds; }
     double StartTime() const { return m_starttime; }
     /// Runs the prewarm for this subsystem. Called once, after the emitters,
-    /// initializers, operators, control points and children are all in place.
-    /// A static child prewarms itself; an event child prewarms every instance
-    /// it spawns.
+    /// initializers, operators, control points and children are all in place
+    /// and its layer sits under its parent groups: the layer's world matrix
+    /// shapes what a prewarm spawns. A static child prewarms itself; an event
+    /// child prewarms every instance it spawns.
     void Prewarm();
 
     /// Whether the subsystem builds geometry for a renderer. A particle file
@@ -134,10 +136,18 @@ public:
     using ControlpointSource = std::function<void(std::span<ParticleControlpoint>)>;
     void SetControlpointSource(ControlpointSource source) { m_cp_source = std::move(source); }
 
-    /// The layer's particles live in the world, not in the layer: when the
-    /// layer's matrix changes, particles already emitted stay where they were
-    /// in the scene and only new ones follow the layer (the particle file's
-    /// `worldspace` flag). Without it every particle moves with the layer.
+    /// The layer's particles live in the world, not in the layer (the particle
+    /// file's `worldspace` flag), as Wallpaper Engine draws them: through no
+    /// model matrix of the layer's, so a particle keeps the size it was authored
+    /// with whatever the layer's scale. Positions are measured from the layer's
+    /// origin along the scene's own axes, and the system draws through a matrix
+    /// that is only that origin (the nodes' render transform). The layer's
+    /// rotation and scale reach a particle once, at its birth: in the offset an
+    /// emitter places it at, the offset of a control point, and the velocity the
+    /// velocity initializers give it. When the layer moves, turns or is rescaled,
+    /// particles already emitted stay where they were in the scene and only new
+    /// ones follow it. Without the flag every particle belongs to the layer and
+    /// is drawn through its whole matrix.
     void SetWorldSpace(bool value) { m_world_space = value; }
     bool WorldSpace() const { return m_world_space; }
 
@@ -201,9 +211,17 @@ private:
     void UpdateControlpoints();
     /// Fills a mirror's mesh from the instances of the subsystem it draws.
     void GenerateFrom(const ParticleSubSystem& source);
-    /// Re-expresses live particles after the layer's matrix changed, for a
-    /// world-space system.
+    /// For a world-space system: moves the draw matrix of its nodes with the
+    /// layer and re-expresses live particles after the layer moved, so they stay
+    /// where they were in the scene.
     void KeepWorldPositions();
+    /// The rotation and scale, and the origin, of the matrix the owner layer
+    /// draws a world-space system's particles by, as of the last step.
+    struct WorldFrame {
+        Eigen::Matrix3d linear { Eigen::Matrix3d::Identity() };
+        Eigen::Vector3d origin { Eigen::Vector3d::Zero() };
+    };
+    std::optional<WorldFrame> OwnerWorldFrame() const;
 
     ParticleSystem&            m_sys;
     std::shared_ptr<SceneMesh> m_mesh;
@@ -247,6 +265,8 @@ private:
     ParticleTrailConfig m_trail {};
     double              m_trail_timer { 0.0 };
 
+    /// The system this one is a child of, for the position of a particle it follows.
+    const ParticleSubSystem*                        m_parent_system { nullptr };
     std::vector<std::unique_ptr<ParticleSubSystem>> m_children;
     std::vector<std::unique_ptr<ParticleSubSystem>> m_mirrors;
     std::vector<std::unique_ptr<ParticleInstance>>  m_instances;

@@ -64,12 +64,7 @@ inline usize GenParticleData(std::span<const std::unique_ptr<ParticleInstance>> 
             specOp(p, { &lifetime });
 
             auto pos = inst->GetBoundedData().pos + p.position;
-            // The generic particle ABI exposes one scalar ParticleSize in
-            // a_TexCoordVec4.w, so nonuniform owner scale cannot be undone per
-            // billboard axis without changing the shader/vertex contract.
-            // Use the isotropic value derived from effective X/Y column norms;
-            // inverse_x/y are carried for generators that can represent them.
-            float size = (p.size / 2.0f) * render_scale.isotropic_inverse;
+            float size = p.size / 2.0f;
 
             usize offset = 0;
 
@@ -269,7 +264,7 @@ inline usize GenRopeData(std::span<const std::unique_ptr<ParticleInstance>> inst
         for (const auto& p : inst->Particles()) {
             if (! ParticleModify::LifetimeOk(p)) continue;
             live.push_back(RopePoint { origin + p.position, p.color, p.alpha,
-                                       (p.size / 2.0f) * render_scale.isotropic_inverse });
+                                       p.size / 2.0f });
         }
         if (live.size() < 2) continue;
 
@@ -315,7 +310,7 @@ inline usize GenRopeTrailData(std::span<const std::unique_ptr<ParticleInstance>>
             }
 
             const uint32_t h         = trails[i].Count();
-            const float    half_size = (p.size / 2.0f) * render_scale.isotropic_inverse;
+            const float    half_size = p.size / 2.0f;
             points.clear();
             points.push_back(RopePoint { origin + p.position, p.color, p.alpha, half_size });
             for (uint32_t j = 1; j <= h; ++j) {
