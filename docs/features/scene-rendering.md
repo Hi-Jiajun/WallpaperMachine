@@ -232,7 +232,31 @@ shaders. Distance and height fog
 (`fogdistance`, `fogheight` with their start, end, densities and colours, Wallpaper
 Engine's defaults where they are left out) are compiled into every pass whose `FOG`
 combo is on, the material's own or its shader's default, and applied by the
-author's `common_fog.h`. Shadow maps, spot cookies and
+author's `common_fog.h`. A layer that draws through effects is first drawn into a card
+of its own, from an ortho camera and with no transform, where a point's distance from
+the eye is its place in the card and not the layer's, so fog compiled into that pass
+dims the card toward its edge. Wallpaper Engine fogs such a layer where it sits, in the
+pass that composites it onto the scene, and so does this renderer: when the layer's own
+material takes fog, the layer's first pass and its effects get none, and the chain ends
+in Wallpaper Engine's fogging passthrough (`effectpassthrough_4`, the generic image
+shader), drawn at the layer's model matrix with the scene's fog, which dims the layer
+evenly by its real distance and height. It costs one layer-sized pass per such layer in
+a fogged scene, and the second ping-pong target of a chain that was one effect long. On
+the one local fogged scene, a 512 x 512 effect layer, a frame went from 9 to 10 passes
+and took 1,064,960 bytes (1 MB) more target memory. The CPU time to encode a frame did
+not change measurably: 16 interleaved runs of each build gave a median of 0.35 ms for
+both, the runs spreading over 0.19-0.45 ms, where one pass of the frame takes about
+0.02-0.04 ms to encode. GPU time was not isolated. A scene without fog, and a layer that
+draws without effects, are unchanged. The pass is added whenever the layer's own
+material takes fog, whether or not the layer's own pass is drawn, so a layer an effect
+generates (`copybackground` off) is fogged too, where only an effect pass of its own
+with a `FOG` combo fogged it before. That is read from Wallpaper Engine's setup of the
+composite, which does not look at `copybackground`, and not seen in a frame: the one
+local fogged scene has no such layer. Compose, fullscreen and puppet layers, a layer
+that blends onto the screen by colour blend mode, text layers, and a layer whose
+material takes no fog keep what they drew.
+
+Shadow maps, spot cookies and
 volumetric light shafts are not drawn: a light that casts a shadow lights as if
 nothing did, which is also what Wallpaper Engine shows when nothing in the scene
 casts one. Both renderers apply a material's depth state and cull mode the same way: a

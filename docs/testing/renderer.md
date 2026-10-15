@@ -790,6 +790,31 @@ into private textures; the three that draw skip visibly without a Metal device.
   `general` fog keys bound to user properties keep the value the scene loaded
   with. Wallpaper Engine's user-level post-processing quality (off, LDR, HDR,
   display HDR) is fixed at its highest SDR level.
+- **Fog reaches an effect layer only where its own material takes fog.** The pass
+  that fogs an effect layer where it sits (`effectpassthrough_4`, ending the chain)
+  stands in for the fog the layer's own material (its `FOG` combo) would have taken,
+  so a layer whose material has none (`genericimage2`, a custom shader) draws
+  unfogged under effects as it does without them. Wallpaper Engine gates it the
+  same way: the setup that builds a layer's composite (`FUN_140206ae0`) gives it
+  `FOG_COMPUTED` and takes `FOG` and `FOG_COMPUTED` out again unless the layer's
+  material has `FOG` on (absent or 0 removes them). The pass is added whether or not
+  the layer's own pass is drawn, so a layer an effect generates (`copybackground`
+  off) is fogged too. Compose, fullscreen and puppet layers, and a layer that blends
+  onto the screen by colour blend mode, keep the fog of their own first pass, which
+  measures it in the layer's card and not where the layer sits (the vignette an
+  effect layer used to have); a text layer's card has no fog pass at all and draws
+  unfogged, where Wallpaper Engine composites every text layer of a fogged scene. A
+  layer another layer samples (`_rt_imageLayerComposite_<id>`) also draws its last
+  pass into that composite, from the layer-local camera, so the picture the other
+  layer reads carries fog measured in the card, for a plain layer as for an effect
+  layer and as it did before the fogging pass existed; what Wallpaper Engine puts in
+  that composite is not known. A wallpaper assets folder without
+  `materials/util/effectpassthrough_4.json` leaves an effect layer fogged in its card
+  too. Established against one wallpaper's frame (the moon of the local corpus,
+  within half a percent of Wallpaper Engine's tone in every ring of its disc) and the
+  decompiled setup. Fogging a layer an effect generates is the decompile's alone: the
+  setup checks one bit of the object's flags and never the `copybackground` bit, and
+  the one local fogged scene has no such layer, so no Wallpaper Engine frame shows it.
 - **Some timeline options are not followed.** A layer's `origin`, `scale` and `angles`
   and an image layer's `color` play their `animation` (loop, single, relative,
   start-paused with the first frame applied, named for `getAnimation`, keyed together

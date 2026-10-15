@@ -1537,9 +1537,12 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
     auto       base_combos  = pWPShaderInfo->combos;
     // Fog is compiled into a pass only once its effective `FOG` combo -- the
     // material's or the shader's own default -- is known to be on, which the
-    // first compile tells; the pass is then compiled again with fog.
+    // first compile tells; the pass is then compiled again with fog. A pass
+    // that asks for no fog (`defer_fog`) is left as the first compile made it,
+    // and `fog_deferred` tells the caller it would have taken it.
     const bool scene_fog = pScene->fog_distance || pScene->fog_height;
     bool       fog_applied = false;
+    pWPShaderInfo->fog_deferred = false;
 
     std::string reflection_json;
     auto        textures = BuildMaterialTextureList(base_textures, pWPShaderInfo->defTexs);
@@ -1613,11 +1616,15 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
             fog_applied     = true;
             const auto fog  = pWPShaderInfo->combos.find("FOG");
             if (fog != pWPShaderInfo->combos.end() && fog->second != "0") {
-                base_combos["FOG_DIST"]     = pScene->fog_distance ? "1" : "0";
-                base_combos["FOG_HEIGHT"]   = pScene->fog_height ? "1" : "0";
-                base_combos["FOG_COMPUTED"] = "1";
-                textures                    = std::move(next_textures);
-                continue;
+                if (pWPShaderInfo->defer_fog) {
+                    pWPShaderInfo->fog_deferred = true;
+                } else {
+                    base_combos["FOG_DIST"]     = pScene->fog_distance ? "1" : "0";
+                    base_combos["FOG_HEIGHT"]   = pScene->fog_height ? "1" : "0";
+                    base_combos["FOG_COMPUTED"] = "1";
+                    textures                    = std::move(next_textures);
+                    continue;
+                }
             }
         }
         if (next_textures == textures) {
@@ -1969,6 +1976,28 @@ std::optional<wpscene::WPImageEffect> MakeColorBlendEffect(fs::VFS& vfs, int32_t
     material.combos["BONECOUNT"] = 1;
     material.combos["BLENDMODE"] = color_blend_mode;
     material.blending            = "disabled";
+    effect.materials.push_back(material);
+    return effect;
+}
+
+/// The pass a layer's effect chain ends in so that scene fog falls on the layer
+/// where it sits: Wallpaper Engine's passthrough material for a device that draws
+/// fog, `effectpassthrough_4` (the generic image shader, which takes the scene's
+/// fog like any pass). The chain before it runs in the layer's own card, from an
+/// ortho camera and with no transform, where a point's distance from the eye is
+/// its place in the card; this last pass is drawn at the layer's model matrix, so
+/// the fog it measures is the layer's. It copies what the chain made, with a white
+/// `g_Color4`: the layer's own colour and alpha are already in it. Without the
+/// material (assets from before it) there is no pass, and the layer keeps its fog
+/// where it was.
+std::optional<wpscene::WPImageEffect> MakeFogCompositeEffect(fs::VFS& vfs) {
+    wpscene::WPImageEffect effect;
+    wpscene::WPMaterial    material;
+    nlohmann::json         json;
+    if (! PARSE_JSON(fs::GetFileContent(vfs, "/assets/materials/util/effectpassthrough_4.json"), json))
+        return std::nullopt;
+    material.FromJson(json);
+    material.combos["BONECOUNT"] = 1;
     effect.materials.push_back(material);
     return effect;
 }
@@ -4120,6 +4149,23 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             count_eff++;
         }
     }
+    // A layer that draws through effects is first drawn into a card of its own,
+    // from an ortho camera and with no transform, where fog measured from the
+    // eye would follow the place in the card and not the layer's. Wallpaper
+    // Engine fogs it where it sits, in the pass that composites it onto the
+    // scene: the chain ends in `effectpassthrough_4` with the scene's fog, and
+    // the passes before it carry none. Only a layer whose own material takes
+    // fog gets that pass (added below, once the material has told), and a layer
+    // drawn at its own place, with no card, is unchanged. Compose, fullscreen
+    // and puppet layers and the one that blends onto the screen keep their fog
+    // where it was.
+    std::optional<wpscene::WPImageEffect> fog_composite;
+    std::optional<usize>                  fog_composite_effect;
+    if ((context.scene->fog_distance || context.scene->fog_height) && count_eff > 0 &&
+        ! isCompose && ! wpimgobj.fullscreen && wpimgobj.puppet.empty() &&
+        ! color_blend_passthrough) {
+        fog_composite = MakeFogCompositeEffect(vfs);
+    }
     const bool has_child_content =
         context.object_list != nullptr && HasChildObject(*context.object_list, wpimgobj.id);
     const bool render_as_compose =
@@ -4357,6 +4403,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         if (hasEffect && has_puppet_bones) {
             input_material.combos["LIGHTING"] = 0;
         }
+        shaderInfo.defer_fog = fog_composite.has_value();
         if (! LoadMaterial(vfs,
                            input_material,
                            context.scene.get(),
@@ -4368,6 +4415,10 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             return;
         };
         LoadConstvalue(material, wpimgobj.material, shaderInfo);
+        if (fog_composite.has_value() && shaderInfo.fog_deferred) {
+            wpimgobj.effects.push_back(std::move(*fog_composite));
+            fog_composite_effect = wpimgobj.effects.size() - 1;
+        }
     }
 
     // mesh
@@ -4574,8 +4625,12 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             // Wallpaper Engine draws the passthrough that blends the layer
             // onto the screen with a white colour: the layer's own colour and
             // alpha are already in what it blends, from the layer's first pass.
+            // The pass that fogs the layer is the same copy of the chain.
+            const bool is_fog_composite =
+                fog_composite_effect.has_value() && &wpeffobj == &wpimgobj.effects[*fog_composite_effect];
             const bool blends_onto_screen =
-                color_blend_effect.has_value() && &wpeffobj == &wpimgobj.effects[*color_blend_effect];
+                is_fog_composite ||
+                (color_blend_effect.has_value() && &wpeffobj == &wpimgobj.effects[*color_blend_effect]);
             if (! EffectIsBuilt(wpeffobj)) {
                 i_eff--;
                 continue;
@@ -4669,6 +4724,8 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                     wpEffShaderInfo.baseConstSvs["g_Color4"] =
                         std::array<float, 4> { 1.0f, 1.0f, 1.0f, 1.0f };
                 }
+                // The fog is the composite's alone, applied where the layer sits.
+                wpEffShaderInfo.defer_fog = fog_composite_effect.has_value() && ! is_fog_composite;
                 SceneMaterial     material;
                 WPShaderValueData svData;
                 svData.effect_owner   = spImgNode.get();

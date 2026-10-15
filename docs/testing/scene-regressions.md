@@ -1460,7 +1460,24 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   the lit pixels on both renderers.
   `SceneSchema.FogIsCompiledIntoPassesWhoseFogComboIsOnWithWallpaperEnginesParameters`
   checks that scene fog reaches a pass whose `FOG` combo is on (and only such a
-  pass) with Wallpaper Engine's parameter layout, and
+  pass) with Wallpaper Engine's parameter layout,
+  `MetalSceneDraw.AnEffectLayerIsFoggedWhereItSitsAsAPlainLayerIsOnBothRenderers`
+  that a layer under a copy effect is fogged where it sits, as the same layer
+  without the effect is (the centre, sides and corners of its card within two
+  levels, for distance fog and for height fog, the two renderers equal; fogging the
+  layer's own card dimmed it toward the edge),
+  `.AnEffectLayersColourAndAlphaAreAppliedOnceWhenItIsFoggedWhereItSitsOnBothRenderers`
+  that the layer's colour and alpha come through that pass once, not twice (the
+  fogging pass draws with a white colour),
+  `.AnEffectLayerWhoseEffectsAScriptSwitchesIsFoggedWhereItSitsOnBothRenderers` that
+  it holds with the chain's only effect switched off and on by a script,
+  `.AnEffectLayerThatMakesItsOwnPictureIsFoggedWhereItSitsOnBothRenderers` that it
+  holds for a layer whose own pass is not drawn (`copybackground` off): an effect
+  that paints red where its input is empty makes a red card, fogged as the plain
+  layer is, where the same effect over a layer that draws its own pass makes a black
+  one, and
+  `.AnEffectLayerWhoseMaterialTakesNoFogIsNotFoggedOnBothRenderers` that a layer
+  whose material turns `FOG` off stays unfogged under an effect, and
   `SceneSchema.ATextureSlotsTexelIsTheStepOfTheTextureItSamples` that
   `g_Texture<N>Texel` is (1 / width, 1 / height, width, height) of the sampled
   texture. After a shader-crate change, rebuild

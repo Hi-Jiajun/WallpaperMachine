@@ -4148,6 +4148,439 @@ TEST_F(MetalSceneDraw, AnImageLayersBoundBrightnessFollowsItsPropertyAndScriptOn
     }
 }
 
+/// A perspective scene under fog, with the fixture's white card 100 units from
+/// the eye, 25.6 units wide, and `effects_json` over it. `fog_json` is the
+/// scene's fog keys. The shaders are the fixture's own, in the shape of Wallpaper
+/// Engine's `genericimage` family: its vertex stage hands the fragment stage the
+/// eye minus the vertex's world position (and the world height), and its
+/// fragment stage multiplies in the layer's `g_Color4` and mixes the fog colour
+/// in by that distance or height once the engine compiles `FOG_COMPUTED` and the
+/// fog kind in. `fog_through` is the plain copy Wallpaper Engine's fogging
+/// passthrough is (`effectpassthrough_4`), fogged the same way; it takes the
+/// `g_Color4` the engine gives it, which must be white. A layer whose material
+/// turns the shader's `FOG` combo off (`material_takes_fog` false) is drawn
+/// unfogged. `layer_keys_json` is more keys of the layer object, such as its
+/// `alpha` and `color`.
+std::filesystem::path WriteFoggedLayerFixture(const std::filesystem::path& root,
+                                              std::string_view fog_json,
+                                              std::string_view effects_json,
+                                              bool material_takes_fog = true,
+                                              std::string_view layer_keys_json = {})
+{
+    const auto project = WriteFixture(root);
+    const auto file    = [&](const std::string& path, const std::string& text) {
+        std::filesystem::create_directories((root / path).parent_path());
+        std::ofstream(root / path) << text;
+    };
+    const std::string vertex =
+        "uniform mat4 g_ModelViewProjectionMatrix;\n"
+        "uniform mat4 g_ModelMatrix;\n"
+        "uniform vec3 g_EyePosition;\n"
+        "attribute vec3 a_Position;\n"
+        "attribute vec2 a_TexCoord;\n"
+        "varying vec2 v_TexCoord;\n"
+        "#if FOG_COMPUTED && (FOG_DIST || FOG_HEIGHT)\n"
+        "varying vec4 v_ViewDir;\n"
+        "#endif\n"
+        "void main() {\n"
+        "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+        "  v_TexCoord = a_TexCoord;\n"
+        "#if FOG_COMPUTED && (FOG_DIST || FOG_HEIGHT)\n"
+        "  vec4 worldPos = g_ModelMatrix * vec4(a_Position, 1.0);\n"
+        "  v_ViewDir = vec4(g_EyePosition - worldPos.xyz, worldPos.y);\n"
+        "#endif\n"
+        "}\n";
+    const auto fragment = [](std::string_view colour) {
+        return "// [COMBO] {\"material\":\"fog\",\"combo\":\"FOG\",\"default\":1}\n"
+               "uniform sampler2D g_Texture0;\n"
+               "uniform vec4 g_Color4;\n"
+               "#if FOG_DIST\n"
+               "uniform vec4 g_FogDistanceParams;\n"
+               "uniform vec3 g_FogDistanceColor;\n"
+               "#endif\n"
+               "#if FOG_HEIGHT\n"
+               "uniform vec4 g_FogHeightParams;\n"
+               "uniform vec3 g_FogHeightColor;\n"
+               "#endif\n"
+               "varying vec2 v_TexCoord;\n"
+               "#if FOG_COMPUTED && (FOG_DIST || FOG_HEIGHT)\n"
+               "varying vec4 v_ViewDir;\n"
+               "#endif\n"
+               "void main() {\n"
+               "  vec4 color = " + std::string(colour) + " * g_Color4;\n"
+               "#if FOG_COMPUTED && FOG_HEIGHT\n"
+               "  float height = clamp((v_ViewDir.w - g_FogHeightParams.x) / g_FogHeightParams.y, 0.0, 1.0);\n"
+               "  color.rgb = mix(color.rgb, g_FogHeightColor,\n"
+               "      g_FogHeightParams.z + g_FogHeightParams.w * height * height);\n"
+               "#endif\n"
+               "#if FOG_COMPUTED && FOG_DIST\n"
+               "  float dist = clamp((length(v_ViewDir.xyz) - g_FogDistanceParams.x) / g_FogDistanceParams.y, 0.0, 1.0);\n"
+               "  color.rgb = mix(color.rgb, g_FogDistanceColor,\n"
+               "      g_FogDistanceParams.z + g_FogDistanceParams.w * dist * dist);\n"
+               "#endif\n"
+               "  gl_FragColor = color;\n"
+               "}\n";
+    };
+    file("shaders/metal_probe.vert", vertex);
+    file("shaders/metal_probe.frag", fragment("vec4(1.0)"));
+    file("shaders/fog_through.vert", vertex);
+    file("shaders/fog_through.frag", fragment("texture2D(g_Texture0, v_TexCoord)"));
+    // An effect that copies what it is given, with no fog of its own.
+    file("shaders/copy.vert", vertex);
+    file("shaders/copy.frag",
+         "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+         "  gl_FragColor = texture2D(g_Texture0, v_TexCoord);\n}\n");
+    file("materials/copy.json",
+         R"({"passes":[{"shader":"copy","blending":"normal","cullmode":"nocull",)"
+         R"("depthtest":"disabled","depthwrite":"disabled","textures":[null]}]})");
+    file("effects/copy/effect.json", R"({"name":"copy","passes":[{"material":"materials/copy.json"}]})");
+    // An effect that paints red where the picture it is given is empty and black
+    // where the layer drew: it tells a layer whose own pass was drawn from one
+    // whose own pass was not.
+    file("shaders/unseen.vert", vertex);
+    file("shaders/unseen.frag",
+         "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+         "  vec4 seen = texture2D(g_Texture0, v_TexCoord);\n"
+         "  gl_FragColor = vec4(1.0 - seen.a, 0.0, 0.0, 1.0);\n}\n");
+    file("materials/unseen.json",
+         R"({"passes":[{"shader":"unseen","blending":"normal","cullmode":"nocull",)"
+         R"("depthtest":"disabled","depthwrite":"disabled","textures":[null]}]})");
+    file("effects/unseen/effect.json", R"({"name":"unseen","passes":[{"material":"materials/unseen.json"}]})");
+    file("materials/util/effectpassthrough_4.json",
+         R"({"passes":[{"shader":"fog_through","blending":"normal","cullmode":"nocull",)"
+         R"("depthtest":"disabled","depthwrite":"disabled","textures":[null]}]})");
+    if (! material_takes_fog) {
+        file("materials/tile.json",
+             R"({"passes":[{"shader":"metal_probe","blending":"translucent","cullmode":"nocull",)"
+             R"("depthtest":"disabled","depthwrite":"disabled","combos":{"FOG":0}}]})");
+    }
+    file("layout.json",
+         R"({"camera":{"center":[0,0,0],"eye":[0,0,10],"up":[0,1,0]},)"
+         R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0,0,0],)"
+         R"("bloom":false,"cameraparallax":false,"orthogonalprojection":null,)"
+         R"("fov":50,"nearz":0.1,"farz":1000,)" + std::string(fog_json) + "},"
+         R"("objects":[{"id":1,"name":"tile","image":"models/tile.json","origin":[0,0,-90],)"
+         R"("scale":[0.1,0.1,0.1],"angles":[0,0,0],"visible":true,)" + std::string(layer_keys_json) +
+             R"("effects":)" + std::string(effects_json) + "}]}");
+    return project;
+}
+
+/// An effect that copies its input, as the fixture's chain.
+constexpr const char* kFoggedCopyEffect = R"([{"file":"effects/copy/effect.json","id":2,"visible":true}])";
+
+/// The effect that paints red where its input is empty and black where the
+/// layer drew. With the layer's `copybackground` off its own pass is not drawn,
+/// the input is empty and this effect makes the card: a red one. With it on, the
+/// card the effect makes is black.
+constexpr const char* kFoggedUnseenEffect = R"([{"file":"effects/unseen/effect.json","id":2,"visible":true}])";
+
+/// The copy effect again, which a script switches on half a second into the scene.
+constexpr const char* kFoggedScriptedCopyEffect =
+    R"([{"file":"effects/copy/effect.json","id":2,"visible":{"value":false,)"
+    R"("script":"export function update() { return engine.runtime >= 0.5; }"}}])";
+
+/// The layer's colour and alpha, which a layer's own pass applies and the pass
+/// that fogs it must not apply again.
+constexpr const char* kFoggedLayerTint = R"("alpha":0.5,"color":"0.5 1 0.25",)";
+
+/// The scene's fog keys, one kind each.
+struct FoggedScene
+{
+    const char* name;
+    const char* json;
+};
+constexpr FoggedScene kFoggedScenes[] = {
+    // 100 units off: a quarter of the way to full fog at the middle.
+    { "distance", R"("fogdistance":true,"fogdistancestart":0,"fogdistanceend":200,)"
+                  R"("fogdistancecolor":[0,0,0],"fogdistancestartdensity":0,)"
+                  R"("fogdistanceenddensity":1)" },
+    // The card spans height -9.6..9.6 around the scene's origin.
+    { "height", R"("fogheight":true,"fogheightstart":-12,"fogheightend":12,)"
+                R"("fogheightcolor":[0,0,0],"fogheightstartdensity":0,)"
+                R"("fogheightenddensity":1)" },
+};
+
+/// `frames` frames of the fogged-layer fixture from one renderer, 384 x 256. A
+/// picture with an `error` is none: the scene did not load, or the native
+/// renderer would not take it.
+RendererPicture DrawFoggedLayer(const std::filesystem::path& root, const std::string& name,
+                                std::string_view fog_json, std::string_view effects_json,
+                                bool material_takes_fog, bool native,
+                                std::string_view layer_keys_json = {}, int frames = 1)
+{
+    RendererPicture picture;
+    const auto project =
+        WriteFoggedLayerFixture(root / name, fog_json, effects_json, material_takes_fog,
+                                layer_keys_json);
+    LoadedScene loaded;
+    if (! LoadScene(project, root / (name + "-cache"), loaded, picture.error)) return picture;
+    if (native) {
+        const auto selection = SelectSceneBackend(*loaded.scene);
+        if (selection.backend != SceneBackend::NativeMetal) {
+            picture.error = selection.fallback_reason;
+            return picture;
+        }
+    }
+    picture = DrawWithRenderer(*loaded.scene, native, 384, 256, frames, 1.0 / 60.0);
+    if (picture.error.empty() && picture.rgb.size() != 384u * 256u * 3u) {
+        picture.error = "the picture is not 384 x 256";
+    }
+    return picture;
+}
+
+/// Channel `channel` (0 red, 1 green, 2 blue) of a fogged-layer picture. The fog
+/// is black, so an untinted layer is grey.
+int FoggedChannel(const RendererPicture& picture, int x, int y, int channel = 0)
+{
+    return int(picture.rgb[(std::size_t(y) * 384u + std::size_t(x)) * 3u + std::size_t(channel)]);
+}
+
+/// Where the card sits in a fogged-layer picture, from the pixels the plain
+/// layer lights.
+struct FoggedCard
+{
+    int left { 384 }, right { -1 }, top { 256 }, bottom { -1 };
+    int width() const { return right - left; }
+    int height() const { return bottom - top; }
+};
+
+FoggedCard FindFoggedCard(const RendererPicture& plain)
+{
+    FoggedCard card;
+    for (int y = 0; y < 256; ++y) {
+        for (int x = 0; x < 384; ++x) {
+            if (std::max({ FoggedChannel(plain, x, y, 0), FoggedChannel(plain, x, y, 1),
+                           FoggedChannel(plain, x, y, 2) }) < 8) {
+                continue;
+            }
+            card.left   = std::min(card.left, x);
+            card.right  = std::max(card.right, x);
+            card.top    = std::min(card.top, y);
+            card.bottom = std::max(card.bottom, y);
+        }
+    }
+    return card;
+}
+
+/// The centre, the four sides and two corners of the card, as (u, v).
+constexpr std::pair<double, double> kFoggedCardSamples[] = {
+    { 0.5, 0.5 }, { 0.1, 0.5 }, { 0.9, 0.5 }, { 0.5, 0.1 }, { 0.5, 0.9 }, { 0.15, 0.15 },
+    { 0.85, 0.85 }
+};
+
+/// The effect layer must come out as the plain one at the centre, sides and
+/// corners of the card, in every channel.
+void ExpectFoggedLikeThePlainLayer(const RendererPicture& plain, const RendererPicture& effect)
+{
+    const auto card = FindFoggedCard(plain);
+    ASSERT_LT(card.left, card.right) << "the plain layer drew nothing";
+    ASSERT_LT(card.top, card.bottom) << "the plain layer drew nothing";
+    EXPECT_LT(card.width(), 200) << "the card should be a small part of the scene";
+    for (const auto [u, v] : kFoggedCardSamples) {
+        const int x = card.left + int(u * card.width());
+        const int y = card.top + int(v * card.height());
+        for (int channel = 0; channel < 3; ++channel) {
+            EXPECT_NEAR(FoggedChannel(effect, x, y, channel), FoggedChannel(plain, x, y, channel), 2)
+                << "the effect layer is fogged differently from the plain layer at " << x << ","
+                << y << ", channel " << channel;
+        }
+    }
+}
+
+TEST_F(MetalSceneDraw, AnEffectLayerIsFoggedWhereItSitsAsAPlainLayerIsOnBothRenderers)
+{
+    // Fog is the distance, or height, of a point of the layer from the eye. An
+    // effect layer is first drawn into a texture of its own, in the layer's
+    // card space, and only then onto the scene; fogging the card where it is
+    // drawn first measures the distance from the middle of the card (10 units
+    // here, the eye's height above it), so the fog grows toward the card's edge
+    // and the layer carries a vignette that no plain layer at the same place
+    // has. Wallpaper Engine fogs the layer where it sits: a layer under an
+    // effect that copies its input must come out as the same layer without it.
+    for (const auto& fog : kFoggedScenes) {
+        SCOPED_TRACE(fog.name);
+        std::map<std::string, RendererPicture> pictures;
+        for (const bool native : { false, true }) {
+            for (const bool effect : { false, true }) {
+                const std::string name = std::string("fogged-") + fog.name +
+                                         (effect ? "-effect" : "-plain") +
+                                         (native ? "-native" : "-compat");
+                auto& picture = pictures[name];
+                picture = DrawFoggedLayer(root_, name, fog.json, effect ? kFoggedCopyEffect : "[]",
+                                          true, native);
+                ASSERT_TRUE(picture.error.empty()) << picture.error;
+            }
+        }
+        for (const bool native : { false, true }) {
+            SCOPED_TRACE(native ? "native" : "compatibility");
+            const auto suffix = std::string(native ? "-native" : "-compat");
+            const auto& plain  = pictures.at(std::string("fogged-") + fog.name + "-plain" + suffix);
+            const auto& effect = pictures.at(std::string("fogged-") + fog.name + "-effect" + suffix);
+            const auto card = FindFoggedCard(plain);
+            ASSERT_LT(card.left, card.right) << "the plain layer drew nothing";
+            ASSERT_LT(card.top, card.bottom) << "the plain layer drew nothing";
+            // The fog dims the plain layer to well under its white.
+            EXPECT_LT(FoggedChannel(plain, card.left + card.width() / 2,
+                                    card.top + card.height() / 2),
+                      225)
+                << "the plain layer is not fogged";
+            ExpectFoggedLikeThePlainLayer(plain, effect);
+        }
+        EXPECT_EQ(pictures.at(std::string("fogged-") + fog.name + "-effect-native").rgb,
+                  pictures.at(std::string("fogged-") + fog.name + "-effect-compat").rgb)
+            << "the renderers fogged the effect layer differently";
+    }
+}
+
+TEST_F(MetalSceneDraw, AnEffectLayersColourAndAlphaAreAppliedOnceWhenItIsFoggedWhereItSitsOnBothRenderers)
+{
+    // The layer's first pass already carries its colour and alpha, so the pass
+    // that fogs it where it sits draws with a white colour: with the layer's own
+    // it would tint and fade the layer twice over.
+    for (const auto& fog : kFoggedScenes) {
+        SCOPED_TRACE(fog.name);
+        std::map<std::string, RendererPicture> pictures;
+        for (const bool native : { false, true }) {
+            for (const bool effect : { false, true }) {
+                const std::string name = std::string("tinted-") + fog.name +
+                                         (effect ? "-effect" : "-plain") +
+                                         (native ? "-native" : "-compat");
+                auto& picture = pictures[name];
+                picture = DrawFoggedLayer(root_, name, fog.json, effect ? kFoggedCopyEffect : "[]",
+                                          true, native, kFoggedLayerTint);
+                ASSERT_TRUE(picture.error.empty()) << picture.error;
+            }
+        }
+        for (const bool native : { false, true }) {
+            SCOPED_TRACE(native ? "native" : "compatibility");
+            const auto suffix = std::string(native ? "-native" : "-compat");
+            const auto& plain  = pictures.at(std::string("tinted-") + fog.name + "-plain" + suffix);
+            const auto& effect = pictures.at(std::string("tinted-") + fog.name + "-effect" + suffix);
+            const auto card = FindFoggedCard(plain);
+            ASSERT_LT(card.left, card.right) << "the plain layer drew nothing";
+            const int cx = card.left + card.width() / 2;
+            const int cy = card.top + card.height() / 2;
+            // Half alpha over black, the green of the tint at full and the red at
+            // half, then the fog: the tint and the fade are in the picture.
+            EXPECT_LE(FoggedChannel(plain, cx, cy, 1), 128) << "the plain layer is not faded";
+            EXPECT_GE(FoggedChannel(plain, cx, cy, 1), 2 * FoggedChannel(plain, cx, cy, 0) - 4)
+                << "the plain layer is not tinted";
+            ExpectFoggedLikeThePlainLayer(plain, effect);
+        }
+        EXPECT_EQ(pictures.at(std::string("tinted-") + fog.name + "-effect-native").rgb,
+                  pictures.at(std::string("tinted-") + fog.name + "-effect-compat").rgb)
+            << "the renderers drew the tinted effect layer differently";
+    }
+}
+
+TEST_F(MetalSceneDraw, AnEffectLayerWhoseEffectsAScriptSwitchesIsFoggedWhereItSitsOnBothRenderers)
+{
+    // The pass that fogs the layer is part of the chain whichever effects a
+    // script has on: with the only effect off the layer is still drawn through
+    // it, fogged where it sits, and with the effect on it is the same layer.
+    for (const auto& fog : kFoggedScenes) {
+        SCOPED_TRACE(fog.name);
+        for (const bool native : { false, true }) {
+            SCOPED_TRACE(native ? "native" : "compatibility");
+            const std::string suffix = std::string("-") + fog.name + (native ? "-native" : "-compat");
+            const auto plain = DrawFoggedLayer(root_, "scripted-plain" + suffix, fog.json, "[]", true,
+                                               native);
+            ASSERT_TRUE(plain.error.empty()) << plain.error;
+            for (const int frames : { 10, 45 }) {
+                SCOPED_TRACE(frames);
+                const auto effect = DrawFoggedLayer(
+                    root_, "scripted-effect-" + std::to_string(frames) + suffix, fog.json,
+                    kFoggedScriptedCopyEffect, true, native, {}, frames);
+                ASSERT_TRUE(effect.error.empty()) << effect.error;
+                ExpectFoggedLikeThePlainLayer(plain, effect);
+            }
+        }
+    }
+}
+
+TEST_F(MetalSceneDraw, AnEffectLayerThatMakesItsOwnPictureIsFoggedWhereItSitsOnBothRenderers)
+{
+    // A layer with `copybackground` off does not draw its own pass: its effect is
+    // given an empty picture and makes the card itself. The layer's material still
+    // takes the scene's fog, and the pass that fogs the layer where it sits is
+    // added for it all the same. The effect paints red where its input is empty
+    // and black where the layer drew, so the red card it makes here is the proof
+    // that the layer's own pass was not drawn (a layer that ignored the flag gets
+    // a black card), and its red must be the plain layer's, fogged where it sits.
+    for (const auto& fog : kFoggedScenes) {
+        SCOPED_TRACE(fog.name);
+        for (const bool native : { false, true }) {
+            SCOPED_TRACE(native ? "native" : "compatibility");
+            const std::string suffix = std::string("-") + fog.name + (native ? "-native" : "-compat");
+            const auto plain = DrawFoggedLayer(root_, "generated-plain" + suffix, fog.json, "[]", true,
+                                               native);
+            ASSERT_TRUE(plain.error.empty()) << plain.error;
+            const auto generated = DrawFoggedLayer(root_, "generated-effect" + suffix, fog.json,
+                                                   kFoggedUnseenEffect, true, native,
+                                                   R"("copybackground":false,)");
+            ASSERT_TRUE(generated.error.empty()) << generated.error;
+            // The same effect over a layer that draws its own pass: black.
+            const auto drawn = DrawFoggedLayer(root_, "generated-drawn" + suffix, fog.json,
+                                               kFoggedUnseenEffect, true, native);
+            ASSERT_TRUE(drawn.error.empty()) << drawn.error;
+
+            const auto card = FindFoggedCard(plain);
+            ASSERT_LT(card.left, card.right) << "the plain layer drew nothing";
+            ASSERT_LT(card.top, card.bottom) << "the plain layer drew nothing";
+            for (const auto [u, v] : kFoggedCardSamples) {
+                const int x = card.left + int(u * card.width());
+                const int y = card.top + int(v * card.height());
+                EXPECT_NEAR(FoggedChannel(generated, x, y, 0), FoggedChannel(plain, x, y, 0), 2)
+                    << "the generated card is fogged differently from the plain layer at " << x
+                    << "," << y;
+                EXPECT_LE(FoggedChannel(generated, x, y, 1), 2) << "the card is not red at " << x << "," << y;
+                EXPECT_LE(FoggedChannel(generated, x, y, 2), 2) << "the card is not red at " << x << "," << y;
+                EXPECT_LE(FoggedChannel(drawn, x, y, 0), 2)
+                    << "the effect did not tell a drawn layer from a generated one at " << x << ","
+                    << y;
+            }
+        }
+    }
+}
+
+TEST_F(MetalSceneDraw, AnEffectLayerWhoseMaterialTakesNoFogIsNotFoggedOnBothRenderers)
+{
+    // The pass that fogs an effect layer where it sits stands in for the fog its
+    // own material would have taken. A material that turns the shader's `FOG`
+    // combo off is not fogged as a plain layer, and its effects must not fog it.
+    const std::string fog = kFoggedScenes[0].json;
+    std::map<std::string, RendererPicture> pictures;
+    for (const bool native : { false, true }) {
+        for (const bool effect : { false, true }) {
+            const std::string name = std::string("unfogged-") + (effect ? "effect" : "plain") +
+                                     (native ? "-native" : "-compat");
+            auto& picture = pictures[name];
+            picture = DrawFoggedLayer(root_, name, fog, effect ? kFoggedCopyEffect : "[]", false,
+                                      native);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
+        }
+    }
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        const auto suffix = std::string(native ? "-native" : "-compat");
+        const auto& plain  = pictures.at("unfogged-plain" + suffix);
+        const auto& effect = pictures.at("unfogged-effect" + suffix);
+        const auto card = FindFoggedCard(plain);
+        ASSERT_LT(card.left, card.right) << "the plain layer drew nothing";
+        ASSERT_LT(card.top, card.bottom) << "the plain layer drew nothing";
+        for (const auto [u, v] : kFoggedCardSamples) {
+            const int x = card.left + int(u * card.width());
+            const int y = card.top + int(v * card.height());
+            EXPECT_GE(FoggedChannel(plain, x, y), 250) << "the plain layer is fogged";
+            EXPECT_NEAR(FoggedChannel(effect, x, y), FoggedChannel(plain, x, y), 2)
+                << "the effect layer is fogged though its material takes no fog, at " << x << ","
+                << y;
+        }
+    }
+    EXPECT_EQ(pictures.at("unfogged-effect-native").rgb, pictures.at("unfogged-effect-compat").rgb)
+        << "the renderers drew the effect layer differently";
+}
+
 TEST_F(MetalSceneDraw, AnEffectsSwappedBuffersAccumulateAndItsFloatBuffersKeepTheirSignOnBothRenderers)
 {
     // Wallpaper Engine's fluid simulation keeps its state in buffers it swaps
