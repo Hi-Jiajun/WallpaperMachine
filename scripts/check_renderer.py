@@ -232,8 +232,10 @@ def fixtures(root):
             objects.extend([inner, tile(301, "grandchild", [0,0,0], 300)])
         if index == 7:
             objects.reverse()  # Declaration order/ID is not a resource identity.
+        # Bloom is off in every generated scene: it is Wallpaper Engine's
+        # default, and these fixtures carry no bloom materials.
         scene = {"camera": {"center":[0,0,0], "eye":[0,0,1], "up":[0,1,0]},
-                 "general": {"ambientcolor":[0,0,0], "skylightcolor":[0,0,0], "clearcolor":[0.02,0.05,0.08], "cameraparallax":False, "orthogonalprojection":{"width":384,"height":256}}, "objects": objects}
+                 "general": {"ambientcolor":[0,0,0], "skylightcolor":[0,0,0], "clearcolor":[0.02,0.05,0.08], "cameraparallax":False, "bloom":False, "orthogonalprojection":{"width":384,"height":256}}, "objects": objects}
         files["layout.json"] = json.dumps(scene)
         for name, contents in files.items():
             path = folder / name
@@ -286,7 +288,7 @@ void main() {
         files[f"shaders/{name}.frag"] = fragment
     files["layout.json"] = {
         "camera": {"center": [0, 0, 0], "eye": [0, 0, 1], "up": [0, 1, 0]},
-        "general": {"clearcolor": [0.1, 0.2, 0.3], "cameraparallax": False, "orthogonalprojection": {"width": 384, "height": 256}},
+        "general": {"clearcolor": [0.1, 0.2, 0.3], "cameraparallax": False, "bloom": False, "orthogonalprojection": {"width": 384, "height": 256}},
         "objects": [
             {"id": 1, "name": "coverage container", "image": "models/util/composelayer.json", "size": [288, 144], "origin": [192, 128, 0], "copybackground": False, "effects": [{"file": "effects/coverage.json", "visible": True}]},
             {"id": 2, "name": "destination", "parent": 1, "image": "models/under.json", "origin": [0, 0, 0]},
@@ -378,7 +380,7 @@ void main() {
         "shaders/page.frag": fragment,
         "layout.json": {
             "camera": {"center": [0, 0, 0], "eye": [0, 0, 1], "up": [0, 1, 0]},
-            "general": {"clearcolor": [0.1, 0.2, 0.3], "cameraparallax": False,
+            "general": {"clearcolor": [0.1, 0.2, 0.3], "cameraparallax": False, "bloom": False,
                         "orthogonalprojection": {"width": 384, "height": 256}},
             "objects": [{"id": 1, "name": "page", "image": "models/page.json",
                          "origin": [192, 128, 0], "scale": [1, 1, 1], "angles": [0, 0, 0],
@@ -411,7 +413,7 @@ void main() {
         "shaders/card.frag": "void main() {\n    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);\n}\n",
         "layout.json": {
             "camera": {"center": [0, 0, 0], "eye": [0, 0, 1], "up": [0, 1, 0]},
-            "general": {"clearcolor": [0.2, 0.4, 0.6], "cameraparallax": False,
+            "general": {"clearcolor": [0.2, 0.4, 0.6], "cameraparallax": False, "bloom": False,
                         "orthogonalprojection": {"width": 384, "height": 256}},
             "objects": [{"id": 1, "name": "curtain", "image": "models/card.json",
                          "alignment": "left", "origin": {"value": [192, 128, 0], "animation": {
