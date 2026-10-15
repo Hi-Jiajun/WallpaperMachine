@@ -9,7 +9,7 @@ import XCTest
 final class SettingsBLocalizationTests: XCTestCase {
   func testTheWordsThePagesBuildFromTheModelAreTranslated() throws {
     let defaults = try TemporaryDefaults.make(for: self).defaults
-    addTeardownBlock { @MainActor in PanelLocale.shared.bind(to: AppLanguageStore.shared) }
+    addTeardownBlock { @MainActor in PanelLocale.shared.bind(to: .testHost) }
     func words() -> [String] {
       [
         L("Playlist paused"), L("Resume playlist"),

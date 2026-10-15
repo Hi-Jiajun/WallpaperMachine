@@ -573,7 +573,7 @@ final class PanelPropertyRowsTests: PanelTestCase {
     XCTAssertEqual(missing.sourcePath, "/Volumes/Gone/clip.mp4")
 
     PanelLocale.shared.bind(to: .english())
-    defer { PanelLocale.shared.bind(to: AppLanguageStore.shared) }
+    defer { PanelLocale.shared.bind(to: .testHost) }
     XCTAssertFalse(
       AssetNotes.lines(state: managed, folder: nil).contains { $0.hasPrefix("Used in place from") },
       "a managed copy is not used in place")

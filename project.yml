@@ -212,6 +212,9 @@ schemes:
       config: Debug
     test:
       config: Debug
+      # The tests run inside the app, which mirrors its own language choice into its AppleLanguages
+      # override; English here keeps `Bundle.main` strings English whatever that choice is.
+      language: en
       targets:
         - WallpaperMachineTests
   WallpaperMachineUI:

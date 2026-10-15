@@ -103,7 +103,7 @@ final class AppearanceSettingsTests: PanelTestCase {
     let japanese = AppLanguageStore(
       defaults: try TemporaryDefaults.make(for: self).defaults, systemLanguages: ["ja"])
     PanelLocale.shared.bind(to: japanese)
-    addTeardownBlock { @MainActor in PanelLocale.shared.bind(to: AppLanguageStore.shared) }
+    addTeardownBlock { @MainActor in PanelLocale.shared.bind(to: .testHost) }
     let inJapanese = GeneralSettingsSection.languageOptions()
     XCTAssertEqual(inJapanese.map(\.title).dropFirst(), ["English", "简体中文", "繁體中文", "日本語"])
     XCTAssertNotEqual(inJapanese.first?.title, "System (Auto)", "Only the system entry follows the language")
@@ -114,7 +114,7 @@ final class AppearanceSettingsTests: PanelTestCase {
       let controller = panel.controller
       let settings = controller.settings
       PanelLocale.shared.bind(to: controller.appLanguage)
-      addTeardownBlock { @MainActor in PanelLocale.shared.bind(to: AppLanguageStore.shared) }
+      addTeardownBlock { @MainActor in PanelLocale.shared.bind(to: .testHost) }
       XCTAssertEqual(PanelLocale.shared.tag, "en")
 
       for (tag, expected) in [("zh-Hans", "zh-Hans"), ("ja", "ja"), (AppLanguageStore.systemChoice, "en")] {

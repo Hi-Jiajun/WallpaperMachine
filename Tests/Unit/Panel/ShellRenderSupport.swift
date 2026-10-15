@@ -180,7 +180,7 @@ final class ShellHost {
 extension XCTestCase {
   /// Each `ShellHost` bound the shared panel language to its own store.
   @MainActor
-  func restoreSharedPanelLanguage() { PanelLocale.shared.bind(to: .shared) }
+  func restoreSharedPanelLanguage() { PanelLocale.shared.bind(to: .testHost) }
 
   /// A `ShellHost` for `body`, always closed afterwards.
   @MainActor

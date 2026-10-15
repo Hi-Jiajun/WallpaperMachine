@@ -156,7 +156,7 @@ extension PanelTestCase {
     let store = AppLanguageStore(
       defaults: try TemporaryDefaults.make(for: self).defaults, systemLanguages: ["en"])
     PanelLocale.shared.bind(to: store)
-    addTeardownBlock { @MainActor in PanelLocale.shared.bind(to: AppLanguageStore.shared) }
+    addTeardownBlock { @MainActor in PanelLocale.shared.bind(to: .testHost) }
   }
 }
 

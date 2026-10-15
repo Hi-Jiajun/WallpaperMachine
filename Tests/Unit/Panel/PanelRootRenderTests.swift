@@ -78,7 +78,7 @@ final class PanelRootRenderTests: PanelTestCase {
 
   override func tearDown() async throws {
     // Each harness bound the shared panel language to its own store.
-    PanelLocale.shared.bind(to: .shared)
+    PanelLocale.shared.bind(to: .testHost)
     try await super.tearDown()
   }
 

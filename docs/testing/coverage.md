@@ -930,7 +930,9 @@ the window or the hosting view and never on `NSApp`, and assert sizes, model sta
 not pixels. A test
 that reads rendered words passes a language (`appLanguage: .english()` from
 `Tests/Unit/Support/TestAppLanguage.swift`, or a store with explicit `systemLanguages`): the shared
-`AppLanguageStore` follows the developer's own choice.
+`AppLanguageStore` follows the developer's own choice. The shared panel language that `L()`
+reads follows `AppLanguageStore.testHost` (English) from the moment the test bundle loads; a test
+that binds it to another store binds it back to `.testHost`, never to `.shared`.
 
 - Controller and actions: `PanelControllerTests` (persisted flags restored and the legacy
   inspector-width key removed, each area model created once, `start()` wires the stores and

@@ -149,7 +149,7 @@ final class WelcomeRenderHarness {
   func close() {
     window.contentViewController = nil
     window.close()
-    PanelLocale.shared.bind(to: .shared)
+    PanelLocale.shared.bind(to: .testHost)
   }
 }
 

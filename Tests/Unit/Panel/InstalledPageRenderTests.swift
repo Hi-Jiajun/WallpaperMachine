@@ -12,7 +12,7 @@ final class InstalledPageRenderTests: PanelTestCase {
 
   override func tearDown() async throws {
     // Each test bound the shared panel language to its fixture's own store.
-    PanelLocale.shared.bind(to: .shared)
+    PanelLocale.shared.bind(to: .testHost)
     try await super.tearDown()
   }
 

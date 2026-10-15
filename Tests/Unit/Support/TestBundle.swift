@@ -7,12 +7,17 @@ import Foundation
 /// The tests run inside the app, so it first takes the desktop away from them: from here on an
 /// address opened, a file revealed in Finder, System Settings or a hidden app is only recorded in
 /// `DesktopActionLog.shared`. A test that means to check such an action injects its own seam or
-/// reads the log; none can open a browser tab or a Finder window on the developer's Mac.
+/// reads the log; none can open a browser tab or a Finder window on the developer's Mac. The
+/// panel's strings follow English (`AppLanguageStore.testHost`), not the language the installed
+/// app was last set to.
 @objc(WallpaperMachineTestBundle)
 final class TestBundle: NSObject {
   override init() {
     super.init()
-    MainActor.assumeIsolated { DesktopActions.current = DesktopActionLog.shared.actions }
+    MainActor.assumeIsolated {
+      DesktopActions.current = DesktopActionLog.shared.actions
+      PanelLocale.shared.bind(to: .testHost)
+    }
   }
 }
 

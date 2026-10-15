@@ -41,7 +41,7 @@ final class SettingsSectionsLocalizationTests: XCTestCase {
 
   func testTheWordsTheModelHandsTheViewsAreTranslated() throws {
     let defaults = try TemporaryDefaults.make(for: self).defaults
-    addTeardownBlock { @MainActor in PanelLocale.shared.bind(to: AppLanguageStore.shared) }
+    addTeardownBlock { @MainActor in PanelLocale.shared.bind(to: .testHost) }
     for language in AppLanguage.supported where language != .english {
       PanelLocale.shared.bind(
         to: AppLanguageStore(defaults: defaults, systemLanguages: [language.tag]))

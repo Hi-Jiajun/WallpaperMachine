@@ -17,7 +17,7 @@ class SettingsBTestCase: PanelTestCase {
   }
 
   override func tearDown() async throws {
-    PanelLocale.shared.bind(to: AppLanguageStore.shared)
+    PanelLocale.shared.bind(to: .testHost)
     try await super.tearDown()
   }
 }
@@ -189,7 +189,7 @@ final class SettingsBHost {
   func close() {
     window.contentViewController = nil
     window.close()
-    PanelLocale.shared.bind(to: .shared)
+    PanelLocale.shared.bind(to: .testHost)
   }
 
   /// Draws the hosted view to a PNG, for a look at it; a review only, never an assertion.

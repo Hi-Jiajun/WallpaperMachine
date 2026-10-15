@@ -12,7 +12,7 @@ class InspectorTestCase: PanelTestCase {
   }
 
   override func tearDown() async throws {
-    PanelLocale.shared.bind(to: AppLanguageStore.shared)
+    PanelLocale.shared.bind(to: .testHost)
     try await super.tearDown()
   }
 

@@ -129,7 +129,7 @@ final class SettingsSectionsRenderTests: PanelTestCase {
   }
 
   override func tearDown() async throws {
-    PanelLocale.shared.bind(to: .shared)
+    PanelLocale.shared.bind(to: .testHost)
     try await super.tearDown()
   }
 

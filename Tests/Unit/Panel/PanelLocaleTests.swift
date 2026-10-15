@@ -158,7 +158,7 @@ final class PanelLocaleTests: XCTestCase {
   }
 
   func testGlobalHelperFollowsTheLanguageAndReadersAreToldWhenItChanges() throws {
-    addTeardownBlock { @MainActor in PanelLocale.shared.bind(to: AppLanguageStore.shared) }
+    addTeardownBlock { @MainActor in PanelLocale.shared.bind(to: .testHost) }
     let source = try store("en")
     PanelLocale.shared.bind(to: source)
     XCTAssertEqual(L("Follow desktop Space"), "Follow desktop Space")
