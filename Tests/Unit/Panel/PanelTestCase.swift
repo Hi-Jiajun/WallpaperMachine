@@ -507,7 +507,9 @@ final class PanelFixture {
   func show() { presentation.show(); controller.refreshVisibilityGatedWork() }
   func hide() { presentation.hide(); controller.refreshVisibilityGatedWork() }
 
-  func waitUntil(timeout: TimeInterval = 2, _ condition: () -> Bool) async throws {
+  /// Waits for a state, never a duration: the deadline only matters when the machine is slow (the
+  /// full suite runs test classes side by side), so it is generous.
+  func waitUntil(timeout: TimeInterval = 10, _ condition: () -> Bool) async throws {
     let deadline = Date().addingTimeInterval(timeout)
     while !condition() {
       guard Date() < deadline else { throw WorkshopFailure(message: "Panel fixture timed out") }
