@@ -16,7 +16,15 @@ struct InstalledTile: View {
   @Environment(\.panelTheme) private var theme
   @Environment(\.isFocused) private var isFocused
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
+  @Environment(\.accessibilitySwitchControlEnabled) private var switchControlEnabled
   @State private var isHovering = false
+
+  /// Whether the check and the heart stay in the tile while they are hidden, so VoiceOver and
+  /// Switch Control can always reach them. Otherwise they are built only while they show: two
+  /// hidden buttons in every tile were most of what a new row cost to build, and scrolling builds
+  /// a row at every step, so they made the grid drop frames.
+  private var keepsHiddenControls: Bool { voiceOverEnabled || switchControlEnabled }
 
   var body: some View {
     let model = controller.library
@@ -40,8 +48,8 @@ struct InstalledTile: View {
       // The pill and the check each hang alone from the corner. In a stack beside the check,
       // `ViewThatFits` settles on its narrowest choice whatever the room, which is how the word
       // "Active" went missing; alone in an overlay it is offered the tile's width and picks the
-      // word whenever it fits. The check keeps its place whether or not it shows, so VoiceOver can
-      // always reach it; the pill sits in the corner and moves past the check only while it shows.
+      // word whenever it fits. The pill sits in the corner and moves past the check only while it
+      // shows.
       Color.clear
         .allowsHitTesting(false)
         .overlay(alignment: .topLeading) {
@@ -51,20 +59,24 @@ struct InstalledTile: View {
             .padding(.trailing, LibraryTileChrome.controlRoom)
         }
         .overlay(alignment: .topLeading) {
-          TileCheck(isOn: isChecked, isArming: isArming, title: row.title) {
-            model.toggleChecked(row.id)
+          if chrome.showsCheck || keepsHiddenControls {
+            TileCheck(isOn: isChecked, isArming: isArming, title: row.title) {
+              model.toggleChecked(row.id)
+            }
+            .opacity(chrome.showsCheck ? 1 : 0)
+            .allowsHitTesting(chrome.showsCheck)
           }
-          .opacity(chrome.showsCheck ? 1 : 0)
-          .allowsHitTesting(chrome.showsCheck)
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: chrome.showsCheck)
     }
     .topTrailingBadge {
-      TileHeart(isOn: isFavorite, title: row.title, isBusy: isFavoriteBusy) {
-        model.toggleFavorite(row.id)
+      if chrome.showsHeart || keepsHiddenControls {
+        TileHeart(isOn: isFavorite, title: row.title, isBusy: isFavoriteBusy) {
+          model.toggleFavorite(row.id)
+        }
+        .opacity(chrome.showsHeart ? 1 : 0)
+        .allowsHitTesting(chrome.showsHeart)
       }
-      .opacity(chrome.showsHeart ? 1 : 0)
-      .allowsHitTesting(chrome.showsHeart)
     }
     .bottomTrailingBadge { markBadges(marks) }
     .scaleEffect(isArming ? 0.97 : 1)

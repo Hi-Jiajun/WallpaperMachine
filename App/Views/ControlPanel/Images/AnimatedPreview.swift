@@ -61,8 +61,10 @@ struct AnimatedFrames: @unchecked Sendable {
 /// The still image that fills the same tile stays under it: when `isPlaying` is false, the
 /// animation is torn down (timer stopped, frame released) and the view draws nothing. It also
 /// stops when the window is not visible and shows only its first frame under Reduce Motion, so an
-/// animation never runs where nobody can see it or where the user asked for none.
-/// `data` is what `PanelImagePipeline.animation(for:)` returned, already held to its budget.
+/// animation never runs where nobody can see it or where the user asked for none. Frames are
+/// decoded off the main thread, one ahead of the one on show, so a page of animations never takes
+/// the time a scroll needs. `data` is what `PanelImagePipeline.animation(for:)` returned, already
+/// held to its budget.
 struct AnimatedPreview: NSViewRepresentable {
   let data: Data?
   let isPlaying: Bool
@@ -91,6 +93,15 @@ final class AnimatedPreviewView: NSView {
   private var loadedData: Data?
   private var index = 0
   private var timer: Timer?
+  /// The frame after `index`, decoded and waiting for its turn.
+  private var upcoming: CGImage?
+  private var hasUpcoming = false
+  /// The current frame's time is up and the next one is still being decoded: it goes on show as
+  /// soon as it arrives.
+  private var isOverdue = false
+  /// The decode under way. Cancelled when what it decodes is no longer wanted, and checked again
+  /// on its return, so a late frame is never drawn.
+  private var decode: Task<Void, Never>?
   private var isPlaying = false
   private var occlusionObserver: NSObjectProtocol?
   private let content = CALayer()
@@ -164,11 +175,18 @@ final class AnimatedPreviewView: NSView {
     if canAnimate, timer == nil { start() } else if !canAnimate { stopTimer() }
   }
 
+  /// Shows the current frame once it is decoded, then plays on from it unless Reduce Motion is on.
   private func start() {
-    guard let frames, canAnimate else { return }
-    draw(index)
-    guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
-    schedule(after: frames.delays[index])
+    guard frames != nil, canAnimate else { return }
+    stopTimer()
+    let shown = index
+    decodeFrame(shown) { [weak self] image in
+      guard let self, let frames = self.frames else { return }
+      self.content.contents = image
+      guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+      self.prepareUpcoming()
+      self.schedule(after: frames.delays[shown])
+    }
   }
 
   private func stop() {
@@ -177,9 +195,15 @@ final class AnimatedPreviewView: NSView {
     content.contents = nil
   }
 
+  /// Stops the clock and drops the frame being decoded or waiting; the frame on show stays.
   private func stopTimer() {
     timer?.invalidate()
     timer = nil
+    decode?.cancel()
+    decode = nil
+    upcoming = nil
+    hasUpcoming = false
+    isOverdue = false
   }
 
   private func schedule(after delay: TimeInterval) {
@@ -189,17 +213,48 @@ final class AnimatedPreviewView: NSView {
     }
   }
 
+  /// The current frame's time is up: the next one goes on show if it is ready, or as soon as it is.
   private func advance() {
+    timer = nil
     guard let frames, canAnimate else { return stopTimer() }
+    guard hasUpcoming else {
+      isOverdue = true
+      return
+    }
     index = (index + 1) % frames.count
-    draw(index)
+    content.contents = upcoming
+    upcoming = nil
+    hasUpcoming = false
+    isOverdue = false
+    prepareUpcoming()
     schedule(after: frames.delays[index])
   }
 
-  private func draw(_ index: Int) {
+  /// Starts decoding the frame after the one on show.
+  private func prepareUpcoming() {
+    guard let frames else { return }
+    decodeFrame((index + 1) % frames.count) { [weak self] image in
+      guard let self else { return }
+      self.upcoming = image
+      self.hasUpcoming = true
+      if self.isOverdue { self.advance() }
+    }
+  }
+
+  /// Decodes frame `index` at the size it is drawn, off the main thread, and hands it to `done`
+  /// unless it was cancelled meanwhile. One decode at a time: a new one replaces the last.
+  private func decodeFrame(_ index: Int, then done: @escaping @MainActor (CGImage?) -> Void) {
     guard let frames else { return }
     let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
     let pixels = Int((max(bounds.width, bounds.height, 64) * scale).rounded(.up))
-    content.contents = frames.image(at: index, maxPixelSize: pixels)
+    decode?.cancel()
+    decode = Task { [weak self] in
+      let image = await Task.detached(priority: .utility) {
+        frames.image(at: index, maxPixelSize: pixels)
+      }.value
+      guard !Task.isCancelled, let self else { return }
+      self.decode = nil
+      done(image)
+    }
   }
 }

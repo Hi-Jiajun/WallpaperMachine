@@ -163,7 +163,8 @@ own lane, only when that copy was pruned; a preview the still pass found to be a
 single frame is refused without a request, and a failed animation is not tried
 again by scrolling. `AnimatedPreview` replaces the still once its data has arrived
 and plays it as authored, black fades included, decoding one frame at a time at the
-size it draws; a load failure keeps the still visible. Under Reduce Motion it shows
+size it draws and off the main thread, so a page of animations does not slow scrolling;
+a load failure keeps the still visible. Under Reduce Motion it shows
 the first frame.
 
 The panel never reads animation pixels back: frames go from ImageIO to the screen,

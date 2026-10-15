@@ -142,7 +142,10 @@ How the panel runs (controller, actions, observation, window hosting) is in
 - **No per-frame or idle work.** Anything that animates on its own reads
   `\.panelIsVisible` and Reduce Motion and stops when either says so; no timer runs
   while the window is hidden; grids are lazy; nothing walks the library on a
-  download tick. Model work that only a visible window needs is gated on
+  download tick. A grid tile builds only what it shows: a control hidden with
+  `.opacity(0)` still costs its whole view tree in every tile, and scrolling builds
+  a row of tiles at every step, so it drops frames (keep it only while an assistive
+  technology needs to reach it, as the Installed tile's check and heart do). Model work that only a visible window needs is gated on
   `controller.presentation.isVisible`.
 - **Layout in the detail column.** A page or an inspector takes the width it is
   offered: wrap a page's root in a `GeometryReader` that hands its size back, end
