@@ -372,22 +372,20 @@ final class PixivBrowserModelTests: MediaPanelTestCase {
   }
 
   func testASecondPressOfARingWithinADoubleClickUndoesNothingAndALaterPressActs() async throws {
-    let gate = DispatchSemaphore(value: 0)
+    // Saves stay under way until cancelled, as a transfer on a slow network would; the panel's
+    // shutdown cancels the one still held at the end.
+    let gate = PixivGate()
     let image = try PanelTestCase.gif(frames: 1, brightness: 0.6)
-    let transport = PixivFixtureTransport { url in
-      if url.host == "i.pximg.net" {
-        if url.path.contains("/img-original/") { _ = gate.wait(timeout: .now() + 10) }
-        return image
-      }
+    let fixture = PixivFixtureTransport { url in
+      if url.host == "i.pximg.net" { return image }
       if url.path.hasSuffix("/pages") {
         return PixivFixtures.pages(
           workID: Int(url.pathComponents.dropLast().last ?? "") ?? 0, count: 1)
       }
       return PixivFixtures.ranking([PixivFixtures.rankingEntry(.init(id: 301), rank: 1)])
     }
+    let transport = HeldOriginalsTransport(fixture: fixture, gate: gate)
     try await withPanel(pixivTransport: transport) { panel in
-      // Opens the transfers the test held, so the panel shuts down without waiting for them.
-      defer { for _ in 0..<4 { gate.signal() } }
       let controller = panel.controller
       let model = controller.pixivBrowser
       try await openRanking(panel)
@@ -400,11 +398,12 @@ final class PixivBrowserModelTests: MediaPanelTestCase {
       }
 
       try await controller.pixivDownload(workID: "301", page: 0)
-      try await panel.waitUntil(timeout: 5) { status() == .downloading }
+      try await panel.waitUntil { gate.waiting == 1 }
+      XCTAssertEqual(status(), .downloading)
       let cancel = try XCTUnwrap(controller.pixivTile(for: work).ring)
       XCTAssertEqual(cancel.state.action, .cancel)
       await model.pressRing(cancel)?.value
-      try await panel.waitUntil(timeout: 5) { status() == .cancelled }
+      try await panel.waitUntil { status() == .cancelled }
 
       // The second click of the double-click lands on the ring the first one left, which now
       // offers to try again: it must not start the save that was just cancelled.
@@ -492,5 +491,22 @@ final class PixivBrowserModelTests: MediaPanelTestCase {
       PixivHeaderRow.signInStyle(forWidth: 450), .short, "a label stays where there is room")
     XCTAssertEqual(PixivHeaderRow.signInStyle(forWidth: 280), .hidden)
     XCTAssertEqual(PixivHeaderRow.signInStyle(forWidth: 0), .hidden)
+  }
+}
+
+/// Holds pixiv's originals at `gate` and answers everything else from `fixture`.
+private struct HeldOriginalsTransport: PixivTransport {
+  let fixture: PixivFixtureTransport
+  let gate: PixivGate
+
+  func data(from url: URL, session: String?) async throws -> Data {
+    try await fixture.data(from: url, session: session)
+  }
+
+  func image(
+    from url: URL, limit: Int, progress: @escaping @Sendable (Int64, Int64?) -> Void
+  ) async throws -> Data {
+    if url.path.contains("/img-original/") { try await gate.pass() }
+    return try await fixture.image(from: url, limit: limit, progress: progress)
   }
 }

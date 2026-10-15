@@ -509,10 +509,16 @@ final class PanelFixture {
 
   /// Waits for a state, never a duration: the deadline only matters when the machine is slow (the
   /// full suite runs test classes side by side), so it is generous.
-  func waitUntil(timeout: TimeInterval = 10, _ condition: () -> Bool) async throws {
+  /// A timeout names the waiting line, since the condition itself cannot be printed.
+  func waitUntil(
+    timeout: TimeInterval = 10, file: StaticString = #fileID, line: UInt = #line,
+    _ condition: () -> Bool
+  ) async throws {
     let deadline = Date().addingTimeInterval(timeout)
     while !condition() {
-      guard Date() < deadline else { throw WorkshopFailure(message: "Panel fixture timed out") }
+      guard Date() < deadline else {
+        throw WorkshopFailure(message: "Panel fixture timed out waiting at \(file):\(line)")
+      }
       try await Task.sleep(for: .milliseconds(10))
     }
   }
