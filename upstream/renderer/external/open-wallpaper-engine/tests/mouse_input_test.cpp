@@ -8,6 +8,10 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <cmath>
+#include <memory>
+#include <utility>
+
 namespace wallpaper
 {
 namespace
@@ -912,6 +916,294 @@ TEST(MouseInput, ARolledBackRegistrationRestoresTheCursorTargetOfTheLayerItRepla
     stage.runtime->SetNodeCursorTarget("fresh", true, true, true);
     stage.runtime->RollbackNodeRegistration("fresh", fresh.get(), nullptr);
     EXPECT_FALSE(stage.runtime->NodeCursorTargetOf("fresh").has_value());
+}
+
+// What a script reads as `input.cursorWorldPosition`. A scene drawn through the
+// 2D canvas camera hands over the cursor in canvas units with no depth. A
+// perspective scene (display-sized here) hands over the point where the cursor
+// ray leaves the view, at the camera's far plane: Wallpaper Engine unprojects
+// the pointer at the depth the projection puts at 0 after its [-1, 1] remap,
+// which is the far plane because its projection stores depth reversed. Workshop
+// scripts size their ranges to it (3509243656 divides by 8000 and 9000 under a
+// farz of 10000).
+namespace
+{
+// A perspective scene seen through one camera, the way a display-sized scene is
+// parsed: the camera is the scene's active one and the runtime works in canvas
+// units until a viewport says otherwise.
+struct PerspectiveStage {
+    Scene                        scene;
+    std::unique_ptr<SceneRuntimeContext> runtime;
+    std::shared_ptr<SceneNode>   camera_node = std::make_shared<SceneNode>();
+    std::shared_ptr<SceneCamera> camera;
+
+    PerspectiveStage(double aspect, double near_clip, double far_clip, double fov) {
+        runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {
+            .canvas_width = 1920, .canvas_height = 1080 });
+        runtime->AttachScene(&scene);
+        camera = std::make_shared<SceneCamera>(static_cast<float>(aspect),
+                                               static_cast<float>(near_clip),
+                                               static_cast<float>(far_clip),
+                                               static_cast<float>(fov));
+        camera->AttatchNode(camera_node);
+        scene.cameras["global_perspective"] = camera;
+        scene.activeCamera                  = camera.get();
+        scene.display_sized                 = true;
+    }
+
+    Eigen::Vector3f Cursor() const { return runtime->hostContext().cursor_world_position; }
+
+    // The window fraction at which `point` is drawn.
+    std::pair<float, float> PointerAt(const Eigen::Vector3d& point) const {
+        const Eigen::Vector4d clip = camera->GetViewProjectionMatrix() *
+                                     Eigen::Vector4d(point.x(), point.y(), point.z(), 1.0);
+        return { static_cast<float>(0.5 + 0.5 * clip.x() / clip.w()),
+                 static_cast<float>(0.5 - 0.5 * clip.y() / clip.w()) };
+    }
+};
+} // namespace
+
+TEST(MouseInput, APerspectiveSceneHandsScriptsTheCursorRayPointAtTheFarPlane) {
+    PerspectiveStage stage(16.0 / 9.0, 0.1, 500.0, 45.0);
+    stage.camera_node->SetTranslate(Eigen::Vector3f(10, 5, 100));
+    stage.camera->Update();
+
+    // The middle of the window is straight down the view axis.
+    stage.runtime->SetCursorInput(0.5f, 0.5f);
+    EXPECT_NEAR(stage.Cursor().x(), 10.0f, 1.0e-3f);
+    EXPECT_NEAR(stage.Cursor().y(), 5.0f, 1.0e-3f);
+    EXPECT_NEAR(stage.Cursor().z(), -400.0f, 1.0e-2f);
+
+    // Halfway to the right and top edges: half the frustum's width and height
+    // at the far plane, 500 units from the eye.
+    stage.runtime->SetCursorInput(0.75f, 0.25f);
+    const double half_height = std::tan(0.5 * 45.0 * 3.14159265358979323846 / 180.0) * 500.0;
+    EXPECT_NEAR(stage.Cursor().x(), 10.0 + 0.5 * half_height * 16.0 / 9.0, 1.0e-2);
+    EXPECT_NEAR(stage.Cursor().y(), 5.0 + 0.5 * half_height, 1.0e-2);
+    EXPECT_NEAR(stage.Cursor().z(), -400.0f, 1.0e-2f);
+}
+
+TEST(MouseInput, ThePerspectiveCursorPointLiesOnTheCursorRayOfAMovedAndShakenCamera) {
+    PerspectiveStage stage(2.0, 0.01, 5389.07, 42.4);
+    stage.camera_node->SetTranslate(Eigen::Vector3f(0.5f, 2.2f, 4.4f));
+    stage.camera_node->SetRotation(Eigen::Vector3f(0.3f, -0.7f, 0.0f));
+    stage.camera->SetShakeOffset(Eigen::Vector3d(0.2, -0.1, 0.3));
+    stage.camera->Update();
+
+    for (const auto [x, y] : { std::pair { 0.5f, 0.5f }, std::pair { 0.0f, 0.0f },
+                               std::pair { 1.0f, 0.2f }, std::pair { 0.3f, 0.9f } }) {
+        stage.runtime->SetCursorInput(x, y);
+        const Eigen::Vector3d point = stage.Cursor().cast<double>();
+        // The point is drawn exactly where the pointer is...
+        const auto [pointer_x, pointer_y] = stage.PointerAt(point);
+        EXPECT_NEAR(pointer_x, x, 1.0e-4f);
+        EXPECT_NEAR(pointer_y, y, 1.0e-4f);
+        // ...and is `farz` in front of the eye, measured along the view axis.
+        const Eigen::Vector4d seen =
+            stage.camera->GetViewMatrix() * Eigen::Vector4d(point.x(), point.y(), point.z(), 1.0);
+        EXPECT_NEAR(seen.z(), -5389.07, 0.5);
+    }
+}
+
+TEST(MouseInput, ACameraPointAtDepthIsOnlyDefinedForAPerspectiveViewAndARealDepth) {
+    auto node = std::make_shared<SceneNode>();
+    node->SetTranslate(Eigen::Vector3f(1, 2, 3));
+    SceneCamera lens(2.0f, 0.1f, 100.0f, 90.0f);
+    lens.AttatchNode(node);
+    const auto centre = UnprojectNdcAtDepth(lens, 0.0, 0.0, 10.0);
+    ASSERT_TRUE(centre.has_value());
+    EXPECT_TRUE(centre->isApprox(Eigen::Vector3d(1, 2, -7), 1.0e-9));
+    // A 90 degree frustum is as wide as it is far at the top edge; twice that wide at 2:1.
+    const auto corner = UnprojectNdcAtDepth(lens, 1.0, 1.0, 10.0);
+    ASSERT_TRUE(corner.has_value());
+    EXPECT_TRUE(corner->isApprox(Eigen::Vector3d(1 + 20, 2 + 10, -7), 1.0e-6));
+
+    EXPECT_FALSE(UnprojectNdcAtDepth(lens, 0.0, 0.0, 0.0).has_value());
+    EXPECT_FALSE(UnprojectNdcAtDepth(lens, 0.0, 0.0, -5.0).has_value());
+    EXPECT_FALSE(UnprojectNdcAtDepth(lens, 0.0, 0.0, std::nan("")).has_value());
+    EXPECT_FALSE(UnprojectNdcAtDepth(lens, std::nan(""), 0.0, 10.0).has_value());
+    SceneCamera canvas(1920, 1080, -5000.0f, 5000.0f);
+    canvas.AttatchNode(node);
+    EXPECT_FALSE(UnprojectNdcAtDepth(canvas, 0.0, 0.0, 10.0).has_value());
+}
+
+// Workshop 3477054430 turns a cat's head to the cursor: the script measures the
+// cursor from the head's origin and turns by that direction past a 100 unit
+// neutral zone. Wallpaper Engine, with the cursor in the middle of the screen,
+// showed the head at pitch -6.1 and yaw -61.4 degrees (the scene's camera
+// looks 12.8 degrees left of -z and a little up). Read in canvas pixels the
+// cursor sat at (960, 540) beside a head at (4.8, 0.8): pitch about -15, yaw about -6.
+TEST(MouseInput, AHeadScriptThatFollowsThePerspectiveCursorTurnsAsInWallpaperEngine) {
+    PerspectiveStage stage(16.0 / 9.0, 0.01, 5389.0698, 42.43);
+    stage.camera_node->SetTranslate(Eigen::Vector3f(0.53864f, 2.22436f, 4.44038f));
+    stage.camera_node->SetRotation(Eigen::Vector3f(0.04597f, 0.224f, 0.0f));
+    stage.camera->Update();
+
+    auto head = std::make_shared<SceneNode>();
+    head->SetTranslate(Eigen::Vector3f(4.7824f, 0.80878f, -20.62969f));
+    stage.runtime->RegisterNode("head", head.get());
+    auto pose = std::make_shared<SceneNode>();
+    stage.runtime->RegisterNode("pose", pose.get());
+    stage.runtime->RegisterNodeTranslate("pose", pose.get(), ResolveVec3Setting(*stage.runtime, {
+        {"value", "0 0 0"}, {"script", R"JS(
+export function update(value) {
+    const dx = input.cursorWorldPosition.x - 4.7824;
+    const dy = input.cursorWorldPosition.y - 0.80878;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    const zone = 100;
+    const influence = distance > zone ? Math.min(1, (distance - zone) / zone) : 0;
+    value.x = -(dy / distance) * 30 * influence;
+    value.y = -32 + (dx / distance) * 30 * influence;
+    return value;
+}
+)JS"},
+    }, "pose"));
+
+    stage.runtime->SetCursorInput(0.5f, 0.5f);
+    stage.runtime->Tick(1.0 / 60.0);
+    EXPECT_NEAR(pose->Translate().x(), -6.1f, 0.2f) << "pitch";
+    EXPECT_NEAR(pose->Translate().y(), -61.4f, 0.2f) << "yaw";
+    EXPECT_EQ(stage.runtime->scriptErrorCount(), 0u);
+}
+
+// A scene drawn through the canvas camera keeps its cursor in canvas units with
+// no depth, whatever perspective camera it also holds.
+TEST(MouseInput, ACanvasSceneKeepsTheCursorInCanvasUnitsEvenWithAPerspectiveCameraAround) {
+    Scene scene;
+    auto  runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {
+        .canvas_width = 1920, .canvas_height = 1080 });
+    runtime->AttachScene(&scene);
+    auto lens_node = std::make_shared<SceneNode>();
+    lens_node->SetTranslate(Eigen::Vector3f(960, 540, 1000));
+    auto lens = std::make_shared<SceneCamera>(16.0f / 9.0f, 5.0f, 15000.0f, 60.0f);
+    lens->AttatchNode(lens_node);
+    scene.cameras["global_perspective"] = lens;
+    auto canvas_node = std::make_shared<SceneNode>();
+    canvas_node->SetTranslate(Eigen::Vector3f(960, 540, 0));
+    auto canvas = std::make_shared<SceneCamera>(1920, 1080, -5000.0f, 5000.0f);
+    canvas->AttatchNode(canvas_node);
+    scene.cameras["global"] = canvas;
+    scene.activeCamera      = canvas.get();
+    ASSERT_FALSE(scene.display_sized);
+
+    runtime->SetCursorInput(0.25f, 0.75f);
+    EXPECT_TRUE(runtime->hostContext().cursor_world_position.isApprox(Eigen::Vector3f(480, 270, 0)));
+
+    // Even when something makes the perspective camera the active one: a scene
+    // authored on a canvas has no far-plane point to hand over.
+    scene.activeCamera = lens.get();
+    runtime->SetCursorInput(0.25f, 0.75f);
+    EXPECT_TRUE(runtime->hostContext().cursor_world_position.isApprox(Eigen::Vector3f(480, 270, 0)));
+}
+
+// Layers are still hit in their own plane through the real view-projection; the
+// far-plane point scripts read is not what the hit test consults.
+TEST(MouseInput, APerspectiveSceneStillHitsLayersWhereTheyAreDrawn) {
+    PerspectiveStage stage(16.0 / 9.0, 0.1, 500.0, 45.0);
+    stage.camera_node->SetTranslate(Eigen::Vector3f(0, 0, 100));
+    stage.camera->Update();
+
+    auto layer = std::make_shared<SceneNode>();
+    layer->SetTranslate(Eigen::Vector3f(8, -3, 0));
+    stage.runtime->RegisterNode("layer", layer.get());
+    stage.runtime->RegisterNodeSize("layer", Eigen::Vector2f(20, 20));
+    auto marker = std::make_shared<SceneNode>();
+    marker->SetVisible(false);
+    stage.runtime->RegisterNode("marker", marker.get());
+    stage.runtime->RegisterSceneScript(
+        R"JS(
+function cursorEnter() { scene.getObject('marker').visible = true; }
+function cursorLeave() { scene.getObject('marker').visible = false; }
+)JS",
+        "layer");
+    stage.runtime->Tick(0.01);
+
+    bool was_in_window = false;
+    const auto move_to = [&](const Eigen::Vector3d& point) {
+        const auto [x, y] = stage.PointerAt(point);
+        stage.runtime->SetCursorInput(x, y);
+        stage.runtime->SetCursorEnter(true);
+        was_in_window = stage.runtime->DispatchCursorFrameEvents(was_in_window);
+        stage.runtime->Tick(0.01);
+    };
+    move_to(Eigen::Vector3d(8, -3, 0));
+    EXPECT_TRUE(marker->Visible());
+    move_to(Eigen::Vector3d(40, -3, 0));
+    EXPECT_FALSE(marker->Visible());
+    move_to(Eigen::Vector3d(14, 4, 0));
+    EXPECT_TRUE(marker->Visible());
+    EXPECT_EQ(stage.runtime->scriptErrorCount(), 0u);
+}
+
+// A particle system's mouse control point follows the cursor in the canvas
+// plane. The far-plane point scripts read is thousands of units deep in a
+// perspective scene, nowhere near where a particle is drawn.
+TEST(MouseInput, AParticleControlPointFollowsTheCanvasPlaneCursorInAPerspectiveScene) {
+    PerspectiveStage stage(16.0 / 9.0, 0.1, 500.0, 45.0);
+    stage.camera_node->SetTranslate(Eigen::Vector3f(10, 5, 100));
+    stage.camera->Update();
+
+    stage.runtime->SetCursorInput(0.25f, 0.75f);
+    ASSERT_TRUE(stage.scene.pointerScenePosition.has_value());
+    // 1920x1080 canvas, y up: a quarter across, a quarter up from the bottom.
+    EXPECT_NEAR((*stage.scene.pointerScenePosition)[0], 480.0f, 1.0e-3f);
+    EXPECT_NEAR((*stage.scene.pointerScenePosition)[1], 270.0f, 1.0e-3f);
+    // Scripts read another point in the same frame.
+    EXPECT_NEAR(stage.Cursor().z(), -400.0f, 1.0e-2f);
+    EXPECT_GT(std::abs(stage.Cursor().x() - 480.0f), 100.0f);
+}
+
+// The window is not always the whole picture: a wallpaper scaled up is cropped
+// by it and one scaled down is letterboxed in it. The cursor's place on the
+// picture, not on the window, decides where its ray goes, so a corner of a
+// cropped window looks through the picture's interior and a corner of a
+// letterboxed one past the frustum's edge. Hit tests read the same mapping.
+TEST(MouseInput, ThePerspectiveCursorPointFollowsThePictureWhenTheWindowCropsOrLetterboxesIt) {
+    PerspectiveStage stage(16.0 / 9.0, 0.1, 500.0, 45.0);
+    stage.camera_node->SetTranslate(Eigen::Vector3f(10, 5, 100));
+    stage.camera->Update();
+
+    const auto present = [&](double wallpaper_scale) {
+        const auto layout = ComputeWallpaperScalingLayout(
+            WallpaperScalingMode::FILL, 1920, 1080, 1920, 1080, 1.0, wallpaper_scale);
+        const auto mapping = ComputeWallpaperCursorMapping(layout, 960.0, 540.0, 1920.0, 1080.0);
+        EXPECT_TRUE(mapping.valid);
+        stage.runtime->SetCursorViewport(CursorViewport {
+            .origin = Eigen::Vector2f(static_cast<float>(mapping.origin_x),
+                                      static_cast<float>(mapping.origin_y)),
+            .size = Eigen::Vector2f(static_cast<float>(mapping.size_x),
+                                    static_cast<float>(mapping.size_y)),
+            .content_origin = Eigen::Vector2f(static_cast<float>(mapping.content_origin_x),
+                                              static_cast<float>(mapping.content_origin_y)),
+            .content_size = Eigen::Vector2f(static_cast<float>(mapping.content_size_x),
+                                            static_cast<float>(mapping.content_size_y)),
+        });
+    };
+    const auto expect_on_ray_at = [&](float window_x, float window_y, float picture_x,
+                                      float picture_y) {
+        stage.runtime->SetCursorInput(window_x, window_y);
+        const Eigen::Vector3d point = stage.Cursor().cast<double>();
+        const auto [pointer_x, pointer_y] = stage.PointerAt(point);
+        EXPECT_NEAR(pointer_x, picture_x, 1.0e-4f) << window_x << "," << window_y;
+        EXPECT_NEAR(pointer_y, picture_y, 1.0e-4f) << window_x << "," << window_y;
+        const Eigen::Vector4d seen =
+            stage.camera->GetViewMatrix() * Eigen::Vector4d(point.x(), point.y(), point.z(), 1.0);
+        EXPECT_NEAR(seen.z(), -500.0, 0.05) << window_x << "," << window_y;
+    };
+
+    // Scaled up by 1.6 and centred: the window shows the middle 0.625 of the
+    // picture each way.
+    present(1.6);
+    expect_on_ray_at(0.5f, 0.5f, 0.5f, 0.5f);
+    expect_on_ray_at(0.0f, 0.0f, 0.1875f, 0.1875f);
+    expect_on_ray_at(1.0f, 0.5f, 0.8125f, 0.5f);
+
+    // Scaled down to half: the picture fills the middle of the window, whose
+    // corners lie one picture-width and height beyond its own.
+    present(0.5);
+    expect_on_ray_at(0.5f, 0.5f, 0.5f, 0.5f);
+    expect_on_ray_at(0.0f, 0.0f, -0.5f, -0.5f);
+    expect_on_ray_at(1.0f, 1.0f, 1.5f, 1.5f);
 }
 
 } // namespace

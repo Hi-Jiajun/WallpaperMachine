@@ -149,4 +149,14 @@ private:
 /// is parallel to the plane, or the hit lies outside the clip volume.
 [[nodiscard]] std::optional<Eigen::Vector3d> IntersectNdcWithNodePlane(
     const SceneCamera& camera, SceneNode& node, double ndc_x, double ndc_y);
+
+/// The world-space point on the camera ray through NDC `(ndc_x, ndc_y)` that is
+/// `depth` in front of the eye, measured along the view axis (the camera's view
+/// space z is `-depth`), the way `glm::unProject` puts a pointer at one depth of
+/// the frustum. NDC x/y span the frustum in [-1, 1] as the projection does.
+/// Perspective cameras only: nullopt for an orthographic one, for a depth that
+/// is not positive and finite, or when the camera has no usable view.
+[[nodiscard]] std::optional<Eigen::Vector3d> UnprojectNdcAtDepth(const SceneCamera& camera,
+                                                                 double ndc_x, double ndc_y,
+                                                                 double depth);
 } // namespace wallpaper

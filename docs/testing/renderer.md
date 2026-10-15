@@ -896,6 +896,17 @@ into private textures; the three that draw skip visibly without a Metal device.
   a button is held with a captured set, and fires a click on release over the layer
   that took the press, where a script here gets enter, down and click together on
   press.
+- **Perspective cursor point.** `input.cursorWorldPosition` in a perspective scene is worked
+  out when the cursor is sampled, through the camera as the last tick left it, before this
+  tick's scripts and camera shake move it, so a camera moved in the same tick shows in the
+  value one frame later. Wallpaper Engine unprojects when the script reads; whether its
+  scripts run before or after it rewrites the view each frame was not established. The
+  cursor callbacks' `position` and `worldPosition` (and `input.cursorLocalPosition`) carry
+  the same far-plane point; the shape of Wallpaper Engine's event objects was not read. The
+  pointer maps over the presented frame, so a cropped window looks through the picture's
+  interior and a letterboxed presentation extrapolates the ray past the frustum, as hit
+  tests already do. A camera without a usable view (a far plane or aspect that is not
+  positive) leaves scripts the canvas point.
 - **Model utility flags.** A project layer is sized by the canvas but still takes the
   passthrough path, not the compose one: it does not draw its children into a target of
   its own and has no composite-only mode (the 11 local scenes that use it hold layers of

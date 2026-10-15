@@ -60,8 +60,15 @@ what it looks at move together by `(cos t, sin 1.333t, sin t)` at
 by a tenth of `camerashakeamplitude` (and in a 2D scene by a tenth of the canvas
 height, in the canvas plane only). The switch and every setting follow their user
 properties, and a shaking scene keeps drawing while it shakes.
-`input.cursorWorldPosition` stays 2D (`z = 0`), so a scripted orbit drag may not
-match Wallpaper Engine.
+`input.cursorWorldPosition` is what Wallpaper Engine hands scripts. In a scene drawn
+through the 2D canvas camera it is the cursor in canvas units with `z = 0`. In a
+perspective scene it is the point where the cursor's ray reaches the camera's far
+plane, `farz` in front of the eye and in the same world as layer origins, so a head
+script measuring the cursor from its layer's origin turns by the ray's direction (the
+projection stores depth reversed, which puts the pointer's unprojection at the far
+plane). The camera is read as it stood when the cursor was sampled. Layers are still hit
+where the cursor ray meets their own plane, and a particle control point still follows
+the cursor in canvas units.
 
 Scripts list the scene's layers through `thisScene`. `getLayer(index)`,
 `getLayerCount()`, `enumerateLayers()`, `getLayerIndex()` and `sortLayer()` share

@@ -199,10 +199,6 @@ void ResizeCardMesh(SceneMesh& mesh, TextLayerRenderBounds bounds, TextLayerText
     mesh.SetDirty();
 }
 
-Eigen::Vector3f CursorHitTestWorldPosition(const ScriptHostContext& host_context) {
-    return host_context.cursor_world_position;
-}
-
 Eigen::Vector2d CursorWorldToNdc(const CursorViewport& viewport, const Eigen::Vector3f& cursor) {
     if (viewport.content_size.x() == 0.0f || viewport.content_size.y() == 0.0f) {
         return Eigen::Vector2d { 0.0, 0.0 };
@@ -804,6 +800,7 @@ std::vector<std::string> SceneRuntimeContext::ResetProjectPropertyOverride() {
 void SceneRuntimeContext::AttachScene(Scene* scene) { m_scene = scene; }
 
 void SceneRuntimeContext::SetCursorWorldPosition(const Eigen::Vector3f& value) {
+    m_cursor_plane_position               = value;
     m_host_context->cursor_world_position = value;
 }
 
@@ -879,20 +876,41 @@ void SceneRuntimeContext::SetCursorInput(float x, float y) {
     x                                          = std::clamp(x, 0.0f, 1.0f);
     y                                          = std::clamp(y, 0.0f, 1.0f);
     m_host_context->cursor_normalized_position = Eigen::Vector2f(x, y);
-    m_host_context->cursor_world_position =
+    m_cursor_plane_position =
         Eigen::Vector3f(m_cursor_viewport.origin.x() + x * m_cursor_viewport.size.x(),
                         m_cursor_viewport.origin.y() + (1.0f - y) * m_cursor_viewport.size.y(),
                         0.0f);
+    m_host_context->cursor_world_position = ScriptCursorWorldPosition();
     // Published for the parts of the scene that are not scripts. A particle
     // system's mouse-linked control point needs the same scene coordinate, and
     // deriving it a second time from the canvas is how it ended up ignoring
     // the crop.
     if (m_scene != nullptr) {
         m_scene->pointerScenePosition = std::array {
-            m_host_context->cursor_world_position.x(),
-            m_host_context->cursor_world_position.y(),
+            m_cursor_plane_position.x(),
+            m_cursor_plane_position.y(),
         };
     }
+}
+
+// `input.cursorWorldPosition`. Wallpaper Engine unprojects the pointer through
+// the scene camera at window depth 0.5, which its [-1, 1] depth remap turns
+// into 0, and its perspective projection stores depth reversed (1 at the near
+// plane, 0 at the far one): the script gets the cursor ray's point at the far
+// plane, `farz` in front of the eye, in the same world as layer origins. A
+// scene authored on a canvas gets canvas units with z = 0 (it hands over its
+// 2D point whatever the camera). Wallpaper Engine unprojects when a script
+// reads; this is worked out when the cursor is sampled, before the tick's
+// scripts and camera shake move the camera, so it is the pose the last tick
+// left. A camera with no usable view (a far plane or aspect that is not
+// positive) keeps the canvas point rather than a made-up depth.
+Eigen::Vector3f SceneRuntimeContext::ScriptCursorWorldPosition() const {
+    const SceneCamera* camera =
+        m_scene != nullptr && m_scene->display_sized ? m_scene->activeCamera : nullptr;
+    if (camera == nullptr || ! camera->IsPerspective()) return m_cursor_plane_position;
+    const Eigen::Vector2d ndc = CursorWorldToNdc(m_cursor_viewport, m_cursor_plane_position);
+    const auto point = UnprojectNdcAtDepth(*camera, ndc.x(), ndc.y(), camera->FarClip());
+    return point.has_value() ? Eigen::Vector3f(point->cast<float>()) : m_cursor_plane_position;
 }
 
 void SceneRuntimeContext::SetCursorEnter(bool entered) {
@@ -3096,7 +3114,7 @@ bool SceneRuntimeContext::CursorInsidePresentedContent() const {
     const auto& origin = m_cursor_viewport.content_origin;
     const auto& size   = m_cursor_viewport.content_size;
     if (size.x() <= 0.0f || size.y() <= 0.0f) return true;
-    const auto& cursor = m_host_context->cursor_world_position;
+    const auto& cursor = m_cursor_plane_position;
     return cursor.x() >= origin.x() && cursor.x() <= origin.x() + size.x() &&
            cursor.y() >= origin.y() && cursor.y() <= origin.y() + size.y();
 }
@@ -3129,11 +3147,10 @@ bool SceneRuntimeContext::CursorHitsLayerGeometry(std::string_view name) const {
         mask_iterator == m_node_hit_masks.end() ? nullptr : &mask_iterator->second;
     const SceneCamera* camera =
         m_scene != nullptr ? CameraForHitNode(*m_scene, *node_iterator->second) : nullptr;
-    const Eigen::Vector2d ndc =
-        CursorWorldToNdc(m_cursor_viewport, CursorHitTestWorldPosition(*m_host_context));
+    const Eigen::Vector2d ndc = CursorWorldToNdc(m_cursor_viewport, m_cursor_plane_position);
     return HitTestNode(*node_iterator->second,
                        NodeSize(name),
-                       CursorHitTestWorldPosition(*m_host_context),
+                       m_cursor_plane_position,
                        mask,
                        camera,
                        ndc);

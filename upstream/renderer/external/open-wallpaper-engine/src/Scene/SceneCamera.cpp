@@ -145,3 +145,25 @@ std::optional<Eigen::Vector3d> wallpaper::IntersectNdcWithNodePlane(
 	if (! hit.allFinite()) return std::nullopt;
 	return hit;
 }
+
+std::optional<Eigen::Vector3d> wallpaper::UnprojectNdcAtDepth(
+	const SceneCamera& camera, double ndc_x, double ndc_y, double depth) {
+	if (! camera.IsPerspective() || ! std::isfinite(ndc_x) || ! std::isfinite(ndc_y) ||
+		! std::isfinite(depth) || depth <= 0.0) {
+		return std::nullopt;
+	}
+	const double tan_half_fov = std::tan(Radians(camera.Fov()) / 2.0);
+	if (! std::isfinite(tan_half_fov) || tan_half_fov <= 0.0 || ! std::isfinite(camera.Aspect()) ||
+		camera.Aspect() <= 0.0) {
+		return std::nullopt;
+	}
+	Eigen::FullPivLU<Eigen::Matrix4d> lu(camera.GetViewMatrix());
+	if (! lu.isInvertible()) return std::nullopt;
+	// The projection divides view x and y by -z, the half extent at unit
+	// distance and (for x) the aspect, so this is its inverse at one depth.
+	const Eigen::Vector4d view_space(
+		ndc_x * tan_half_fov * camera.Aspect() * depth, ndc_y * tan_half_fov * depth, -depth, 1.0);
+	const Eigen::Vector4d world = lu.inverse() * view_space;
+	if (! world.allFinite() || world.w() == 0.0) return std::nullopt;
+	return Eigen::Vector3d(world.head<3>() / world.w());
+}

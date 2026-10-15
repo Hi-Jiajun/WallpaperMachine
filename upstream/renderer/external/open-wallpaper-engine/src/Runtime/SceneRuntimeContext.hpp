@@ -148,6 +148,8 @@ public:
     // document asked for something else is reported in `deferred`.
     ProjectPropertyPreview PreviewProjectPropertyOverride(const ProjectProperties& override_properties);
     void          AttachScene(Scene* scene);
+    /// Puts the cursor at a scene position, canvas units for hit tests and
+    /// scripts alike, whatever the camera: the probes' way to click a layer.
     void          SetCursorWorldPosition(const Eigen::Vector3f& value);
     // World rectangle the window shows, so window-normalized cursor input lands
     // where the presented wallpaper actually draws each layer.
@@ -736,6 +738,7 @@ private:
     void ApplyPerspectiveCameraShots(double seconds);
     void DispatchPendingAnimationEvents();
     bool                           CursorInsidePresentedContent() const;
+    Eigen::Vector3f ScriptCursorWorldPosition() const;
     bool CursorHitsLayer(std::string_view name) const;
     bool CursorHitsLayerGeometry(std::string_view name) const;
     CursorVisit VisitCursorLayer(std::string_view name) const;
@@ -770,6 +773,10 @@ private:
     std::unique_ptr<ScriptHostContext>                             m_host_context;
     Scene*                                                         m_scene { nullptr };
     CursorViewport                                                 m_cursor_viewport {};
+    // The cursor in the canvas plane, where the viewport maps the window pointer
+    // (z = 0). Layers are hit in it and particles follow it. It is not what a
+    // perspective scene's scripts read as `input.cursorWorldPosition`.
+    Eigen::Vector3f                                                m_cursor_plane_position { Eigen::Vector3f::Zero() };
     ProjectProperties                                              m_default_project_properties;
     ProjectProperties                                              m_project_property_overrides;
     ProjectProperties                                              m_project_properties;

@@ -243,6 +243,27 @@ Playback, backend, host and startup areas are in
   `.DefaultPanIsBitExactWithTheCentredLayout` compares every mode against an in-test
   copy of the old centring arithmetic, so the default can never move a wallpaper by a
   pixel; a change to the layout function's arithmetic order has to keep it green.
+- **`input.cursorWorldPosition` in a perspective scene** — `MouseInput.APerspectiveSceneHandsScriptsTheCursorRayPointAtTheFarPlane`,
+  `.ThePerspectiveCursorPointLiesOnTheCursorRayOfAMovedAndShakenCamera`,
+  `.ACameraPointAtDepthIsOnlyDefinedForAPerspectiveViewAndARealDepth`,
+  `.AHeadScriptThatFollowsThePerspectiveCursorTurnsAsInWallpaperEngine`,
+  `.ACanvasSceneKeepsTheCursorInCanvasUnitsEvenWithAPerspectiveCameraAround`,
+  `.APerspectiveSceneStillHitsLayersWhereTheyAreDrawn`,
+  `.AParticleControlPointFollowsTheCanvasPlaneCursorInAPerspectiveScene` and
+  `.ThePerspectiveCursorPointFollowsThePictureWhenTheWindowCropsOrLetterboxesIt` in
+  `mouse_input_test`. A display-sized
+  scene (`Scene::display_sized`, the one with a perspective camera) gives scripts the point on
+  the cursor ray `farz` in front of the eye (`UnprojectNdcAtDepth`), found from the cursor's
+  NDC in the presented frame (a window that crops or letterboxes the picture moves it with the
+  picture, not with the window); a canvas scene keeps canvas units with `z = 0`. Hit tests and
+  `Scene::pointerScenePosition` (a particle's mouse control point) read the canvas-plane
+  position (`SceneRuntimeContext::m_cursor_plane_position`), never that point. The head test runs the
+  neutral-zone script of workshop 3477054430 with the cursor in the middle and the scene's
+  camera, and requires the pose Wallpaper Engine showed (pitch -6.1, yaw -61.4 degrees,
+  where canvas pixels give about -15 and -6). End to end, `metal_scene_draw_smoke`'s
+  `LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBackend` with
+  `WE_TEST_INPUT_JSON='[{"frame":0,"x":0.5,"y":0.5,"inside":true}]'` draws that wallpaper's
+  head turned as Wallpaper Engine's frame shows it.
 - **`engine.screenResolution`** has its own setter:
   `SceneWallpaper::publishScreenResolution` reports the display's pixels on scene
   attach and whenever the surface is replaced. `RenderInitInfo::width`/`height`
