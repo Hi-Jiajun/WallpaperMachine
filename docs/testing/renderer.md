@@ -802,14 +802,14 @@ into private textures; the three that draw skip visibly without a Metal device.
   and text layers always draw through the orthographic camera, so a layer at a depth
   or turned about x or y is drawn flat. Wallpaper Engine draws such a layer through a
   perspective camera that sits `(canvas height / 2) / tan(fov / 2)` from the canvas
-  plane, with the scene's field of view (`perspectiveoverridefov`, else `fov`); in the
-  one local scene that shows it (a layer 222 units out, field of view 90, canvas
-  2160 high) that is 1.26 times larger than flat. The perspective camera a 2D scene
-  has is placed at 1000 units, and four places assume that distance
-  (`ParseCamera`, `Scene::FrameCanvas`, `SceneRuntimeContext::ApplySceneZoomAnimation`
-  and `ApplyCameraFillMode`), so applying the flag, or moving models and particles
-  to the scene's own distance, has to change them together, and needs a picture
-  comparison of the 3D-model scenes.
+  plane, with the scene's `perspectiveoverridefov` (95 when absent); in the one local
+  scene that shows it (a layer 222 units out, field of view 90, canvas 2160 high)
+  that is 1.26 times larger than flat. The perspective camera a 2D scene has, which
+  models and particles with the flag draw through, sits at that distance
+  (`FitCanvasPerspective`, shared by `ParseCamera`, `Scene::FrameCanvas`,
+  `SceneRuntimeContext::ApplySceneZoom` and `ApplyCameraFillMode`), so applying the
+  flag to image and text layers is a matter of binding them to it, and needs a
+  picture comparison of the layers it moves.
 - **Object kinds not drawn or not modelled.** A `shape` object draws only an effect of
   a single pass: its last effect is drawn onto the scene as a mesh, so a multi-pass
   last effect, which would draw into buffers first, is left out (the editor's

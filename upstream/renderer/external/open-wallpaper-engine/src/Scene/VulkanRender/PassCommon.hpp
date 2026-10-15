@@ -534,9 +534,7 @@ inline void ApplyCameraFillMode(wallpaper::Scene& scene, wallpaper::FillMode fil
     }
     // The extent the orthographic camera actually shows, so a camera layer's
     // zoom narrows perspective layers exactly as it does the rest.
-    if (! gPerCam.FovLocked()) {
-        gPerCam.SetFov(algorism::CalculatePersperctiveFov(1000.0f, gCam.VisibleHeight()));
-    }
+    FitCanvasPerspective(gPerCam, gCam);
     gCam.Update();
     gPerCam.Update();
     scene.UpdateLinkedCamera("global");

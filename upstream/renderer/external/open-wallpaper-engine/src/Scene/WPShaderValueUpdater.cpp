@@ -771,7 +771,14 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, uint32_t material_sl
                                               static_cast<float>(value.y()),
                                               static_cast<float>(value.z()) };
             };
-            if (info.has_EYE) updateOp(G_EYEPOSITION, to_array(view_camera->GetPosition()));
+            if (info.has_EYE) {
+                auto eye = to_array(view_camera->GetPosition());
+                // A 2D scene's perspective camera sits where its field of view
+                // puts it, which is not where Wallpaper Engine keeps the eye its
+                // shaders read: over the view's centre at a fixed depth.
+                if (! view_camera->FovLocked()) eye[2] = kCanvasShaderEyeDepth;
+                updateOp(G_EYEPOSITION, eye);
+            }
             if (info.has_VIEWFORWARD)
                 updateOp(G_VIEWFORWARD, to_array(view_camera->GetDirection()));
             if (info.has_VIEWUP) updateOp(G_VIEWUP, to_array(view_camera->GetUp()));

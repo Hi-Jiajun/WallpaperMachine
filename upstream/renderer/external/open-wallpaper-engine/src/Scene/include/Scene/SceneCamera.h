@@ -49,6 +49,11 @@ public:
     }
     void SetAspect(double aspect) { m_aspect = aspect; }
     void SetFov(double value) { m_fov = value; }
+    /// The depth range a perspective projection keeps.
+    void SetClip(double near_clip, double far_clip) {
+        m_nearClip = near_clip;
+        m_farClip  = far_clip;
+    }
     /// A camera object's own zoom, separate from the scene-wide zoom that
     /// writes width and height. Larger zooms in; anything not positive and
     /// finite frames the full canvas.
@@ -141,6 +146,27 @@ private:
     bool                                   m_isComposeLayer { false };
     bool                                   m_layerLocal { false };
 };
+
+/// Seats the perspective camera of a 2D scene -- the one particles, models and
+/// layers with the `perspective` flag draw through -- on the view `canvas`
+/// shows, as Wallpaper Engine does. The eye sits (visible height / 2) /
+/// tan(fov / 2) in front of the canvas plane, the near plane 5 units from the
+/// eye and the far plane 1000 units behind the canvas plane or 15000 from the
+/// eye, whichever is further. The field of view is the scene's and never
+/// moves, so the canvas plane maps exactly as the orthographic view maps it,
+/// whatever frames it (a fill mode, a zoom, a camera layer), and what lies off
+/// the plane is magnified by D / (D - z) and stays in view up to the eye. Only
+/// the depth moves: the caller aims the camera. A camera with a locked field of
+/// view belongs to a perspective scene and is left alone. Call `Update`
+/// afterwards.
+void FitCanvasPerspective(SceneCamera& perspective, const SceneCamera& canvas);
+
+/// How far in front of the canvas plane the eye is that shaders read as
+/// `g_EyePosition` in a 2D scene. It is a constant of the scene -- 2000 units out
+/// over the centre of the view -- and not the distance the perspective camera
+/// sits at, which follows its field of view and the visible canvas. Particle
+/// trails turn their ribbons by the angle between a particle and this eye.
+inline constexpr float kCanvasShaderEyeDepth = 2000.0f;
 
 /// Intersects the camera ray through NDC `(ndc_x, ndc_y)` with `node`'s local
 /// z = 0 plane. NDC is the shared clip space after the perspective divide,

@@ -1975,6 +1975,62 @@ TEST(CameraFraming, AGroupStillDecidesWhetherAFullscreenLayerShows) {
     ExpectCardFillsItsTarget(*parsed, *post, { 32.0, 16.0 });
 }
 
+// The camera perspective layers of a 2D scene draw through keeps the lens the
+// scene authored and follows the canvas plane: whatever frames the canvas -- a
+// fill mode, a camera layer's zoom and pan -- puts its eye (visible height / 2) /
+// tan(fov / 2) from the plane and over the point the orthographic view looks at,
+// so a layer on the plane lands where it does without the perspective.
+TEST(CameraFraming, APerspectiveCameraKeepsItsLensAndFollowsEveryWayTheCanvasIsFramed) {
+    fs::VFS vfs;
+    auto    parsed = ParseScene(vfs, R"([
+        {"id":1,"name":"backdrop","image":"image.json","origin":[32,16,0]}
+      ])");
+    ASSERT_NE(parsed, nullptr);
+    const auto& canvas      = *parsed->cameras.at("global");
+    const auto& perspective = *parsed->cameras.at("global_perspective");
+    const double fov        = perspective.Fov();
+
+    const auto expect_framed = [&](const std::string& what) {
+        SCOPED_TRACE(what);
+        EXPECT_DOUBLE_EQ(perspective.Fov(), fov) << "the lens is the scene's, not the framing's";
+        EXPECT_DOUBLE_EQ(perspective.Aspect(), canvas.Aspect());
+        const auto centre = canvas.GetPosition();
+        const auto eye    = perspective.GetPosition();
+        EXPECT_NEAR(eye.x(), centre.x(), 1e-4);
+        EXPECT_NEAR(eye.y(), centre.y(), 1e-4);
+        EXPECT_NEAR(eye.z(), (canvas.VisibleHeight() / 2.0) / std::tan(fov * M_PI / 360.0), 1e-3);
+        for (const auto& [fx, fy] : {std::pair { -0.5, -0.5 }, std::pair { 0.5, 0.5 },
+                                     std::pair { 0.3, -0.2 }}) {
+            const Eigen::Vector4d point(centre.x() + fx * canvas.VisibleWidth(),
+                                        centre.y() + fy * canvas.VisibleHeight(), 0.0, 1.0);
+            const Eigen::Vector4d flat = canvas.GetViewProjectionMatrix() * point;
+            const Eigen::Vector4d deep = perspective.GetViewProjectionMatrix() * point;
+            EXPECT_NEAR(deep.x() / deep.w(), flat.x() / flat.w(), 1e-5);
+            EXPECT_NEAR(deep.y() / deep.w(), flat.y() / flat.w(), 1e-5);
+        }
+    };
+
+    expect_framed("as parsed");
+    struct Output {
+        FillMode    mode;
+        const char* name;
+        uint32_t    width;
+        uint32_t    height;
+    };
+    for (const auto& output : { Output { FillMode::STRETCH, "stretch", 300, 90 },
+                                Output { FillMode::ASPECTFIT, "fit wide", 400, 100 },
+                                Output { FillMode::ASPECTFIT, "fit tall", 100, 400 },
+                                Output { FillMode::ASPECTCROP, "crop wide", 400, 100 },
+                                Output { FillMode::ASPECTCROP, "crop tall", 100, 400 } }) {
+        vulkan::ApplyCameraFillMode(*parsed, output.mode, output.width, output.height);
+        expect_framed(output.name);
+    }
+    parsed->FrameCanvas(2.0, Eigen::Vector2f(8.0f, 4.0f));
+    expect_framed("zoomed and panned");
+    parsed->FrameCanvas(1.0, Eigen::Vector2f(0.0f, 0.0f));
+    expect_framed("back to the whole canvas");
+}
+
 // The static-result cache reuses a target's pixels while every pass writing it
 // samples the same. A camera layer zooming or panning the scene moves no node
 // and rebuilds no graph, so a sample blind to the camera served the first

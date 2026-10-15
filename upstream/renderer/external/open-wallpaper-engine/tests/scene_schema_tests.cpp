@@ -7,6 +7,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -1548,21 +1549,27 @@ TEST(SceneSchema, PerspectiveCameraSelectionFollowsVisibilityWithoutHiddenOverri
     EXPECT_EQ(scene->runtime->DescribeTimeAdvancingWork() & SceneDemandReason::Animation, 0u);
 }
 
+// A shot without a field of view of its own takes the scene's `fov`.
+// `perspectiveoverridefov` is the field of view of a 2D scene's perspective
+// layers (Wallpaper Engine reads `fov` when the scene is not orthographic), so
+// a perspective scene that carries the key, from a package of any version,
+// ignores it.
 TEST(SceneSchema, PerspectiveShotsInheritSceneFovUnlessExplicitlyOverridden) {
     for (bool runtime_enabled : {false, true}) {
         for (const auto* camera_name : {"named shot camera", "default"}) {
-            for (float scene_override : {0.0f, 75.0f}) {
+            for (float ignored_override : {0.0f, 75.0f}) {
                 for (const auto& object_fov : std::vector<nlohmann::json> {nullptr, 0, -1, 80}) {
-                    SCOPED_TRACE(object_fov.dump() + " " + camera_name +
+                    SCOPED_TRACE(object_fov.dump() + " " + camera_name + " override " +
+                                 std::to_string(ignored_override) +
                                  (runtime_enabled ? " runtime" : " static"));
                     auto source = nlohmann::json::parse(PerspectiveSceneJson(R"([
                       {"id":1,"name":"earlier","camera":"default","origin":[0,0,12],"fov":45},
                       {"id":2,"name":"target","camera":"default","origin":[6,0,8]}
                     ])"));
-                    source["general"]["perspectiveoverridefov"] = scene_override;
+                    source["general"]["perspectiveoverridefov"] = ignored_override;
                     source["objects"][1]["camera"] = camera_name;
                     if (!object_fov.is_null()) source["objects"][1]["fov"] = object_fov;
-                    const double scene_fov = scene_override > 0 ? scene_override : 60.0;
+                    const double scene_fov = 60.0;
                     const double expected = !object_fov.is_null() && object_fov.get<double>() > 0
                                                 ? object_fov.get<double>() : scene_fov;
                     fs::VFS vfs;
@@ -5328,6 +5335,7 @@ TEST(SceneSchema, CameraZoomTimelineRevealsFullCanvasWithoutResizingRenderTarget
     EXPECT_DOUBLE_EQ(camera->Width(), 320);
     EXPECT_DOUBLE_EQ(camera->Height(), 180);
     const auto initial_fov = perspective->Fov();
+    const auto initial_distance = perspective->GetPosition().z();
     const auto target = parsed->renderTargets.at(std::string(SpecTex_Default));
     parsed->runtime->Tick(10.0);
     EXPECT_DOUBLE_EQ(camera->Width(), 320);
@@ -5339,7 +5347,12 @@ TEST(SceneSchema, CameraZoomTimelineRevealsFullCanvasWithoutResizingRenderTarget
     EXPECT_DOUBLE_EQ(camera->Height(), 540);
     EXPECT_DOUBLE_EQ(linked->Width(), camera->Width());
     EXPECT_DOUBLE_EQ(linked->Height(), camera->Height());
-    EXPECT_GT(perspective->Fov(), initial_fov);
+    // The zoom reframes the canvas, not the lens: the field of view stays the
+    // scene's and the eye backs off as more of the canvas shows.
+    EXPECT_DOUBLE_EQ(perspective->Fov(), initial_fov);
+    EXPECT_GT(perspective->GetPosition().z(), initial_distance);
+    EXPECT_NEAR(perspective->GetPosition().z(),
+                270.0 / std::tan(initial_fov * M_PI / 360.0), 1e-3);
     EXPECT_DOUBLE_EQ(perspective->Aspect(), camera->Aspect());
     for (const auto* view : {camera.get(), perspective.get(), linked.get()}) {
         for (const auto& corner : {Eigen::Vector4d(0, 0, 0, 1),
@@ -5355,6 +5368,165 @@ TEST(SceneSchema, CameraZoomTimelineRevealsFullCanvasWithoutResizingRenderTarget
     EXPECT_EQ(parsed->ortho[1], 540);
     EXPECT_EQ(parsed->renderTargets.at(std::string(SpecTex_Default)).width, target.width);
     EXPECT_EQ(parsed->renderTargets.at(std::string(SpecTex_Default)).height, target.height);
+}
+
+// A 2D scene's perspective layers -- particles and models with the
+// `perspective` flag -- are drawn through a camera that Wallpaper Engine seats
+// (canvas height / 2) / tan(fov / 2) in front of the canvas, with the scene's
+// `perspectiveoverridefov` (95 when it leaves the key out; `fov` belongs to
+// scenes with a perspective projection). The canvas plane maps exactly as the
+// orthographic view does; what lies off it is magnified by D / (D - z), and
+// nothing is clipped before it reaches the eye.
+std::shared_ptr<Scene> ParseCanvasPerspectiveScene(int width, int height,
+                                                   std::optional<double> override_fov) {
+    auto source = nlohmann::json::parse(BasicImageSceneJson());
+    source["objects"] = nlohmann::json::array();
+    source["general"]["orthogonalprojection"] = {{"width", width}, {"height", height}};
+    source["general"]["fov"] = 60;
+    if (override_fov.has_value()) source["general"]["perspectiveoverridefov"] = *override_fov;
+    fs::VFS vfs;
+    audio::SoundManager sound;
+    ProjectProperties properties;
+    return WPSceneParser().Parse(SceneParseRequest {
+        .scene_id = "canvas-perspective", .project_properties = &properties,
+    }, source.dump(), vfs, sound);
+}
+
+Eigen::Vector4d ClipOf(const SceneCamera& camera, double x, double y, double z) {
+    return camera.GetViewProjectionMatrix() * Eigen::Vector4d(x, y, z, 1.0);
+}
+
+TEST(SceneSchema, A2DScenesPerspectiveCameraSitsWhereItsFieldOfViewPutsTheEye) {
+    struct Case {
+        int                  width;
+        int                  height;
+        std::optional<double> override_fov;
+        double               fov;
+    };
+    const Case cases[] = {
+        { 1920, 1080, 50.0, 50.0 },
+        { 3840, 2160, 25.0, 25.0 },
+        { 1366, 768, 95.0, 95.0 },
+        // No key: 95, whatever `fov` says.
+        { 1366, 768, std::nullopt, 95.0 },
+        { 7680, 2160, 170.0, 170.0 },
+    };
+    for (const auto& c : cases) {
+        SCOPED_TRACE(std::to_string(c.width) + "x" + std::to_string(c.height) + " fov " +
+                     std::to_string(c.fov));
+        auto parsed = ParseCanvasPerspectiveScene(c.width, c.height, c.override_fov);
+        ASSERT_NE(parsed, nullptr);
+        const auto& canvas      = *parsed->cameras.at("global");
+        const auto& perspective = *parsed->cameras.at("global_perspective");
+        const double distance   = (c.height / 2.0) / std::tan(c.fov * M_PI / 360.0);
+
+        EXPECT_DOUBLE_EQ(perspective.Fov(), c.fov);
+        const auto eye = perspective.GetPosition();
+        EXPECT_NEAR(eye.x(), c.width / 2.0, 1e-3);
+        EXPECT_NEAR(eye.y(), c.height / 2.0, 1e-3);
+        EXPECT_NEAR(eye.z(), distance, distance * 1e-6);
+        EXPECT_DOUBLE_EQ(perspective.NearClip(), 5.0);
+        EXPECT_NEAR(perspective.FarClip(), std::max(distance + 1000.0, 15000.0), 1e-2);
+
+        // The canvas plane is mapped as the orthographic camera maps it.
+        for (const auto& point : {std::pair {0.0, 0.0}, std::pair {double(c.width), double(c.height)},
+                                  std::pair {c.width * 0.3, c.height * 0.8}}) {
+            const auto flat = ClipOf(canvas, point.first, point.second, 0.0);
+            const auto deep = ClipOf(perspective, point.first, point.second, 0.0);
+            EXPECT_NEAR(deep.x() / deep.w(), flat.x() / flat.w(), 1e-5);
+            EXPECT_NEAR(deep.y() / deep.w(), flat.y() / flat.w(), 1e-5);
+        }
+
+        // What lies in front of the plane is larger by D / (D - z) and stays
+        // in view up to the near plane, 5 units from the eye, past a thousand
+        // units out or not.
+        const double offset = c.width / 200.0;
+        const auto   centre_x = c.width / 2.0;
+        const auto   flat = ClipOf(perspective, centre_x + offset, c.height / 2.0, 0.0);
+        for (const double z : {distance * 0.1, distance * 0.5, distance * 0.9, distance - 6.0}) {
+            SCOPED_TRACE("z " + std::to_string(z));
+            const auto at = ClipOf(perspective, centre_x + offset, c.height / 2.0, z);
+            ASSERT_GT(at.w(), 0.0);
+            // The eye is stored as a float, which near a far eye is a fraction of a
+            // unit: the ratio is taken against where it really is.
+            const double seen = eye.z() / (eye.z() - z);
+            EXPECT_NEAR((at.x() / at.w()) / (flat.x() / flat.w()), seen, seen * 1e-5);
+            const auto middle = ClipOf(perspective, centre_x, c.height / 2.0, z);
+            const double depth = middle.z() / middle.w();
+            EXPECT_GE(depth, 0.0);
+            EXPECT_LE(depth, 1.0);
+        }
+    }
+}
+
+TEST(SceneSchema, TheFieldOfViewOfA2DScenesPerspectiveCameraIsReadFromAnyPackageVersion) {
+    const auto json = nlohmann::json::parse(R"({"perspectiveoverridefov":70.0,"windenabled":true})");
+    // `windenabled` is a package-version-21 key and stays gated; the field of view
+    // is read from whatever file carries it.
+    wpscene::WPSceneGeneral v9;
+    ASSERT_TRUE(v9.FromJson(json, 9));
+    EXPECT_FLOAT_EQ(v9.perspectiveoverridefov, 70.0f);
+    EXPECT_FALSE(v9.windenabled);
+}
+
+// What a shader reads as `g_EyePosition` in a 2D scene is not where the perspective
+// camera sits. Wallpaper Engine keeps that eye at the centre of the view, 2000
+// units in front of the canvas (the scene-wide eye of FUN_1401891a0), whatever
+// distance the field of view puts the projection's eye at; the particle trail
+// shaders orient their ribbons by it.
+TEST(SceneSchema, A2DScenesPerspectiveModelReadsTheEyeTwoThousandUnitsOutWhateverTheLens) {
+    auto files = std::map<std::string, std::string> {};
+    AddLeafModelSceneFiles(files);
+    fs::VFS vfs;
+    ASSERT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+    audio::SoundManager sound_manager;
+    auto parsed = WPSceneParser().Parse("canvas-eye", R"({
+      "camera": {"center":[0,0,0], "eye":[0,0,1], "up":[0,1,0]},
+      "general": {
+        "ambientcolor":[0.2,0.2,0.2], "skylightcolor":[0.3,0.3,0.3],
+        "clearcolor":[0,0,0], "cameraparallax":false,
+        "cameraparallaxamount":0, "cameraparallaxdelay":0,
+        "cameraparallaxmouseinfluence":0, "perspectiveoverridefov":40,
+        "orthogonalprojection":{"width":640,"height":360}
+      },
+      "objects": [
+        {"id":7,"name":"planet","model":"planet.mdl","perspective":true,
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true}
+      ]
+    })", vfs, sound_manager);
+    ASSERT_NE(parsed, nullptr);
+    auto node = FindRootChildByName(*parsed, "planet");
+    ASSERT_NE(node, nullptr);
+    ASSERT_EQ(node->Camera(), "global_perspective");
+    auto* updater = parsed->shaderValueUpdater.get();
+    ASSERT_NE(updater, nullptr);
+    updater->InitUniforms(node.get(), 0, [](std::string_view name) { return name == "g_EyePosition"; });
+    const auto read_eye = [&] {
+        std::array<float, 3> eye { 0.0f, 0.0f, 0.0f };
+        sprite_map_t         sprites;
+        updater->UpdateUniforms(node.get(), sprites,
+                                [&](std::string_view name, const ShaderValue& value) {
+                                    if (name == "g_EyePosition") eye = { value[0], value[1], value[2] };
+                                });
+        return eye;
+    };
+
+    // The projection's eye is (360 / 2) / tan(20 degrees) = 494.6 units out.
+    const auto& perspective = *parsed->cameras.at("global_perspective");
+    ASSERT_NEAR(perspective.GetPosition().z(), 180.0 / std::tan(20.0 * M_PI / 180.0), 1e-2);
+    auto eye = read_eye();
+    EXPECT_NEAR(eye[0], 320.0f, 1e-3f);
+    EXPECT_NEAR(eye[1], 180.0f, 1e-3f);
+    EXPECT_NEAR(eye[2], 2000.0f, 1e-3f);
+
+    // A reframed canvas moves the view's centre and the projection's eye; the
+    // shader's eye follows the centre and keeps its distance.
+    parsed->FrameCanvas(3.0, Eigen::Vector2f(40.0f, -20.0f));
+    ASSERT_GT(std::abs(perspective.GetPosition().z() - 494.6), 100.0);
+    eye = read_eye();
+    EXPECT_NEAR(eye[0], 360.0f, 1e-3f);
+    EXPECT_NEAR(eye[1], 160.0f, 1e-3f);
+    EXPECT_NEAR(eye[2], 2000.0f, 1e-3f);
 }
 
 TEST(SceneSchema, CameraZoomTimelineHonorsPausedFirstKeyAndLooping) {

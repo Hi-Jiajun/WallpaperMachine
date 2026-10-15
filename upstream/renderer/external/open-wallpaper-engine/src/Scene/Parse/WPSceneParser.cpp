@@ -3456,11 +3456,25 @@ TryLoadPuppetMaterialSlots(ParseContext& context, SceneNode* node, wpscene::WPIm
 
 // parse
 
+// The field of view of a scene with a perspective projection: a shot's own, else
+// the scene's `fov`. `perspectiveoverridefov` belongs to a 2D scene's perspective
+// layers (below) and plays no part here, whatever the package version.
 float ResolvePerspectiveFov(const wpscene::WPSceneGeneral& general, float object_fov = 0.0f) {
     if (object_fov > 0.0f) return object_fov;
-    if (general.perspectiveoverridefov > 0.0f) return general.perspectiveoverridefov;
     if (general.fov > 0.0f) return general.fov;
     return 50.0f;
+}
+
+// The lens Wallpaper Engine puts in front of a 2D scene's perspective layers --
+// particles and models with the `perspective` flag -- is the scene's
+// `perspectiveoverridefov`, 95 degrees when the file leaves it out. `fov`
+// belongs to scenes with a perspective projection and plays no part here.
+// Every field of view is held between 0.1 and 179.9 degrees.
+float ResolveCanvasPerspectiveFov(const wpscene::WPSceneGeneral& general) {
+    constexpr float kDefaultFov = 95.0f;
+    const float     fov = general.perspectiveoverridefov > 0.0f ? general.perspectiveoverridefov
+                                                                : kDefaultFov;
+    return std::clamp(fov, 0.1f, 179.9f);
 }
 
 void PlacePerspectiveCameraNode(SceneNode& node, const wpscene::WPSceneCamera& camera) {
@@ -3512,8 +3526,7 @@ void ParseCamera(ParseContext& context, wpscene::WPScene& sc) {
         (float)projection_width / (float)projection_height,
         general.nearz,
         general.farz,
-        general.isOrtho ? algorism::CalculatePersperctiveFov(1000.0f, projection_height)
-                        : authored_fov);
+        general.isOrtho ? ResolveCanvasPerspectiveFov(general) : authored_fov);
 
     // Fullscreen effects live in screen space even when the scene camera is
     // perspective. Projecting their canvas-sized card through that camera
@@ -3525,10 +3538,13 @@ void ParseCamera(ParseContext& context, wpscene::WPScene& sc) {
     scene.sceneGraph->AppendChild(fullscreen_node);
 
     if (general.isOrtho) {
-        Vector3f cperori                       = cori;
-        cperori[2]                             = 1000.0f;
-        context.global_perspective_camera_node = std::make_shared<SceneNode>(cperori, cscale, cangle);
-        scene.cameras["global_perspective"]->AttatchNode(context.global_perspective_camera_node);
+        // Over the canvas centre; its distance from the canvas plane follows
+        // from its field of view and the canvas it looks at.
+        context.global_perspective_camera_node = std::make_shared<SceneNode>(cori, cscale, cangle);
+        auto& perspective                      = *scene.cameras["global_perspective"];
+        perspective.AttatchNode(context.global_perspective_camera_node);
+        FitCanvasPerspective(perspective, *scene.cameras.at("global"));
+        perspective.Update();
         scene.sceneGraph->AppendChild(context.global_perspective_camera_node);
         return;
     }
@@ -5108,7 +5124,7 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
         static_cast<float>(context.ortho_w) / 2.0f,
         static_cast<float>(context.ortho_h) / 2.0f,
         // Wallpaper Engine puts a 2D scene's eye 2000 units in front of the canvas.
-        2000.0f,
+        kCanvasShaderEyeDepth,
     };
 
     const u32 samples = rope_trail ? trail_segments : 0u;

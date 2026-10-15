@@ -70,6 +70,23 @@ plane). The camera is read as it stood when the cursor was sampled. Layers are s
 where the cursor ray meets their own plane, and a particle control point still follows
 the cursor in canvas units.
 
+In a 2D scene, a particle system or 3D model with the `perspective` flag is drawn
+through a perspective camera seated as Wallpaper Engine seats it. Its field of view is
+the scene's `perspectiveoverridefov` (95 degrees when the file leaves it out, read from
+a file of any package version; `fov` belongs to scenes with a perspective projection,
+which read it and ignore `perspectiveoverridefov`), its eye is
+`(visible canvas height / 2) / tan(fov / 2)` in front of the canvas plane, and its near
+plane is 5 units from the eye and its far plane at least 15000 away. The canvas plane
+therefore maps exactly as the orthographic view maps it, and what lies off the plane,
+such as a flake drifting towards the viewer, is magnified by `D / (D - z)` for a
+distance `D`: a narrow field of view puts the eye far away and magnifies little, a wide
+one brings it close, and nothing in front of the plane is cut before it is within 5
+units of the eye. The distance follows the visible height, so a fill mode, the scene
+zoom or a camera layer's zoom moves the eye and leaves the field of view alone. The eye
+that those layers' shaders read as `g_EyePosition`, which a particle trail turns its
+ribbon by, is a constant of the scene instead: the centre of the view, 2000 units in
+front of the canvas plane, whatever distance the field of view gives the camera.
+
 Scripts list the scene's layers through `thisScene`. `getLayer(index)`,
 `getLayerCount()`, `enumerateLayers()`, `getLayerIndex()` and `sortLayer()` share
 one order, the scene file's object order followed by the layers scripts made, and a

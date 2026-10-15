@@ -46,9 +46,10 @@ Playback, backend, host and startup areas are in
     the last visible shot (authored order) to `Scene::FrameCanvas`. Its `zoom`
     narrows the orthographic view about the view centre, and its origin `x`/`y` is
     that centre's offset from the canvas centre, not a canvas coordinate. The
-    perspective camera keeps its distance but takes the same centre and a field of
-    view spanning the same visible height. With no visible shot the whole canvas
-    shows, and nothing is reframed while zoom and offset stay the same.
+    perspective camera keeps its field of view, takes the same centre and moves its
+    eye to the distance that field of view gives for the visible height. With no
+    visible shot the whole canvas shows, and nothing is reframed while zoom and
+    offset stay the same.
   - A script-bound origin is pending until the first tick has applied it (the
     view stays on the canvas centre until then); the editor's static `value`
     beside such a script is never drawn. A relative origin curve offsets the
@@ -56,8 +57,9 @@ Playback, backend, host and startup areas are in
     single-play timeline that has ended stops counting as animation demand, so
     an otherwise still scene can go idle after its intro.
   - Perspective shots with an omitted or nonpositive `fov` inherit the scene's
-    resolved FOV (`perspectiveoverridefov`, then `fov`, then 50); a positive shot
-    FOV overrides. Resolve it from authored scene settings, never from a shared
+    resolved FOV (`fov`, then 50; `perspectiveoverridefov` is the lens of a 2D
+    scene's perspective layers and is ignored here); a positive shot FOV
+    overrides. Resolve it from authored scene settings, never from a shared
     camera an earlier visible shot may have changed.
   - Framing moves no node and rebuilds no graph, so a fullscreen layer's last
     pass uses the `fullscreen` camera (always the canvas), a layer sampled as
@@ -77,6 +79,31 @@ Playback, backend, host and startup areas are in
   uses), not `Width()`/`Height()`, or clicks and mouse-linked particles stay on
   the unzoomed image. The authored extent the render targets are sized from must
   not move with zoom.
+- **The camera perspective layers of a 2D scene draw through** — in
+  `scene_schema_tests`: `SceneSchema.A2DScenesPerspectiveCameraSitsWhereItsFieldOfViewPutsTheEye`
+  (field of view `perspectiveoverridefov`, 95 when absent whatever `fov` says; eye
+  at `(H / 2) / tan(fov / 2)`, near 5, far `max(D + 1000, 15000)`; the canvas plane
+  maps as the orthographic view maps it; a point `z` out is magnified by
+  `D / (D - z)` and stays in view up to the near plane, past 1000 units or not),
+  `.TheFieldOfViewOfA2DScenesPerspectiveCameraIsReadFromAnyPackageVersion` and
+  `.CameraZoomTimelineRevealsFullCanvasWithoutResizingRenderTargets` (the zoom
+  moves the eye, not the field of view); in `layer_texture_reference_test`:
+  `CameraFraming.APerspectiveCameraKeepsItsLensAndFollowsEveryWayTheCanvasIsFramed`
+  (every fill mode, `FrameCanvas`); in `metal_scene_draw_smoke`:
+  `MetalSceneDraw.APerspectiveLayerIsSeenFromTheEyeDistanceOfTheScenesFieldOfViewOnBothRenderers`
+  (a card 500, 1100 and 1400 units out is the width the eye distance gives on both
+  renderers). The eye sat at 1000 units with a field of view derived from it, so a
+  particle 500 units out was twice its size and one past 1000 units was cut; the
+  distance is the scene's own, in one helper (`FitCanvasPerspective`) that the
+  parser, `Scene::FrameCanvas`, the scene zoom and `ApplyCameraFillMode` share.
+  The camera's distance is not the eye the shaders read: `g_EyePosition` of a
+  perspective particle or model stays over the view's centre 2000 units out
+  whatever the field of view or the framing (`Renderers.APerspectiveParticleReadsTheEyeTwoThousandUnitsOutWhateverTheLens`
+  in `particle_parity_test`, `SceneSchema.A2DScenesPerspectiveModelReadsTheEyeTwoThousandUnitsOutWhateverTheLens`
+  in `scene_schema_tests`), or a particle trail would turn its ribbon by an eye
+  that moves with the lens. `perspectiveoverridefov` is a 2D scene's lens only: a
+  scene with a perspective projection keeps `fov`
+  (`.PerspectiveShotsInheritSceneFovUnlessExplicitlyOverridden`).
 - **Perspective camera shots and paths** — in `scene_schema_tests`:
   `SceneSchema.PerspectiveCameraSelectionFollowsVisibilityWithoutHiddenOverrides`,
   `.PerspectiveCameraPathsSampleAndQueueAuthoredCurves`,

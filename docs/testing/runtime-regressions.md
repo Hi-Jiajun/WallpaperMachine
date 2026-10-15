@@ -68,7 +68,9 @@ device.
   draw does.
 - **Perspective cameras** — `MetalProjection.PerspectiveUsesFovAspectNearFarAndAHomogeneousDivide`,
   `.UnprojectingNdcHitsTheLayerPlane` and `.CameraAxesFollowTheAttachedNode` in
-  `metal_backend_test`; `MetalSceneDraw.APerspectiveCameraDrawsThroughTheAuthoredShader`.
+  `metal_backend_test`; `MetalSceneDraw.APerspectiveCameraDrawsThroughTheAuthoredShader`
+  (see also the 2D scene's perspective camera in
+  [scene regressions](scene-regressions.md)).
   Projection is the scene camera's own FOV/aspect/near/far, not an orthographic
   scale; a rotated card must foreshorten.
 - **Depth writes** — `MetalSceneDraw.ADepthWritingDrawHidesLaterDrawsAsOnCompatibility`:

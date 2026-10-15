@@ -1,5 +1,6 @@
 #include "SceneCamera.h"
 #include "SceneNode.h"
+#include "Utils/Algorism.h"
 #include "Utils/Logging.h"
 #include <cmath>
 #include <iostream>
@@ -96,6 +97,19 @@ void SceneCamera::AttatchNode(std::shared_ptr<SceneNode> node) {
 	}
 	m_node = node;
 	Update();
+}
+
+void wallpaper::FitCanvasPerspective(SceneCamera& perspective, const SceneCamera& canvas) {
+	if(perspective.FovLocked()) return;
+	const double distance =
+		algorism::CalculatePersperctiveDistance(perspective.Fov(), canvas.VisibleHeight());
+	if(! std::isfinite(distance) || distance <= 0.0) return;
+	if(const auto node = perspective.GetAttachedNode(); node != nullptr) {
+		Vector3f translate = node->Translate();
+		translate.z()      = static_cast<float>(distance);
+		node->SetTranslate(translate);
+	}
+	perspective.SetClip(5.0, std::max(distance + 1000.0, 15000.0));
 }
 
 SceneCamera::Axes SceneCamera::GetAxes() const {

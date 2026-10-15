@@ -7,6 +7,7 @@
 #include "Fs/VFS.h"
 #include "Audio/SoundManager.h"
 #include "Interface/IParticleRawGener.h"
+#include "Interface/IShaderValueUpdater.h"
 #include "Particle/ParticleEmitter.h"
 #include "Particle/ParticleModify.h"
 #include "Particle/ParticleSystem.h"
@@ -3135,6 +3136,64 @@ TEST(Renderers, ATwoDimensionalSceneSetsTheEyeTwoThousandUnitsInFrontOfTheCanvas
     EXPECT_FLOAT_EQ(eye->second[0], 320.0f);
     EXPECT_FLOAT_EQ(eye->second[1], 180.0f);
     EXPECT_FLOAT_EQ(eye->second[2], 2000.0f);
+}
+
+/// The node of `root`'s subtree that draws a mesh through the camera `camera`.
+SceneNode* FindMeshNodeOnCamera(SceneNode& root, std::string_view camera) {
+    for (auto& child : root.GetChildren()) {
+        if (child->Mesh() != nullptr && child->Camera() == camera) return child.get();
+        if (auto* found = FindMeshNodeOnCamera(*child, camera)) return found;
+    }
+    return nullptr;
+}
+
+// A particle with the `perspective` flag draws through the 2D scene's perspective
+// camera, which sits where the field of view puts it. The eye its shaders read is
+// not that camera's position: Wallpaper Engine keeps it at the view's centre, 2000
+// units in front of the canvas, and a trail's ribbon turns on the angle between
+// the particle and that eye. A narrow field of view puts the camera far out and a
+// wide one close, and neither moves the shader's eye.
+TEST(Renderers, APerspectiveParticleReadsTheEyeTwoThousandUnitsOutWhateverTheLens) {
+    for (const double fov : { 30.0, 95.0, 150.0 }) {
+        SCOPED_TRACE("perspectiveoverridefov " + std::to_string(fov));
+        ParticleScene scene(
+            { { "/particle.json",
+                ParticleFile(R"({"name":"sphererandom","id":1,"rate":0,"instantaneous":1,"distancemax":0})",
+                             R"("maxcount":4,"flags":4)") } },
+            OneParticleObject(),
+            R"("orthogonalprojection":{"width":640,"height":360},"perspectiveoverridefov":)" +
+                std::to_string(fov));
+        ASSERT_NE(scene.scene, nullptr);
+        auto* node = FindMeshNodeOnCamera(*scene.scene->sceneGraph, "global_perspective");
+        ASSERT_NE(node, nullptr);
+        auto* updater = scene.scene->shaderValueUpdater.get();
+        ASSERT_NE(updater, nullptr);
+        updater->InitUniforms(node, 0, [](std::string_view name) { return name == "g_EyePosition"; });
+        const auto read_eye = [&] {
+            std::array<float, 3> eye { 0.0f, 0.0f, 0.0f };
+            sprite_map_t         sprites;
+            updater->UpdateUniforms(node, sprites,
+                                    [&](std::string_view name, const ShaderValue& value) {
+                                        if (name == "g_EyePosition") eye = { value[0], value[1], value[2] };
+                                    });
+            return eye;
+        };
+
+        const double distance =
+            scene.scene->cameras.at("global_perspective")->GetPosition().z();
+        ASSERT_NEAR(distance, 180.0 / std::tan(fov * M_PI / 360.0), distance * 1e-5);
+        auto eye = read_eye();
+        EXPECT_NEAR(eye[0], 320.0f, 1e-3f);
+        EXPECT_NEAR(eye[1], 180.0f, 1e-3f);
+        EXPECT_NEAR(eye[2], 2000.0f, 1e-3f);
+
+        // A reframed canvas moves the view's centre and the camera's distance.
+        scene.scene->FrameCanvas(2.0, Eigen::Vector2f(-40.0f, 20.0f));
+        eye = read_eye();
+        EXPECT_NEAR(eye[0], 280.0f, 1e-3f);
+        EXPECT_NEAR(eye[1], 200.0f, 1e-3f);
+        EXPECT_NEAR(eye[2], 2000.0f, 1e-3f);
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -2003,6 +2003,71 @@ TEST_F(MetalSceneDraw, APerspectiveCameraDrawsThroughTheAuthoredShader)
     }
 }
 
+/// The fixture's card cut down to 60 units square, centred in a 960 x 540 canvas
+/// at `z` units in front of the canvas plane, in a scene whose
+/// `perspectiveoverridefov` is 20 degrees.
+std::filesystem::path WriteDeepCardFixture(const std::filesystem::path& root, int z)
+{
+    const auto project = WriteFixture(root, "0.30");
+    std::ofstream(root / "models/tile.json")
+        << R"({"width":60,"height":60,"material":"materials/tile.json"})";
+    std::ofstream(root / "layout.json")
+        << R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+        << R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0.0,0.0,0.0],)"
+        << R"("cameraparallax":false,"fov":50,"perspectiveoverridefov":20,)"
+        << R"("orthogonalprojection":{"width":960,"height":540}},)"
+        << R"("objects":[{"id":1,"name":"tile","image":"models/tile.json","origin":[480,270,)"
+        << z << R"(],"scale":[1,1,1],"angles":[0,0,0],"visible":true}]})";
+    return project;
+}
+
+TEST_F(MetalSceneDraw, APerspectiveLayerIsSeenFromTheEyeDistanceOfTheScenesFieldOfViewOnBothRenderers)
+{
+    // Wallpaper Engine seats the camera that perspective layers of a 2D scene
+    // draw through (canvas height / 2) / tan(fov / 2) from the canvas, with the
+    // scene's `perspectiveoverridefov`: here 270 / tan(10 degrees) = 1531 units,
+    // so a card 500 units out is 1.49 times larger, one 1100 units out 3.55
+    // times and one 1400 units out 11.7 times. A camera fixed at 1000 units
+    // makes the first 2 times and loses the other two behind it.
+    constexpr double kDistance = 270.0 / 0.17632698070846498;
+    constexpr double kPixelsPerUnit = 0.5;
+    for (const int z : { 500, 1100, 1400 }) {
+        SCOPED_TRACE("z " + std::to_string(z));
+        const double expected = 60.0 * kPixelsPerUnit * kDistance / (kDistance - z);
+        for (const bool native : { false, true }) {
+            SCOPED_TRACE(native ? "native" : "compatibility");
+            const std::string name = std::to_string(z) + (native ? "-native" : "-compat");
+            const auto project = WriteDeepCardFixture(root_ / ("deep-card-" + name), z);
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / ("deep-card-cache-" + name), loaded, error))
+                << error;
+            auto* node = FirstDrawableNode(loaded.scene->sceneGraph.get());
+            ASSERT_NE(node, nullptr);
+            node->SetCamera("global_perspective");
+            if (native) {
+                ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal);
+            }
+            const auto picture = DrawWithRenderer(*loaded.scene, native, 480, 270, 1, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
+            ASSERT_EQ(picture.width, 480u);
+            ASSERT_EQ(picture.height, 270u);
+
+            // The card's constant blue, 0.30, tells it from the black around it.
+            int left = -1, right = -1;
+            for (uint32_t x = 0; x < picture.width; ++x) {
+                const auto i = (std::size_t(picture.height / 2) * picture.width + x) * 3;
+                if (picture.rgb[i + 2] >= 65 && picture.rgb[i + 2] <= 90) {
+                    if (left < 0) left = static_cast<int>(x);
+                    right = static_cast<int>(x);
+                }
+            }
+            ASSERT_GE(left, 0) << "the card was not drawn";
+            EXPECT_NEAR(right - left + 1, expected, 2.5);
+        }
+    }
+}
+
 /// Two overlapping cards, drawn in order: a half-transparent red card nearer
 /// the camera, whose `blending`, `depthtest` and `depthwrite` are the given
 /// authored strings, then an opaque blue card further away that depth-tests

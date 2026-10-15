@@ -117,8 +117,10 @@ bool WPSceneGeneral::FromJson(const nlohmann::json& json, uint16_t pkg_version) 
     if (WantsVersion(pkg_version, 20)) {
 	    ReadVec3Setting(json, "bloomtint", &bloomtint, &bloomtint_setting, &dynamic_bloomtint);
     }
+    // Wallpaper Engine reads the field of view of a 2D scene's perspective layers
+    // from whatever file carries it, not only from package version 21 on.
+    GET_JSON_NAME_VALUE_NOWARN(json, "perspectiveoverridefov", perspectiveoverridefov);
     if (WantsVersion(pkg_version, 21)) {
-	    GET_JSON_NAME_VALUE_NOWARN(json, "perspectiveoverridefov", perspectiveoverridefov);
 	    GET_JSON_NAME_VALUE_NOWARN(json, "windenabled", windenabled);
 	    GET_JSON_NAME_VALUE_NOWARN(json, "winddirection", winddirection);
 	    GET_JSON_NAME_VALUE_NOWARN(json, "windstrength", windstrength);

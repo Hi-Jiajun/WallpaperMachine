@@ -1709,9 +1709,7 @@ void SceneRuntimeContext::ApplySceneZoom(double zoom) {
     camera.Update();
     auto& perspective = *m_scene->cameras.at("global_perspective");
     perspective.SetAspect(camera.Aspect());
-    if (! perspective.FovLocked()) {
-        perspective.SetFov(algorism::CalculatePersperctiveFov(1000.0, camera.VisibleHeight()));
-    }
+    FitCanvasPerspective(perspective, camera);
     perspective.Update();
     m_scene->UpdateLinkedCamera("global");
 }
