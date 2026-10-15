@@ -468,6 +468,22 @@ never substitutes Pause for an unavailable mute.
 - Inspection covers the desktop pages and the live preview only. The screen saver
   and the lock-screen extension are never attachable through this setting, and an inspected page's JavaScript is open to anyone using this Mac's
   Safari while it is on.
+- **A page's `<video>` is colour-managed by WebKit; Wallpaper Engine's Chromium shows the
+  decoded values as sRGB.** WebKit passes the stream's colour tags to CoreVideo and the
+  system converts them to the display's colour space. A stream that is untagged or tagged
+  BT.709 has its transfer curve read as gamma 1.96 and shown through sRGB's 2.2, so
+  mid-tones come out lighter: on a limited-range ten-step grey ramp 80 reads 90, 110 reads
+  120 and 160 reads 169 while black and white stay, a mean error of 6.5 levels. An
+  untagged VP8 WebM is also decoded with BT.601 coefficients (skin 200/150/120 reads
+  199/157/132); untagged H.264, HEVC and VP9 use BT.709. The same clip tagged with the
+  sRGB transfer, BT.709 primaries and BT.709 matrix reads back as the decoded values
+  (mean error 0.9) for VP8, VP9, H.264 and HEVC, which is what Wallpaper Engine's frame
+  matches. In an MP4 the `colr` box and the H.264 VUI each work alone, and `colr` wins
+  when they disagree. A project's files are loaded straight from disk, so the host cannot
+  retag them, and it applies no compensation: a filter on the `<video>` would be a
+  full-resolution software pass for every frame (about 160 ms more per 3456 x 1944
+  snapshot, 60 ms at 1920 x 1080) and would have to know each stream's tags to undo
+  them. Measured on offscreen snapshots; see [Verification](#verification) for what was not.
 - Nonzero WebAudio gain is not controlled by the native media-volume interface;
   whole-page Mute still applies where WebKit exposes it.
 - A paused wallpaper's WebAudio is muted (`WebWallpaperAudioOwnership` gives a paused
@@ -511,7 +527,10 @@ WebContent savings on WebGL, Spine and three.js pages (an A/B with
 that mix it into CSS pixel math also need an authorized desktop run. So does a real
 smoothing visualizer (bars that decay per callback) after the system audio stops, and
 a comparison with Wallpaper Engine's own behavior in silence if a Windows reference is
-ever available. A real Workshop page that hosts its player in an iframe needs an authorized
+ever available. Whether the on-screen compositor lifts a page's `<video>` the way the
+offscreen snapshot does (see Limits), and what the native video backend's `AVPlayerLayer`
+does with the same clips, need an authorized desktop run. A real Workshop page that hosts
+its player in an iframe needs an authorized
 desktop run, as does a page that makes its local requests from a worker. That
 Safari's Develop menu lists a desktop wallpaper page and attaches to it in a release
 build, and drops it again when the switch goes off, also needs one.
