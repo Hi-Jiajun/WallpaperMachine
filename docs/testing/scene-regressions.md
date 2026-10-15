@@ -139,6 +139,24 @@ Playback, backend, host and startup areas are in
   FOV) and `.MovingTheCameraChangesTheStaticSampleOfAPassItDraws` in
   `layer_texture_reference_test`. Fullscreen effects use the screen-space
   `fullscreen` camera in 2D and 3D scenes.
+  - A fullscreen layer ignores its ancestors' transform
+    (`SceneNode::SetIgnoreParentTransform`, set by `ParseImageObj`; the group still
+    decides visibility through `EffectiveVisible`). Wallpaper Engine lays the layer
+    over the whole screen whichever group it sits in; placed by the group's world
+    matrix, its result was the screen shifted, scaled or turned by the group, with the
+    screen's own corner showing in the opposite one.
+    `CameraFraming.AFullscreenLayerCoversTheScreenWhereverItsParentSits` (a moved,
+    scaled, turned and nested group, before and after the runtime ticks, which mirrors
+    the layer's matrix onto its final card) and
+    `.ParallaxDoesNotCarryAFullscreenLayerWithItsParent` (parallax walks to the
+    outermost layer of a tree, and a fullscreen layer is its own) and
+    `.AGroupStillDecidesWhetherAFullscreenLayerShows` (a group bound to a property
+    hides and shows the layer, which covers the screen whenever it shows) in
+    `layer_texture_reference_test`;
+    `MetalSceneDraw.AFullscreenLayerCoversTheScreenWhereverItsGroupSitsOnBothRenderers`
+    draws a four-quadrant backdrop through a pass-through fullscreen layer alone and
+    under a moved, scaled and turned group, and requires every picture to equal the
+    backdrop alone on both renderers.
 - **One cursor mapping, owned by the presentation** —
   `SceneRuntimeContext::SetCursorInput` maps window-normalized input through the
   cursor viewport the renderer publishes (`origin + (x, 1 - y) * size`) and writes

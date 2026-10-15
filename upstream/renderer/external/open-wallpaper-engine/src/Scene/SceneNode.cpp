@@ -23,12 +23,13 @@ void SceneNode::UpdateTrans() {
     if (! m_dirty) return;
     m_dirty = false;
 
-    if (m_parent) {
+    const bool inherits = m_parent && ! m_ignoreParentTransform;
+    if (inherits) {
         m_parent->UpdateTrans();
     }
     {
         Affine3d trans = Affine3d::Identity();
-        if (m_parent) {
+        if (inherits) {
             trans *= m_parent->ModelTrans();
         }
         m_trans = (trans * GetLocalTrans()).matrix();

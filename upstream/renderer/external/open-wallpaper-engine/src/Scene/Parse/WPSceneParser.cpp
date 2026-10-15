@@ -4161,6 +4161,9 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                                                  runtime_name);
     context.layer_nodes[wpimgobj.id] = spImgNode;
     spImgNode->SetVisible(wpimgobj.visible);
+    // Wallpaper Engine lays a fullscreen layer over the whole screen, whichever
+    // group it sits in: the group decides whether it shows, never where.
+    spImgNode->SetIgnoreParentTransform(wpimgobj.fullscreen);
     RuntimeNodeRegistrationRollback runtime_node_registration(
         context.scene->runtime.get(),
         runtime_name,

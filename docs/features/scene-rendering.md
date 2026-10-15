@@ -338,10 +338,13 @@ tested, a plain group or a particle layer is not, and a visible layer under the 
 with `disablepropagation` hides every layer behind it, which hears no enter, leave or
 move meanwhile and keeps whatever hover state it had. A project layer
 (`models/util/projectlayer.json`) is as large as the scene's canvas, and the
-depth-testing composition layer composes like the plain one. A `shape` object, the
-quad the editor's light-shaft effect is drawn on, is a quad as tall as the canvas on
-both axes, or the one `point0` to `point3` of its first effect make; it has no
-texture, and its last effect, with `DIRECTDRAW` forced on, is drawn additively
+depth-testing composition layer composes like the plain one. A fullscreen layer
+(`fullscreen` in its model) is laid over the whole screen whichever group it sits in:
+the group decides whether it shows, never where, how large or how turned, so its
+effects, its result and camera parallax all treat it as the outermost layer of its own
+tree. A `shape` object, the quad the editor's light-shaft effect is drawn on, is a quad
+as tall as the canvas on both axes, or the one `point0` to `point3` of its first effect
+make; it has no texture, and its last effect, with `DIRECTDRAW` forced on, is drawn additively
 straight onto the scene as the layer's own geometry, so it keeps a layer's transform,
 parents, visibility and scripts. An effect of more than one pass is left out.
 

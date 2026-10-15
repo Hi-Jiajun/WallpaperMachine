@@ -562,8 +562,11 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, uint32_t material_sl
                     const SceneNode* root = nodeData->parallax_layer != nullptr
                                                 ? nodeData->parallax_layer
                                                 : pNode;
+                    // A layer placed by its own transform alone (a fullscreen
+                    // layer) is the outermost of its own tree.
                     while (root->Parent() != nullptr &&
-                           root->Parent() != m_scene->sceneGraph.get())
+                           root->Parent() != m_scene->sceneGraph.get() &&
+                           ! root->IgnoresParentTransform())
                         root = root->Parent();
                     offset += root->ModelTrans().block<2, 1>(0, 3).cast<float>() -
                               camera->GetPosition().cast<float>().head<2>();

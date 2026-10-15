@@ -1843,6 +1843,138 @@ TEST(CameraFraming, AFullscreenEffectCoversAPerspectiveScene) {
     ExpectCardFillsItsTarget(*parsed, *post, half_extent);
 }
 
+// Wallpaper Engine lays a fullscreen layer over the whole screen and takes only
+// its visibility from the hierarchy. Placed by the world matrix, the result of
+// a layer under a translated, scaled or turned group was drawn as a copy of
+// the screen shifted by the group, with the screen's own corner showing in the
+// opposite one.
+TEST(CameraFraming, AFullscreenLayerCoversTheScreenWhereverItsParentSits) {
+    struct Group {
+        const char* name;
+        const char* origin;
+        const char* scale;
+        const char* angles;
+    };
+    constexpr std::array<Group, 4> groups { {
+        { "translated", "[20,10,0]", "[1,1,1]", "[0,0,0]" },
+        { "scaled", "[20,10,0]", "[1.5,1.5,1]", "[0,0,0]" },
+        { "turned", "[20,10,0]", "[1,1,1]", "[0,0,0.3]" },
+        { "scaled and turned", "[-12,7,0]", "[0.6,1.5,1]", "[0,0,-0.7]" },
+    } };
+    for (const auto& group : groups) {
+        SCOPED_TRACE(group.name);
+        fs::VFS vfs;
+        auto    extra = CopyEffectFiles();
+        extra["/post.json"] = R"({"fullscreen":true,"passthrough":true,"material":"mat.json"})";
+        // The post layer sits two groups down: the inner group carries the
+        // transform under test, the outer one moves it again.
+        const ProjectProperties properties;
+        auto parsed = ParseScene(vfs,
+                                 std::string(R"([
+            {"id":1,"name":"backdrop","image":"image.json","origin":[32,16,0]},
+            {"id":3,"name":"outer","origin":[5,-4,0]},
+            {"id":4,"name":"inner","parent":3,"origin":)") +
+                                     group.origin + R"(,"scale":)" + group.scale +
+                                     R"(,"angles":)" + group.angles + R"(},
+            {"id":2,"name":"post","parent":4,"image":"post.json",
+             "effects":[{"file":"effects/copy/effect.json","visible":true}]}
+          ])",
+                                 std::move(extra), &properties);
+        ASSERT_NE(parsed, nullptr);
+        ASSERT_NE(parsed->runtime, nullptr);
+        AddScreenTarget(*parsed);
+        const auto graph = sceneToRenderGraph(*parsed);
+        ASSERT_NE(graph, nullptr);
+        const auto* post = FindPassByOutput(*graph, SpecTex_Default);
+        ASSERT_NE(post, nullptr);
+        ASSERT_NE(post, FindPassByNode(*graph, "backdrop"));
+
+        // As the parser leaves it, and again after the runtime has ticked: every
+        // tick it copies each layer's world matrix onto its effect's final card.
+        ExpectCardFillsItsTarget(*parsed, *post, { 32.0, 16.0 });
+        for (int tick = 0; tick < 3; ++tick) parsed->runtime->Tick(1.0 / 60.0);
+        ExpectCardFillsItsTarget(*parsed, *post, { 32.0, 16.0 });
+    }
+}
+
+// Camera parallax moves a whole tree by its outermost layer's distance from the
+// middle of the view. A fullscreen layer is placed by the canvas alone, so the
+// group it sits in carries it nowhere there either.
+TEST(CameraFraming, ParallaxDoesNotCarryAFullscreenLayerWithItsParent) {
+    fs::VFS vfs;
+    auto    extra = CopyEffectFiles();
+    extra["/post.json"] = R"({"fullscreen":true,"passthrough":true,"material":"mat.json"})";
+    MountFiles(vfs, std::move(extra));
+    audio::SoundManager sound;
+    WPSceneParser       parser;
+    auto                parsed = parser.Parse("fullscreen-parallax", ParallaxSceneJson(R"([
+        {"id":3,"name":"group","origin":[20,10,0]},
+        {"id":2,"name":"post","parent":3,"image":"post.json",
+         "effects":[{"file":"effects/copy/effect.json","visible":true}]}
+      ])"),
+                                     vfs,
+                                     sound);
+    ASSERT_NE(parsed, nullptr);
+    AddScreenTarget(*parsed);
+    // The cursor at rest in the middle of the view, so the only thing that
+    // could move the layer is where its group sits.
+    parsed->shaderValueUpdater->MouseInput(0.5, 0.5);
+    parsed->frameTime = 1.0;
+    parsed->shaderValueUpdater->FrameBegin();
+
+    const auto graph = sceneToRenderGraph(*parsed);
+    ASSERT_NE(graph, nullptr);
+    const auto* post = FindPassByOutput(*graph, SpecTex_Default);
+    ASSERT_NE(post, nullptr);
+    ExpectCardFillsItsTarget(*parsed, *post, { 32.0, 16.0 });
+}
+
+// A group decides whether the fullscreen layer under it shows, though no longer
+// where: hiding the group hides the layer, and showing it again brings back a
+// card that still covers the screen.
+TEST(CameraFraming, AGroupStillDecidesWhetherAFullscreenLayerShows) {
+    const ProjectProperties properties { { "open", RuntimeScalarValue::Bool(true) } };
+    fs::VFS                 vfs;
+    auto                    extra = CopyEffectFiles();
+    extra["/post.json"] = R"({"fullscreen":true,"passthrough":true,"material":"mat.json"})";
+    auto parsed = ParseScene(vfs, R"([
+        {"id":1,"name":"backdrop","image":"image.json","origin":[32,16,0]},
+        {"id":3,"name":"group","origin":[20,10,0],"visible":{"user":"open","value":true}},
+        {"id":2,"name":"post","parent":3,"image":"post.json",
+         "effects":[{"file":"effects/copy/effect.json","visible":true}]}
+      ])",
+                             std::move(extra), &properties);
+    ASSERT_NE(parsed, nullptr);
+    ASSERT_NE(parsed->runtime, nullptr);
+    AddScreenTarget(*parsed);
+    auto&      runtime = *parsed->runtime;
+    const auto tick    = [&runtime](bool open) {
+        runtime.PreviewProjectPropertyOverride({ { "open", RuntimeScalarValue::Bool(open) } });
+        runtime.Tick(1.0 / 60.0);
+    };
+    const auto graph = sceneToRenderGraph(*parsed);
+    ASSERT_NE(graph, nullptr);
+    const auto* post = FindPassByOutput(*graph, SpecTex_Default);
+    ASSERT_NE(post, nullptr);
+    ASSERT_NE(post, FindPassByNode(*graph, "backdrop"));
+
+    // The pass shows exactly when the layer does: its own switch and every
+    // group above it.
+    const auto* owner = post->desc().visibility_node != nullptr ? post->desc().visibility_node
+                                                                : post->desc().node;
+    ASSERT_NE(owner, nullptr);
+    tick(true);
+    EXPECT_TRUE(owner->EffectiveVisible());
+    ExpectCardFillsItsTarget(*parsed, *post, { 32.0, 16.0 });
+    tick(false);
+    EXPECT_FALSE(runtime.NodeVisible("group"));
+    EXPECT_TRUE(runtime.NodeVisible("post")) << "the layer's own switch was never touched";
+    EXPECT_FALSE(owner->EffectiveVisible()) << "a hidden group left its fullscreen layer shown";
+    tick(true);
+    EXPECT_TRUE(owner->EffectiveVisible());
+    ExpectCardFillsItsTarget(*parsed, *post, { 32.0, 16.0 });
+}
+
 // The static-result cache reuses a target's pixels while every pass writing it
 // samples the same. A camera layer zooming or panning the scene moves no node
 // and rebuilds no graph, so a sample blind to the camera served the first

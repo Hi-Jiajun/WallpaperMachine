@@ -111,6 +111,16 @@ public:
     }
     void        SetVisible(bool visible) { m_visible = visible; }
     void        SetSkipRenderPass(bool skip) { m_skipRenderPass = skip; }
+    /// A node placed by its own transform alone, whatever its ancestors do: a
+    /// fullscreen layer covers the screen from whichever group it sits in.
+    /// The hierarchy above it still decides whether it shows (`EffectiveVisible`),
+    /// but no longer where it is, how large or how turned.
+    bool        IgnoresParentTransform() const { return m_ignoreParentTransform; }
+    void        SetIgnoreParentTransform(bool ignore) {
+        if (m_ignoreParentTransform == ignore) return;
+        m_ignoreParentTransform = ignore;
+        MarkTransDirty();
+    }
 
     void SetAttachmentTransform(const Eigen::Matrix4d& transform) {
         if (m_attachmentTransform && m_attachmentTransform->isApprox(transform, 1.0e-10)) return;
@@ -156,6 +166,7 @@ private:
     std::string m_name;
     bool        m_visible { true };
     bool        m_skipRenderPass { false };
+    bool        m_ignoreParentTransform { false };
     bool        m_must_produce { false };
     bool        m_composite_only { false };
     bool        m_visibility_settled { false };

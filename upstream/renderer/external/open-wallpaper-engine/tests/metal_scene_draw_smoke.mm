@@ -2490,6 +2490,130 @@ TEST_F(MetalSceneDraw, ACompositingEffectSeesTheScreenUprightOnBothRenderers)
     }
 }
 
+TEST_F(MetalSceneDraw, AFullscreenLayerCoversTheScreenWhereverItsGroupSitsOnBothRenderers)
+{
+    // Wallpaper Engine lays a fullscreen layer over the whole screen and takes
+    // only its visibility from the group it sits in. Over a backdrop of four
+    // differently coloured quadrants, a fullscreen layer that only passes the
+    // screen on must leave the picture as it was, whether it sits at the top
+    // or under a group that is moved, scaled and turned: placed by the group's
+    // matrix, its result was the screen shifted by the group, with the
+    // bottom-left quadrant showing again in the top-right one.
+    struct Placement {
+        const char* name;
+        const char* group;
+    };
+    const std::array<Placement, 3> placements { {
+        { "alone", "" },
+        { "moved", R"("origin":[100,60,0],"scale":[1,1,1],"angles":[0,0,0],)" },
+        { "moved, scaled and turned", R"("origin":[100,60,0],"scale":[1.5,1.5,1],"angles":[0,0,0.3],)" },
+    } };
+    std::map<std::string, RendererPicture> pictures;
+    for (const bool native : { false, true }) {
+        // The same backdrop without the fullscreen layer: the picture to keep.
+        for (std::size_t variant = 0; variant <= placements.size(); ++variant) {
+            const bool        plain = variant == placements.size();
+            const std::string label = plain ? "plain" : placements[variant].name;
+            const std::string name  = std::string("fullscreen-group-") + (native ? "native-" : "compat-") +
+                                     std::to_string(variant);
+            const auto project = WriteFixture(root_ / name);
+            const auto file    = [&](const std::string& path, const std::string& text) {
+                std::filesystem::create_directories((root_ / name / path).parent_path());
+                std::ofstream(root_ / name / path) << text;
+            };
+            const std::string vertex =
+                "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\n"
+                "attribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+                "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+                "  v_TexCoord = a_TexCoord;\n}\n";
+            file("shaders/quadrants.vert", vertex);
+            file("shaders/quadrants.frag",
+                 "varying vec2 v_TexCoord;\nvoid main() {\n"
+                 "  vec3 low = v_TexCoord.x < 0.5 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);\n"
+                 "  vec3 high = v_TexCoord.x < 0.5 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 1.0, 0.0);\n"
+                 "  gl_FragColor = vec4(v_TexCoord.y < 0.5 ? low : high, 1.0);\n}\n");
+            file("shaders/through.vert", vertex);
+            file("shaders/through.frag",
+                 "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\n"
+                 "void main() {\n  gl_FragColor = texture2D(g_Texture0, v_TexCoord);\n}\n");
+            const std::string pass =
+                R"("cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled")";
+            file("materials/quadrants.json",
+                 R"({"passes":[{"shader":"quadrants","blending":"translucent",)" + pass + "}]}");
+            file("materials/screen.json",
+                 R"({"passes":[{"shader":"through","blending":"translucent",)" + pass +
+                     R"(,"textures":["_rt_FullFrameBuffer"]}]})");
+            file("materials/through.json",
+                 R"({"passes":[{"shader":"through","blending":"normal",)" + pass +
+                     R"(,"textures":[null]}]})");
+            file("effects/identity/effect.json",
+                 R"({"name":"identity","passes":[{"material":"materials/through.json"}]})");
+            file("models/backdrop.json",
+                 R"({"width":384,"height":256,"material":"materials/quadrants.json"})");
+            file("models/post.json",
+                 R"({"fullscreen":true,"passthrough":true,"material":"materials/screen.json"})");
+            std::string objects =
+                R"({"id":1,"name":"backdrop","image":"models/backdrop.json","origin":[192,128,0],)"
+                R"("scale":[1,1,1],"angles":[0,0,0],"visible":true})";
+            if (! plain) {
+                const std::string group = placements[variant].group;
+                // A group of its own for the layer, unless it stands alone.
+                const std::string parent = group.empty() ? "" : R"("parent":9,)";
+                if (! group.empty()) {
+                    objects += R"(,{"id":9,"name":"group",)" + group + R"("visible":true})";
+                }
+                objects += R"(,{"id":2,"name":"post",)" + parent +
+                           R"("image":"models/post.json","origin":[192,128,0],"visible":true,)"
+                           R"("effects":[{"file":"effects/identity/effect.json","id":3,"visible":true}]})";
+            }
+            file("layout.json",
+                 R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+                 R"("general":{"clearcolor":[0,0,0],"bloom":false,"cameraparallax":false,)"
+                 R"("orthogonalprojection":{"width":384,"height":256}},"objects":[)" +
+                     objects + "]}");
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            if (native) {
+                const auto selection = SelectSceneBackend(*loaded.scene);
+                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            }
+            // Several frames, so the runtime has ticked as it does in the app.
+            auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << label << ": " << picture.error;
+            ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+            pictures[(native ? "native " : "compat ") + label] = std::move(picture);
+        }
+    }
+    for (const bool native : { false, true }) {
+        const std::string prefix = native ? "native " : "compat ";
+        const auto&       plain  = pictures.at(prefix + "plain").rgb;
+        // The backdrop has four colours at four places, so a copy of one corner
+        // over another cannot match it by chance.
+        const auto at = [&plain](int x, int y) {
+            const std::size_t i = (static_cast<std::size_t>(y) * 384u + static_cast<std::size_t>(x)) * 3u;
+            return std::array<int, 3> { plain[i], plain[i + 1], plain[i + 2] };
+        };
+        ASSERT_NE(at(30, 30), at(350, 30));
+        ASSERT_NE(at(30, 30), at(30, 220));
+        ASSERT_NE(at(350, 220), at(350, 30));
+        for (const auto& placement : placements) {
+            const auto& rgb = pictures.at(prefix + placement.name).rgb;
+            std::size_t different = 0;
+            for (std::size_t i = 0; i < rgb.size(); ++i) {
+                if (std::abs(int(rgb[i]) - int(plain[i])) > 2) ++different;
+            }
+            EXPECT_EQ(different, 0u)
+                << (native ? "native" : "compatibility") << " renderer, layer " << placement.name
+                << ": " << different << " of " << rgb.size()
+                << " channel values differ from the scene without the fullscreen layer";
+        }
+    }
+    EXPECT_EQ(pictures.at("native moved, scaled and turned").rgb,
+              pictures.at("compat moved, scaled and turned").rgb)
+        << "the renderers draw the fullscreen layer differently";
+}
+
 TEST_F(MetalSceneDraw, AScreenReadBeforeAnyDrawSeesTheBackgroundEveryFrameOnBothRenderers)
 {
     // The only layer blends with the screen, so the first thing each frame
