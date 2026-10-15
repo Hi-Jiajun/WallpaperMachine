@@ -391,11 +391,14 @@ RendererPicture DrawWithRenderer(Scene& scene, bool native, uint32_t width, uint
             render.destroy();
             return picture;
         }
+        // As the host presents a wallpaper: the scaling layout crops the
+        // finished picture to the surface; the camera keeps the canvas's shape,
+        // since the host changes it only for an explicit fill mode, which the
+        // app never sends. Narrowing it too would crop twice.
         render.SetWallpaperScalingMode(WallpaperScalingMode::FILL);
         render.SetWallpaperScalingFactor(1.0);
         render.SetWallpaperFraming(WallpaperFraming {});
         render.SetWallpaperHorizontalFlip(false);
-        render.UpdateCameraFillMode(scene, FillMode::ASPECTCROP);
         if (scene.runtime != nullptr) {
             scene.runtime->SetScreenResolution(Eigen::Vector2f(width, height));
         }
