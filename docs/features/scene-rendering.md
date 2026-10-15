@@ -114,6 +114,17 @@ a text or image layer under such an effect is drawn at its own texture coordinat
 and not at the vertex position's, which left a text layer empty and an image layer
 sampled at the wrong place.
 
+A model's tangent reaches the shader under the name Wallpaper Engine's model shaders
+declare it, `a_Tangent4` (`generic`, `generic2`, `generic3`, `generic4`,
+`genericimage3`, `genericimage4`, `chroma4`, `foliage4`, `fur4`; the two `genericimage`
+shaders read it for a lit, skinned puppet layer), so a lit, normal-mapped model builds
+its tangent frame from the mesh's own tangent and handedness. The model parser used
+to name it `a_Tangent`, which left the shader's input unbound: it read the first four
+floats of the vertex (the position, and the normal's x in a model without bones), the
+perturbed normal came out far longer than one, and a lit roof showed hard-edged
+highlight patches and white sparkles where Wallpaper Engine shows a smooth specular
+pool.
+
 Scene lighting works as in Wallpaper Engine, on both renderers. A lit shader
 (`genericimage4`, `generic4`, the particle, rope, foliage and fluid shaders) asks for
 `#require LightingV1`; the shader compiler writes in a `PerformLighting_V1` with one

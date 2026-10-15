@@ -752,9 +752,16 @@ into private textures; the three that draw skip visibly without a Metal device.
   native renderer refuses only a puppet's bone indices and weights). That is
   right for an input a shader declares and never reads, and it hid a shader that
   reads one: a written input was reflected under another name until pipeline
-  revision 16 ([Shader pipeline](scene-regressions.md#shader-pipeline)). A
-  picture that looks like a layer sampling at its vertex positions is this
-  fallback.
+  revision 16 ([Shader pipeline](scene-regressions.md#shader-pipeline)), and a
+  model's tangent was named `a_Tangent` where Wallpaper Engine's shaders declare
+  `a_Tangent4` ([Layers, textures and compositing](scene-regressions.md#layers-textures-and-compositing)).
+  A picture that looks like a layer sampling at its vertex positions is this
+  fallback. Reporting the miss, or binding zeros instead, cannot be done from
+  reflection alone: a shader may declare an input it never reads (`flat` declares
+  `a_Color` and reads it only under `VERTEXCOLOR`, so a layer drawn with it and no
+  vertex colours has no mesh attribute for that input), reflection lists such an
+  input like any other, and nothing in it says whether the shader reads it. That
+  needs the use information first.
 - Wallpaper Engine's `fur4` shader does not compile on its own: its instanced shells read
   the dialect's cast macros (`CASTF` among them), which the compiler does not supply with
   `CASTI`, `CASTU`, `CAST4U`, `DECLARE_SAMPLER2D_PARAMETER` and `MAKE_SAMPLER2D_ARGUMENT`.

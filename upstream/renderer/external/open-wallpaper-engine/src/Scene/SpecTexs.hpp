@@ -38,7 +38,11 @@ constexpr std::string_view WE_EFFECT_PPONG_PREFIX_B { "_rt_effect_pingpong_b_" }
 constexpr std::string_view WE_IN_POSITION { "a_Position" };
 constexpr std::string_view WE_IN_TEXCOORD { "a_TexCoord" };
 constexpr std::string_view WE_IN_NORMAL { "a_Normal" };
-constexpr std::string_view WE_IN_TANGENT { "a_Tangent" };
+/// The signed tangent of a model (xyz, and the bitangent's handedness in w).
+/// Wallpaper Engine's model shaders declare it `attribute vec4 a_Tangent4`, and
+/// a renderer hands a shader input the mesh attribute of the same name, so the
+/// mesh has to use that spelling: under any other the input is left unbound.
+constexpr std::string_view WE_IN_TANGENT { "a_Tangent4" };
 constexpr std::string_view WE_IN_BLENDINDICES { "a_BlendIndices" };
 constexpr std::string_view WE_IN_BLENDWEIGHTS { "a_BlendWeights" };
 

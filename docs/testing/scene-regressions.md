@@ -863,6 +863,31 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   Wallpaper Engine draws them through the layer's model matrix, unless the particle
   file is `worldspace`, which it draws through none; quantity remains the documented
   emission-rate factor, not a replacement for the authored maximum count.
+- **A model's tangent reaches the shader that declares it** — Wallpaper Engine's
+  model shaders (`generic`, `generic2`, `generic3`, `generic4`, `genericimage3`,
+  `genericimage4`, `chroma4`, `foliage4`, `fur4`) read the signed tangent of a
+  normal-mapped model from `attribute vec4 a_Tangent4` (the two `genericimage`
+  shaders for a skinned puppet layer), and both renderers hand a vertex input the
+  mesh attribute of the same name. The model parser named it `a_Tangent`, so the
+  input found no attribute and read the first vertex buffer from offset 0: the
+  position and, in a model without bones, the normal's x. The tangent frame of a
+  lit, normal-mapped model was then built from that, the perturbed normal came out
+  far longer than one, and the highlight swept through the specular pole:
+  hard-edged patches, contour lines and white sparkles on a lit roof where
+  Wallpaper Engine draws a smooth pool. The
+  attribute is now named `a_Tangent4` (`WE_IN_TANGENT`); nothing else changes, so
+  there is no extra pass, buffer or per-frame work, and a model without a normal map
+  never read it. Tests: `MdlSchema.VersionedSurfaceMeshesPreserveAllVertexAttributes`
+  and `.GenMeshIncludesNormals` in `mdl_schema_tests` (the names the generated mesh
+  carries) and
+  `MetalSceneDraw.AModelsTangentReachesTheShaderThatDeclaresItOnBothRenderers` (a
+  quad built by the model parser from a tangent that is no axis, with handedness
+  -1, drawn through a probe vertex shader that builds the tangent and bitangent as
+  `generic4` does (`BuildTangentSpace`, without the model transform; Wallpaper
+  Engine's own shaders are not in the repository); the fragment shader shows the
+  tangent, the bitangent and a perturbed normal, each a flat colour equal to the
+  mesh's own values on both renderers, where before the change every pixel was the
+  position-derived read).
 - **Layer textures tiled across models** — `LayerTextureReference.CompositeAddressingFollowsTheSourceLayersClampUvs`
   in `layer_texture_reference_test`. `_rt_imageLayerComposite_<id>` repeats when
   the source layer says `"clampuvs": false` and clamps when it is true or absent;

@@ -48,6 +48,7 @@
 #include "VulkanRender/StaticSubgraphCache.hpp"
 #include "Shader/SceneMetalVariants.hpp"
 #include "Scene/Parse/WPShaderParser.hpp"
+#include "Scene/Parse/WPMdlParser.hpp"
 #include "Shader/RustShaderBridge.hpp"
 #include "WPSceneParser.hpp"
 #include "SceneSourceResolver.hpp"
@@ -2972,6 +2973,154 @@ TEST_F(MetalSceneDraw, AVertexShaderThatWritesItsInputsStillReadsTheMeshOnBothRe
             EXPECT_EQ(pictures[prefix + "-written"].rgb, plain)
                 << "a shader that writes its vertex inputs read another mesh attribute than the "
                    "one it names";
+        }
+    }
+}
+
+namespace
+{
+
+/// The tangent frame `MakeMdlQuadMesh` gives every vertex.
+constexpr std::array<float, 3> kQuadNormal { 0.0f, 0.0f, 1.0f };
+constexpr std::array<float, 4> kQuadSignedTangent { 0.6f, 0.8f, 0.0f, -1.0f };
+
+/// A quad a model file would hold -- positions, a normal, a signed tangent and
+/// texture coordinates per vertex -- turned into a mesh by the model parser, as
+/// a scene's 3D model is. The tangent is not the direction of any axis and the
+/// handedness is -1, so it can be told from the vertex position, from a unit
+/// axis and from a plain cross product.
+std::shared_ptr<SceneMesh> MakeMdlQuadMesh(std::shared_ptr<SceneMaterial> material)
+{
+    WPMdl::Mesh quad;
+    quad.positions = { { -128.0f, -96.0f, 0.0f }, { 128.0f, -96.0f, 0.0f },
+                       { 128.0f, 96.0f, 0.0f },   { -128.0f, 96.0f, 0.0f } };
+    quad.normals.assign(4, kQuadNormal);
+    quad.tangents.assign(4, kQuadSignedTangent);
+    quad.texcoords = { { 0.0f, 0.0f }, { 1.0f, 0.0f }, { 1.0f, 1.0f }, { 0.0f, 1.0f } };
+    quad.indices   = { { 0, 1, 2 }, { 0, 2, 3 } };
+    WPMdl mdl;
+    mdl.meshes.push_back(std::move(quad));
+
+    auto mesh = std::make_shared<SceneMesh>();
+    WPMdlParser::GenPuppetMesh(*mesh, mdl, false);
+    mesh->MaterialSlots().push_back(std::move(material));
+    return mesh;
+}
+
+} // namespace
+
+TEST_F(MetalSceneDraw, AModelsTangentReachesTheShaderThatDeclaresItOnBothRenderers)
+{
+    // Wallpaper Engine's model shaders (generic4 and the family around it) read
+    // the signed tangent of a normal-mapped model from `attribute vec4
+    // a_Tangent4`, and both renderers hand a vertex input the mesh attribute of
+    // the same name. The model parser named its tangent `a_Tangent`, so the
+    // input found none and read the first buffer from offset zero: the vertex
+    // position and, in a model without bones, the normal's x. The tangent frame
+    // of a lit, normal-mapped model was then built from that, and the perturbed
+    // normal came out far longer than one. Their own sources are not in this
+    // repository, so the fixture's vertex shader is a probe that builds the
+    // tangent and bitangent the way those shaders' BuildTangentSpace does (the
+    // model transform left out); the fragment shader shows one part of the
+    // frame, so the card is a flat colour that can be checked against the
+    // mesh's own values.
+    const auto length = [](const std::array<float, 3>& v) {
+        return std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    };
+    const std::array<float, 3> tangent { kQuadSignedTangent[0], kQuadSignedTangent[1],
+                                         kQuadSignedTangent[2] };
+    ASSERT_NEAR(length(tangent), 1.0f, 1e-6f);
+    const std::array<float, 3> bitangent {
+        (kQuadNormal[1] * tangent[2] - kQuadNormal[2] * tangent[1]) * kQuadSignedTangent[3],
+        (kQuadNormal[2] * tangent[0] - kQuadNormal[0] * tangent[2]) * kQuadSignedTangent[3],
+        (kQuadNormal[0] * tangent[1] - kQuadNormal[1] * tangent[0]) * kQuadSignedTangent[3] };
+    // A normal-map texel's tangent-space direction, and where it points once
+    // the frame carries it: a unit vector turned by an orthonormal frame is
+    // still a unit vector, which the garbage frame did not keep.
+    constexpr std::array<float, 3> kMapped { 0.6f, 0.48f, 0.64f };
+    std::array<float, 3>           perturbed {};
+    for (std::size_t i = 0; i < 3; ++i) {
+        perturbed[i] = tangent[i] * kMapped[0] + bitangent[i] * kMapped[1] +
+                       kQuadNormal[i] * kMapped[2];
+    }
+    ASSERT_NEAR(length(perturbed), 1.0f, 1e-5f);
+
+    struct Shown
+    {
+        const char*          name;
+        const char*          colour;
+        std::array<float, 3> vector;
+    };
+    const std::array<Shown, 3> shown {
+        Shown { "tangent", "v_Tangent", tangent },
+        Shown { "bitangent", "v_Bitangent", bitangent },
+        Shown { "perturbed-normal",
+                "v_Tangent * 0.6 + v_Bitangent * 0.48 + v_Normal * 0.64", perturbed },
+    };
+
+    for (const bool native : { false, true }) {
+        for (const auto& part : shown) {
+            const std::string name = std::string("mdl-tangent-") + (native ? "native-" : "compat-") +
+                                     part.name;
+            SCOPED_TRACE(name);
+            const auto project = WriteFixture(root_ / name);
+            std::ofstream(root_ / name / "shaders/metal_probe.vert")
+                << "uniform mat4 g_ModelViewProjectionMatrix;\n"
+                   "attribute vec3 a_Position;\n"
+                   "attribute vec3 a_Normal;\n"
+                   "attribute vec4 a_Tangent4;\n"
+                   "attribute vec2 a_TexCoord;\n"
+                   "varying vec3 v_Tangent;\n"
+                   "varying vec3 v_Bitangent;\n"
+                   "varying vec3 v_Normal;\n"
+                   "varying vec2 v_TexCoord;\n"
+                   "void main() {\n"
+                   "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+                   "  v_Tangent = a_Tangent4.xyz;\n"
+                   "  v_Bitangent = cross(a_Normal, a_Tangent4.xyz) * a_Tangent4.w;\n"
+                   "  v_Normal = a_Normal;\n"
+                   "  v_TexCoord = a_TexCoord;\n"
+                   "}\n";
+            std::ofstream(root_ / name / "shaders/metal_probe.frag")
+                << "varying vec3 v_Tangent;\n"
+                   "varying vec3 v_Bitangent;\n"
+                   "varying vec3 v_Normal;\n"
+                   "varying vec2 v_TexCoord;\n"
+                   "void main() {\n"
+                   "  vec3 shown = "
+                << part.colour
+                << ";\n"
+                   "  gl_FragColor = vec4(shown * 0.5 + 0.5, 1.0);\n"
+                   "}\n";
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            auto* node = FirstDrawableNode(loaded.scene->sceneGraph.get());
+            ASSERT_NE(node, nullptr);
+            auto* source_mesh = node->Mesh();
+            ASSERT_NE(source_mesh, nullptr);
+            auto material = source_mesh->MaterialSlotPtr(0);
+            ASSERT_NE(material, nullptr);
+            node->AddMesh(MakeMdlQuadMesh(material));
+            if (native) {
+                const auto selection = SelectSceneBackend(*loaded.scene);
+                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            }
+            const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
+            ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+            // Four corners and the middle of the card, which covers x 64..320
+            // and y 32..224: a flat colour on all of them.
+            for (const auto& [x, y] : std::array<std::pair<std::size_t, std::size_t>, 5> {
+                     { { 192, 128 }, { 80, 48 }, { 304, 48 }, { 80, 208 }, { 304, 208 } } }) {
+                const std::size_t i = (y * 384 + x) * 3;
+                for (std::size_t channel = 0; channel < 3; ++channel) {
+                    const float expected = (part.vector[channel] * 0.5f + 0.5f) * 255.0f;
+                    EXPECT_NEAR(static_cast<float>(picture.rgb[i + channel]), expected, 2.5f)
+                        << part.name << " channel " << channel << " at " << x << "," << y
+                        << ": the shader's tangent input did not carry the mesh's tangent";
+                }
+            }
         }
     }
 }
