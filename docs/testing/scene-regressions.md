@@ -1485,6 +1485,9 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   a prewarm spawns to sit where the layer's finished matrix, its groups' included,
   puts them; `Movement.FlagOneGravityOfAWorldspaceSystemNeedsNoTurningByItsLayer`
   requires gravity to be left as written.
+- **Text with every effect off** — `MetalSceneDraw.ATextLayerWhoseEffectsAreAllOffIsDrawnAsPlainTextOnBothRenderers`
+  draws a caption whose only effect is off and requires the same lit pixels as the
+  caption without effects; it used to draw nothing.
 - **Hidden layers scripts reach** — `MetalSceneDraw.AHiddenLayersScriptsStillRunOnBothRenderers`
   drives an effect from a value a hidden layer's script writes to `shared`, and
   `MetalSceneDraw.AScriptCanShowAHiddenLayerItNamesOnBothRenderers` shows a hidden

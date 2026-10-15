@@ -480,7 +480,9 @@ the layer's effect chain again over the effects that run and rebuilds the render
 graph before the next frame, so nothing is paid per frame. While a script has
 every effect of a layer off, the chain ends in a passthrough: Wallpaper Engine
 draws such a layer as one without effects, so that state costs one layer-sized
-pass more here, and a text layer keeps its effect padding. A sound layer's volume
+pass more here, and a text layer keeps its effect padding. A text layer whose every effect is off
+in the scene file, or by a property as the scene loads, is drawn as plain text,
+as Wallpaper Engine draws it: an effect that is off builds no chain. A sound layer's volume
 is live too: a slider bound to it sets the stream's volume when the slider moves,
 and nothing else does, so a volume a script set stays until its own slider moves.
 

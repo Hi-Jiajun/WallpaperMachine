@@ -2219,6 +2219,14 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
                       obj.name.c_str());
         }
     }
+    // Whether the card goes through an effect chain at all: an effect that is
+    // off (in the file, or by a property as the scene loads) builds nothing, so
+    // a text whose every effect is off is drawn as plain text, as Wallpaper
+    // Engine draws it. One a script may switch on later still counts.
+    const bool through_effects =
+        std::any_of(obj.effects.begin(), obj.effects.end(), [](const wpscene::WPImageEffect& effect) {
+            return EffectIsBuilt(effect) && ! effect.materials.empty();
+        });
     auto       text         = JsonStringOrObjectValue(obj.text, "text");
     const auto font_key     = JsonStringOrObjectValue(obj.font, {});
     const auto anchor       = TextAnchorForObject(obj);
@@ -2297,7 +2305,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         material.name                = "text";
         material.textures            = { texture_name };
         material.defines             = { "g_Texture0" };
-        material.blenmode = ! obj.effects.empty() ? BlendMode::Disable
+        material.blenmode = through_effects ? BlendMode::Disable
                             : additive_color_blend ? BlendMode::Additive
                                                    : BlendMode::Translucent;
         const bool styled   = TextStyleActive(text_state.style);
@@ -2394,7 +2402,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
                                    runtime_name,
                                    Vec3SettingSemantic::AnglesDegrees));
         }
-        if (! obj.effects.empty()) {
+        if (through_effects) {
             AttachEffectsToNode(context,
                                 *node,
                                 obj.id,
@@ -2411,7 +2419,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
                                 color_blend_effect.has_value() ? &obj.effects[*color_blend_effect]
                                                                : nullptr);
         }
-        const auto& card = obj.effects.empty() ? render_frame : effect_final_frame;
+        const auto& card = through_effects ? effect_final_frame : render_frame;
         context.text_cards[obj.id] = card;
         if (context.referenced_layer_ids.contains(obj.id)) {
             RegisterTextComposite(context, obj, *node, card);

@@ -4470,6 +4470,40 @@ void AdvanceSceneFrame(MetalRender& render, Scene& scene)
 
 } // namespace
 
+TEST_F(MetalSceneDraw, ATextLayerWhoseEffectsAreAllOffIsDrawnAsPlainTextOnBothRenderers)
+{
+    // An effect that is off builds nothing, so a text layer whose every effect
+    // is off has no chain to put it on screen: Wallpaper Engine draws it as plain
+    // text. The same caption with no effects at all is the reference.
+    const auto lit = [](const RendererPicture& picture) {
+        std::size_t count = 0;
+        for (std::size_t i = 0; i + 2 < picture.rgb.size(); i += 3) {
+            if (picture.rgb[i] != 0 || picture.rgb[i + 1] != 0 || picture.rgb[i + 2] != 0) ++count;
+        }
+        return count;
+    };
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        std::map<bool, std::size_t> pixels;
+        for (const bool hidden_effect : { false, true }) {
+            const std::string name = std::string("text-effects-off-") + (native ? "native-" : "compat-") +
+                                     (hidden_effect ? "hidden" : "plain");
+            const auto project = WriteTextFixture(
+                root_ / name, "CLOCK", false, {},
+                hidden_effect ? std::string_view(R"(,"effects":[{"file":"effects/probe.json","visible":false}])")
+                              : std::string_view());
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
+            pixels[hidden_effect] = lit(picture);
+        }
+        EXPECT_GT(pixels[false], 0u);
+        EXPECT_EQ(pixels[true], pixels[false]) << "the text with its only effect off is not drawn as plain text";
+    }
+}
+
 TEST_F(MetalSceneDraw, TextStylingChangesPixelsWithoutRerasterizingGlyphs)
 {
     for (const bool with_effect : { false, true }) {
