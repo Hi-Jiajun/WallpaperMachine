@@ -6645,6 +6645,74 @@ TEST(SceneSchema, AWorldspaceLayerStretchesItsSpawnsButNotTheSpeedOfItsParticles
     }
 }
 
+TEST(SceneSchema, AChildSystemOriginScalesWithItsLayerUnlessItsParentIsWorldspace) {
+    // A child system's matrix, with the origin as its translation, is composed
+    // with its parent system's, and a layer-space parent is drawn through the
+    // layer's model matrix: the offset scales along with the rest. The
+    // particles of a worldspace parent are already in world units, so the child
+    // hangs at the authored offset unscaled, held here at half its value under
+    // a layer scaled by two. An event child follows its parent's flag alone,
+    // whatever its own file says. A static child whose own file is worldspace is
+    // not settled by any reference scene and keeps the authored offset in world
+    // units, as it did before the origin was scaled.
+    struct Case {
+        const char* type;
+        int         parent_flags;
+        int         child_flags;
+        float       world_y;
+    };
+    for (const auto& [type, parent_flags, child_flags, world_y] : {
+             Case { "static", 0, 0, 280.0f },
+             Case { "static", 0, 1, 230.0f },
+             Case { "static", 1, 0, 230.0f },
+             Case { "static", 1, 1, 230.0f },
+             Case { "eventfollow", 0, 0, 280.0f },
+             Case { "eventfollow", 0, 1, 280.0f },
+             Case { "eventfollow", 1, 0, 230.0f },
+             Case { "eventfollow", 1, 1, 230.0f },
+         }) {
+        SCOPED_TRACE(std::string(type) + " " + std::to_string(parent_flags) + "/" +
+                     std::to_string(child_flags));
+        const auto still = [](int flags, std::string_view children) {
+            return std::string(R"({"emitter":[{"name":"boxrandom","id":1,"origin":"0 0 0",)"
+                               R"("distancemin":"0 0 0","distancemax":"0 0 0","speedmin":0,)"
+                               R"("speedmax":0,"rate":100,"instantaneous":1}],)"
+                               R"("initializer":[{"name":"lifetimerandom","min":10,"max":10}],)"
+                               R"("material":"mat.json","maxcount":1,"starttime":0,"flags":)") +
+                   std::to_string(flags) + std::string(children) + "}";
+        };
+        fs::VFS vfs;
+        MountSceneFiles(vfs);
+        auto files = std::map<std::string, std::string> {
+            { "/parent_particle.json",
+              still(parent_flags,
+                    std::string(R"(,"children":[{"name":"child_particle.json","type":")") + type +
+                        R"(","maxcount":1,"origin":"0 50 0"}])") },
+            { "/child_particle.json", still(child_flags, "") },
+        };
+        ASSERT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+        audio::SoundManager sound_manager;
+        auto scene = WPSceneParser().Parse(
+            SceneParseRequest { .scene_id = "child-origin" },
+            R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},
+                "general":{"clearcolor":[0,0,0],"cameraparallax":false,"bloom":false,
+                           "orthogonalprojection":{"width":640,"height":360}},
+                "objects":[{"id":1,"name":"snow","particle":"parent_particle.json",
+                            "origin":[320,180,0],"scale":[2,2,1],"visible":true}]})",
+            vfs, sound_manager);
+        ASSERT_NE(scene, nullptr);
+        const auto layer = FindRootChildByName(*scene, "snow");
+        ASSERT_NE(layer, nullptr);
+        ASSERT_EQ(layer->GetChildren().size(), 1u);
+        const auto& child_node = layer->GetChildren().front();
+        child_node->UpdateTrans();
+        const Eigen::Vector3d placed =
+            (child_node->ModelTrans() * Eigen::Vector4d(0, 0, 0, 1)).head<3>();
+        EXPECT_NEAR(placed.x(), 320.0, 1.0e-3);
+        EXPECT_NEAR(placed.y(), world_y, 1.0e-3);
+    }
+}
+
 TEST(SceneSchema, AudioRequirementComesOnlyFromContentThatReadsAudio) {
     AudioProbeScene plain(kPlainImageObjects);
     ASSERT_NE(plain.scene, nullptr);

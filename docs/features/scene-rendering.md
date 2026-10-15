@@ -273,8 +273,12 @@ pinned to the world (flag 2, never the first) keeps the matrix it was authored
 with, so an emitter on it is neither spread nor launched by the layer. A
 layer-space file's emitter origin is in the layer's space too and scales with the
 layer; only a `worldspace` file adds it unscaled, in world units. A child system's
-origin is still held at its authored world offset, which no reference has settled
-yet; a puppet model whose animation block the
+origin is its offset inside its parent system and scales
+the same way, through the parent's matrix, wherever the parent is not `worldspace`:
+a row of static children 50 units apart under a layer scaled 1.5 stands 75 apart.
+Under a `worldspace` parent, whose particles are in world units, a child hangs at
+its authored offset unscaled, and so does a static child whose own file is
+`worldspace`, which no reference settles. A puppet model whose animation block the
 model parser cannot read is drawn in its bind pose on both, with a log line when it
 loads. A text layer is an ordinary layer: it takes its place in the layer order and
 carries its transform, opacity, blend, effect chain, camera and the final

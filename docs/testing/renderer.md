@@ -978,13 +978,20 @@ into private textures; the three that draw skip visibly without a Metal device.
   draw through the layer's matrix times their own, as the binary draws a child that
   is not itself `worldspace`; what the draw's base matrix is while a layer draws its
   own child objects was not traced, so a `worldspace` layer there keeps the scene
-  origin. Emitter
-  defaults for a scene without a pixel canvas (sphere `distancemax`, box `directions`)
-  are still the pixel set. A scene that names no `orthogonalprojection` is still
-  drawn here as the default orthogonal canvas, while Wallpaper Engine's scene
-  starts without an orthogonal projection; its particle defaults follow what is
-  drawn (the pixel set), not the engine's scene-unit set. An event child's instance
-  is prewarmed at the moment it spawns, inside the frame, as Wallpaper Engine does:
+  origin. A child system's origin scales with the layer
+  unless its parent is `worldspace`, in which case it stays in world units; an event
+  child follows its parent's flag alone, whatever its own file says. The worldspace
+  parent and the event child rules are read from the 2.8.42 binary's child matrix
+  composition; no reference frame shows either. A static child whose own file is
+  `worldspace` is not settled (the binary builds it from its bare local matrix and
+  the spawn matrix that follows was not traced) and keeps its offset in world units.
+  Emitter defaults for a scene without a pixel canvas (sphere `distancemax`, box
+  `directions`) are still the pixel set. A scene that names no `orthogonalprojection`
+  is still drawn here as the default orthogonal canvas, while Wallpaper Engine's
+  scene starts without an orthogonal projection; its particle defaults follow what
+  is drawn (the pixel set), not the engine's scene-unit set. An event child's
+  instance is prewarmed at the moment it spawns, inside the frame, as Wallpaper
+  Engine does:
   a start time of 15 s costs about 300 steps of that child file's own system per
   spawned instance (about a millisecond on the local library), so a burst of
   many spawns with a long start time in one frame costs that many times as much;

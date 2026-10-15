@@ -1740,6 +1740,13 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   a prewarm spawns to sit where the layer's finished matrix, its groups' included,
   puts them; `Movement.FlagOneGravityOfAWorldspaceSystemNeedsNoTurningByItsLayer`
   requires gravity to be left as written.
+- **Particle child system origin** — `SceneSchema.AChildSystemOriginScalesWithItsLayerUnlessItsParentIsWorldspace`
+  hangs a static and an `eventfollow` child at a local offset under a layer scaled
+  by two, with every combination of the parent's and the child file's `worldspace`
+  flag: the child's place is scaled with the layer unless the parent is
+  `worldspace`, whatever an event child's own flag says. A static child whose own
+  file is `worldspace` is the one combination no reference settles, and the test
+  holds it at the world offset it had before.
 - **Text with every effect off** — `MetalSceneDraw.ATextLayerWhoseEffectsAreAllOffIsDrawnAsPlainTextOnBothRenderers`
   draws a caption whose only effect is off and requires the same lit pixels as the
   caption without effects; it used to draw nothing.

@@ -4773,6 +4773,9 @@ struct ParticleChildPtr {
 
     i32 max_instancecount { 1 };
     Eigen::Vector3f world_scale { Eigen::Vector3f::Ones() };
+    /// The parent system's file carries the `worldspace` flag: its particles
+    /// are in world units, so a child hangs at its authored origin unscaled.
+    bool parent_worldspace { false };
 
     /// Set for a particle file's second and later `renderer` entries: the
     /// system builds another mesh, material and node for that renderer, and
@@ -4931,9 +4934,22 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
     } else if (is_child) {
         p_particle_obj = &(child_ptr.child->obj);
         Vector3f child_origin(child_ptr.child->origin.data());
-        for (int i = 0; i < 3; ++i) {
-            const float scale = child_ptr.world_scale[i];
-            if (std::abs(scale) > 1.0e-6f) child_origin[i] /= scale;
+        // The child's origin is its offset inside the parent system, composed
+        // with the parent's matrix: a layer-space parent is drawn through the
+        // layer's model matrix, which scales the offset with everything else.
+        // A worldspace parent's particles are in world units, and the child
+        // sits at the authored offset unscaled. An event child follows its
+        // parent's flag alone. A static child whose own file is worldspace is
+        // built from its bare local matrix in the engine, which no reference
+        // scene exercises, so it keeps the authored offset in world units.
+        const bool static_child =
+            ParseSpawnType(child_ptr.child->type) == ParticleSubSystem::SpawnType::STATIC;
+        const bool own_worldspace = p_particle_obj->flags[wpscene::Particle::FlagEnum::wordspace];
+        if (child_ptr.parent_worldspace || (static_child && own_worldspace)) {
+            for (int i = 0; i < 3; ++i) {
+                const float scale = child_ptr.world_scale[i];
+                if (std::abs(scale) > 1.0e-6f) child_origin[i] /= scale;
+            }
         }
         spNode         = std::make_shared<SceneNode>(child_origin,
                                              Vector3f(child_ptr.child->scale.data()),
@@ -5357,6 +5373,7 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
                                  .mirror_particle   = &particle_obj,
                              });
         }
+        const bool worldspace = particle_obj.flags[wpscene::Particle::FlagEnum::wordspace];
         for (auto& child : particle_obj.children) {
             ParseParticleObj(context,
                              wppartobj,
@@ -5366,6 +5383,7 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
                                  .particle_parent   = particleSub.get(),
                                  .max_instancecount = child_ptr.max_instancecount,
                                  .world_scale       = node_world_scale,
+                                 .parent_worldspace = worldspace,
                              });
         }
     }
