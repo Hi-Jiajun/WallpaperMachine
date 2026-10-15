@@ -1143,10 +1143,13 @@ void LoadEmitter(ParticleSubSystem& pSys, const wpscene::Particle& wp,
         }
         auto newEm = em;
         if (newEm.controlpoint >= 0) newEm.controlpoint += cp_start_index;
-        // A layer's own worldspace system is already measured in scene units, so
-        // its emitter origin is left as authored; any other system is held at the
-        // scaled-down value the layer's matrix brings back.
-        if (! in_scene_units) {
+        // A system lives in its layer's space, so the layer's model matrix
+        // scales the emitter origin along with everything else the system
+        // makes, as Wallpaper Engine draws it. A worldspace file adds the origin
+        // unscaled, in world units: a layer's own worldspace system is already
+        // measured in them, a system inside its layer's space is held at the
+        // scaled-down value the matrix brings back.
+        if (wp.flags[wpscene::Particle::FlagEnum::wordspace] && ! in_scene_units) {
             for (int i = 0; i < 3; ++i) {
                 const float scale = world_scale[i];
                 if (std::abs(scale) > 1.0e-6f) newEm.origin[i] /= scale;

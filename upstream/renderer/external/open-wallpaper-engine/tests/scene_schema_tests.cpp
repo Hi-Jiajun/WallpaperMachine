@@ -5828,6 +5828,54 @@ constexpr std::string_view kPlainImageObjects =
     R"([{"id":1,"name":"plain","image":"image.json","visible":true}])";
 }
 
+TEST(SceneSchema, AnEmitterOriginScalesWithItsLayerUnlessTheFileIsWorldspace) {
+    // A particle system lives in its layer's space: Wallpaper Engine draws it
+    // through the layer's model matrix, which scales the emitter origin along
+    // with every position and size the system makes. A worldspace file is drawn
+    // through no such matrix: the origin is added unscaled, in world units, so
+    // the drawn place is the layer's position plus the authored 50, not 100.
+    for (const auto& [flags, world_y] : { std::pair<int, float> { 0, 280.0f }, { 1, 230.0f } }) {
+        SCOPED_TRACE(flags);
+        fs::VFS vfs;
+        MountSceneFiles(vfs);
+        auto files = std::map<std::string, std::string> {
+            { "/still_particle.json",
+              R"({"emitter":[{"name":"boxrandom","id":1,"origin":"0 50 0",)"
+              R"("distancemin":"0 0 0","distancemax":"0 0 0","speedmin":0,"speedmax":0,)"
+              R"("rate":100,"instantaneous":1}],)"
+              R"("initializer":[{"name":"lifetimerandom","min":10,"max":10}],)"
+              R"("material":"mat.json","maxcount":1,"starttime":0,"flags":)" +
+                  std::to_string(flags) + "}" },
+        };
+        ASSERT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+        audio::SoundManager sound_manager;
+        auto scene = WPSceneParser().Parse(
+            SceneParseRequest { .scene_id = "emitter-origin" },
+            R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},
+                "general":{"clearcolor":[0,0,0],"cameraparallax":false,"bloom":false,
+                           "orthogonalprojection":{"width":640,"height":360}},
+                "objects":[{"id":1,"name":"snow","particle":"still_particle.json",
+                            "origin":[320,180,0],"scale":[2,2,1],"visible":true}]})",
+            vfs, sound_manager);
+        ASSERT_NE(scene, nullptr);
+        ASSERT_FALSE(scene->paritileSys->subsystems.empty());
+        scene->frameTime = 1.0 / 60.0;
+        scene->paritileSys->Emitt();
+        const auto& subsystem = *scene->paritileSys->subsystems.front();
+        ASSERT_FALSE(subsystem.Instances().empty());
+        const auto particles = subsystem.Instances().front()->Particles();
+        ASSERT_FALSE(particles.empty());
+        const auto layer = FindRootChildByName(*scene, "snow");
+        ASSERT_NE(layer, nullptr);
+        layer->UpdateTrans();
+        const auto& at = particles.front().position;
+        const Eigen::Vector3d drawn =
+            (layer->RenderTrans() * Eigen::Vector4d(at.x(), at.y(), at.z(), 1.0)).head<3>();
+        EXPECT_NEAR(drawn.x(), 320.0, 1.0e-3);
+        EXPECT_NEAR(drawn.y(), world_y, 1.0e-3);
+    }
+}
+
 TEST(SceneSchema, AWorldspaceLayerStretchesItsSpawnsButNotTheSpeedOfItsParticles) {
     // A stretched layer (24 times wider than tall) carries a particle file whose
     // emitter sends each particle out from its spawn point at 60 units a second.

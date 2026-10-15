@@ -176,7 +176,11 @@ point places it at and in the velocity the velocity initializers give it, so a l
 stretched along x spreads and launches its particles along x; the emitter's origin
 is added after, unscaled, and every force acts in scene units. A control point
 pinned to the world (flag 2, never the first) keeps the matrix it was authored
-with, so an emitter on it is neither spread nor launched by the layer. A puppet model whose animation block the
+with, so an emitter on it is neither spread nor launched by the layer. A
+layer-space file's emitter origin is in the layer's space too and scales with the
+layer; only a `worldspace` file adds it unscaled, in world units. A child system's
+origin is still held at its authored world offset, which no reference has settled
+yet; a puppet model whose animation block the
 model parser cannot read is drawn in its bind pose on both, with a log line when it
 loads. A text layer is an ordinary layer: it takes its place in the layer order and
 carries its transform, opacity, blend, effect chain, camera and the final

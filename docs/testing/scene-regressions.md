@@ -1389,6 +1389,10 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   placeholders. `MetalSceneDraw.ALayerWhoseEffectsAScriptHasAllSwitchedOffIsStillDrawnOnBothRenderers`
   switches a layer's only effect off: the passthrough at the end of the chain
   must still draw the layer, inside its bounds.
+- **Particle emitter origin** — `SceneSchema.AnEmitterOriginScalesWithItsLayerUnlessTheFileIsWorldspace`
+  parses a still emitter at a local offset under a layer scaled by two and reads
+  where it is drawn: a layer-space file's offset is scaled by the model matrix,
+  and a `worldspace` file's is the world offset.
 - **Worldspace particle files** — a `worldspace` system is in scene units from its
   layer's origin and is drawn through that origin alone.
   `ParticleMouseControlpoint.AWorldspaceSystemKeepsItsBillboardSizeWhateverItsLayerScale`
