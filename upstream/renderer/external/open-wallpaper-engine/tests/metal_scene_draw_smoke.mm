@@ -333,11 +333,14 @@ struct RendererPicture
 /// mutation -- and returns the last frame through the poster path both
 /// renderers share. Two calls on two parses of one scene, seeded and clocked
 /// alike, differ only by what the renderers did. `before_frame` runs ahead of
-/// each frame with its index, for a scene the world changes while it runs.
+/// each frame with its index, for a scene the world changes while it runs;
+/// `input`, when given, feeds its synthetic pointer events
+/// (`WE_TEST_INPUT_JSON`) through the renderer's cursor mapping as the host does.
 RendererPicture DrawWithRenderer(Scene& scene, bool native, uint32_t width, uint32_t height,
                                  int frames, double step,
                                  const std::function<void(int)>& before_frame = {},
-                                 double display_scale_factor = 1.0)
+                                 double display_scale_factor = 1.0,
+                                 tests::SceneProbeControls* input = nullptr)
 {
     RendererPicture picture;
     @autoreleasepool {
@@ -411,6 +414,9 @@ RendererPicture DrawWithRenderer(Scene& scene, bool native, uint32_t width, uint
         }
         for (int frame = 0; frame < frames && picture.error.empty(); ++frame) {
             if (before_frame) before_frame(frame);
+            if (input != nullptr && input->hasInput()) {
+                input->input(scene, static_cast<uint32_t>(frame), render.CursorMapping(scene));
+            }
             scene.paritileSys->Emitt();
             if (scene.runtime != nullptr) {
                 scene.runtime->Tick(step);
@@ -10227,7 +10233,11 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawTheSamePictureOnBothRenderers)
     // is presented at (`canvas`, the default, at the size it was authored at) and
     // `WE_TEST_COMPARE_SCALE_FACTOR` is the layer's backing scale (1), so a
     // display-resolution picture can be compared across renderers and with the
-    // canvas one.
+    // canvas one. `WE_TEST_INPUT_JSON` feeds synthetic pointer events (the
+    // cursor at the centre of the screen is `[{"frame":0,"x":0.5,"y":0.5}]`),
+    // and `WE_TEST_COMPARE_REALTIME` paces the frames in real time, so a
+    // script reading the wall clock (`Date.now()`) sees the scene's time pass as
+    // it does on a desktop.
     const char* listed = std::getenv("WE_TEST_COMPARE_PROJECTS");
     const bool  native_only = std::getenv("WE_TEST_COMPARE_NATIVE_ONLY") != nullptr;
     const auto  assets = LocalSceneAssetsRoot();
@@ -10257,6 +10267,7 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawTheSamePictureOnBothRenderers)
         resolution_name != nullptr && std::string_view(resolution_name) == "display"
             ? SceneResolution::Display
             : SceneResolution::Canvas;
+    const bool realtime = std::getenv("WE_TEST_COMPARE_REALTIME") != nullptr;
     double scale_factor = 1.0;
     if (const char* value = std::getenv("WE_TEST_COMPARE_SCALE_FACTOR")) {
         scale_factor = std::strtod(value, nullptr);
@@ -10333,8 +10344,16 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawTheSamePictureOnBothRenderers)
                 (void)scene.runtime->ConsumeSceneGraphMutationFlag();
             }
 
+            tests::SceneProbeControls input;
+            const auto start = std::chrono::steady_clock::now();
+            const auto pace  = [&](int frame) {
+                if (! realtime) return;
+                std::this_thread::sleep_until(
+                    start + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                                std::chrono::duration<double>(frame * frame_step)));
+            };
             auto picture = DrawWithRenderer(scene, native, width, height, frame_count, frame_step,
-                                            {}, scale_factor);
+                                            pace, scale_factor, &input);
             if (! picture.error.empty()) {
                 std::cout << "[ COMPARE  ] " << scene_id << ": "
                           << (native ? "native" : "compatibility") << " -- " << picture.error
