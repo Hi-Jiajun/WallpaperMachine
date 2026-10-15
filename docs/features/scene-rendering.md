@@ -887,11 +887,18 @@ resources still allocate normally. The offscreen probe prints allocator reserved
 used bytes separately from process memory.
 
 For scenes with an authored 2D canvas, both backends load packaged mip chains to
-match the physical display: the longest texture edge is limited to the next power of
-two at or above the display's longest edge, so a 3024×1964 display uses the authored
-4K mip instead of an 8K source level. Larger levels are skipped before decoding and
-GPU upload. Layout metadata, render-target resolution, frame rate and effects stay
-unchanged, but source detail can differ, especially when zooming into an image.
+match the physical display: a leading mip is skipped only while the next one is still
+at least as long as the display's longest edge, so the level kept always covers the
+display (a 3024×1964 display uses the authored 4K mip of an 8K source, and a 4240 px
+picture on a 3456 px display keeps its full-size level, the one Wallpaper Engine
+samples, instead of a 2120 px one stretched to fill the screen). A texture shorter
+than the display keeps its own largest level. The rule favours picture quality over
+the smallest footprint: a texture longer than the display's longest edge but shorter
+than twice it keeps its full-size chain, roughly four times the memory of its next
+level, instead of being cut to a level that would be magnified. Skipped
+levels are never decoded or uploaded. Layout metadata, render-target resolution, frame rate and effects stay
+unchanged, but source detail can differ for a layer drawn larger than the display,
+such as a zoomed image.
 Display-surface replacement rebuilds the textures for the new display size.
 Perspective scenes without an authored canvas retain the source mip chain: a model
 or skybox can magnify a small UV region, so display dimensions alone cannot

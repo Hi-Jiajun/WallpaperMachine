@@ -5583,6 +5583,96 @@ TEST_F(MetalSceneDraw, ATexturePointSampledByItsHeaderPicksItsMipLevelByPointOnB
 
 namespace
 {
+/// An opaque `width` by `height` texture with a full mip chain whose first level
+/// is white and whose others are black, so which levels were kept shows in a
+/// sample's brightness.
+void WriteSizedMipChainTexture(const std::filesystem::path& path, uint32_t width, uint32_t height)
+{
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream texture(path, std::ios::binary);
+    const auto u32 = [&](uint32_t value) {
+        const char bytes[] { char(value), char(value >> 8), char(value >> 16), char(value >> 24) };
+        texture.write(bytes, sizeof(bytes));
+    };
+    // Each level half the last, rounded down, as the GPU's chain is.
+    std::vector<std::pair<uint32_t, uint32_t>> sizes;
+    for (uint32_t w = width, h = height;; w = std::max(1u, w / 2), h = std::max(1u, h / 2)) {
+        sizes.emplace_back(w, h);
+        if (w == 1 && h == 1) break;
+    }
+    texture.write("TEXV0005", 9);
+    texture.write("TEXI0001", 9);
+    u32(0); u32(0);
+    u32(width); u32(height); u32(width); u32(height);
+    u32(0);
+    texture.write("TEXB0002", 9);
+    u32(1); // images
+    u32(static_cast<uint32_t>(sizes.size()));
+    for (std::size_t level = 0; level < sizes.size(); ++level) {
+        const auto [w, h] = sizes[level];
+        u32(w); u32(h); u32(0); u32(0);
+        u32(w * h * 4);
+        std::vector<char> rgba(size_t(w) * h * 4, level == 0 ? char(255) : char(0));
+        for (std::size_t i = 3; i < rgba.size(); i += 4) rgba[i] = char(255);
+        texture.write(rgba.data(), static_cast<std::streamsize>(rgba.size()));
+    }
+}
+
+/// A card as large as the 384 by 256 canvas showing a `width` by `height`
+/// mip chain, so the picture is drawn at about the chain's own size.
+std::filesystem::path WriteCanvasCardMipFixture(const std::filesystem::path& root, uint32_t width,
+                                                uint32_t height)
+{
+    const auto project = WriteFixture(root);
+    WriteSizedMipChainTexture(root / "materials/mipchain.tex", width, height);
+    std::ofstream(root / "models/tile.json")
+        << R"({"width":384,"height":256,"material":"materials/tile.json"})";
+    std::ofstream(root / "materials/tile.json")
+        << R"({"passes":[{"shader":"metal_probe","blending":"translucent","cullmode":"nocull",)"
+           R"("depthtest":"disabled","depthwrite":"disabled","textures":["mipchain"]}]})";
+    std::ofstream(root / "shaders/metal_probe.frag")
+        << "uniform sampler2D g_Texture0;\n"
+           "varying vec2 v_TexCoord;\n"
+           "void main() {\n"
+           "  gl_FragColor = texture(g_Texture0, v_TexCoord);\n"
+           "}\n";
+    return project;
+}
+} // namespace
+
+TEST_F(MetalSceneDraw, ATextureWhoseNextLevelFallsShortOfTheSurfaceKeepsItsFullSizeLevelOnBothRenderers)
+{
+    // A 528 by 352 chain on a 384 pixel surface: the power-of-two ceiling of the
+    // surface, 512, is below the texture's width, but the next level (264) is
+    // narrower than the surface. Dropping the full-size level would draw the
+    // picture from a level a third smaller than the screen, magnified; kept, it
+    // is drawn from the full-size white level blended with the next, black, one
+    // (1.375 texels to the pixel).
+    std::map<bool, RendererPicture> pictures;
+    for (const bool native : { false, true }) {
+        const std::string name = std::string("mip-budget-") + (native ? "native" : "compat");
+        const auto project = WriteCanvasCardMipFixture(root_ / name, 528, 352);
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+        if (native) {
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+        }
+        pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 2, 1.0 / 60.0);
+        ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+        ASSERT_EQ(pictures[native].rgb.size(), 384u * 256u * 3u);
+    }
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        const std::size_t at = (std::size_t(128) * 384 + 192) * 3;
+        EXPECT_GE(pictures[native].rgb[at], 100)
+            << "the full-size level was dropped and a smaller one magnified";
+    }
+}
+
+namespace
+{
 
 /// A `.tex` holding one `side` x `side` image of `format` (0 is RGBA8, 4 is
 /// DXT5) in a single mip level, `data` being that level's bytes as stored.

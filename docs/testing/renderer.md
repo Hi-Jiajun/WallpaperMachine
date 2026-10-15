@@ -148,7 +148,7 @@ Frames, time and surfaces:
 | `WE_TEST_COMPARE_RESOLUTION` | the same test | `display` rasterizes a 2D scene at the size it is presented at on the layer; `canvas`, the default, at the size it was authored at. Perspective scenes and videos ignore it |
 | `WE_TEST_COMPARE_SCALE_FACTOR` | the same test | The layer's backing scale, `1`–`4` (default `1`); with `WE_TEST_COMPARE_SURFACE` it makes a laptop-panel-sized layer |
 | `WE_TEST_SURFACE` | `offscreen_scene_probe` | `<width>x<height>` physical output extent; defaults to `1920x1080`. Perspective scenes use it as their full-scale raster; authored 2D canvases keep their size |
-| `WE_TEST_TEXTURE_SURFACE` | `offscreen_scene_probe` | `<width>x<height>` opts into the production display-sized texture mip policy without changing raster extent; unset retains all source levels for before/after image and allocation comparisons. Native Metal uses its surface size automatically |
+| `WE_TEST_TEXTURE_SURFACE` | `offscreen_scene_probe` | `<width>x<height>` opts into the production display-sized texture mip policy (a leading mip is dropped only while the next is still at least as long as the surface's longest side, so the level kept covers the surface) without changing raster extent; unset retains all source levels for before/after image and allocation comparisons. Native Metal uses its surface size automatically |
 | `WE_TEST_METAL_SURFACE` | `metal_scene_draw_smoke` | `<width>x<height>` for the surface the native backend rasterizes; defaults to `960x540`. Screen-space shader inputs follow it, so comparing this backend's output with another's is only meaningful when both rasterize the same extent |
 | `WE_TEST_METAL_RESOLUTION`, `WE_TEST_METAL_SCALE_FACTOR` | `metal_scene_draw_smoke` | `display` rasterizes a 2D scene at the size it is presented at on that surface, `canvas` (the default) at the size it was authored at; the scale factor (`1`–`4`, default `1`) is the surface's backing scale. The `render target bytes` line and `WE_TEST_METAL_DUMP_TARGETS=*` then show what the choice costs |
 
@@ -783,6 +783,17 @@ into private textures; the three that draw skip visibly without a Metal device.
   draws nothing. Puppet morph targets (`MDMP`, blend shapes) are parsed and never read: no `MORPHING` combo, no
   morph texture and no weight uniforms. Sound `spatialization`, `attenuation` and
   `mindistance` are not read, so every sound plays unpositioned.
+- **Texture mips are chosen from the display, not from each layer.** A 2D scene's
+  packaged chains are cut at the display's longest edge (a level is dropped only
+  while the next is still that long), so a texture about the size of the screen keeps
+  its full-size level, as Wallpaper Engine samples it. A layer drawn larger than the
+  display, such as a scaled-up one or a layer on a canvas wider than the display,
+  still samples a level that only covers the display, softer than Wallpaper
+  Engine's. Choosing each layer's level from its projected extent at graph compile
+  would fix that and keep the full-size chain for those layers only, at the price of
+  more texture memory for them than the display rule; the figures from the mip
+  headers of one machine's library are in `upstream/provenance.json`
+  (`textureMipBudgetChanges`).
 - **File textures are sampled trilinearly.** Wallpaper Engine's sampler for a file
   texture is anisotropic (8x), which only shows on a surface seen at an angle (the
   local scene with 3D models), and it samples a shadow atlas through a comparison

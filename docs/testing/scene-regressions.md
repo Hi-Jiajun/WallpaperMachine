@@ -1012,6 +1012,29 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
 - **JPEG/EXIF orientation** — `tex_schema_tests`: all eight EXIF display
   transforms on asymmetric RGBA pixels, both TIFF byte orders, truncated
   JPEG/EXIF data, invalid IFD offsets.
+- **Texture mip budget** — `TexSchema.SurfaceBudget*` in `tex_schema_tests` and
+  `MetalSceneDraw.ATextureWhoseNextLevelFallsShortOfTheSurfaceKeepsItsFullSizeLevelOnBothRenderers`
+  in `metal_scene_draw_smoke`. A 2D scene's packaged chain loses a leading level only
+  while the next one is still at least as long as the surface's longest side
+  (`IImageParser::SetTextureSurfaceSize`), so the level kept covers the surface and a
+  picture is never magnified to save memory: a 4240 px texture on a 3456 px display
+  keeps its full-size level, which Wallpaper Engine samples, where the earlier rule
+  (the surface rounded up to a power of two) dropped it and drew the next, 2120 px,
+  level 1.8 times too large. Covered: the selection and the layout metadata it
+  preserves (`.SurfaceBudgetSelectsAuthoredMipsAndKeepsLayoutMetadata`), encoded
+  levels dropped without decoding and truncation (`.SurfaceBudgetSkipsEncodedPixels…`),
+  sprite and video chains left whole (`.SurfaceBudgetPreservesSpriteAndVideoMipChains`),
+  a 4100 px level on a 3456 px surface kept
+  (`.SurfaceBudgetKeepsALevelThatTheNextOneWouldNotCover`), the property for 1920×1080,
+  2560×1440 and 3456×2234 surfaces and wide and tall textures from half the surface to
+  twice it (the kept level is as long as the surface or the texture, and the one after
+  it is shorter than the surface: `.SurfaceBudgetKeepsTheSmallestLevelThatStillCoversTheSurface`),
+  levels of a TEXB0003 container measured by their headers
+  (`.SurfaceBudgetFollowsTheHeaderSizesOfAnEncodedChain`), and the draw test, a 528×352
+  chain with a white first level and black others across a 384×256 surface, which
+  both renderers draw from the first level blended with the second (black without
+  the change). Not covered: a layer drawn larger than the display
+  ([Known limitations](renderer.md#known-limitations)).
 - **Render scale** — `RenderScale.*` in `render_scale_test`: physical surface
   sizing and scale/resize transitions (full scale keeps every target at the
   authored size, half scale halves the raster but not the authored canvas,
