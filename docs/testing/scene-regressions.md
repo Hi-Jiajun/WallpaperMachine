@@ -1316,6 +1316,27 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   serves both). It is a getter that reads the clock only when a script asks.
   While it was missing, scripts that blend day and night layers by the hour
   computed `NaN` and drew the layer black.
+- **Text a script writes** — `text_object_runtime_test`.
+  `TextObjectRuntime.ScriptTextWrittenInUpdateIsKeptWhenUpdateReturnsNothing` is a
+  text script that writes `thisLayer.text` only when its string changes and returns
+  nothing: three ticks later the layer shows the string, not the scene file's
+  placeholder (the bound value, republished by the undefined return, used to be put
+  back over the write on the same tick). `.ScriptReadsTheTextItWroteOnTheNextUpdate`
+  steps through two writes, each reached only when the previous one became the
+  `value` the next `update(value)` is given, and
+  `.ScriptReturnValueStillReplacesTextTheScriptWrote` keeps a returned string
+  winning over a write. Those three are the owning script's own writes; only the
+  first is compared with a Wallpaper Engine frame (a 12-hour clock), the other two
+  pin the same rule's edges. `.TextWrittenByAnotherScriptDoesNotReplaceWhatTheTextScriptReturns`
+  and `.TextScriptWritingAnotherLayersTextKeepsItsOwnValue` pin what was not
+  changed: a visibility script or another layer's script writing a layer whose text
+  script returns a value, and a text script writing another layer's text, leave the
+  text property's own value on screen, while a text nothing is bound to takes what
+  is written. The first is the shape of a media widget's title layer whose frame
+  shows the text script's empty value; which script Wallpaper Engine lets win in
+  general is not established, so these two are chosen, not evidenced. An earlier form
+  of this change made every script's write the property's value, and the widget
+  drew the sound layer's name where Wallpaper Engine draws nothing.
 - **Raster caches and revisions** — text raster caches hold neutral glyph
   coverage. Color, brightness and alpha bindings reach uniforms, including text
   under effects, without relayout or uploads

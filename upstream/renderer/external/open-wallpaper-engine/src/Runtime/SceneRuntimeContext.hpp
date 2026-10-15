@@ -436,6 +436,27 @@ public:
     bool            NodeTextDirty(std::string_view name) const;
     std::optional<TextLayerState> NodeTextState(std::string_view name) const;
     bool                          SetNodeText(std::string_view name, std::string text);
+    /// Watches one run of a scripted value's script for the text it writes to the
+    /// layer the value is the text property of. The script that decides a layer's
+    /// text keeps what it writes there when its `update()` returns nothing, so the
+    /// scripted value asks `Written()` after the run. A write by any other script
+    /// to that layer, or by this one to another layer, is not recorded.
+    class OwnTextWrite {
+    public:
+        OwnTextWrite(SceneRuntimeContext& runtime, const DynamicValue& owner) noexcept;
+        ~OwnTextWrite();
+        OwnTextWrite(const OwnTextWrite&)            = delete;
+        OwnTextWrite& operator=(const OwnTextWrite&) = delete;
+
+        const std::optional<std::string>& Written() const noexcept { return m_written; }
+
+    private:
+        friend class SceneRuntimeContext;
+        SceneRuntimeContext&       m_runtime;
+        const DynamicValue&        m_owner;
+        OwnTextWrite*              m_outer { nullptr };
+        std::optional<std::string> m_written;
+    };
     /// The text layer's style as scripts read and write it: `font`, `pointsize`,
     /// `horizontalalign`, `verticalalign`. A write that changes anything makes
     /// the layer lay out and draw again. `nullopt` / false for a layer that is
@@ -812,6 +833,7 @@ private:
     std::optional<std::pair<double, Eigen::Vector2f>> m_framed_camera_shot;
     std::vector<MaterialConstantBinding>                           m_material_constants;
     std::vector<TextValueBinding>                                  m_text_values;
+    OwnTextWrite*                                                  m_own_text_write { nullptr };
     std::vector<DynamicValueListenerBinding>                       m_dynamic_value_listeners;
     std::unordered_map<std::string, Eigen::Vector2f>               m_node_size;
     std::unordered_map<std::string, NodeHitMask>                   m_node_hit_masks;

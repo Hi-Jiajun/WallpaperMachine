@@ -797,7 +797,18 @@ into private textures; the three that draw skip visibly without a Metal device.
   scene file's value; one bound to a property is read once at load, with the user's
   value, and held there (a load-only property). The text object's other layout keys
   (`pointsize`, `padding`, `spacing`, `maxwidth`, `maxrows`, the limit flags) read the
-  scene file's value whatever property or script is bound to them.
+  scene file's value whatever property or script is bound to them. Only one text write
+  is compared with Wallpaper Engine: a text script that writes `thisLayer.text` from
+  `update()` and returns nothing keeps the write. Not established, and kept as the
+  renderer had it: a script that writes and also returns a string shows the returned
+  string; a write from a script that does not own the text property (a visibility
+  script, a scene script, a cursor or media handler, another layer's script) lasts
+  until the property's own value is applied on the next tick, and a text script's write
+  from a handler does the same. Which of two scripts writing one text Wallpaper Engine
+  shows depends on the order it runs a layer's scripts in, which was not read from the
+  binary. The one frame that covers it, a media widget whose text script returns an
+  empty title while its visibility script writes the sound layer's name, shows the
+  text script's value.
 - **Cursor walk details.** Layers are walked in the scene's layer order, and the quad
   test keeps a coverage mask for layers whose scripts handle the cursor, which
   Wallpaper Engine's does not have. Wallpaper Engine lets no blocker stop the walk while

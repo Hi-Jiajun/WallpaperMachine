@@ -4262,6 +4262,7 @@ DynamicValueUniquePtr PropertyScriptProgram::Evaluate(const ScriptHostContext& h
     JS_FreeValue(context_handle, current_value_js);
 
     auto published = std::make_unique<DynamicValue>();
+    m_update_returned_value = false;
     if (JS_IsException(result) || JS_IsUndefined(result) ||
         (current_value.getType() == DynamicValue::Boolean &&
          JS_VALUE_GET_TAG(result) == JS_TAG_OBJECT)) {
@@ -4270,6 +4271,7 @@ DynamicValueUniquePtr PropertyScriptProgram::Evaluate(const ScriptHostContext& h
         return published;
     }
 
+    m_update_returned_value = true;
     FillDynamicValueFromJS(context_handle, result, current_value.getType(), *published);
     if (m_semantic == PropertyScriptValueSemantic::AnglesDegrees &&
         published->getType() == DynamicValue::Vec3) {

@@ -187,8 +187,16 @@ carries its transform, opacity, blend, effect chain, camera and the final
 composition, appears in desktop posters, and uses the engine's one text system on
 both renderers. Text whose content has not changed is not laid out, rasterised or
 uploaded again; a script that produces it still runs on its own schedule every
-frame. Effect and video output of Native Metal has not been compared against real
-wallpapers.
+frame. A text script that writes `thisLayer.text` from `update()` and returns nothing
+keeps what it wrote, as in Wallpaper Engine (a clock that writes the time once a
+minute shows it, not the text the scene file starts with), and its next
+`update(value)` is given that string. A string `update()` returns replaces it. That is
+the only text write compared with Wallpaper Engine's frames. A write from anything
+else, such as another property's script, a scene script, a cursor handler or another
+layer's script, is the layer's text until the text property's own value is applied on
+the next tick; which script Wallpaper Engine lets win when two write one text is not
+established (the one frame that covers it shows the text script's value). Effect and
+video output of Native Metal has not been compared against real wallpapers.
 
 Particle systems follow Wallpaper Engine 2.8's own rules, on both renderers, because
 one simulation feeds both. A system is simulated for its file's `starttime` before the

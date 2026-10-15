@@ -85,6 +85,9 @@ public:
     const ScriptProgramCapabilities& Capabilities() const noexcept { return m_capabilities; }
     DynamicValueUniquePtr Evaluate(const ScriptHostContext& host_context,
                                    const DynamicValue&      current_value);
+    /// Whether the last `Evaluate` got a value from `update()`. When it did not
+    /// (it returned nothing, or threw), `Evaluate` hands back the current value.
+    bool                  UpdateReturnedValue() const noexcept { return m_update_returned_value; }
     void                  ApplyProjectProperties(const ProjectProperties& project_properties,
                                                   const ProjectProperties& changed_properties);
     void                  DispatchCursorClick(const ScriptHostContext& host_context);
@@ -124,6 +127,7 @@ private:
     bool                                 m_owns_context = false;
     bool                                 m_valid        = false;
     bool                                 m_init_called  = false;
+    bool                                 m_update_returned_value = false;
     bool                                 m_destroyed    = false;
     // The animation layer this script is attached to (`animationlayers[i]`), or -1
     // when it is attached to the layer itself. `thisObject` is that animation layer.

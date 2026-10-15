@@ -2652,10 +2652,27 @@ std::optional<TextLayerState> SceneRuntimeContext::NodeTextState(std::string_vie
 bool SceneRuntimeContext::SetNodeText(std::string_view name, std::string text) {
     const auto iterator = m_text_layers.find(std::string(name));
     if (iterator == m_text_layers.end()) return false;
+    if (m_own_text_write != nullptr) {
+        const auto bound = std::any_of(
+            m_text_values.begin(), m_text_values.end(), [&](const TextValueBinding& binding) {
+                return binding.value == &m_own_text_write->m_owner && binding.name == name;
+            });
+        if (bound) m_own_text_write->m_written = text;
+    }
     if (iterator->second.text() == text) return true;
 
     iterator->second.SetText(std::move(text));
     return true;
+}
+
+SceneRuntimeContext::OwnTextWrite::OwnTextWrite(SceneRuntimeContext& runtime,
+                                                const DynamicValue&  owner) noexcept
+    : m_runtime(runtime), m_owner(owner), m_outer(runtime.m_own_text_write) {
+    runtime.m_own_text_write = this;
+}
+
+SceneRuntimeContext::OwnTextWrite::~OwnTextWrite() {
+    m_runtime.m_own_text_write = m_outer;
 }
 
 bool SceneRuntimeContext::ClearNodeTextDirty(std::string_view name) {

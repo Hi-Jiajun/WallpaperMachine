@@ -2789,6 +2789,245 @@ TEST(TextObjectRuntime, EventOnlyTextScriptRegistersAsSceneScript) {
     EXPECT_EQ(scene->runtime->scriptErrorCount(), 0u);
 }
 
+// Wallpaper Engine keeps a string a script wrote to `thisLayer.text` from
+// `update()` when `update()` returns nothing, and the scene file's value is only
+// the text the layer starts with. The clock scripts that write the time only when
+// the minute changes show their placeholder otherwise.
+TEST(TextObjectRuntime, ScriptTextWrittenInUpdateIsKeptWhenUpdateReturnsNothing) {
+    fs::VFS vfs;
+    MountAssets(vfs);
+    audio::SoundManager sound_manager;
+    WPSceneParser       parser;
+    ProjectProperties   properties;
+    SceneParseRequest   request {
+          .scene_id           = "text-script-write-kept",
+          .project_properties = &properties,
+    };
+
+    auto scene = parser.Parse(request,
+                              MinimalSceneObjects(R"JSON([
+          {
+            "id": 1,
+            "name": "caption",
+            "text": {
+              "value": "placeholder",
+              "script": "var last; export function update() { var s = 'live'; if (s !== last) { last = s; thisLayer.text = s; } }"
+            },
+            "font": "Arial",
+            "visible": true
+          }
+        ])JSON"),
+                              vfs,
+                              sound_manager);
+
+    ASSERT_NE(scene, nullptr);
+    ASSERT_NE(scene->runtime, nullptr);
+    EXPECT_EQ(scene->runtime->NodeText("caption"), "placeholder");
+
+    // The script writes on its first tick only; the ticks after it write
+    // nothing, and the layer must not fall back to the placeholder.
+    for (int tick = 0; tick < 3; ++tick) {
+        scene->runtime->Tick(1.0 / 30.0);
+        PumpTextUntilClean(*scene->runtime);
+        EXPECT_EQ(scene->runtime->NodeText("caption"), "live") << "tick " << tick;
+    }
+    EXPECT_EQ(scene->runtime->scriptErrorCount(), 0u);
+}
+
+TEST(TextObjectRuntime, ScriptReadsTheTextItWroteOnTheNextUpdate) {
+    fs::VFS vfs;
+    MountAssets(vfs);
+    audio::SoundManager sound_manager;
+    WPSceneParser       parser;
+    ProjectProperties   properties;
+    SceneParseRequest   request {
+          .scene_id           = "text-script-write-continues",
+          .project_properties = &properties,
+    };
+
+    // `update(value)` is handed the property's current string. Each step below
+    // is reached only if the previous explicit write became that string.
+    auto scene = parser.Parse(request,
+                              MinimalSceneObjects(R"JSON([
+          {
+            "id": 1,
+            "name": "caption",
+            "text": {
+              "value": "placeholder",
+              "script": "export function update(value) { if (value === 'placeholder') thisLayer.text = 'first'; else if (value === 'first') thisLayer.text = 'second'; }"
+            },
+            "font": "Arial",
+            "visible": true
+          }
+        ])JSON"),
+                              vfs,
+                              sound_manager);
+
+    ASSERT_NE(scene, nullptr);
+    ASSERT_NE(scene->runtime, nullptr);
+
+    const std::string expected[] = { "first", "second", "second" };
+    for (const auto& text : expected) {
+        scene->runtime->Tick(1.0 / 30.0);
+        PumpTextUntilClean(*scene->runtime);
+        EXPECT_EQ(scene->runtime->NodeText("caption"), text);
+    }
+    EXPECT_EQ(scene->runtime->scriptErrorCount(), 0u);
+}
+
+TEST(TextObjectRuntime, ScriptReturnValueStillReplacesTextTheScriptWrote) {
+    fs::VFS vfs;
+    MountAssets(vfs);
+    audio::SoundManager sound_manager;
+    WPSceneParser       parser;
+    ProjectProperties   properties;
+    SceneParseRequest   request {
+          .scene_id           = "text-script-write-then-return",
+          .project_properties = &properties,
+    };
+
+    // A script that writes and also returns: the value it returns is the
+    // property's result, as it always was.
+    auto scene = parser.Parse(request,
+                              MinimalSceneObjects(R"JSON([
+          {
+            "id": 1,
+            "name": "caption",
+            "text": {
+              "value": "placeholder",
+              "script": "export function update() { thisLayer.text = 'written'; return 'returned'; }"
+            },
+            "font": "Arial",
+            "visible": true
+          }
+        ])JSON"),
+                              vfs,
+                              sound_manager);
+
+    ASSERT_NE(scene, nullptr);
+    ASSERT_NE(scene->runtime, nullptr);
+    for (int tick = 0; tick < 2; ++tick) {
+        scene->runtime->Tick(1.0 / 30.0);
+        PumpTextUntilClean(*scene->runtime);
+        EXPECT_EQ(scene->runtime->NodeText("caption"), "returned") << "tick " << tick;
+    }
+    EXPECT_EQ(scene->runtime->scriptErrorCount(), 0u);
+}
+
+// Two scripts writing one text: the property's own script decides it. A media
+// widget's title layer carries a text script that returns the (empty) title and a
+// visibility script that writes the sound layer's name every tick, and Wallpaper
+// Engine's frame of it shows the empty title. Which script Wallpaper Engine
+// lets win in general is not established; the one frame is what this keeps.
+TEST(TextObjectRuntime, TextWrittenByAnotherScriptDoesNotReplaceWhatTheTextScriptReturns) {
+    fs::VFS vfs;
+    MountAssets(vfs);
+    audio::SoundManager sound_manager;
+    WPSceneParser       parser;
+    ProjectProperties   properties;
+    SceneParseRequest   request {
+          .scene_id           = "text-written-by-another-script",
+          .project_properties = &properties,
+    };
+
+    auto scene = parser.Parse(request,
+                              MinimalSceneObjects(R"JSON([
+          {
+            "id": 1,
+            "name": "caption",
+            "text": {
+              "value": "placeholder",
+              "script": "export function update(value) { return ''; }"
+            },
+            "font": "Arial",
+            "visible": {
+              "value": true,
+              "script": "export function update() { thisLayer.text = 'from the visibility script'; }"
+            }
+          },
+          {
+            "id": 2,
+            "name": "writer",
+            "text": "writer",
+            "font": "Arial",
+            "visible": {
+              "value": true,
+              "script": "export function update() { thisScene.getLayer('caption').text = 'from another layer'; thisScene.getLayer('plain').text = 'written'; }"
+            }
+          },
+          {
+            "id": 3,
+            "name": "plain",
+            "text": "plain",
+            "font": "Arial",
+            "visible": true
+          }
+        ])JSON"),
+                              vfs,
+                              sound_manager);
+
+    ASSERT_NE(scene, nullptr);
+    ASSERT_NE(scene->runtime, nullptr);
+    for (int tick = 0; tick < 3; ++tick) {
+        scene->runtime->Tick(1.0 / 30.0);
+        PumpTextUntilClean(*scene->runtime);
+        EXPECT_EQ(scene->runtime->NodeText("caption"), "") << "tick " << tick;
+        // A text no property or script is bound to just takes what is written.
+        EXPECT_EQ(scene->runtime->NodeText("plain"), "written") << "tick " << tick;
+    }
+    EXPECT_EQ(scene->runtime->scriptErrorCount(), 0u);
+}
+
+// What a text script writes to another layer's text is that layer's business:
+// the writer keeps its own value, and the layer's own script has its say.
+TEST(TextObjectRuntime, TextScriptWritingAnotherLayersTextKeepsItsOwnValue) {
+    fs::VFS vfs;
+    MountAssets(vfs);
+    audio::SoundManager sound_manager;
+    WPSceneParser       parser;
+    ProjectProperties   properties;
+    SceneParseRequest   request {
+          .scene_id           = "text-script-writes-other-layer",
+          .project_properties = &properties,
+    };
+
+    auto scene = parser.Parse(request,
+                              MinimalSceneObjects(R"JSON([
+          {
+            "id": 1,
+            "name": "writer",
+            "text": {
+              "value": "writer placeholder",
+              "script": "export function update() { thisScene.getLayer('target').text = 'from the writer'; }"
+            },
+            "font": "Arial",
+            "visible": true
+          },
+          {
+            "id": 2,
+            "name": "target",
+            "text": {
+              "value": "target placeholder",
+              "script": "export function update() { return 'from the target'; }"
+            },
+            "font": "Arial",
+            "visible": true
+          }
+        ])JSON"),
+                              vfs,
+                              sound_manager);
+
+    ASSERT_NE(scene, nullptr);
+    ASSERT_NE(scene->runtime, nullptr);
+    for (int tick = 0; tick < 3; ++tick) {
+        scene->runtime->Tick(1.0 / 30.0);
+        PumpTextUntilClean(*scene->runtime);
+        EXPECT_EQ(scene->runtime->NodeText("writer"), "writer placeholder") << "tick " << tick;
+        EXPECT_EQ(scene->runtime->NodeText("target"), "from the target") << "tick " << tick;
+    }
+    EXPECT_EQ(scene->runtime->scriptErrorCount(), 0u);
+}
+
 TEST(TextObjectRuntime, TextParentReusesPlaceholderWhenChildAppearsFirst) {
     fs::VFS vfs;
     MountAssets(vfs);

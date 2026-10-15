@@ -54,8 +54,17 @@ void ScriptedDynamicValue::reevaluate() {
     if (m_runtime->ProjectPropertiesChanging() || m_program == nullptr || ! m_program->Valid()) return;
 
     // update(value) continues from the previous result, including explicit property writes.
+    SceneRuntimeContext::OwnTextWrite own_text_write(*m_runtime, *this);
     auto result = m_program->Evaluate(m_runtime->hostContext(), *this);
-    if (m_program->Capabilities().update && result != nullptr) DynamicValue::update(*result);
+    if (! m_program->Capabilities().update || result == nullptr) return;
+    // The text script that writes its own layer's text and returns nothing has
+    // decided the text: the current value would put the string it started with
+    // back over the write.
+    if (own_text_write.Written().has_value() && ! m_program->UpdateReturnedValue()) {
+        DynamicValue::update(*own_text_write.Written());
+    } else {
+        DynamicValue::update(*result);
+    }
 }
 
 void ScriptedDynamicValue::ApplyProjectProperties(const ProjectProperties& project_properties,
