@@ -333,8 +333,13 @@ timeline on one of them is not followed. `anchor` pins a text
 layer to an edge or corner of the area the display shows, on top of its origin and
 alignment: where the display's shape differs from the canvas's (Fill crops it, Fit or a
 pan adds room), the layer follows that edge, and a scene shown whole moves nothing.
-A text object that leaves keys out has Wallpaper Engine's defaults: 32 points,
-`maxwidth` 500 and `maxrows` 1.
+Camera parallax moves a text layer as it moves an image layer, as Wallpaper Engine's
+draw loop adds the offset to every object it draws: by the layer's distance from the
+eased cursor point times its `parallaxDepth` and the scene's amount, so a text label
+beside a depth-0.06 underline moves with it, and with the cursor centred a layer off the
+centre of the canvas already sits that far out. A layer drawn through effects takes the
+offset once, on its final pass. A text object that leaves keys out has Wallpaper
+Engine's defaults: 32 points, `maxwidth` 500 and `maxrows` 1.
 
 A texture slot a material binds to the now-playing cover (a `usertextures` entry of
 type `system`, `$mediaThumbnail` or `$mediaPreviousThumbnail`, on an image layer or

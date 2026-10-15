@@ -748,6 +748,130 @@ TEST(TextObjectRuntime, ParserCreatesRenderableTextMaterialAndTexture) {
     EXPECT_EQ(material->blenmode, BlendMode::Translucent);
 }
 
+namespace {
+
+// A 640x360 canvas whose camera parallax is on, with a cursor that rests at the
+// centre of the view and is followed at once (amount 0.5, no delay).
+std::string ParallaxTextScene(std::string objects_json) {
+    return R"({
+      "camera": {"center":[0,0,0], "eye":[0,0,1], "up":[0,1,0]},
+      "general": {
+        "ambientcolor":[0,0,0], "skylightcolor":[0,0,0],
+        "clearcolor":[0,0,0], "cameraparallax":true,
+        "cameraparallaxamount":0.5, "cameraparallaxdelay":0,
+        "cameraparallaxmouseinfluence":1,
+        "orthogonalprojection":{"width":640,"height":360}
+      },
+      "objects": )" +
+           objects_json + "\n}";
+}
+
+// How far the model matrix a pass hands its shader sits from where the layer's
+// node places it: the whole of what camera parallax does to a layer.
+Eigen::Vector2f ParallaxDisplacement(WPShaderValueUpdater& updater, SceneNode& node) {
+    sprite_map_t sprites;
+    ShaderValue  model;
+    updater.UpdateUniforms(&node, sprites, [&](std::string_view name, const ShaderValue& value) {
+        if (name == "g_ModelMatrix") model = value;
+    });
+    node.UpdateTrans();
+    return Eigen::Vector2f(model[12] - static_cast<float>(node.ModelTrans()(0, 3)),
+                           model[13] - static_cast<float>(node.ModelTrans()(1, 3)));
+}
+
+} // namespace
+
+// Wallpaper Engine moves every layer by the camera parallax, a text layer drawn
+// straight onto the scene included: by its distance from the eased cursor point,
+// times its `parallaxDepth` and the scene's amount, so with the cursor centred a
+// layer off the centre already sits further out. A text layer without effects has
+// no record of its own in the value updater unless the parser makes one, which left
+// it where its origin put it however the cursor moved while the layers around it,
+// at the same depth, moved.
+TEST(TextObjectRuntime, CameraParallaxMovesAPlainTextLayerByItsDepth) {
+    fs::VFS vfs;
+    MountAssets(vfs);
+    audio::SoundManager sound_manager;
+    WPSceneParser       parser;
+    ProjectProperties   properties;
+    auto scene = parser.Parse(SceneParseRequest { .scene_id           = "text-parallax",
+                                                  .project_properties = &properties },
+                              ParallaxTextScene(R"([
+          {"id":1,"name":"caption","text":"hello","font":"Arial","pointsize":20,
+           "origin":[420,260,0],"parallaxDepth":[0.2,0.4],"visible":true}
+        ])"),
+                              vfs, sound_manager);
+    ASSERT_NE(scene, nullptr);
+    auto* node    = FindRootChild(*scene, "caption");
+    auto* updater = dynamic_cast<WPShaderValueUpdater*>(scene->shaderValueUpdater.get());
+    ASSERT_NE(node, nullptr);
+    ASSERT_NE(updater, nullptr);
+    updater->InitUniforms(node, [](std::string_view name) {
+        return name == "g_ModelMatrix" || name == "g_ModelViewProjectionMatrix";
+    });
+    node->UpdateTrans();
+    const float x = static_cast<float>(node->ModelTrans()(0, 3));
+    const float y = static_cast<float>(node->ModelTrans()(1, 3));
+
+    // The cursor at the centre of the view (320, 180): (position - centre) x amount x depth.
+    updater->FrameBegin();
+    const auto rest = ParallaxDisplacement(*updater, *node);
+    EXPECT_NEAR(rest.x(), (x - 320.0f) * 0.5f * 0.2f, 1e-3f);
+    EXPECT_NEAR(rest.y(), (y - 180.0f) * 0.5f * 0.4f, 1e-3f);
+
+    // The cursor against the right edge moves the point the layer is measured from.
+    updater->MouseInput(1.0, 0.5);
+    scene->frameTime = 1.0;
+    updater->FrameBegin();
+    const auto moved = ParallaxDisplacement(*updater, *node);
+    EXPECT_NEAR(moved.x(), (x - 640.0f) * 0.5f * 0.2f, 1e-3f);
+    EXPECT_NEAR(moved.y(), (y - 180.0f) * 0.5f * 0.4f, 1e-3f);
+
+    // The static-reuse cache and the on-demand clock learn of it from the pass: one
+    // that follows the cursor is redrawn, and wakes a still scene for the pointer.
+    EXPECT_NE(updater->FrameVaryingUniforms(node, 0, "") & frame_varying_uniform::kParallax, 0u);
+}
+
+// Parallax is measured from the outermost layer of a tree and takes its depth, as
+// for every other layer; the depth a text layer under a group keeps in the file
+// is stale.
+TEST(TextObjectRuntime, ATextLayerUnderAGroupRidesTheGroupsParallax) {
+    fs::VFS vfs;
+    MountAssets(vfs);
+    audio::SoundManager sound_manager;
+    WPSceneParser       parser;
+    ProjectProperties   properties;
+    auto scene = parser.Parse(SceneParseRequest { .scene_id           = "text-parallax-group",
+                                                  .project_properties = &properties },
+                              ParallaxTextScene(R"([
+          {"id":1,"name":"group","origin":[320,180,0],"parallaxDepth":[0.5,0.5]},
+          {"id":2,"name":"caption","parent":1,"text":"hello","font":"Arial","pointsize":20,
+           "origin":[100,80,0],"parallaxDepth":[9,9],"visible":true}
+        ])"),
+                              vfs, sound_manager);
+    ASSERT_NE(scene, nullptr);
+    auto* group   = FindRootChild(*scene, "group");
+    auto* updater = dynamic_cast<WPShaderValueUpdater*>(scene->shaderValueUpdater.get());
+    ASSERT_NE(group, nullptr);
+    ASSERT_NE(updater, nullptr);
+    ASSERT_EQ(group->GetChildren().size(), 1u);
+    auto* node = group->GetChildren().front().get();
+    ASSERT_EQ(node->Name(), "caption");
+    updater->InitUniforms(node, [](std::string_view name) { return name == "g_ModelMatrix"; });
+
+    // The group sits at the centre of the view, so the cursor centred leaves the tree alone.
+    updater->FrameBegin();
+    EXPECT_LT(ParallaxDisplacement(*updater, *node).norm(), 1e-3f);
+    // The cursor against the right edge moves the whole tree by the group's distance
+    // from it, at the group's depth.
+    updater->MouseInput(1.0, 0.5);
+    scene->frameTime = 1.0;
+    updater->FrameBegin();
+    const auto moved = ParallaxDisplacement(*updater, *node);
+    EXPECT_NEAR(moved.x(), (320.0f - 640.0f) * 0.5f * 0.5f, 1e-3f);
+    EXPECT_NEAR(moved.y(), 0.0f, 1e-3f);
+}
+
 TEST(TextObjectRuntime, ParserRoutesTextObjectEffectsThroughImageEffectLayer) {
     fs::VFS vfs;
     MountAssets(vfs,

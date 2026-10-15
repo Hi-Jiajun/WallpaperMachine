@@ -4971,6 +4971,133 @@ TEST_F(MetalSceneDraw, ATextLayersColourBlendModeAppliesItsColourAndAlphaOnceOnB
 
 namespace
 {
+/// A white "I" and a red 64 pixel square, each 80 pixels to the right of the centre of
+/// the canvas and 40 above or below it, both at parallax depth `depth`, under camera
+/// parallax of amount 1 with the cursor followed at once. With `effect` the text goes
+/// through a copy effect chain.
+std::filesystem::path WriteTextParallaxFixture(const std::filesystem::path& root, bool effect,
+                                               std::string_view depth)
+{
+    WriteTextFixture(root, "I", effect);
+    const auto project = WriteFixture(root);
+    std::ofstream(root / "models/tile.json")
+        << R"({"width":64,"height":64,"material":"materials/tile.json"})";
+    std::ofstream(root / "shaders/metal_probe.frag")
+        << "void main() { gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0); }\n";
+    std::ofstream(root / "layout.json")
+        << R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+           R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0,0,0],)"
+           R"("cameraparallax":true,"cameraparallaxamount":1,"cameraparallaxdelay":0,)"
+           R"("cameraparallaxmouseinfluence":1,)"
+           R"("orthogonalprojection":{"width":384,"height":256}},)"
+           R"("objects":[{"id":1,"name":"caption","text":"I","font":"Arial","pointsize":24,)"
+           R"("origin":[272,168,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true,)"
+           R"("parallaxDepth":)"
+        << depth << (effect ? R"(,"effects":[{"file":"effects/probe.json","visible":true}])" : "")
+        << R"(},{"id":2,"name":"tile","image":"models/tile.json","origin":[272,88,0],)"
+           R"("scale":[1,1,1],"angles":[0,0,0],"visible":true,"parallaxDepth":)"
+        << depth << "}]}";
+    return project;
+}
+
+/// Where the ink of one layer sits in a picture: the centre of its pixels' weight, in
+/// pixels from the top left. The text is white on black, the square red.
+struct InkCentre
+{
+    double x { 0.0 };
+    double y { 0.0 };
+    double weight { 0.0 };
+};
+
+InkCentre InkCentreOf(const RendererPicture& picture, bool text)
+{
+    InkCentre ink;
+    for (uint32_t y = 0; y < picture.height; ++y) {
+        for (uint32_t x = 0; x < picture.width; ++x) {
+            const auto*  pixel = &picture.rgb[(std::size_t(y) * picture.width + x) * 3];
+            const double w     = text ? pixel[1] : (pixel[1] < 40 ? pixel[0] : 0);
+            ink.x += w * x;
+            ink.y += w * y;
+            ink.weight += w;
+        }
+    }
+    if (ink.weight > 0.0) {
+        ink.x /= ink.weight;
+        ink.y /= ink.weight;
+    }
+    return ink;
+}
+} // namespace
+
+TEST_F(MetalSceneDraw, CameraParallaxMovesATextLayerAsItMovesAnImageOnBothRenderers)
+{
+    // Wallpaper Engine moves a text layer by the camera parallax as it moves an image
+    // layer: by its distance from the point the cursor eases to, times its depth and
+    // the scene's amount. The text and the square sit the same 80 pixels right of the
+    // centre of the canvas, 40 above and below it; at depth 0 each is where its origin
+    // puts it, at depth 0.5 with the cursor centred it is half as far from the centre
+    // again: the square 40 right and 20 down, the text 40 right and 20 up. A cursor at
+    // 0.75 of the width moves the point they are measured from 96 right, so both end
+    // 8 left of their origins. A text that goes through an effect chain moves the same
+    // way: once, not twice.
+    struct Variant
+    {
+        const char* name;
+        bool        effect;
+        double      cursor;
+        double      shift_x; // pixels to the right, text and square alike
+    };
+    for (const auto& variant : { Variant { "plain, cursor centred", false, 0.5, 40.0 },
+                                 Variant { "plain, cursor right", false, 0.75, -8.0 },
+                                 Variant { "effect chain, cursor centred", true, 0.5, 40.0 } }) {
+        SCOPED_TRACE(variant.name);
+        for (const bool native : { false, true }) {
+            SCOPED_TRACE(native ? "native" : "compatibility");
+            std::map<std::string, RendererPicture> pictures;
+            for (const std::string depth : { "[0,0]", "[0.5,0.5]" }) {
+                const std::string name = std::string("text-parallax-") +
+                                         (variant.effect ? "effect-" : "plain-") +
+                                         (native ? "native-" : "compat-") +
+                                         (depth == "[0,0]" ? "rest-" : "depth-") +
+                                         std::to_string(int(variant.cursor * 100));
+                const auto project = WriteTextParallaxFixture(root_ / name, variant.effect, depth);
+                LoadedScene loaded;
+                std::string error;
+                ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+                if (native) {
+                    const auto selection = SelectSceneBackend(*loaded.scene);
+                    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal)
+                        << selection.fallback_reason;
+                }
+                loaded.scene->shaderValueUpdater->MouseInput(variant.cursor, 0.5);
+                pictures[depth] =
+                    DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+                ASSERT_TRUE(pictures[depth].error.empty()) << pictures[depth].error;
+                ASSERT_EQ(pictures[depth].rgb.size(), 384u * 256u * 3u);
+            }
+            const auto& rest  = pictures["[0,0]"];
+            const auto& moved = pictures["[0.5,0.5]"];
+            const auto  text_before = InkCentreOf(rest, true);
+            const auto  text_after  = InkCentreOf(moved, true);
+            const auto  tile_before = InkCentreOf(rest, false);
+            const auto  tile_after  = InkCentreOf(moved, false);
+            ASSERT_GT(text_before.weight, 1000.0) << "the text was not drawn";
+            ASSERT_GT(text_after.weight, 1000.0) << "the text moved out of the picture";
+            ASSERT_GT(tile_after.weight, 1000.0) << "the square was not drawn";
+            // The square sits 40 below the centre: it moves down by half of that.
+            EXPECT_NEAR(tile_after.x - tile_before.x, variant.shift_x, 1.0);
+            EXPECT_NEAR(tile_after.y - tile_before.y, 20.0, 1.0);
+            // The text sits 40 above it: it moves up by half of that.
+            EXPECT_NEAR(text_after.x - text_before.x, variant.shift_x, 1.0)
+                << "the text did not move with the layers around it";
+            EXPECT_NEAR(text_after.y - text_before.y, -20.0, 1.0)
+                << "the text did not move with the layers around it";
+        }
+    }
+}
+
+namespace
+{
 /// A 16 by 12 layer with a copy effect, shown 16 times larger: its target holds
 /// one texel to every 16 pixels of the picture, so how the target is sampled is
 /// the whole of what separates a smooth gradient from a staircase.

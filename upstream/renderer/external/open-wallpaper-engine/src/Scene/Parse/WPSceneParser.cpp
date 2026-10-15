@@ -2418,6 +2418,16 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
                                 /* preserve_effect_fbo_resolution */ true,
                                 color_blend_effect.has_value() ? &obj.effects[*color_blend_effect]
                                                                : nullptr);
+        } else {
+            // Camera parallax moves a layer through the model matrix of the draw, and
+            // the value updater adds it to a draw that has a record with the layer's
+            // depth. A text layer drawn through effects has it on its effect passes
+            // (`AttachEffectsToNode`); one the card draws straight onto the scene has
+            // none unless it is made here, and stood still while every other layer of
+            // its depth moved. A depth a script writes finds this record and changes it.
+            WPShaderValueData shader_value_data;
+            shader_value_data.parallaxDepth = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
+            context.shader_updater->SetNodeData(node.get(), shader_value_data);
         }
         const auto& card = through_effects ? effect_final_frame : render_frame;
         context.text_cards[obj.id] = card;

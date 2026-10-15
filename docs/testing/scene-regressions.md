@@ -94,7 +94,10 @@ Playback, backend, host and startup areas are in
   `.ZeroParallaxDelayFollowsTheCursorAtOnce` and
   `.ParallaxLayersAreReportedAsFollowingTheCursor` in `script_runtime_compat_test`;
   `SceneSchema.ParserCopiesImageParallaxDepthToPuppetMaterialSlots` in
-  `scene_schema_tests`.
+  `scene_schema_tests`; `TextObjectRuntime.CameraParallaxMovesAPlainTextLayerByItsDepth`
+  and `.ATextLayerUnderAGroupRidesTheGroupsParallax` in `text_object_runtime_test`;
+  `MetalSceneDraw.CameraParallaxMovesATextLayerAsItMovesAnImageOnBothRenderers` in
+  `metal_scene_draw_smoke`.
   - In a 2D scene, as in Wallpaper Engine, parallax moves each layer tree by its
     outermost layer's distance from the eased cursor point, times that layer's
     `parallaxDepth` and `cameraparallaxamount`. The point rests at the view centre
@@ -111,6 +114,19 @@ Playback, backend, host and startup areas are in
     reusable (`LayerTextureReference.AReferencedLayerIsItsCardWhereverTheSceneShowsIt`
     in `layer_texture_reference_test`). What this costs is under
     [Known limitations](renderer.md#known-limitations).
+  - A text layer is a parallax layer like any other: Wallpaper Engine's draw loop
+    adds the offset to every object it draws, text included. A text layer its own
+    card draws straight onto the scene (no effects, so no pass carries its depth)
+    gets the value updater record that holds its `parallaxDepth`, as an image layer
+    without effects does. Without it the layer stayed on its origin however the
+    cursor moved, out of step with the layers around it at the same depth, which
+    sit `(origin - centre) x amount x depth` off theirs even at rest. The unit tests
+    read the model matrix of the text pass at rest and with the cursor at the edge,
+    its `kParallax` report, and a text under a group riding the group's depth and
+    anchor; the Metal test draws a text and a 64 pixel square at the same distance
+    from the centre on both renderers and measures how far their ink moves against
+    the same scene at depth 0, with the cursor centred and away from the centre, and
+    for a text drawn through a copy effect (moved once, not twice).
   - `cameraparallaxdelay` of zero means no easing. Dividing by it makes the eased
     cursor NaN, which reaches every parallax layer's model matrix and leaves only
     the clear color on both backends.
