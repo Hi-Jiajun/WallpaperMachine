@@ -105,6 +105,13 @@ shaders are the ones compiled: the flipped screen coordinate of the compositing
 pass, a brace-listed sample kernel, and a light falloff that stays defined beyond a
 light's radius.
 
+A vertex shader may assign to its own inputs, as Wallpaper Engine's HLSL lets it (the
+Shadow effect's default `a_TexCoord *= atFactor`, a factor of 1 at its default
+settings). The input keeps reading the mesh attribute it names on both renderers, so
+a text or image layer under such an effect is drawn at its own texture coordinates
+and not at the vertex position's, which left a text layer empty and an image layer
+sampled at the wrong place.
+
 Scene lighting works as in Wallpaper Engine, on both renderers. A lit shader
 (`genericimage4`, `generic4`, the particle, rope, foliage and fluid shaders) asks for
 `#require LightingV1`; the shader compiler writes in a `PerformLighting_V1` with one

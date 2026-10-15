@@ -3650,6 +3650,67 @@ fn a_redeclared_vertex_index_is_no_vertex_input_of_the_compiled_program() {
     }
 }
 
+#[test]
+fn a_vertex_input_the_shader_writes_keeps_the_attribute_name_the_mesh_provides() {
+    // HLSL lets a vertex shader assign to its inputs, so the legalizer reads a
+    // written input through a local copy. Reflection feeds the renderer's
+    // lookup of the mesh attribute by name: a name carrying the copy's prefix
+    // matches no attribute and the renderer would bind the position instead.
+    let vertex = concat!(
+        "attribute vec3 a_Position;\n",
+        "attribute vec2 a_TexCoord;\n",
+        "attribute vec4 a_Color;\n",
+        "uniform mat4 g_ModelViewProjectionMatrix;\n",
+        "uniform float g_Scale;\n",
+        "varying vec2 v_TexCoord;\n",
+        "varying vec4 v_Color;\n",
+        "void main() {\n",
+        "    a_Position.xy *= g_Scale;\n",
+        "    a_TexCoord *= g_Scale;\n",
+        "    gl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n",
+        "    v_TexCoord = a_TexCoord;\n",
+        "    v_Color = a_Color;\n",
+        "}\n",
+    );
+    // The fragment stage copies a written varying the same way; it is linked
+    // by location, so it still meets the vertex stage's output.
+    let fragment = concat!(
+        "varying vec2 v_TexCoord;\nvarying vec4 v_Color;\n",
+        "void main() {\n",
+        "    v_TexCoord.x += 0.0;\n",
+        "    gl_FragColor = v_Color * v_TexCoord.x;\n",
+        "}\n",
+    );
+    for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+        let program = compile_program("written_inputs", target, vertex, fragment);
+        assert!(
+            legalized_stage(&program, ShaderStageKind::Fragment)
+                .contains("vec2 v_TexCoord = _we_in_v_TexCoord;"),
+            "the written varying is read through a local copy for {target:?}"
+        );
+        assert!(
+            legalized_stage(&program, ShaderStageKind::Vertex)
+                .contains("vec2 a_TexCoord = _we_in_a_TexCoord;"),
+            "the written input is read through a local copy for {target:?}"
+        );
+        let inputs: Vec<_> = program
+            .reflection()
+            .vertex_inputs()
+            .iter()
+            .map(|input| (input.name().to_owned(), input.location().index()))
+            .collect();
+        assert_eq!(
+            inputs,
+            [
+                ("a_Position".to_owned(), 0),
+                ("a_TexCoord".to_owned(), 1),
+                ("a_Color".to_owned(), 2),
+            ],
+            "{target:?}"
+        );
+    }
+}
+
 fn pipeline() -> DefaultShaderPipeline<InMemoryShaderSourceProvider> {
     DefaultShaderPipeline::new(
         InMemoryShaderSourceProvider::new().with_source(

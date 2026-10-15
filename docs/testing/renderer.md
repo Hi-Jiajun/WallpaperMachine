@@ -733,6 +733,15 @@ into private textures; the three that draw skip visibly without a Metal device.
   `castvolumetrics` adds no light shafts. When a kind has more lights than its
   `lightconfig` count, the first ones in scene order are lit, where Wallpaper Engine
   sorts them first.
+- **A vertex input the mesh does not provide is bound to the position, silently.**
+  Both renderers look each reflected vertex input up in the mesh's attributes by
+  name and, for a name that is not there, read the first buffer at offset 0 (the
+  native renderer refuses only a puppet's bone indices and weights). That is
+  right for an input a shader declares and never reads, and it hid a shader that
+  reads one: a written input was reflected under another name until pipeline
+  revision 16 ([Shader pipeline](scene-regressions.md#shader-pipeline)). A
+  picture that looks like a layer sampling at its vertex positions is this
+  fallback.
 - Wallpaper Engine's `fur4` shader does not compile on its own: its instanced shells read
   the dialect's cast macros (`CASTF` among them), which the compiler does not supply with
   `CASTI`, `CASTU`, `CAST4U`, `DECLARE_SAMPLER2D_PARAMETER` and `MAKE_SAMPLER2D_ARGUMENT`.

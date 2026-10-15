@@ -1678,6 +1678,30 @@ Rust regressions in `crates/shader/tests` (`legalize`, `preprocess`,
   builtins; the author's `inverse` on both targets) and `pipeline` (the screen
   coordinate, the kernel, the falloff, the vertex inputs, and the shipped
   `effectcomposebackground` and `generic4` stages when the assets are present).
+- **A vertex input the shader writes keeps its mesh binding** — Wallpaper Engine's
+  HLSL lets a vertex shader assign to its inputs (`a_TexCoord *= atFactor` in the
+  workshop Shadow effect, whose default `AT=1` combo makes the factor 1). The
+  legalizer reads such an input through a local copy: it declares `_we_in_<name>`
+  and keeps `<name>` as the local, and Naga names the entry-point argument after
+  the declaration, so reflection reported `_we_in_a_TexCoord`. Both renderers bind
+  a vertex attribute to the mesh by its reflected name and give a name the mesh
+  does not provide the first buffer at offset 0 (the position), so a layer under
+  such an effect read its texture coordinate from the vertex position: a text card
+  sampled empty texels and vanished, an image layer sampled at the wrong place, and
+  a solid layer hid it by being one colour. Reflection now reports the source name
+  (`StageInterface::source_name`); nothing else about the compiled stage changes,
+  so SPIR-V and MSL stay byte-identical and there is no extra pass, buffer or
+  per-frame work. Pipeline revision 16 recompiles stored programs, whose cached
+  reflection carries the old name. A read-only input was never renamed.
+  A local scene that put text layers under the Shadow effect's default combo
+  shows them again on the native renderer. Tests: `pipeline`
+  (`a_vertex_input_the_shader_writes_keeps_the_attribute_name_the_mesh_provides`:
+  both targets, a written position, a written texture coordinate and a read-only
+  colour keep their names and locations) and
+  `MetalSceneDraw.AVertexShaderThatWritesItsInputsStillReadsTheMeshOnBothRenderers`
+  (a card showing its texture coordinates, alone and behind a single-pass effect,
+  drawn with a shader that writes `a_Position` and `a_TexCoord` unchanged and one
+  that does not: byte-equal pictures on each renderer).
 - **Repairs for permissive-path shaders** — the pipeline handles undersized
   cross-stage varying declarations, conditional helper headers, source-defined
   `log10`, legacy scalar/vector argument conversion, compound assignment

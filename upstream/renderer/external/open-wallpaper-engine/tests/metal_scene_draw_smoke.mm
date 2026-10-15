@@ -2896,6 +2896,85 @@ TEST_F(MetalSceneDraw, AFullscreenLayerCoversTheScreenWhereverItsGroupSitsOnBoth
         << "the renderers draw the fullscreen layer differently";
 }
 
+TEST_F(MetalSceneDraw, AVertexShaderThatWritesItsInputsStillReadsTheMeshOnBothRenderers)
+{
+    // Wallpaper Engine's HLSL lets a vertex shader assign to its inputs (a
+    // shadow effect's `a_TexCoord *= atFactor`). The legalizer reads such an
+    // input through a local copy; both renderers find the mesh attribute for
+    // each vertex input by its reflected name, and under the copy's name they
+    // found none and read the position instead. The fixture's card shows its
+    // texture coordinates, drawn on its own and again through a single-pass
+    // effect that reads the layer back at its own: writing the inputs without
+    // changing them must leave the picture as it is.
+    std::map<std::string, RendererPicture> pictures;
+    for (const bool native : { false, true }) {
+        for (const bool through_effect : { false, true }) {
+            for (const bool writes : { false, true }) {
+                const std::string name = std::string(native ? "written-input-native" : "written-input-compat") +
+                                         (through_effect ? "-effect" : "-card") +
+                                         (writes ? "-written" : "-plain");
+                const auto project = WriteFixture(root_ / name);
+                const auto file    = [&](const std::string& path, const std::string& text) {
+                    std::filesystem::create_directories((root_ / name / path).parent_path());
+                    std::ofstream(root_ / name / path) << text;
+                };
+                const std::string vertex =
+                    "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\n"
+                    "attribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\nvoid main() {\n" +
+                    std::string(writes ? "  a_Position.xy *= 1.0;\n  a_TexCoord *= 1.0;\n" : "") +
+                    "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+                    "  v_TexCoord = a_TexCoord;\n}\n";
+                if (through_effect) {
+                    file("shaders/through.vert", vertex);
+                    file("shaders/through.frag",
+                         "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\n"
+                         "void main() {\n  gl_FragColor = texture2D(g_Texture0, v_TexCoord);\n}\n");
+                    file("materials/through.json",
+                         R"({"passes":[{"shader":"through","blending":"normal","cullmode":"nocull",)"
+                         R"("depthtest":"disabled","depthwrite":"disabled","textures":[null]}]})");
+                    file("effects/through/effect.json",
+                         R"({"name":"through","passes":[{"material":"materials/through.json"}]})");
+                    file("layout.json",
+                         R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+                         R"("general":{"clearcolor":[0,0,0],"bloom":false,"cameraparallax":false,)"
+                         R"("orthogonalprojection":{"width":384,"height":256}},)"
+                         R"("objects":[{"id":1,"name":"tile","image":"models/tile.json","origin":[192,128,0],)"
+                         R"("scale":[1,1,1],"angles":[0,0,0],"visible":true,)"
+                         R"("effects":[{"file":"effects/through/effect.json","id":2,"visible":true}]}]})");
+                } else {
+                    file("shaders/metal_probe.vert", vertex);
+                }
+                LoadedScene loaded;
+                std::string error;
+                ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+                if (native) {
+                    const auto selection = SelectSceneBackend(*loaded.scene);
+                    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+                }
+                auto& picture = pictures[name];
+                picture       = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
+                ASSERT_TRUE(picture.error.empty()) << name << ": " << picture.error;
+                ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u) << name;
+            }
+        }
+    }
+    for (const bool native : { false, true }) {
+        for (const bool through_effect : { false, true }) {
+            const std::string prefix = std::string(native ? "written-input-native" : "written-input-compat") +
+                                       (through_effect ? "-effect" : "-card");
+            SCOPED_TRACE(prefix);
+            const auto& plain = pictures[prefix + "-plain"].rgb;
+            // The card covers x 64..320: its texture coordinate's red runs
+            // across it, so a picture of anything else shows.
+            const auto red = [&plain](std::size_t x) { return plain[(128u * 384u + x) * 3u]; };
+            EXPECT_LT(red(100) + 60, red(280)) << "the card does not show its texture coordinates";
+            EXPECT_EQ(pictures[prefix + "-written"].rgb, plain)
+                << "a shader that writes its vertex inputs read another mesh attribute than the "
+                   "one it names";
+        }
+    }
+}
+
 TEST_F(MetalSceneDraw, AScreenReadBeforeAnyDrawSeesTheBackgroundEveryFrameOnBothRenderers)
 {
     // The only layer blends with the screen, so the first thing each frame
