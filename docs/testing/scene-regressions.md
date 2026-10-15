@@ -1379,6 +1379,21 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   that is neither is refused, the renderer is told at start-up and once per
   change, and every open scene is handed the render scale in force without a
   reconcile), and `PanelPerformanceSettingsTests` the panel's side.
+- **Particle owner and inherited scale** —
+  `MetalSceneDraw.ParsedParticleBillboardsKeepTheirAuthoredScaleThroughParentsAndChildren`
+  parses and simulates an original deterministic scene on both production
+  renderers. Its three particles have one local size and owner scales .25, .75
+  and 1: their 384x256 output bounds are 20x20, 60x60 and 80x80, matching the
+  same original fixture rendered by Wallpaper Engine 2.8.42. Mirrored owners,
+  a nonuniform parent and a nonuniform child-particle transform also have
+  exact bounds and coverage assertions. Local size must not be divided by an
+  average owner scale: that made small authored flames enormous and erased
+  the difference between their scales. CPU coverage in
+  `particle_mouse_controlpoint_test` protects authored-canvas and perspective
+  projection, depth, inherited/nonuniform/mirrored scale and model-space size;
+  `particle_rope_geometry_test` checks local endpoint widths. No transform or
+  scale norm is read during raw geometry generation. A `worldspace` particle
+  file is the exception that draws through none of its layer's matrix (above).
 - **Random sprite-sheet frames** — `ParticleMouseControlpoint.SpawnedParticlesCarryAnIndependentFrameValueSpreadOverTheSheet`
   in `particle_mouse_controlpoint_test`. A `randomframe` particle keeps one frame
   for its life: the particle's own `seed`, one draw at spawn, so identical spawns
@@ -2552,6 +2567,15 @@ Rust regressions in `crates/shader/tests` (`legalize`, `preprocess`,
   booleans: the same picture on both renderers) and
   `UnpackShaderCompileSmoke.CompilesAnEffectUnderTheCombosTheSceneSetsOnIt`; the
   first two fail without the change.
+- **Source-defined multiplication helpers** —
+  `MetalSceneDraw.ASourceDefinedMulDrawsItsOwnResultWhileTheOtherStageUsesTheBuiltin`
+  compiles original overloaded helpers, a prototype and nested calls and draws
+  their analytically known RGB result and card coverage through both production
+  renderers. A function named `mul` in the source is not the HLSL compatibility
+  builtin: its declaration and calls must keep the author's arithmetic. The
+  vertex stage, which declares no helper, still uses builtin `mul` to place the
+  card. A dropped material or substituting ordinary multiplication cannot pass
+  the color and coverage assertions.
 - **Repairs for permissive-path shaders** — the pipeline handles undersized
   cross-stage varying declarations, conditional helper headers, source-defined
   `log10`, legacy scalar/vector argument conversion, compound assignment

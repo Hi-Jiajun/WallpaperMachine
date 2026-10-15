@@ -1351,6 +1351,202 @@ void main() {
     }
 }
 
+TEST_F(MetalSceneDraw, ASourceDefinedMulDrawsItsOwnResultWhileTheOtherStageUsesTheBuiltin)
+{
+    // A source-defined helper is not the HLSL compatibility builtin. Its
+    // arithmetic deliberately differs from matrix multiplication, so compiling
+    // without preserving its calls cannot accidentally pass the pixel check.
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        const std::string suffix = native ? "native" : "compatibility";
+        const auto directory = root_ / ("user-mul-" + suffix);
+        const auto project = WriteFixture(directory);
+        std::ofstream(directory / "shaders/metal_probe.vert") << R"(
+uniform mat4 g_ModelViewProjectionMatrix;
+attribute vec3 a_Position;
+void main() {
+    gl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);
+}
+)";
+        std::ofstream(directory / "shaders/metal_probe.frag") << R"(
+float mul(float left, float right) {
+    return left + right;
+}
+vec3 mul(mat3 basis, vec3 color);
+vec3 mul(mat3 basis, vec3 color) {
+    return color * basis[0][0] + vec3(mul(0.0625, 0.0625), 0.25, 0.5);
+}
+void main() {
+    gl_FragColor = vec4(mul(mat3(0.5), vec3(mul(0.125, 0.125))), 1.0);
+}
+)";
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, root_ / ("user-mul-cache-" + suffix), loaded, error))
+            << error;
+        ASSERT_NE(FirstMaterial(loaded.scene->sceneGraph.get()), nullptr)
+            << "the authored material was dropped instead of compiling its helper";
+        if (native) {
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+        }
+        const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 2, 1.0 / 60.0);
+        ASSERT_TRUE(picture.error.empty()) << picture.error;
+        ASSERT_EQ(picture.width, 384u);
+        ASSERT_EQ(picture.height, 256u);
+        ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+        std::size_t colored = 0;
+        std::size_t lit = 0;
+        for (std::size_t i = 0; i < picture.rgb.size(); i += 3) {
+            const int red = picture.rgb[i];
+            const int green = picture.rgb[i + 1];
+            const int blue = picture.rgb[i + 2];
+            if (red > 1 || green > 1 || blue > 1) ++lit;
+            if (std::abs(red - 64) <= 1 && std::abs(green - 96) <= 1 &&
+                std::abs(blue - 159) <= 1) ++colored;
+        }
+        EXPECT_EQ(colored, 256u * 192u)
+            << "the helper must draw RGB(0.25, 0.375, 0.625) over the whole card";
+        EXPECT_EQ(lit, colored)
+            << "the other stage's builtin mul must still place the card on the black canvas";
+    }
+}
+
+TEST_F(MetalSceneDraw, ParsedParticleBillboardsKeepTheirAuthoredScaleThroughParentsAndChildren)
+{
+    // Wallpaper Engine 2.8.42 renders the original three-particle fixture at
+    // 384x256 with 20x20, 60x60 and 80x80 cards for scales .25, .75 and 1.
+    // These original shaders express the shipped particle ABI without needing
+    // private assets. The parser, simulation, graph, uploads and poster path
+    // are production code on each backend, not hand-built particle geometry.
+    struct Case {
+        const char* name;
+        bool parented;
+        bool child;
+        bool mirrored;
+    };
+    const Case cases[] = {
+        { "direct", false, false, false },
+        { "mirrored", false, false, true },
+        { "parented", true, false, false },
+        { "child", false, true, false },
+    };
+    for (const auto& c : cases) {
+        for (const bool native : { false, true }) {
+            const std::string label = std::string(c.name) + (native ? "-native" : "-compatibility");
+            SCOPED_TRACE(label);
+            const auto directory = root_ / ("particle-scale-" + label);
+            const auto project = WriteFixture(directory);
+            std::ofstream(directory / "shaders/metal_probe.vert") << R"(
+uniform mat4 g_ModelViewProjectionMatrix;
+attribute vec3 a_Position;
+attribute vec4 a_TexCoordVec4;
+attribute vec4 a_Color;
+varying vec4 v_Color;
+void main() {
+    vec3 position = a_Position + vec3(
+        (a_TexCoordVec4.x - 0.5) * a_TexCoordVec4.w,
+        -(a_TexCoordVec4.y - 0.5) * a_TexCoordVec4.w, 0.0);
+    gl_Position = mul(vec4(position, 1.0), g_ModelViewProjectionMatrix);
+    v_Color = a_Color;
+}
+)";
+            std::ofstream(directory / "shaders/metal_probe.frag") << R"(
+varying vec4 v_Color;
+void main() { gl_FragColor = v_Color; }
+)";
+            auto particle = nlohmann::json::parse(R"({
+"maxcount":1,"starttime":0,"flags":0,
+"emitter":[{"id":1,"name":"sphererandom","rate":0,"instantaneous":1,
+"distancemin":0,"distancemax":0,"directions":[1,1,1],"origin":[0,0,0],
+"speedmin":0,"speedmax":0}],
+"initializer":[{"id":2,"name":"lifetimerandom","min":1000,"max":1000},
+{"id":3,"name":"sizerandom","min":160,"max":160},
+{"id":4,"name":"colorrandom","min":[255,255,255],"max":[255,255,255]}],
+"operator":[],"renderer":[{"name":"sprite"}],"material":"materials/tile.json"
+})");
+            std::filesystem::create_directories(directory / "particles");
+            if (c.child) {
+                std::ofstream(directory / "particles/child.json") << particle;
+                particle["initializer"].push_back(
+                    {{"id", 5}, {"name", "alpharandom"}, {"min", 0}, {"max", 0}});
+                particle["children"] = nlohmann::json::array({
+                    {{"name", "particles/child.json"}, {"type", "static"}, {"maxcount", 1},
+                     {"origin", {0, 0, 0}}, {"scale", {0.5, 2.0, 1.0}}, {"angles", {0, 0, 0}}},
+                });
+            }
+            std::ofstream(directory / "particles/stationary.json") << particle;
+            auto layout = nlohmann::json::parse(std::ifstream(directory / "layout.json"));
+            layout["objects"] = nlohmann::json::array();
+            if (c.parented) {
+                layout["objects"].push_back(
+                    {{"id", 10}, {"name", "nonuniform parent"}, {"origin", {0, 0, 0}},
+                     {"scale", {0.5, 2.0, 1.0}}, {"angles", {0, 0, 0}}, {"visible", true}});
+            }
+            const float scales[] = { 0.25f, 0.75f, 1.0f };
+            const std::array<float, 3> colors[] = {
+                { 1.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f },
+            };
+            for (int i = 0; i < 3; ++i) {
+                const int center = 64 + i * 128;
+                nlohmann::json object = {
+                    {"id", i + 1}, {"name", "particle " + std::to_string(i)},
+                    {"particle", "particles/stationary.json"},
+                    {"origin", {c.parented ? center * 2 : center, c.parented ? 64 : 128, 0}},
+                    {"scale", {c.mirrored ? -scales[i] : scales[i], scales[i], 1.0f}},
+                    {"angles", {0, 0, 0}}, {"visible", true},
+                    {"instanceoverride", {{"colorn", colors[i]}}},
+                };
+                if (c.parented) object["parent"] = 10;
+                layout["objects"].push_back(std::move(object));
+            }
+            std::ofstream(directory / "layout.json") << layout;
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / ("particle-scale-cache-" + label), loaded, error))
+                << error;
+            ASSERT_NE(FirstMaterial(loaded.scene->sceneGraph.get()), nullptr);
+            if (native) {
+                const auto selection = SelectSceneBackend(*loaded.scene);
+                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            }
+            const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 2, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
+            ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+            std::array<uint32_t, 3> left { 384, 384, 384 }, right {}, top { 256, 256, 256 }, bottom {};
+            std::array<std::size_t, 3> counts {};
+            std::size_t lit = 0;
+            for (uint32_t y = 0; y < 256; ++y) {
+                for (uint32_t x = 0; x < 384; ++x) {
+                    const auto offset = (std::size_t(y) * 384 + x) * 3;
+                    const uint8_t* rgb = picture.rgb.data() + offset;
+                    if (rgb[0] > 1 || rgb[1] > 1 || rgb[2] > 1) ++lit;
+                    for (std::size_t channel = 0; channel < 3; ++channel) {
+                        if (rgb[channel] <= 200 || rgb[(channel + 1) % 3] >= 2 ||
+                            rgb[(channel + 2) % 3] >= 2) continue;
+                        ++counts[channel];
+                        left[channel] = std::min(left[channel], x);
+                        right[channel] = std::max(right[channel], x + 1);
+                        top[channel] = std::min(top[channel], y);
+                        bottom[channel] = std::max(bottom[channel], y + 1);
+                    }
+                }
+            }
+            for (std::size_t channel = 0; channel < 3; ++channel) {
+                const int center = 64 + static_cast<int>(channel) * 128;
+                const int width = static_cast<int>(80 * scales[channel] * (c.parented || c.child ? 0.5f : 1.0f));
+                const int height = static_cast<int>(80 * scales[channel] * (c.parented || c.child ? 2.0f : 1.0f));
+                EXPECT_EQ(left[channel], center - width / 2);
+                EXPECT_EQ(right[channel], center + width / 2);
+                EXPECT_EQ(top[channel], 128 - height / 2);
+                EXPECT_EQ(bottom[channel], 128 + height / 2);
+                EXPECT_EQ(counts[channel], std::size_t(width) * height);
+            }
+            EXPECT_EQ(lit, counts[0] + counts[1] + counts[2]);
+        }
+    }
+}
+
 TEST_F(MetalSceneDraw, SingleSampleAlphaCoveragePreservesTransparentAndPartialPixels)
 {
     const auto project = WriteFixture(root_ / "coverage");
