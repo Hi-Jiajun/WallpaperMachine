@@ -77,7 +77,7 @@ std::string CfUrlToPath(CFURLRef url) {
     return CfStringToUtf8(path.get());
 }
 
-std::string ResolveAppleSystemFontPath(std::string_view family) {
+SystemFontFace ResolveAppleSystemFont(std::string_view family) {
     if (family.empty()) return {};
 
     ScopedCf<CFStringRef> family_name(
@@ -103,18 +103,26 @@ std::string ResolveAppleSystemFontPath(std::string_view family) {
 
     ScopedCf<CFTypeRef> url_value(
         CTFontDescriptorCopyAttribute(matched_descriptor.get(), kCTFontURLAttribute));
-    return CfUrlToPath(static_cast<CFURLRef>(url_value.get()));
+    SystemFontFace face { .path = CfUrlToPath(static_cast<CFURLRef>(url_value.get())) };
+    if (face.path.empty()) return {};
+
+    ScopedCf<CFTypeRef> name_value(
+        CTFontDescriptorCopyAttribute(matched_descriptor.get(), kCTFontNameAttribute));
+    if (name_value.get() != nullptr && CFGetTypeID(name_value.get()) == CFStringGetTypeID()) {
+        face.postscript_name = CfStringToUtf8(static_cast<CFStringRef>(name_value.get()));
+    }
+    return face;
 }
 #endif
 
 } // namespace
 
-std::string ResolveSystemFontPath(std::string_view system_font_key) {
+SystemFontFace ResolveSystemFont(std::string_view system_font_key) {
     const auto family = SystemFontFamily(system_font_key);
     if (family.empty()) return {};
 
 #ifdef __APPLE__
-    if (const auto path = ResolveAppleSystemFontPath(family); !path.empty()) return path;
+    if (auto face = ResolveAppleSystemFont(family); ! face.path.empty()) return face;
 
     // Windows workshop fonts (notably Consolas) are often absent on macOS.
     // Use a real, metrically suitable installed face rather than letting the
@@ -126,12 +134,16 @@ std::string ResolveSystemFontPath(std::string_view system_font_key) {
     const bool monospaced = normalized == "consolas" || normalized == "courier new" ||
                             normalized == "lucida console";
     for (const auto fallback : {monospaced ? "Menlo" : "Helvetica", "Arial", "Times"}) {
-        if (const auto path = ResolveAppleSystemFontPath(fallback); !path.empty()) return path;
+        if (auto face = ResolveAppleSystemFont(fallback); ! face.path.empty()) return face;
     }
     return {};
 #else
     return {};
 #endif
+}
+
+std::string ResolveSystemFontPath(std::string_view system_font_key) {
+    return ResolveSystemFont(system_font_key).path;
 }
 
 } // namespace wallpaper

@@ -47,6 +47,8 @@
 #include <thread>
 #include <vector>
 
+#include <unistd.h>
+
 namespace wallpaper
 {
 namespace vulkan
@@ -5627,6 +5629,277 @@ TEST(TextObjectRuntime, PenAdvancesAreUnhintedWholePixelsKernedWithTheNextGlyph)
     };
     // "Te": the pen steps by the kerned advance, then the 'e' adds its own ink.
     EXPECT_FLOAT_EQ(width_of("Te"), pen + width_of("e"));
+}
+
+// ---------------------------------------------------------------------------
+// Font faces: a system font is opened from its file, by the name the system gives
+// the face, and kept for the next layout; a second face is opened only for a glyph
+// the first lacks. A layout runs for every change of every text layer, so none of
+// this may cost a file read each time.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+// A layer's layout and raster, which is two measurements and one rasterisation.
+void LayOutAndRaster(const TextLayerState& state) {
+    (void)MeasureTextLayerSize(state);
+    (void)RasterOf(state);
+}
+
+std::string FaceKey(std::string_view family) { return "systemfont_" + std::string(family); }
+
+// A state that draws `text` in the installed face `font` names, as the parser fills it.
+TextLayerState StateInFace(const SystemFontFace& font, std::string text, float point_size) {
+    auto state               = HelveticaState(std::move(text), point_size);
+    state.resolved_font_path = font.path;
+    state.resolved_font_face = font.postscript_name;
+    return state;
+}
+
+uint64_t InkMass(const Rastered& raster) {
+    uint64_t mass = 0;
+    for (std::size_t at = 3; at < raster.rgba.size(); at += 4u) mass += raster.rgba[at];
+    return mass;
+}
+} // namespace
+
+TEST(TextObjectRuntime, AFallbackFaceIsOpenedOnlyWhenAGlyphIsMissing) {
+#ifdef __APPLE__
+    ResetTextFontCacheForTests();
+    const auto latin = HelveticaState("Monday 08:36, September 15", 24.0f);
+    ASSERT_FALSE(latin.resolved_font_path.empty());
+    LayOutAndRaster(latin);
+    EXPECT_EQ(TextFallbackFaceRequestsForTests(), 0u)
+        << "text the font can draw asked for a second face";
+
+    // Helvetica has no Han glyphs: the layout that meets one asks for a face for it,
+    // once per layout, however many such glyphs it holds.
+    const auto han = HelveticaState("08:36 \xE4\xB8\xAD\xE6\x96\x87\xE5\xAD\x97", 24.0f);
+    (void)MeasureTextLayerSize(han);
+    EXPECT_EQ(TextFallbackFaceRequestsForTests(), 1u);
+    (void)MeasureTextLayerSize(han);
+    EXPECT_EQ(TextFallbackFaceRequestsForTests(), 2u);
+#endif
+}
+
+TEST(TextObjectRuntime, ASystemFontIsOpenedOnceAndNotForEveryLayout) {
+#ifdef __APPLE__
+    ResetTextFontCacheForTests();
+    const auto clock = HelveticaState("08:36", 24.0f);
+    for (int tick = 0; tick < 10; ++tick) LayOutAndRaster(clock);
+    EXPECT_EQ(TextFontFilesOpenedForTests(), 1u) << "the font file was opened again for a layout";
+    EXPECT_EQ(TextFontFacesCachedForTests(), 1u);
+    // The face reads from its file; the font is not held in memory as a copy of it.
+    EXPECT_TRUE(TextFontFacesAreReadFromFilesForTests());
+
+    // The face for a glyph the font lacks is kept the same way.
+    const auto mixed = HelveticaState("08:36 \xE4\xB8\xAD", 24.0f);
+    for (int tick = 0; tick < 10; ++tick) LayOutAndRaster(mixed);
+    EXPECT_EQ(TextFontFilesOpenedForTests(), 2u);
+    EXPECT_EQ(TextFontFacesCachedForTests(), 2u);
+#endif
+}
+
+TEST(TextObjectRuntime, AFontTheWallpaperShipsIsNotOpenedFromAFile) {
+#ifdef __APPLE__
+    const auto path = ResolveSystemFontPath("systemfont_Helvetica");
+    ASSERT_FALSE(path.empty());
+    std::ifstream file(path, std::ios::binary);
+    const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)), {});
+    ASSERT_FALSE(bytes.empty());
+
+    ResetTextFontCacheForTests();
+    auto shipped               = HelveticaState("08:36", 24.0f);
+    shipped.resolved_font_kind = "asset";
+    shipped.resolved_font_path = "/assets/fonts/shipped.ttf";
+    shipped.resolved_font_data = bytes;
+    for (int tick = 0; tick < 3; ++tick) LayOutAndRaster(shipped);
+    EXPECT_EQ(TextFontFilesOpenedForTests(), 0u);
+    EXPECT_EQ(TextFontFacesCachedForTests(), 0u);
+#endif
+}
+
+TEST(TextObjectRuntime, TheFaceCacheKeepsEightFacesAndDropsTheOneUnusedLongest) {
+#ifdef __APPLE__
+    std::vector<SystemFontFace> fonts;
+    for (const char* family : {"Arial", "Courier New", "Georgia", "Impact", "Tahoma", "Trebuchet MS",
+                               "Times New Roman", "Verdana", "Comic Sans MS", "Andale Mono",
+                               "Arial Black", "Menlo", "Monaco", "Optima", "Futura"}) {
+        const auto font = ResolveSystemFont(FaceKey(family));
+        const bool seen = std::ranges::any_of(fonts, [&](const SystemFontFace& other) {
+            return other.path == font.path && other.postscript_name == font.postscript_name;
+        });
+        if (! font.path.empty() && ! seen) fonts.push_back(font);
+    }
+    if (fonts.size() < 10u) GTEST_SKIP() << "fewer than ten of the fonts macOS ships are installed";
+
+    // A space is in every font, so no layout here asks for a second face.
+    const auto lay_out = [&](std::size_t font) {
+        LayOutAndRaster(StateInFace(fonts[font], " ", 20.0f));
+    };
+    ResetTextFontCacheForTests();
+    for (std::size_t font = 0; font < 10; ++font) lay_out(font);
+    EXPECT_EQ(TextFontFilesOpenedForTests(), 10u);
+    EXPECT_EQ(TextFontFacesCachedForTests(), 8u);
+
+    lay_out(9);
+    EXPECT_EQ(TextFontFilesOpenedForTests(), 10u) << "the face used last was not kept";
+    lay_out(8);
+    lay_out(2);
+    EXPECT_EQ(TextFontFilesOpenedForTests(), 10u) << "a face among the last eight was dropped";
+    lay_out(0);
+    EXPECT_EQ(TextFontFilesOpenedForTests(), 11u) << "the face unused longest was kept";
+    EXPECT_EQ(TextFontFacesCachedForTests(), 8u);
+#endif
+}
+
+// FreeType reads a face out of a mapping of its file, which faults when the file is cut
+// short under it, so a file that has changed is opened again before it is used.
+TEST(TextObjectRuntime, AFontFileThatChangedIsOpenedAgainBeforeItsCachedFaceIsUsed) {
+#ifdef __APPLE__
+    const auto courier = ResolveSystemFont("Courier New");
+    const auto arial   = ResolveSystemFont("Arial");
+    if (courier.path.empty() || arial.path.empty() || courier.path == arial.path ||
+        std::filesystem::path(courier.path).extension() != std::filesystem::path(arial.path).extension()) {
+        GTEST_SKIP() << "no two single-face fonts of one kind to stand for the font and its replacement";
+    }
+    const auto directory = std::filesystem::temp_directory_path() /
+                           ("text-face-refresh-" + std::to_string(::getpid()));
+    std::filesystem::create_directories(directory);
+    const auto installed = directory / ("installed" + std::filesystem::path(courier.path).extension().string());
+    std::filesystem::copy_file(courier.path, installed, std::filesystem::copy_options::overwrite_existing);
+
+    SystemFontFace font { .path = installed.string(), .postscript_name = courier.postscript_name };
+    const auto     state = StateInFace(font, "08:36", 24.0f);
+    ResetTextFontCacheForTests();
+    LayOutAndRaster(state);
+    LayOutAndRaster(state);
+    EXPECT_EQ(TextFontFilesOpenedForTests(), 1u) << "an untouched file was opened again";
+
+    // The file is replaced in place by another font's bytes, as an installer that
+    // truncates and rewrites it does.
+    {
+        std::ifstream replacement(arial.path, std::ios::binary);
+        std::ofstream rewritten(installed, std::ios::binary | std::ios::trunc);
+        rewritten << replacement.rdbuf();
+    }
+    LayOutAndRaster(state);
+    EXPECT_EQ(TextFontFilesOpenedForTests(), 2u) << "a cached face outlived the file it was opened from";
+    EXPECT_EQ(TextFontFacesCachedForTests(), 1u);
+
+    // A file that is gone leaves nothing cached, and the layout still draws (in Arial).
+    std::filesystem::remove(installed);
+    LayOutAndRaster(state);
+    EXPECT_EQ(TextFontFacesCachedForTests(), 1u) << "the face of a deleted file stayed cached";
+    std::filesystem::remove_all(directory);
+#endif
+}
+
+TEST(TextObjectRuntime, AFaceOfACollectionIsChosenByItsPostScriptName) {
+#ifdef __APPLE__
+    // Songti.ttc holds four weights of one family, and its first face is not the
+    // regular one. The weight shows in how much ink a glyph has.
+    const auto songti = ResolveSystemFont(FaceKey("Songti SC"));
+    ASSERT_FALSE(songti.path.empty());
+    ASSERT_EQ(songti.postscript_name, "STSongti-SC-Regular")
+        << "the system does not name the regular weight for the family";
+
+    const auto mass_of = [&](std::string_view face) {
+        SystemFontFace font = songti;
+        font.postscript_name = std::string(face);
+        return InkMass(RasterOf(StateInFace(font, "\xE6\xB0\xB8\xE9\xAB\x98", 40.0f)));
+    };
+    const auto light   = mass_of("STSongti-SC-Light");
+    const auto regular = mass_of("STSongti-SC-Regular");
+    const auto bold    = mass_of("STSongti-SC-Bold");
+    const auto black   = mass_of("STSongti-SC-Black");
+    EXPECT_LT(light, regular);
+    EXPECT_LT(regular, bold);
+    EXPECT_LT(bold, black);
+
+    // The name the system gave is the regular one, not the file's first face.
+    EXPECT_EQ(mass_of(songti.postscript_name), regular);
+    EXPECT_NE(mass_of(""), regular);
+
+    // A name the file does not have opens the first face, and is not looked up again.
+    ResetTextFontCacheForTests();
+    const auto first = mass_of("");
+    EXPECT_EQ(mass_of("NoSuchFace-Regular"), first);
+    const auto opened = TextFontFilesOpenedForTests();
+    for (int tick = 0; tick < 5; ++tick) EXPECT_EQ(mass_of("NoSuchFace-Regular"), first);
+    EXPECT_EQ(TextFontFilesOpenedForTests(), opened);
+    EXPECT_EQ(TextFontFacesCachedForTests(), 1u);
+#endif
+}
+
+// The fullwidth comma and the ideographic comma and full stop sit on the baseline in
+// the Simplified Chinese cut of PingFang, and centred in the line in the Hong Kong
+// cut, which is the first face of PingFang.ttc.
+TEST(TextObjectRuntime, HanFallbackUsesTheSimplifiedFace) {
+#ifdef __APPLE__
+    const auto pingfang = ResolveSystemFont(FaceKey("PingFang SC"));
+    if (pingfang.postscript_name != "PingFangSC-Regular") GTEST_SKIP() << "no PingFang SC installed";
+
+    constexpr float kPointSize = 40.0f;
+    const float     em         = kPointSize * 300.0f / 72.0f;
+    // The baseline is the bottom of an H, which Helvetica has.
+    const auto reference = RasterOf(HelveticaState("H", kPointSize));
+    const auto h_box     = InkBounds(reference.rgba, reference.width, reference.height);
+    ASSERT_TRUE(h_box.Any());
+    const float baseline = static_cast<float>(h_box.max_y + 1);
+
+    for (const char* mark : {"\xEF\xBC\x8C", "\xE3\x80\x81", "\xE3\x80\x82"}) {
+        SCOPED_TRACE(mark);
+        const auto raster = RasterOf(HelveticaState(mark, kPointSize));
+        const auto box    = InkBounds(raster.rgba, raster.width, raster.height);
+        ASSERT_TRUE(box.Any()) << "no face drew the mark";
+        const float centre_above_baseline =
+            baseline - (static_cast<float>(box.min_y + box.max_y + 1) * 0.5f);
+        EXPECT_NEAR(centre_above_baseline / em, 0.0f, 0.05f);
+    }
+#endif
+}
+
+TEST(TextObjectRuntime, TheFaceTheSystemNamesReachesTheLayerFromTheSceneAndFromAScript) {
+#ifdef __APPLE__
+    TextSceneFixture fixture(R"([
+      {"id":1,"name":"system","text":"a","font":"systemfont_Songti SC","visible":true},
+      {"id":2,"name":"family","text":"a","font":"Songti SC","visible":true},
+      {"id":3,"name":"asset","text":"a","font":"fonts/asset.ttf","visible":true},
+      {"id":4,"name":"scripted","text":"a","font":"systemfont_Helvetica","visible":true}
+    ])", "text-font-face", { { "/fonts/asset.ttf", "fake-font-bytes" } });
+    ASSERT_NE(fixture.scene, nullptr);
+    auto& runtime = *fixture.scene->runtime;
+
+    EXPECT_EQ(fixture.State("system").resolved_font_face, "STSongti-SC-Regular");
+    EXPECT_EQ(fixture.State("family").resolved_font_face, "STSongti-SC-Regular");
+    EXPECT_EQ(fixture.State("system").resolved_font_path, fixture.State("family").resolved_font_path);
+    EXPECT_TRUE(fixture.State("asset").resolved_font_face.empty());
+    EXPECT_EQ(fixture.State("scripted").resolved_font_face, "Helvetica");
+
+    // A script that sets `font` is resolved the way the scene file's is.
+    ASSERT_TRUE(runtime.SetNodeTextStyle("scripted", "font", "systemfont_Songti SC"));
+    EXPECT_EQ(fixture.State("scripted").resolved_font_face, "STSongti-SC-Regular");
+    EXPECT_EQ(fixture.State("scripted").resolved_font_path, fixture.State("system").resolved_font_path);
+    ASSERT_TRUE(runtime.SetNodeTextStyle("scripted", "font", "systemfont_Helvetica"));
+    EXPECT_EQ(fixture.State("scripted").resolved_font_face, "Helvetica");
+#endif
+}
+
+TEST(TextObjectRuntime, ANewFaceOfTheSameFileLaysTheTextOutAgain) {
+    TextLayerState state { .text = "a", .font_key = "systemfont_Songti SC",
+                           .resolved_font_kind = "system", .resolved_font_identity = "Songti SC",
+                           .resolved_font_path = "/fonts/Songti.ttc",
+                           .resolved_font_face = "STSongti-SC-Regular" };
+    TextLayer layer(state);
+    layer.ClearDirty();
+    layer.SetFont(state.font_key, state.resolved_font_kind, state.resolved_font_identity,
+                  state.resolved_font_path, state.resolved_font_face, state.resolved_font_data);
+    EXPECT_FALSE(layer.dirty()) << "the same font was set again";
+    layer.SetFont(state.font_key, state.resolved_font_kind, state.resolved_font_identity,
+                  state.resolved_font_path, "STSongti-SC-Black", state.resolved_font_data);
+    EXPECT_TRUE(layer.dirty());
+    EXPECT_TRUE(layer.layoutPending());
 }
 
 TEST(TextObjectRuntime, StyledTextKeepsItsMarginWhenItsTextChanges) {

@@ -3926,11 +3926,12 @@ bool SceneRuntimeContext::SetNodeTextStyle(std::string_view name, std::string_vi
             resolved.resolved_font_kind     = "family";
             resolved.resolved_font_identity = value.empty() ? "default" : std::string(value);
             resolved.resolved_font_path.clear();
+            resolved.resolved_font_face.clear();
             resolved.resolved_font_data = SharedFontData {};
         }
         layer->second.SetFont(std::string(value), resolved.resolved_font_kind,
                               resolved.resolved_font_identity, resolved.resolved_font_path,
-                              resolved.resolved_font_data);
+                              resolved.resolved_font_face, resolved.resolved_font_data);
         return true;
     }
     if (property == "horizontalalign" || property == "verticalalign") {

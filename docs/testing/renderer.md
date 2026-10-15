@@ -924,7 +924,13 @@ into private textures; the three that draw skip visibly without a Metal device.
   kerning, ligatures, complex scripts) and draws colour glyphs from an RGBA atlas; the
   layout kerns only from a font's legacy `kern` table (Arial has one, many OpenType
   fonts have only GPOS kerning and so go unkerned), forms no ligatures, and colour
-  glyphs are monochrome or missing. It draws one quad per glyph from a distance-field atlas, so the outline of
+  glyphs are monochrome or missing. A glyph the layer's font lacks is drawn from one
+  installed face (PingFang SC, else Arial Unicode MS, else Helvetica), where Wallpaper
+  Engine tries up to eight faces in a fixed order (Arial, Segoe UI Emoji, Arial
+  Unicode, Segoe UI, Twemoji, Segoe UI Symbol, Microsoft YaHei, Malgun Gothic), so a
+  Latin glyph the font lacks comes from PingFang here and from Arial there. The font
+  files themselves are macOS's, not the Windows fonts a scene was authored with.
+  It draws one quad per glyph from a distance-field atlas, so the outline of
   a glyph that overlaps its neighbour's fill is drawn over it there, and the outline,
   blur and shadow are made here from the union of the glyphs, at their reach but not
   clipped to the atlas margin. `msdf` alone, `opaquebackground`, `backgroundcolor` and

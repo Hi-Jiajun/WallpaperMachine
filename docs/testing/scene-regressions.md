@@ -1611,7 +1611,28 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   `TextObjectRuntime.WidthAndRowLimitsProduceTheSamePixelsAsExplicitLineBreaks`
   and `.EllipsisFitsTheLastVisibleRowAndLimitFlagsRemainIndependent` compare the
   rendered pixels and layout bounds, and FreeType and fallback fonts share the
-  same wrapping and truncation rules.
+  same wrapping and truncation rules. A layout runs for every change of a text
+  layer, so the faces are kept and not read each time:
+  `TextObjectRuntime.ASystemFontIsOpenedOnceAndNotForEveryLayout` counts the font
+  files a layer's layouts open (one for the font, one more for a glyph it lacks; the
+  faces read from their files, not from a copy of the font in memory),
+  `.AFallbackFaceIsOpenedOnlyWhenAGlyphIsMissing` that text the font can draw asks for
+  no second face, `.AFontTheWallpaperShipsIsNotOpenedFromAFile` that an authored font
+  stays in memory, and `.TheFaceCacheKeepsEightFacesAndDropsTheOneUnusedLongest`
+  that ten fonts leave eight open and the one used last is not reopened, and
+  `.AFontFileThatChangedIsOpenedAgainBeforeItsCachedFaceIsUsed` that a font file
+  rewritten or deleted under a cached face is opened again, not read through the old
+  mapping. The face of
+  a collection is chosen by PostScript name, not by position in the file:
+  `.AFaceOfACollectionIsChosenByItsPostScriptName` (the four weights of Songti, by ink,
+  and a name the file lacks opens the first face once) and
+  `.HanFallbackUsesTheSimplifiedFace` (the ideographic and fullwidth commas and the
+  ideographic full stop sit on the baseline, as in PingFang SC, not 0.29 to 0.36 em
+  above it, as in the Hong Kong face that starts the file);
+  `.TheFaceTheSystemNamesReachesTheLayerFromTheSceneAndFromAScript` and
+  `.ANewFaceOfTheSameFileLaysTheTextOutAgain` cover how the name gets to the layer.
+  They need the fonts macOS ships; the Han test skips where PingFang SC is not
+  installed, and the eight-face test where fewer than ten of the fonts it names are.
 - **Text as Wallpaper Engine sets it** — `text_object_runtime_test`.
   `TextObjectRuntime.PointSizeIsRequestedFromTheFontAt300Dpi` asks FreeType for the
   face the way Wallpaper Engine does (`FT_Set_Char_Size` at 300 dpi, whose line

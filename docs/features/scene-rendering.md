@@ -443,16 +443,30 @@ glyph start (the advance after the last glyph is not part of it). Five cards tha
 Wallpaper Engine saved for text in Arial in the local scenes (with and without
 padding, a lone full stop, a run of dashes, a long run of underscores) come out to
 the pixel; other fonts, scripts and the OpenType-only kerning of many fonts have not
-been compared. The card is the text plus `padding` on each axis, and the margin is
+been compared. A system font is opened through FreeType from its file and not read
+into memory (PingFang is 78 MB), and the face of a font collection is the one the system
+names, by PostScript name, so `PingFang SC` is the Simplified Chinese cut and not the
+Hong Kong cut that starts `PingFang.ttc`. The faces stay open for the next layout, at most
+eight, the one unused longest dropped first, because a layer lays its text out again for
+every change of it, and a face whose file has changed since it was opened (a font replaced
+in place) is dropped and opened again, because FreeType reads the file through a mapping. A glyph the font lacks is drawn from one more face (PingFang SC,
+else Arial Unicode MS, else Helvetica) that is looked up when a layout meets such a
+glyph, never otherwise; Wallpaper Engine's list of up to eight faces is not followed.
+
+The card is the text plus `padding` on each axis, and the margin is
 there only for a layer that draws through effect passes, a colour blend, an LED
 source or an opaque background, or in a scene that enables distance fog or height
 fog (`fogdistance`, `fogheight`): a plain text layer has none, whatever its `padding`
-says. `padding` and `spacing` are two numbers, and `padding` is 32 on both axes where
+says.
+
+`padding` and `spacing` are two numbers, and `padding` is 32 on both axes where
 the scene leaves it out, each lane capped at 512 and not floored (a negative padding
 takes the card in around the text). A scene's authored `size` is not what sets the
 card as it is in Wallpaper Engine, which ignores it and sizes the card from the
 layout; here it stays the layout box and the smallest the card is (see the known
-limitations). `maxwidth` is the width a row may fill, as authored: padding is never
+limitations).
+
+`maxwidth` is the width a row may fill, as authored: padding is never
 taken from it, so a padded card can be wider than `maxwidth`. A row wraps before a
 glyph whose ink would end past that width, once it holds a glyph: at the last space
 or tab before it, where everything before that space stays in the row (a second space

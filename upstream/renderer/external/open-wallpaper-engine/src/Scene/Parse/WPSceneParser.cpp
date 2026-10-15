@@ -2024,9 +2024,11 @@ void ResolveTextLayerFont(TextLayerState& state, fs::VFS& vfs, const std::string
     constexpr std::string_view system_prefix = "systemfont_";
     const auto                 filename      = std::filesystem::path(font_key).filename().string();
     if (filename.starts_with(system_prefix)) {
+        const auto face              = ResolveSystemFont(font_key);
         state.resolved_font_kind     = "system";
         state.resolved_font_identity = filename.substr(system_prefix.size());
-        state.resolved_font_path     = ResolveSystemFontPath(font_key);
+        state.resolved_font_path     = face.path;
+        state.resolved_font_face     = face.postscript_name;
         state.resolved_font_data     = SharedFontData {};
         return;
     }
@@ -2039,6 +2041,7 @@ void ResolveTextLayerFont(TextLayerState& state, fs::VFS& vfs, const std::string
             state.resolved_font_kind     = "asset";
             state.resolved_font_identity = font_key;
             state.resolved_font_path     = candidate;
+            state.resolved_font_face.clear();
             state.resolved_font_data     = ReadVfsBytes(vfs, candidate);
             return;
         }
@@ -2046,14 +2049,17 @@ void ResolveTextLayerFont(TextLayerState& state, fs::VFS& vfs, const std::string
             state.resolved_font_kind     = "asset";
             state.resolved_font_identity = font_key;
             state.resolved_font_path     = font_key;
+            state.resolved_font_face.clear();
             state.resolved_font_data     = ReadVfsBytes(vfs, font_key);
             return;
         }
     }
 
+    const auto face              = ResolveSystemFont(font_key.empty() ? "default" : font_key);
     state.resolved_font_kind     = "family";
     state.resolved_font_identity = font_key.empty() ? "default" : font_key;
-    state.resolved_font_path     = ResolveSystemFontPath(state.resolved_font_identity);
+    state.resolved_font_path     = face.path;
+    state.resolved_font_face     = face.postscript_name;
     state.resolved_font_data     = SharedFontData {};
 }
 

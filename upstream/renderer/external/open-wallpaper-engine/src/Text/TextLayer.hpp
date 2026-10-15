@@ -81,6 +81,9 @@ struct TextLayerState {
     std::string          resolved_font_kind { "family" };
     std::string          resolved_font_identity;
     std::string          resolved_font_path;
+    // The PostScript name of the face to open in `resolved_font_path`, for a file
+    // that holds several (a collection). Empty opens the file's first face.
+    std::string          resolved_font_face;
     SharedFontData       resolved_font_data;
     float                point_size { 12.0f };
     // The margin the card keeps clear around the text on each axis, in pixels.
@@ -193,7 +196,7 @@ public:
     // changes anything schedules a new layout and raster, as new text does.
     void SetPointSize(float point_size);
     void SetFont(std::string font_key, std::string kind, std::string identity, std::string path,
-                 SharedFontData data);
+                 std::string face, SharedFontData data);
     void SetAlignment(std::string horizontal, std::string vertical, std::string anchor);
     bool ApplyPreparedLayout(uint64_t revision, Eigen::Vector2f layout_size,
                              Eigen::Vector2f raster_size);
@@ -241,6 +244,17 @@ void            RasterizeTextLayer(const TextLayerState& state, uint32_t width, 
 #ifdef WESCENE_BUILD_TESTS
 uint64_t        TextLayerMeasurementCountForTests();
 void            ResetTextLayerMeasurementCountForTests();
+/// What the font faces have cost since `ResetTextFontCacheForTests`, which also drops
+/// every face the cache holds: font files opened (a face found in the cache is not
+/// one), glyph-fallback faces asked for (one per layout that lacks a glyph), and
+/// faces the cache holds now.
+uint64_t        TextFontFilesOpenedForTests();
+uint64_t        TextFallbackFaceRequestsForTests();
+std::size_t     TextFontFacesCachedForTests();
+/// Whether every face the cache holds reads from its file (a mapping, as FreeType opens
+/// one) and not from a copy of the font in memory.
+bool            TextFontFacesAreReadFromFilesForTests();
+void            ResetTextFontCacheForTests();
 #endif
 
 } // namespace wallpaper

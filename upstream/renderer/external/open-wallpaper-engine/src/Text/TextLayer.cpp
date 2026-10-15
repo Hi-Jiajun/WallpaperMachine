@@ -5,8 +5,8 @@
 #include <atomic>
 #include <array>
 #include <cmath>
+#include <filesystem>
 #include <functional>
-#include <fstream>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -32,6 +32,7 @@ constexpr float kMinPointSize  = 1.0f;
 constexpr float kMaxPointSize  = 256.0f;
 #ifdef WESCENE_BUILD_TESTS
 std::atomic_uint64_t g_measurement_count { 0 };
+std::atomic_uint64_t g_fallback_requests { 0 };
 #endif
 std::mutex g_freetype_mutex;
 
@@ -151,24 +152,16 @@ std::array<uint8_t, 4> TextColorBytes(const TextLayerState& state) {
     };
 }
 
-std::vector<uint8_t> ReadFileBytes(std::string_view path) {
-    if (path.empty()) return {};
-    std::ifstream file(std::string(path), std::ios::binary | std::ios::ate);
-    if (! file) return {};
+using OwnedFace = std::unique_ptr<std::remove_pointer_t<FT_Face>, FtFaceDeleter>;
 
-    const auto size = file.tellg();
-    if (size <= 0) return {};
-    file.seekg(0, std::ios::beg);
-
-    std::vector<uint8_t> data(static_cast<std::size_t>(size));
-    if (! file.read(reinterpret_cast<char*>(data.data()), size)) {
-        return {};
-    }
-    return data;
+// Sizes `face` as Wallpaper Engine does: `point_size` points at 300 dpi.
+bool SetFaceSize(FT_Face face, float point_size) {
+    return FT_Set_Char_Size(face, 0, FreeTypeCharHeight(point_size), static_cast<FT_UInt>(kTextDpi),
+                            static_cast<FT_UInt>(kTextDpi)) == 0;
 }
 
-std::unique_ptr<std::remove_pointer_t<FT_Face>, FtFaceDeleter>
-CreateFreeTypeFaceFromBytes(const std::vector<uint8_t>& data, float point_size) {
+// A face of a font the wallpaper ships, which is in memory already.
+OwnedFace CreateFreeTypeFaceFromBytes(const std::vector<uint8_t>& data, float point_size) {
     FT_Library library = FtLibrary::Get().handle();
     if (library == nullptr) return nullptr;
     if (data.empty()) return nullptr;
@@ -182,63 +175,249 @@ CreateFreeTypeFaceFromBytes(const std::vector<uint8_t>& data, float point_size) 
         return nullptr;
     }
 
-    if (FT_Set_Char_Size(raw_face, 0, FreeTypeCharHeight(point_size),
-                         static_cast<FT_UInt>(kTextDpi), static_cast<FT_UInt>(kTextDpi)) != 0) {
-        FT_Done_Face(raw_face);
+    OwnedFace face(raw_face);
+    if (! SetFaceSize(raw_face, point_size)) return nullptr;
+    return face;
+}
+
+bool HasPostScriptName(FT_Face face, const std::string& name) {
+    const char* face_name = FT_Get_Postscript_Name(face);
+    return face_name != nullptr && name == face_name;
+}
+
+// The faces opened from font files, kept for the layouts after the one that opened
+// them. A text layer lays out again for every change of its text, and a clock
+// changes every second; a system font file can be tens of megabytes (PingFang is
+// 78), so a layout must not read it. Wallpaper Engine keeps the faces it loads by
+// path as well.
+//
+// A face is told apart by its file and its index in the file, and asked for by
+// PostScript name: a file that holds a collection holds several faces, and the first
+// is not the one the system means (PingFang.ttc starts with the Hong Kong cut, and
+// Songti.ttc with a weight that is not the regular one). Every use is under
+// `g_freetype_mutex`. A layout touches a handful of faces at most and takes them
+// last, so the ones it is using are the newest when the cache drops its oldest.
+//
+// FreeType maps a file it opens and reads the glyphs out of the mapping, so a file
+// truncated or rewritten in place under an open face (a font a user installed and then
+// replaced) would fault the read. `Refresh` therefore drops the faces whose file is
+// gone or no longer has the size and modification time it had when it was opened,
+// before a layout takes any face, so the next use opens the file as it is.
+class FaceCache {
+public:
+    static constexpr std::size_t kCapacity = 8;
+
+    static FaceCache& Get() {
+        static FaceCache instance;
+        return instance;
+    }
+
+    // Drops every face whose file has changed since it was opened. Called before a layout
+    // takes its faces, so none is dropped while a layout holds it.
+    void Refresh() {
+        std::erase_if(m_entries, [](const Entry& entry) {
+            if (FileStamp::Of(entry.path) == entry.stamp) return false;
+            FT_Done_Face(entry.face);
+            return true;
+        });
+    }
+
+    // The face of `path` that has `postscript_name`, or the file's first face when
+    // the name is empty or the file has no such face. Null when it cannot be opened.
+    FT_Face Acquire(const std::string& path, const std::string& postscript_name) {
+        if (path.empty()) return nullptr;
+        if (Entry* entry = Find(path, postscript_name)) return Use(*entry);
+
+        FT_Library library = FtLibrary::Get().handle();
+        if (library == nullptr) return nullptr;
+        FT_Face face = nullptr;
+        if (FT_New_Face(library, path.c_str(), 0, &face) != 0) return nullptr;
+        FT_Long index = 0;
+        if (! postscript_name.empty() && ! HasPostScriptName(face, postscript_name)) {
+            for (FT_Long other = 1; other < face->num_faces; ++other) {
+                FT_Face candidate = nullptr;
+                if (FT_New_Face(library, path.c_str(), other, &candidate) != 0) continue;
+                if (HasPostScriptName(candidate, postscript_name)) {
+                    FT_Done_Face(face);
+                    face  = candidate;
+                    index = other;
+                    break;
+                }
+                FT_Done_Face(candidate);
+            }
+        }
+
+        // The face may be held already, asked for by another name.
+        const auto held = std::ranges::find_if(m_entries, [&](const Entry& entry) {
+            return entry.index == index && entry.path == path;
+        });
+        if (held != m_entries.end()) {
+            FT_Done_Face(face);
+            held->names.push_back(postscript_name);
+            return Use(*held);
+        }
+
+#ifdef WESCENE_BUILD_TESTS
+        ++m_files_opened;
+#endif
+        m_entries.push_back(Entry { .path = path, .index = index, .face = face,
+                                    .used = ++m_clock, .stamp = FileStamp::Of(path),
+                                    .names = { postscript_name } });
+        if (m_entries.size() > kCapacity) {
+            const auto oldest = std::ranges::min_element(
+                m_entries, {}, [](const Entry& entry) { return entry.used; });
+            FT_Done_Face(oldest->face);
+            m_entries.erase(oldest);
+        }
+        return face;
+    }
+
+#ifdef WESCENE_BUILD_TESTS
+    uint64_t    FilesOpened() const { return m_files_opened; }
+    std::size_t Size() const { return m_entries.size(); }
+    // Whether every face reads from its file, not from a copy of the font in memory.
+    bool FromFiles() const {
+        return std::ranges::all_of(m_entries, [](const Entry& entry) {
+            return entry.face->stream != nullptr && entry.face->stream->close != nullptr;
+        });
+    }
+    void        Reset() {
+        Clear();
+        m_files_opened = 0;
+    }
+#endif
+
+private:
+    // The size and modification time of a file; two stamps are equal while the file is
+    // the one that was opened. A file that cannot be read has the stamp of none.
+    struct FileStamp {
+        std::uintmax_t                  size { static_cast<std::uintmax_t>(-1) };
+        std::filesystem::file_time_type time {};
+
+        static FileStamp Of(const std::string& path) {
+            std::error_code failure;
+            FileStamp       stamp;
+            stamp.size = std::filesystem::file_size(path, failure);
+            if (failure) return {};
+            stamp.time = std::filesystem::last_write_time(path, failure);
+            return failure ? FileStamp {} : stamp;
+        }
+        bool operator==(const FileStamp&) const = default;
+    };
+
+    struct Entry {
+        std::string path;
+        FT_Long     index { 0 };
+        FT_Face     face { nullptr };
+        uint64_t    used { 0 };
+        FileStamp   stamp;
+        // What the face has been asked for by; the empty name is a request with none.
+        std::vector<std::string> names;
+    };
+
+    // The statics are destroyed in reverse order of their construction: the library
+    // goes after the faces made from it.
+    FaceCache() { (void)FtLibrary::Get(); }
+    ~FaceCache() { Clear(); }
+
+    FaceCache(const FaceCache&)            = delete;
+    FaceCache& operator=(const FaceCache&) = delete;
+
+    void Clear() {
+        for (auto& entry : m_entries) FT_Done_Face(entry.face);
+        m_entries.clear();
+    }
+
+    Entry* Find(const std::string& path, const std::string& postscript_name) {
+        for (auto& entry : m_entries) {
+            if (entry.path == path && std::ranges::find(entry.names, postscript_name) != entry.names.end()) {
+                return &entry;
+            }
+        }
         return nullptr;
     }
-    return std::unique_ptr<std::remove_pointer_t<FT_Face>, FtFaceDeleter>(raw_face);
-}
 
-std::unique_ptr<std::remove_pointer_t<FT_Face>, FtFaceDeleter>
-CreateFreeTypeFace(const TextLayerState& state, std::vector<uint8_t>& owned_data) {
-    // Keep an authored, usable font first. A package can also contain a broken
-    // font, or a previously resolved file can disappear before rasterization.
-    // Recover at the decoder boundary so measurement and rasterization choose
-    // the same real face in all of these cases, not placeholder rectangles.
-    if (! state.resolved_font_data.empty()) {
-        if (auto face = CreateFreeTypeFaceFromBytes(state.resolved_font_data.bytes(), state.point_size)) {
-            return face;
-        }
-    } else if (! state.resolved_font_path.empty()) {
-        owned_data = ReadFileBytes(state.resolved_font_path);
-        if (auto face = CreateFreeTypeFaceFromBytes(owned_data, state.point_size)) return face;
+    FT_Face Use(Entry& entry) {
+        entry.used = ++m_clock;
+        return entry.face;
     }
-#ifdef __APPLE__
-    for (const auto& key : {state.font_key, std::string("systemfont_sansserif")}) {
-        const auto path = ResolveSystemFontPath(key);
-        if (path.empty()) continue;
-        owned_data = ReadFileBytes(path);
-        if (auto face = CreateFreeTypeFaceFromBytes(owned_data, state.point_size)) return face;
-    }
+
+    std::vector<Entry> m_entries;
+    uint64_t           m_clock { 0 };
+#ifdef WESCENE_BUILD_TESTS
+    uint64_t m_files_opened { 0 };
 #endif
-    return nullptr;
-}
-
-struct FallbackFace {
-    std::vector<uint8_t>                                           data;
-    std::unique_ptr<std::remove_pointer_t<FT_Face>, FtFaceDeleter> face;
 };
 
-std::optional<FallbackFace> CreateFallbackFace(const TextLayerState& state) {
-#ifdef __APPLE__
-    for (std::string_view key :
-         { "systemfont_PingFang SC", "systemfont_Arial Unicode MS", "systemfont_Helvetica" }) {
-        const auto path = ResolveSystemFontPath(key);
-        if (path.empty() || path == state.resolved_font_path) continue;
-
-        FallbackFace fallback {
-            .data = ReadFileBytes(path),
-            .face = {},
-        };
-        fallback.face = CreateFreeTypeFaceFromBytes(fallback.data, state.point_size);
-        if (fallback.face != nullptr) return fallback;
-    }
-#else
-    (void)state;
-#endif
-    return std::nullopt;
+// An installed face at `point_size`, from the cache. Null where the file does not
+// open or the face cannot be sized.
+FT_Face OpenInstalledFace(const std::string& path, const std::string& postscript_name,
+                          float point_size) {
+    FT_Face face = FaceCache::Get().Acquire(path, postscript_name);
+    return face != nullptr && SetFaceSize(face, point_size) ? face : nullptr;
 }
+
+// What draws a glyph the layer's font does not have: the first of these that is
+// installed. Wallpaper Engine tries up to eight faces in a fixed order.
+constexpr std::string_view kFallbackFonts[] = { "systemfont_PingFang SC", "systemfont_Arial Unicode MS",
+                                                "systemfont_Helvetica" };
+// A layout touches its font (two stand-ins at most, when the layer's cannot be
+// opened) and each of these, so what it uses is never the face the cache drops.
+static_assert(std::size(kFallbackFonts) + 2 < FaceCache::kCapacity);
+
+// The faces one layout draws with: the layer's own font, and a face for the glyphs
+// that font lacks, which is not looked for until a glyph needs it. Both are sized
+// for the layout and only good while the caller holds `g_freetype_mutex`.
+class FaceChain {
+public:
+    explicit FaceChain(const TextLayerState& state): m_point_size(state.point_size) {
+        FaceCache::Get().Refresh();
+        // Keep an authored, usable font first. A package can also contain a broken
+        // font, or a previously resolved file can disappear before rasterization.
+        // Recover at the decoder boundary so measurement and rasterization choose
+        // the same real face in all of these cases, not placeholder rectangles.
+        if (! state.resolved_font_data.empty()) {
+            m_owned = CreateFreeTypeFaceFromBytes(state.resolved_font_data.bytes(), state.point_size);
+            m_primary = m_owned.get();
+        } else if (! state.resolved_font_path.empty()) {
+            m_primary =
+                OpenInstalledFace(state.resolved_font_path, state.resolved_font_face, state.point_size);
+        }
+        if (m_primary != nullptr) return;
+        for (const auto& key : { state.font_key, std::string("systemfont_sansserif") }) {
+            const auto font = ResolveSystemFont(key);
+            m_primary       = OpenInstalledFace(font.path, font.postscript_name, state.point_size);
+            if (m_primary != nullptr) return;
+        }
+    }
+
+    FT_Face primary() const { return m_primary; }
+
+    // The face behind a glyph the font lacks, null where none is installed. Asked
+    // for once per layout, and not before a glyph needs it.
+    FT_Face fallback() {
+        if (m_fallback_looked_up) return m_fallback;
+        m_fallback_looked_up = true;
+#ifdef WESCENE_BUILD_TESTS
+        ++g_fallback_requests;
+#endif
+        for (const auto key : kFallbackFonts) {
+            const auto font = ResolveSystemFont(key);
+            FT_Face    face = OpenInstalledFace(font.path, font.postscript_name, m_point_size);
+            if (face == nullptr || face == m_primary) continue;
+            m_fallback = face;
+            break;
+        }
+        return m_fallback;
+    }
+
+private:
+    float     m_point_size { 12.0f };
+    FT_Face   m_primary { nullptr };
+    OwnedFace m_owned;
+    FT_Face   m_fallback { nullptr };
+    bool      m_fallback_looked_up { false };
+};
 
 std::vector<uint32_t> DecodeUtf8(std::string_view text) {
     std::vector<uint32_t> codepoints;
@@ -349,14 +528,16 @@ float GlyphAdvance(const GlyphRun& glyph, float spacing_x) {
     return std::floor(static_cast<float>(glyph.advance_26_6 + glyph.kerning_26_6) / 64.0f) + spacing_x;
 }
 
-std::optional<GlyphRun> MeasureGlyph(FT_Face primary_face, FT_Face fallback_face, uint32_t codepoint,
-                                     float spacing_x) {
-    FT_Face face     = primary_face;
+std::optional<GlyphRun> MeasureGlyph(FaceChain& faces, uint32_t codepoint, float spacing_x) {
+    FT_Face face     = faces.primary();
     bool    fallback = false;
-    if (FT_Get_Char_Index(face, codepoint) == 0u && fallback_face != nullptr &&
-        FT_Get_Char_Index(fallback_face, codepoint) != 0u) {
-        face     = fallback_face;
-        fallback = true;
+    if (FT_Get_Char_Index(face, codepoint) == 0u) {
+        // Only a glyph the font lacks looks for the second face.
+        FT_Face other = faces.fallback();
+        if (other != nullptr && FT_Get_Char_Index(other, codepoint) != 0u) {
+            face     = other;
+            fallback = true;
+        }
     }
     if (FT_Get_Char_Index(face, codepoint) == 0u) return std::nullopt;
     if (FT_Load_Char(face, codepoint, FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL) != 0) return std::nullopt;
@@ -558,14 +739,14 @@ std::vector<LineRun> BuildLineRuns(const TextLayerState& state, Measure measure,
     return lines;
 }
 
-std::vector<LineRun> BuildFreeTypeLines(const TextLayerState& state, FT_Face face, FT_Face fallback) {
+std::vector<LineRun> BuildFreeTypeLines(const TextLayerState& state, FaceChain& faces) {
     const float spacing_x = GlyphSpacing(state);
     return BuildLineRuns(
         state,
-        [&](uint32_t codepoint) { return MeasureGlyph(face, fallback, codepoint, spacing_x); },
+        [&](uint32_t codepoint) { return MeasureGlyph(faces, codepoint, spacing_x); },
         [&](const GlyphRun& left, const GlyphRun& right) -> int32_t {
             // Neighbours of one face only, as a shaper kerns a run of one font.
-            FT_Face used = left.fallback ? fallback : face;
+            FT_Face used = left.fallback ? faces.fallback() : faces.primary();
             if (left.fallback != right.fallback || used == nullptr || ! FT_HAS_KERNING(used)) return 0;
             FT_Vector kern {};
             if (FT_Get_Kerning(used, left.glyph_index, right.glyph_index, FT_KERNING_UNFITTED, &kern) != 0) {
@@ -972,15 +1153,12 @@ bool RasterizeFreeTypeText(const TextLayerState& state, uint32_t width, uint32_t
                            Plot&& plot) {
     if (state.text.empty()) return true;
 
-    std::vector<uint8_t> font_data;
-    auto                 face = CreateFreeTypeFace(state, font_data);
-    if (face == nullptr) return false;
-    auto fallback_face = CreateFallbackFace(state);
+    FaceChain faces(state);
+    if (faces.primary() == nullptr) return false;
 
-    const auto lines =
-        BuildFreeTypeLines(state, face.get(), fallback_face ? fallback_face->face.get() : nullptr);
+    const auto lines = BuildFreeTypeLines(state, faces);
 
-    const auto metrics = FaceMetrics(state, face.get());
+    const auto metrics = FaceMetrics(state, faces.primary());
     const auto block   = MeasureTextBlock(lines, metrics.ascender, metrics.pitch);
     // The style's margin is clear room around the card the text is laid out in.
     const auto padding = CardPadding(state) + Eigen::Vector2f::Constant(TextStyleMargin(state));
@@ -990,8 +1168,8 @@ bool RasterizeFreeTypeText(const TextLayerState& state, uint32_t width, uint32_t
         const float left_edge = HorizontalLineStart(state, line.LayoutWidth(), padding.x(), width);
         float pen_x = left_edge - line.ExtentLeft();
         for (const auto& glyph : line.glyphs) {
-            FT_Face glyph_face =
-                glyph.fallback && fallback_face ? fallback_face->face.get() : face.get();
+            FT_Face glyph_face = glyph.fallback ? faces.fallback() : nullptr;
+            if (glyph_face == nullptr) glyph_face = faces.primary();
             if (FT_Load_Char(glyph_face, glyph.codepoint, FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL) !=
                 0) {
                 pen_x += glyph.advance;
@@ -1031,14 +1209,11 @@ bool RasterizeFreeTypeText(const TextLayerState& state, uint32_t width, uint32_t
 }
 
 std::optional<Eigen::Vector2f> MeasureFreeTypeText(const TextLayerState& state) {
-    std::vector<uint8_t> font_data;
-    auto                 face = CreateFreeTypeFace(state, font_data);
-    if (face == nullptr) return std::nullopt;
-    auto fallback_face = CreateFallbackFace(state);
+    FaceChain faces(state);
+    if (faces.primary() == nullptr) return std::nullopt;
 
-    const auto lines =
-        BuildFreeTypeLines(state, face.get(), fallback_face ? fallback_face->face.get() : nullptr);
-    const auto metrics = FaceMetrics(state, face.get());
+    const auto lines   = BuildFreeTypeLines(state, faces);
+    const auto metrics = FaceMetrics(state, faces.primary());
     return CardSizeForBlock(state, MeasureTextBlock(lines, metrics.ascender, metrics.pitch));
 }
 
@@ -1314,6 +1489,31 @@ uint64_t TextLayerMeasurementCountForTests() {
 void ResetTextLayerMeasurementCountForTests() {
     g_measurement_count.store(0);
 }
+
+uint64_t TextFontFilesOpenedForTests() {
+    const std::lock_guard lock { g_freetype_mutex };
+    return FaceCache::Get().FilesOpened();
+}
+
+uint64_t TextFallbackFaceRequestsForTests() {
+    return g_fallback_requests.load();
+}
+
+std::size_t TextFontFacesCachedForTests() {
+    const std::lock_guard lock { g_freetype_mutex };
+    return FaceCache::Get().Size();
+}
+
+bool TextFontFacesAreReadFromFilesForTests() {
+    const std::lock_guard lock { g_freetype_mutex };
+    return FaceCache::Get().FromFiles();
+}
+
+void ResetTextFontCacheForTests() {
+    const std::lock_guard lock { g_freetype_mutex };
+    FaceCache::Get().Reset();
+    g_fallback_requests.store(0);
+}
 #endif
 
 TextLayer::TextLayer(TextLayerState state): m_state(std::move(state)) {
@@ -1342,15 +1542,17 @@ void TextLayer::SetPointSize(float point_size) {
 }
 
 void TextLayer::SetFont(std::string font_key, std::string kind, std::string identity,
-                        std::string path, SharedFontData data) {
+                        std::string path, std::string face, SharedFontData data) {
     if (m_state.font_key == font_key && m_state.resolved_font_kind == kind &&
-        m_state.resolved_font_identity == identity && m_state.resolved_font_path == path) {
+        m_state.resolved_font_identity == identity && m_state.resolved_font_path == path &&
+        m_state.resolved_font_face == face) {
         return;
     }
     m_state.font_key               = std::move(font_key);
     m_state.resolved_font_kind     = std::move(kind);
     m_state.resolved_font_identity = std::move(identity);
     m_state.resolved_font_path     = std::move(path);
+    m_state.resolved_font_face     = std::move(face);
     m_state.resolved_font_data     = std::move(data);
     m_state.dirty                  = true;
     m_state.layout_pending         = true;
@@ -1404,6 +1606,7 @@ void TextLayer::EnsureCacheIdentity() {
     const std::string material = m_state.layer_key + "|" + m_state.text + "|" +
                                  m_state.resolved_font_kind + "|" + m_state.resolved_font_identity +
                                  "|" + m_state.resolved_font_path + "|" +
+                                 m_state.resolved_font_face + "|" +
                                  std::to_string(m_state.point_size) + "|" +
                                  std::to_string(m_state.max_width) + "|" +
                                  std::to_string(m_state.max_rows) + "|" +
