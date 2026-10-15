@@ -1,4 +1,5 @@
 import Foundation
+import XCTest
 
 @testable import WallpaperMachine
 
@@ -9,15 +10,20 @@ import Foundation
 /// `DesktopActionLog.shared`. A test that means to check such an action injects its own seam or
 /// reads the log; none can open a browser tab or a Finder window on the developer's Mac. The
 /// panel's strings follow English (`AppLanguageStore.testHost`), not the language the installed
-/// app was last set to.
+/// app was last set to, and every test starts in English whatever the test before it bound.
 @objc(WallpaperMachineTestBundle)
-final class TestBundle: NSObject {
+final class TestBundle: NSObject, XCTestObservation {
   override init() {
     super.init()
     MainActor.assumeIsolated {
       DesktopActions.current = DesktopActionLog.shared.actions
       PanelLocale.shared.bind(to: .testHost)
     }
+    XCTestObservationCenter.shared.addTestObserver(self)
+  }
+
+  func testCaseWillStart(_ testCase: XCTestCase) {
+    MainActor.assumeIsolated { PanelLocale.shared.bind(to: .testHost) }
   }
 }
 
