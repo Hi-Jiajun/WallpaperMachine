@@ -196,6 +196,15 @@ device.
   tail of every loop. It also covers cancellation during a drain, a bounded
   no-progress budget, and releasing a held packet exactly once on seek, stop or
   failure.
+- **Decoder eligibility and first-frame import** — `VideoDecoderSelection.*` in
+  `playback_gpu_test` writes an original embedded 64×64 red AV1 clip, primes the
+  real source, requires an IOSurface-backed NV12 frame, and reads known red Metal
+  pixels after releasing the decoder. This catches a software-only default
+  hiding another decoder's VideoToolbox capability. The AV1 case explicitly skips
+  machines without AV1 hardware decode; a failed decode on capable hardware is a
+  failure, not a skip. The suite also imports generated H.264 through an already
+  eligible default and verifies that a valid software-only PPM stream remains
+  rejected instead of broadening software decode admission.
 - **Color range** — `video_color_conversion_test` pins known pixels for
   BT.601/709/2020 in both ranges, studio black and white with clamping, 75%
   color bars round-tripped from their RGB primaries, matrix separation,

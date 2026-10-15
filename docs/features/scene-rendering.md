@@ -195,6 +195,13 @@ this app's own windows is not a click on the wallpaper, so neither scripts
 dragged onto the desktop before the button is let go. A press the wallpaper did get is
 always released, wherever the pointer ends up.
 
+Both scene renderers share video decoder selection. On macOS, an eligible FFmpeg
+default is kept; a software-only default does not rule out another decoder for
+the same codec that supports VideoToolbox, as with dav1d and native AV1. A codec
+with no VideoToolbox-capable decoder is still rejected, and the first frame must
+still decode successfully. This does not enable software-only decoders.
+
+
 An effect that composes its layer over the screen (refraction among them) reads
 that screen the right way up on both renderers. The shader compiler defines `HLSL`
 and `HLSL_SM40` as Wallpaper Engine does, so the Direct3D branches of an effect's own

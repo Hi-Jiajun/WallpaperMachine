@@ -245,6 +245,37 @@ bool ProbeStreamDimensions(AVStream* stream, uint32_t* width, uint32_t* height, 
 }
 
 #if defined(__APPLE__)
+AVPixelFormat AppleHardwarePixelFormat(const AVCodec* codec)
+{
+    for (int index = 0;; ++index) {
+        const AVCodecHWConfig* config = avcodec_get_hw_config(codec, index);
+        if (config == nullptr) return AV_PIX_FMT_NONE;
+        if ((config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX) != 0 &&
+            config->device_type == AV_HWDEVICE_TYPE_VIDEOTOOLBOX) {
+            return config->pix_fmt;
+        }
+    }
+}
+
+const AVCodec* SelectAppleHardwareDecoder(const AVCodec* preferred, AVPixelFormat* pixel_format)
+{
+    *pixel_format = AppleHardwarePixelFormat(preferred);
+    if (*pixel_format != AV_PIX_FMT_NONE) return preferred;
+
+    // FFmpeg's default can be software-only even when another decoder for the
+    // same codec supports VideoToolbox (libdav1d versus native AV1, for example).
+    // Search only at open, and keep the same hardware capability requirement.
+    void* iterator = nullptr;
+    while (const AVCodec* candidate = av_codec_iterate(&iterator)) {
+        if (candidate->id != preferred->id || !av_codec_is_decoder(candidate)) continue;
+        const auto format = AppleHardwarePixelFormat(candidate);
+        if (format == AV_PIX_FMT_NONE) continue;
+        *pixel_format = format;
+        return candidate;
+    }
+    return nullptr;
+}
+
 AVPixelFormat SelectAppleHardwareFormat(AVCodecContext* context, const AVPixelFormat* formats)
 {
     if (context == nullptr || formats == nullptr) return AV_PIX_FMT_NONE;
@@ -738,6 +769,13 @@ private:
             avformat_close_input(&format_context);
             return SetError(error, "failed to find FFmpeg decoder for video stream");
         }
+#if defined(__APPLE__)
+        codec = SelectAppleHardwareDecoder(codec, &m_hw_pixel_format);
+        if (codec == nullptr) {
+            avformat_close_input(&format_context);
+            return SetError(error, "FFmpeg decoder does not advertise VideoToolbox hardware decode");
+        }
+#endif
 
         AVCodecContext* codec_context = avcodec_alloc_context3(codec);
         if (codec_context == nullptr) {
@@ -753,22 +791,6 @@ private:
         }
 
 #if defined(__APPLE__)
-        m_hw_pixel_format = AV_PIX_FMT_NONE;
-        for (int index = 0;; ++index) {
-            const AVCodecHWConfig* config = avcodec_get_hw_config(codec, index);
-            if (config == nullptr) break;
-            if ((config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX) != 0 &&
-                config->device_type == AV_HWDEVICE_TYPE_VIDEOTOOLBOX) {
-                m_hw_pixel_format = config->pix_fmt;
-                break;
-            }
-        }
-        if (m_hw_pixel_format == AV_PIX_FMT_NONE) {
-            avcodec_free_context(&codec_context);
-            avformat_close_input(&format_context);
-            return SetError(error, "FFmpeg decoder does not advertise VideoToolbox hardware decode");
-        }
-
         codec_context->get_format = SelectAppleHardwareFormat;
         codec_context->opaque = &m_hw_pixel_format;
         if (!CreateVideoToolboxDeviceContext(&m_hw_device_context, error)) {
