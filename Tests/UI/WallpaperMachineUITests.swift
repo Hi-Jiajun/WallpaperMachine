@@ -81,9 +81,7 @@ final class WallpaperMachineUITests: XCTestCase {
       .matching(NSPredicate(format: "label BEGINSWITH %@", "\(title), ")).firstMatch
   }
 
-  /// A search field by its label, or by its prompt: the toolbar field of Installed and pixiv is the
-  /// system's own (`.searchable`), which VoiceOver names by the prompt it shows ("Search
-  /// wallpapers"); Steam Workshop's field in the page carries a label of its own.
+  /// A search field by its label, or by its prompt (`PageSearchBar` names each page's field).
   private func searchField(_ label: String) -> XCUIElement {
     window.descendants(matching: .any)
       .matching(

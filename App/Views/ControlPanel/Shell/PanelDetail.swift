@@ -18,8 +18,8 @@ struct PanelDetail: View {
       settingsSection: controller.settings.selectedSection, searchQuery: controller.settings.query,
       workshopSubtitle: selection == .workshop ? controller.workshopTitleSubtitle : nil)
     page(for: selection)
-      // One search field for the pages that have one, kept in place across them (PageSearchField).
-      .modifier(PageSearchField(selection: selection))
+      // One search bar at the top of the pages that have one, kept in place across them.
+      .safeAreaInset(edge: .top, spacing: 0) { PageSearchBar(selection: selection) }
       .safeAreaInset(edge: .top, spacing: 0) { PanelBanners() }
       .background { theme.surface.background.color.ignoresSafeArea() }
       // The inspector stays attached on every page and is only closed on Settings, so moving

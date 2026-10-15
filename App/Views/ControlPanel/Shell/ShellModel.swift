@@ -359,7 +359,7 @@ final class ShellModel {
     return false
   }
 
-  /// Command-F: puts the keyboard in the page's search field (the toolbar's, or the Settings
+  /// Command-F: puts the keyboard in the page's search field (its search bar, or the Settings
   /// sidebar's). False when the window has none.
   @discardableResult
   func focusSearch() -> Bool {

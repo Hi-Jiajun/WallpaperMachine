@@ -13,7 +13,7 @@ and each saved wallpaper links back to the work on pixiv.
 
 ## Browsing
 
-With the toolbar's search field empty the page shows a ranking; typing tags searches
+With the page's search bar empty the page shows a ranking; typing tags searches
 pixiv instead, and the menu in the page's header follows: rankings while the field is
 empty, search orders once it is not. Typing searches after a short pause, and Return
 or **Refresh** asks again at once from the first page.

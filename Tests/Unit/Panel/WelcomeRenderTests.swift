@@ -173,8 +173,7 @@ final class WelcomeRenderTests: PanelTestCase {
       try await harness.layout(at: sizes[1])
       XCTAssertEqual(library.scope, .favorites, "The sidebar works again")
 
-      // The search field that is a toolbar item survives the toolbar coming back: moving between
-      // the two pages that share it still works (PageSearchField).
+      // Moving between two pages that share the search bar still works (PageSearchBar).
       panel.navigation.selection = .pixiv
       try await harness.layout(at: sizes[1])
       panel.navigation.selection = .wallpaper

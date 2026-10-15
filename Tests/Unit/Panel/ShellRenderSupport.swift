@@ -155,9 +155,9 @@ final class ShellHost {
     }
   }
 
-  /// Whether the toolbar has the search field that the pages with one share.
-  var hasToolbarSearchField: Bool {
-    (window.toolbar?.items ?? []).contains { $0 is NSSearchToolbarItem }
+  /// Whether the page shows the search bar that the pages with one share (`PageSearchBar`).
+  var hasPageSearchField: Bool {
+    PanelSearchFocus.field(in: window)?.accessibilityIdentifier() == "page-search-field"
   }
 
   /// A PNG of the hosted content as drawn now.

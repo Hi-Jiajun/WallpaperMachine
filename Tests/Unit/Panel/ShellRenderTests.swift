@@ -82,11 +82,10 @@ final class ShellRenderTests: PanelTestCase {
       try await host.settle { host.window.title == "All wallpapers" }
       XCTAssertEqual(host.window.subtitle, "8 wallpapers", "the title bar says how many are shown")
 
-      // Settings searches in its own sidebar, so the toolbar's search field goes. The next page's
-      // field is added only once it has: asked for in the same layout pass, SwiftUI's toolbar bridge
-      // raises "already contains an item with the identifier com.apple.SwiftUI.search".
+      // Settings searches in its own sidebar, so the page's search bar goes.
+      XCTAssertTrue(host.hasPageSearchField)
       host.navigation.selection = .settings
-      try await host.settle { host.window.title == "Quick Settings" && !host.hasToolbarSearchField }
+      try await host.settle { host.window.title == "Quick Settings" && !host.hasPageSearchField }
       XCTAssertEqual(host.window.subtitle, "", "Settings has no count")
 
       host.navigation.selection = .workshop
@@ -330,7 +329,7 @@ final class ShellRenderTests: PanelTestCase {
     }
   }
 
-  func testTheToolbarSearchFieldIsNamedForWhatItSearches() async throws {
+  func testThePageSearchFieldIsNamedForWhatItSearches() async throws {
     try await withPanel { panel in
       let host = ShellFixtureHost(panel: panel)
       defer { host.close() }
@@ -342,7 +341,7 @@ final class ShellRenderTests: PanelTestCase {
       for (selection, name) in names {
         await panel.controller.shell.open(selection).value
         try await host.settle {
-          PanelSearchFocus.toolbarItem(in: host.window)?.searchField.accessibilityLabel() == name
+          PanelSearchFocus.field(in: host.window)?.accessibilityLabel() == name
         }
       }
     }

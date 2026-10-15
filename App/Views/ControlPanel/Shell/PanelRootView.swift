@@ -40,8 +40,8 @@ private struct PanelSplitView: View {
     .disabled(shell.isWelcomeOpen)
     .accessibilityHidden(shell.isWelcomeOpen)
     // AppKit draws the toolbar above the guide's scrim, where its controls would look usable. It
-    // is hidden, not emptied, so its items are never removed and inserted again (PageSearchField),
-    // and the traffic lights and the title bar's dragging stay. The bar is `.automatic`: the toolbar
+    // is hidden, not emptied, so its items are never removed and inserted again, and the traffic
+    // lights and the title bar's dragging stay. The bar is `.automatic`: the toolbar
     // a hosting controller bridges into its window ignores `.windowToolbar`.
     .toolbarVisibility(shell.isWelcomeOpen ? .hidden : .automatic, for: .automatic)
     .overlay { WelcomeOverlayHost() }

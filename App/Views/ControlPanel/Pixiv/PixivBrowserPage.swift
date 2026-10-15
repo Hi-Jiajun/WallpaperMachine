@@ -2,8 +2,8 @@ import SwiftUI
 
 /// The pixiv page: rankings and tag search, the filters, a grid of works, and the paging bar.
 ///
-/// The toolbar carries the search field, which the detail column owns (`PageSearchField`): Return
-/// asks for the first page afresh, typing waits for a pause. Under it a slim row holds Filter, the
+/// The search bar above it is the detail column's (`PageSearchBar`): Return asks for the first
+/// page afresh, typing waits for a pause. Under it a slim row holds Filter, the
 /// ranking or search-order menu and Refresh, with a way to sign in while signed out. The inspector
 /// shows the selected work. The paging bar is there while it has something to page or to say
 /// about the works on show (`PixivPagerBar.isShown(for:)`).

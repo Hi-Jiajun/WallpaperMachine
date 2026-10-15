@@ -215,9 +215,11 @@ final class WorkshopBrowserRenderTests: MediaPanelTestCase {
     host.close()
   }
 
-  /// The window's toolbar search item, while the page has one.
-  private func searchItem(in window: NSWindow) -> NSSearchToolbarItem? {
-    window.toolbar?.items.lazy.compactMap { $0 as? NSSearchToolbarItem }.first
+  /// The page's search bar field, while the page has one.
+  private func searchField(in window: NSWindow) -> NSSearchField? {
+    PanelSearchFocus.field(in: window).flatMap {
+      $0.accessibilityIdentifier() == "page-search-field" ? $0 : nil
+    }
   }
 
   func testThePageDrawsItsControlsInOneRowAboveTheGridInTheSmallestWindow() async throws {
@@ -238,12 +240,13 @@ final class WorkshopBrowserRenderTests: MediaPanelTestCase {
         let tool = try XCTUnwrap(frame(tool, in: host.hosting.view))
         XCTAssertEqual(tool.midY, lists.midY, accuracy: 2, "inspector \(inspector): one header row")
       }
-      XCTAssertNotNil(searchItem(in: host.window), "the search field is the toolbar's")
+      let field = try XCTUnwrap(searchField(in: host.window), "the page has its search bar")
+      XCTAssertGreaterThan(field.frame.width, lists.width, "inspector \(inspector): a wide bar")
       host.close()
     }
   }
 
-  func testCommandFSearchesFromTheToolbarAndAnAuthorsListHasNoField() async throws {
+  func testCommandFSearchesFromThePageAndAnAuthorsListHasNoField() async throws {
     let panel = try await makePanel()
     let controller = panel.controller
     let model = controller.workshopBrowser
@@ -251,25 +254,25 @@ final class WorkshopBrowserRenderTests: MediaPanelTestCase {
     controller.presentation.attach(to: host.window)
     let size = NSSize(width: 1240, height: 800)
     try await settle(host, size: size)
-    try await settle(host) { searchItem(in: host.window) != nil }
+    try await settle(host) { searchField(in: host.window) != nil }
     XCTAssertTrue(
-      PanelSearchFocus.field(in: host.window) === searchItem(in: host.window)?.searchField,
+      PanelSearchFocus.field(in: host.window) === searchField(in: host.window),
       "Command-F finds the Workshop's field")
     XCTAssertTrue(controller.shell.focusSearch())
 
     // An author's wallpapers are in their own order: the field goes, and comes back with the list,
-    // and the toolbar takes both changes without throwing.
+    // and the page takes both changes.
     model.openAuthor(of: controller.workshopBrowse.items[0])
     try await waitFor { !controller.workshopBrowse.source.isSearchable }
     try await settle(host, size: size)
-    try await settle(host) { searchItem(in: host.window) == nil }
-    XCTAssertNil(searchItem(in: host.window))
+    try await settle(host) { searchField(in: host.window) == nil }
+    XCTAssertNil(searchField(in: host.window))
     XCTAssertFalse(controller.shell.focusSearch(), "nothing to search")
     model.goBack()
     try await waitFor { controller.workshopBrowse.source.list == .browse }
     try await settle(host, size: size)
-    try await settle(host) { searchItem(in: host.window) != nil }
-    XCTAssertNotNil(searchItem(in: host.window))
+    try await settle(host) { searchField(in: host.window) != nil }
+    XCTAssertNotNil(searchField(in: host.window))
     controller.presentation.attach(to: nil)
     host.close()
   }

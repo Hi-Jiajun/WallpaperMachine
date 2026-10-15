@@ -3,8 +3,7 @@ import SwiftUI
 /// The window toolbar: the activity pills, the target display menu, the downloads button and the
 /// inspector toggle, trailing, in that order. A pill, the downloads button and the inspector toggle
 /// are in the toolbar only while they have something to show; the target display menu is hidden on
-/// Settings. The pages' search field is added by the detail column (`PageSearchField`), and the
-/// system places it beside these.
+/// Settings. The pages' search field is in the page, not here (`PageSearchBar`).
 struct PanelToolbarContent: ToolbarContent {
   let controller: PanelController
 

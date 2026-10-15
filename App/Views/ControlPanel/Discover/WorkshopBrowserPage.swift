@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The Steam Workshop page: the lists and the tools above, 30 tiles to a page, the pager beneath.
-/// The search field is the window's, in the toolbar (`PageSearchField`).
+/// The search bar above it is the detail column's (`PageSearchBar`).
 ///
 /// Steam does the searching, sorting and filtering; the page asks and shows what comes back. A tile
 /// is a Workshop item with the download it wears, and the inspector beside the page says the rest.

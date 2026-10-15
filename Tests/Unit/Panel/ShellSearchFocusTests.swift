@@ -15,20 +15,6 @@ final class ShellSearchFocusTests: PanelTestCase {
     return window
   }
 
-  private final class ToolbarDelegate: NSObject, NSToolbarDelegate {
-    let item = NSSearchToolbarItem(itemIdentifier: NSToolbarItem.Identifier("search"))
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-      [item.itemIdentifier]
-    }
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-      [item.itemIdentifier]
-    }
-    func toolbar(
-      _ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
-      willBeInsertedIntoToolbar flag: Bool
-    ) -> NSToolbarItem? { item }
-  }
-
   func testAVisibleSearchFieldInTheContentTakesTheKeyboardAndAHiddenOneIsSkipped() throws {
     let window = makeWindow()
     defer { window.close() }
@@ -53,20 +39,6 @@ final class ShellSearchFocusTests: PanelTestCase {
     window.contentView?.addSubview(NSTextField(frame: NSRect(x: 0, y: 0, width: 100, height: 22)))
     XCTAssertNil(PanelSearchFocus.field(in: window))
     XCTAssertFalse(PanelSearchFocus.focus(in: window))
-  }
-
-  func testTheToolbarsSearchItemIsThePageFieldWhenThereIsOne() {
-    let window = makeWindow()
-    defer { window.close() }
-    let delegate = ToolbarDelegate()
-    let toolbar = NSToolbar(identifier: "test")
-    toolbar.delegate = delegate
-    window.toolbar = toolbar
-    let sidebar = NSSearchField(frame: NSRect(x: 0, y: 0, width: 100, height: 22))
-    window.contentView?.addSubview(sidebar)
-
-    XCTAssertTrue(PanelSearchFocus.field(in: window) === delegate.item.searchField)
-    XCTAssertTrue(PanelSearchFocus.focus(in: window))
   }
 
   func testTheShellReportsNoFieldWithoutAWindow() async throws {
