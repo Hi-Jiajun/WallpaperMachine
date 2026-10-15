@@ -399,9 +399,10 @@ per-Space getter and setter through optional private CoreGraphics and HIServices
   counts as hidden too, once the pointer has been away for 3 s: `ActiveDisplayTracker` follows
   the pointer with event monitors that exist only while the option is on and two displays are
   connected, and reads it on a timer while this app is active, when the monitors miss it; the
-  policy never lets it darken every display. The bridge keeps `suspended_displays`
-  beside the global flag, resolves each scene's and web descriptor's paused state from its own
-  display, and re-applies the still-hidden displays after a global resume. System audio capture
+  policy never lets it darken every display: while every display in use is hidden anyway (a
+  full-screen app, a covered working area that pauses), it pauses none. The bridge keeps
+  `suspended_displays` beside the global flag, resolves each scene's and web descriptor's paused
+  state from its own display, and re-applies the still-hidden displays after a global resume. System audio capture
   follows visible consumers, not the global pause flag.
 - **Display changes.** Screen-parameter changes refresh displays through
   `DisplayRefreshCoalescer`: one refresh runs at a time and a burst that arrives meanwhile gets

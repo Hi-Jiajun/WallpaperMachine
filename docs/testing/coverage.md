@@ -205,7 +205,8 @@ picture shows between a window closing and the web page's window opening.
   every suspended surface, and the resume announcement (`onResumed`) after a global
   or per-display resume, but not after a suspend, a refused delivery or teardown. A
   display the user is not using is one more hidden reason: suspended after the settle
-  delay, resumed at once, joined to coverage, never darkening every display, untouched
+  delay, resumed at once, joined to coverage, never darkening every display, playing
+  while the display in use is covered or under a full-screen app, untouched
   by a sleep and wake, and not counted as hidden for the update alert's gate.
 - `SystemWakeRevalidatorTests` — against a private notification center and
   injected delays, idle wait and bridge call: a wake's two notifications are one

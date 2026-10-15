@@ -420,22 +420,64 @@ final class WallpaperPresentationPolicyTests: XCTestCase {
 
     func testAnInactiveDisplayJoinsCoverageAndCoverageCanBeTurnedOffWithoutResumingIt() {
         let probe = twoVisibleDisplays()
-        probe.covered = [1]
+        probe.covered = [2]
         probe.inactive = [2]
         let policy = makePolicy(probe, settle: .zero)
         policy.start()
         defer { policy.stop() }
-        XCTAssertEqual(policy.suspendedDisplayIDs, [1, 2], "Each display has its own reason to be paused")
+        XCTAssertEqual(policy.suspendedDisplayIDs, [2], "Display 2 has two reasons to be paused")
 
         probe.coveredAction = .keepRunning
         policy.evaluate()
         XCTAssertEqual(policy.suspendedDisplayIDs, [2], "Keep running ends the covered reason only")
-        XCTAssertEqual(probe.displayDecisions(for: 1), [true, false])
         XCTAssertEqual(probe.displayDecisions(for: 2), [true], "and display 2 is not resumed and paused again")
+        XCTAssertEqual(probe.displayDecisions(for: 1), [], "The display in use is never told to stop")
 
         probe.inactive = []
         policy.evaluate()
         XCTAssertTrue(policy.suspendedDisplayIDs.isEmpty)
+    }
+
+    func testHidingTheDisplayInUseLeavesTheOthersPlaying() {
+        // A full-screen app or windows over the display the pointer is on pause that
+        // display alone: the one beside it still shows its wallpaper, and stopping it
+        // too would leave the user looking at nothing but frozen wallpapers.
+        let probe = twoVisibleDisplays()
+        probe.inactive = [2]
+        let policy = makePolicy(probe, settle: .zero)
+        policy.start()
+        defer { policy.stop() }
+        XCTAssertEqual(policy.suspendedDisplayIDs, [2])
+
+        probe.covered = [1]
+        policy.evaluate()
+        XCTAssertEqual(policy.suspendedDisplayIDs, [1], "Windows over the display in use pause that display only")
+        XCTAssertEqual(probe.displayDecisions(for: 2), [true, false], "and the other one plays again at once")
+        XCTAssertFalse(policy.isSuspended)
+
+        probe.covered = []
+        policy.evaluate()
+        XCTAssertEqual(policy.suspendedDisplayIDs, [2], "Uncovering it brings the pointer's rule back")
+        XCTAssertEqual(probe.displayDecisions(for: 1), [true, false])
+
+        probe.setVisible(false, display: 1)
+        policy.evaluate()
+        XCTAssertEqual(policy.suspendedDisplayIDs, [1], "A full-screen app on the display in use pauses only that display")
+        XCTAssertEqual(policy.hiddenDisplayIDs, [1])
+        XCTAssertFalse(policy.isSuspendedInPlainSight(displayID: 2), "The other display is playing, not paused")
+
+        probe.setVisible(true, display: 1)
+        probe.covered = [1]
+        probe.coveredAction = .keepRunning
+        policy.evaluate()
+        XCTAssertEqual(
+            policy.suspendedDisplayIDs, [2],
+            "A covered display the user keeps running still shows its wallpaper, so the pointer's rule holds")
+
+        probe.setVisible(false, display: 2)
+        probe.setVisible(false, display: 1)
+        policy.evaluate()
+        XCTAssertEqual(policy.suspendedDisplayIDs, [1, 2], "Each display hidden on its own stays paused")
     }
 
     func testTheInactiveSetIsAskedAboutTheDisplaysWithWallpaperAndNeverDarkensAllOfThem() {
@@ -468,7 +510,7 @@ final class WallpaperPresentationPolicyTests: XCTestCase {
 
         probe.covered = [1]
         policy.evaluate()
-        XCTAssertEqual(policy.suspendedDisplayIDs, [1, 2])
+        XCTAssertEqual(policy.suspendedDisplayIDs, [1], "Covering the display in use lets the other one play")
         XCTAssertEqual(policy.hiddenDisplayIDs, [1], "A display something covers is still hidden")
 
         probe.inactive = []

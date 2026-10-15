@@ -321,8 +321,11 @@ skimming across a display, or going back to it, never pauses it. It is one more
 reason a display counts as hidden in `WallpaperPresentationPolicy`, beside occlusion
 and a covered working area: it never changes **Play** and **Pause**, nothing has to be
 restored when it ends, and the usual one-second settle applies before a display
-pauses. The policy never darkens every display for it, and a pointer on a screen the
-app has no wallpaper on pauses nothing. `ActiveDisplayTracker` follows the pointer
+pauses. The policy never darkens every display for it: while the display in use cannot
+show its wallpaper (a full-screen app on it or, with **Pause**, windows covering its
+working area), that display pauses on its own and the others keep playing, and they
+pause again once it shows its wallpaper. A pointer on a screen the app has no wallpaper
+on pauses nothing. `ActiveDisplayTracker` follows the pointer
 with one global and one local event monitor, installed only while the option is on and
 two displays are connected; the global monitor needs no Accessibility or Input
 Monitoring grant, and a pointer event that stays on one display costs one rectangle
