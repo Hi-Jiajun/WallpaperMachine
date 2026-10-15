@@ -141,6 +141,17 @@ perturbed normal came out far longer than one, and a lit roof showed hard-edged
 highlight patches and white sparkles where Wallpaper Engine shows a smooth specular
 pool.
 
+An effect may mask with an `int` it fills from `step` and multiply a boolean into
+(`int bar = step(y, h); bar *= isLeftChannel;`), as Wallpaper Engine's HLSL promotes
+the boolean to a number. The shader compiler makes that `int` a float, since `step`
+returns one, and every later repair reads it as a float: the boolean becomes `1.0` or
+`0.0`, an `int` taken from it is cast, an `if`, `while` or `?:` condition on it
+compares with `0.0`, and a `%` on it is a float remainder. The circle and centre
+shapes of the workshop Simple Audio Bars effect (without anti-aliasing) need this;
+without it the effect failed to compile and its layers lost the bars whatever
+played. A number as an operand of `!`, `&&` or `||` is not converted, whether a mask
+or not ([Known limitations](../testing/renderer.md#known-limitations)).
+
 Scene lighting works as in Wallpaper Engine, on both renderers. A lit shader
 (`genericimage4`, `generic4`, the particle, rope, foliage and fluid shaders) asks for
 `#require LightingV1`; the shader compiler writes in a `PerformLighting_V1` with one

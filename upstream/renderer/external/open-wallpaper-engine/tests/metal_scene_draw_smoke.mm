@@ -3240,6 +3240,82 @@ TEST_F(MetalSceneDraw, AModelsTangentReachesTheShaderThatDeclaresItOnBothRendere
     }
 }
 
+TEST_F(MetalSceneDraw, ABooleanMultipliedIntoAStepMaskClipsItOnBothRenderers)
+{
+    // HLSL promotes a bool to a number, so an author masks with `int bar =
+    // step(..); bar *= isLeft;`. The legalizer retypes the `int` to float
+    // because `step` returns one, and the product with the bool must follow
+    // (the stereo bars of a workshop audio effect are written this way).
+    // Without it the effect does not compile and the layer is drawn without
+    // it. Here the two masks overlap through the middle of the card and the
+    // booleans cut them apart, so the card is white above and below a black
+    // band and nowhere else.
+    std::map<std::string, RendererPicture> pictures;
+    for (const bool native : { false, true }) {
+        const std::string name = native ? "step-bool-native" : "step-bool-compat";
+        const auto project     = WriteFixture(root_ / name);
+        const auto file        = [&](const std::string& path, const std::string& text) {
+            std::filesystem::create_directories((root_ / name / path).parent_path());
+            std::ofstream(root_ / name / path) << text;
+        };
+        file("shaders/step_bool.vert",
+             "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\n"
+             "attribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+             "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+             "  v_TexCoord = a_TexCoord;\n}\n");
+        file("shaders/step_bool.frag",
+             "varying vec2 v_TexCoord;\nvoid main() {\n"
+             "  vec2 shapeCoord = v_TexCoord.xy;\n"
+             "  bool isLeftChannel = shapeCoord.y < 0.4;\n"
+             "  bool isRightChannel = shapeCoord.y > 0.6;\n"
+             "  int barLeft = step(shapeCoord.y, 0.9);\n"
+             "  int barRight = step(1 - shapeCoord.y, 0.9);\n"
+             "  barLeft *= isLeftChannel; barRight *= isRightChannel;\n"
+             "  float bar = max(barLeft, barRight);\n"
+             "  gl_FragColor = vec4(bar, bar, bar, 1.0);\n}\n");
+        file("materials/step_bool.json",
+             R"({"passes":[{"shader":"step_bool","blending":"normal","cullmode":"nocull",)"
+             R"("depthtest":"disabled","depthwrite":"disabled","textures":[null]}]})");
+        file("effects/step_bool/effect.json",
+             R"({"name":"step_bool","passes":[{"material":"materials/step_bool.json"}]})");
+        file("layout.json",
+             R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+             R"("general":{"clearcolor":[0,0,0],"bloom":false,"cameraparallax":false,)"
+             R"("orthogonalprojection":{"width":384,"height":256}},)"
+             R"("objects":[{"id":1,"name":"tile","image":"models/tile.json","origin":[192,128,0],)"
+             R"("scale":[1,1,1],"angles":[0,0,0],"visible":true,)"
+             R"("effects":[{"file":"effects/step_bool/effect.json","id":2,"visible":true}]}]})");
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+        if (native) {
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+        }
+        auto& picture = pictures[name];
+        picture       = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
+        ASSERT_TRUE(picture.error.empty()) << name << ": " << picture.error;
+        ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u) << name;
+    }
+    for (const auto& [name, picture] : pictures) {
+        SCOPED_TRACE(name);
+        // The card spans x 64..320 and y 32..224; its middle is the black band
+        // (a fifth of its height), the rest of its height is white.
+        const auto grey = [&picture](std::size_t x, std::size_t y) {
+            const std::size_t i = (y * 384u + x) * 3u;
+            return std::array<int, 3> { picture.rgb[i], picture.rgb[i + 1], picture.rgb[i + 2] };
+        };
+        for (const std::size_t x : { std::size_t(100), std::size_t(192), std::size_t(300) }) {
+            EXPECT_GT(grey(x, 70)[0], 240) << "x " << x << ": above the band is not white";
+            EXPECT_GT(grey(x, 186)[0], 240) << "x " << x << ": below the band is not white";
+            EXPECT_LT(grey(x, 128)[0], 16) << "x " << x << ": the band is not black";
+        }
+        EXPECT_LT(grey(20, 70)[0], 16) << "the clear colour outside the card";
+    }
+    EXPECT_EQ(pictures.at("step-bool-native").rgb, pictures.at("step-bool-compat").rgb)
+        << "the renderers draw the masked bars differently";
+}
+
 TEST_F(MetalSceneDraw, AScreenReadBeforeAnyDrawSeesTheBackgroundEveryFrameOnBothRenderers)
 {
     // The only layer blends with the screen, so the first thing each frame

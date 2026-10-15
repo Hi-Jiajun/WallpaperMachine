@@ -88,6 +88,9 @@ struct ExpectedShaderContext {
     std::string           identity_key;
     std::string           shader_name;
     std::string           shader_path;
+    /// Combos the scene sets on an effect's pass, over the material's own:
+    /// the effect file's pass first, then the scene's instance of it.
+    wallpaper::Combos     scene_combos;
 };
 
 struct DirectShaderCompileJob {
@@ -429,6 +432,8 @@ std::optional<DirectShaderCompileJob> BuildDirectShaderCompileJob(
         }
     }
 
+    for (const auto& [name, value] : expectation.scene_combos) job.combos[name] = value;
+
     if (first_pass->contains("textures") && first_pass->at("textures").is_array()) {
         job.base_textures.reserve(first_pass->at("textures").size());
         for (const auto& texture : first_pass->at("textures")) {
@@ -471,13 +476,28 @@ std::optional<DirectShaderCompileJob> BuildDirectShaderCompileJob(
     return BuildDirectShaderCompileJob(expectation, *material_json);
 }
 
+/// The integer combos of one pass entry, as the engine reads them from a
+/// scene's effect or an effect file's pass. Others are left out, like a
+/// material's own.
+void AddPassCombos(const nlohmann::json& pass, wallpaper::Combos& combos) {
+    if (! pass.is_object() || ! pass.contains("combos") || ! pass.at("combos").is_object()) {
+        return;
+    }
+    for (const auto& combo : pass.at("combos").items()) {
+        if (combo.value().is_number_integer()) {
+            combos[combo.key()] = std::to_string(combo.value().get<int32_t>());
+        }
+    }
+}
+
 void AddMaterialExpectation(const std::filesystem::path& scene_dir,
                             const std::string& material_path, const std::string& context,
                             const std::string& identity_key, std::string_view workshop_id,
                             const std::filesystem::path& scene_json, bool mounted_common_assets,
                             std::vector<ExpectedShaderContext>& expected,
                             std::vector<NonShaderBlocker>&      blockers,
-                            std::optional<std::string>          shader_override = std::nullopt) {
+                            std::optional<std::string>          shader_override = std::nullopt,
+                            wallpaper::Combos                   scene_combos    = {}) {
     auto material = ReadAssetJson(scene_dir,
                                   material_path,
                                   workshop_id,
@@ -499,6 +519,7 @@ void AddMaterialExpectation(const std::filesystem::path& scene_dir,
         .identity_key = identity_key,
         .shader_name  = shader_name,
         .shader_path  = "shaders/" + shader_name,
+        .scene_combos = std::move(scene_combos),
     });
 }
 
@@ -545,11 +566,22 @@ void CollectEffectExpectations(const std::filesystem::path& scene_dir,
     const auto effect_context =
         context + "/effect:" + (effect_name.empty() ? effect_path : effect_name);
 
+    // The scene's entries for the effect's passes follow its material passes in
+    // order, a command pass not counted.
+    const auto* scene_passes = effect_ref.is_object() && effect_ref.contains("passes") &&
+                                       effect_ref.at("passes").is_array()
+                                   ? &effect_ref.at("passes")
+                                   : nullptr;
     std::size_t raw_pass_index      = 0;
     std::size_t material_pass_index = 0;
     for (const auto& pass : effect->first.at("passes")) {
         const auto material_path = JsonStringValue(pass, "material");
         if (! material_path.empty()) {
+            wallpaper::Combos scene_combos;
+            AddPassCombos(pass, scene_combos);
+            if (scene_passes != nullptr && material_pass_index < scene_passes->size()) {
+                AddPassCombos(scene_passes->at(material_pass_index), scene_combos);
+            }
             AddMaterialExpectation(scene_dir,
                                    material_path,
                                    effect_context + "/source-pass-" +
@@ -561,7 +593,9 @@ void CollectEffectExpectations(const std::filesystem::path& scene_dir,
                                    scene_json,
                                    mounted_common_assets,
                                    expected,
-                                   blockers);
+                                   blockers,
+                                   std::nullopt,
+                                   std::move(scene_combos));
             ++material_pass_index;
         }
         ++raw_pass_index;
@@ -1242,6 +1276,80 @@ TEST(UnpackShaderCompileSmoke, CollectsVisibleEffectsUnderPreviouslyBlacklistedW
     EXPECT_EQ(expected.at(0).shader_path, "shaders/effects/visible_workshop_shader");
     EXPECT_EQ(expected.at(0).identity_key, "node:Layer/effect-0/pass-0/material-slot-0");
     EXPECT_NE(expected.at(0).context.find("visible-workshop-effect"), std::string::npos);
+
+    std::filesystem::remove_all(scene_dir);
+}
+
+TEST(UnpackShaderCompileSmoke, CompilesAnEffectUnderTheCombosTheSceneSetsOnIt) {
+    // A scene picks an effect's combos on its own entry for each pass (the
+    // audio bars effect's SHAPE), over the effect file's and the material's.
+    // A shader can compile under its defaults and fail under the scene's
+    // choice, so the sweep has to compile what the scene asks for. The scene's
+    // entries follow the effect's material passes; a command pass takes none.
+    const std::string test_name = testing::UnitTest::GetInstance()->current_test_info()->name();
+    const auto        scene_dir = std::filesystem::temp_directory_path() /
+                           (test_name + "-" + std::to_string(::getpid()));
+    std::filesystem::remove_all(scene_dir);
+    ASSERT_TRUE(std::filesystem::create_directories(scene_dir / "materials"));
+    ASSERT_TRUE(std::filesystem::create_directories(scene_dir / "effects"));
+
+    const auto write = [&scene_dir](const std::string& path, const std::string& text) {
+        std::ofstream(scene_dir / path) << text;
+    };
+    write("materials/layer.json", R"({"material": ""})");
+    write("effects/bars.json", R"({
+        "name": "bars",
+        "passes": [
+            { "material": "materials/first.json" },
+            { "command": "copy", "target": "_rt_copy", "source": "previous" },
+            { "material": "materials/second.json", "combos": { "FROM_FILE": 1, "BOTH": 1 } }
+        ]
+    })");
+    write("materials/first.json", R"({
+        "passes": [{ "shader": "effects/first", "combos": { "SHAPE": 0, "KEPT": 1 } }]
+    })");
+    write("materials/second.json", R"({ "passes": [{ "shader": "effects/second" }] })");
+
+    const auto scene_json = nlohmann::json::parse(R"({
+        "objects": [{
+            "id": 7,
+            "name": "Layer",
+            "visible": true,
+            "image": "materials/layer.json",
+            "effects": [{
+                "visible": true,
+                "file": "effects/bars.json",
+                "passes": [
+                    { "combos": { "SHAPE": 7, "NOT_AN_INTEGER": "x" } },
+                    { "combos": { "BOTH": 2 } }
+                ]
+            }]
+        }]
+    })");
+
+    fs::VFS vfs;
+    std::vector<NonShaderBlocker> blockers;
+    const auto expected = CollectSourceShaderExpectations(scene_dir,
+                                                          vfs,
+                                                          scene_json,
+                                                          "1",
+                                                          scene_dir / "scene.json",
+                                                          false,
+                                                          blockers);
+
+    EXPECT_TRUE(blockers.empty()) << NonShaderBlockerReport(blockers);
+    ASSERT_EQ(expected.size(), 2u);
+    const auto first  = BuildDirectShaderCompileJob(expected.at(0), blockers, "1",
+                                                    scene_dir / "scene.json", false);
+    const auto second = BuildDirectShaderCompileJob(expected.at(1), blockers, "1",
+                                                    scene_dir / "scene.json", false);
+    ASSERT_TRUE(first.has_value());
+    ASSERT_TRUE(second.has_value());
+    EXPECT_EQ(first->combos.at("SHAPE"), "7") << "the scene's choice replaces the material's";
+    EXPECT_EQ(first->combos.at("KEPT"), "1") << "a combo the scene does not set stays";
+    EXPECT_EQ(first->combos.count("NOT_AN_INTEGER"), 0u);
+    EXPECT_EQ(second->combos.at("FROM_FILE"), "1") << "the effect file's pass sets combos too";
+    EXPECT_EQ(second->combos.at("BOTH"), "2") << "the scene's entry wins over the effect file's";
 
     std::filesystem::remove_all(scene_dir);
 }

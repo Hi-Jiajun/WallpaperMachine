@@ -1826,6 +1826,42 @@ Rust regressions in `crates/shader/tests` (`legalize`, `preprocess`,
   (a card showing its texture coordinates, alone and behind a single-pass effect,
   drawn with a shader that writes `a_Position` and `a_TexCoord` unchanged and one
   that does not: byte-equal pictures on each renderer).
+- **A boolean multiplied into a `step` mask converts like any float** — Wallpaper
+  Engine's HLSL promotes a bool to a number, and an author masks with `int bar =
+  step(y, h); bar *= isLeftChannel;`. `step` returns a float, so the legalizer's
+  `IntStepInitializer` rewrites that declaration to `float`, but the symbol facts
+  every other control-flow repair reads are built from the unrepaired source, where
+  `bar` is still an `int`: `FloatBoolAssignment` left the bool bare, Naga rejected
+  `Float * Bool` and the whole effect was dropped (`Rust shader compile failed`). The
+  workshop Simple Audio Bars effect without anti-aliasing does this in its circle
+  and centre shapes (`SHAPE` 4 to 7), so a layer using one lost the bars whatever
+  played, which a silent frame cannot show. `SymbolFacts` now types an `int`
+  declarator initialised by a two-argument `step` as a float, from the predicate the
+  repair itself uses (`int_step::float_step_names`), so the bool becomes `(flag ?
+  1.0 : 0.0)` and the other repairs read the rewritten type too: `int level = bar +
+  1` is cast, `if (bar)` compares with `0.0` and `bar % 2` is a float remainder. A
+  declarator in another scope with the same name keeps its own type. Compile time
+  only: no pass, buffer or per-frame work. No pipeline revision bump: a compile
+  that failed is never stored (`WPShaderParser` writes a program only after its
+  compile succeeded), so the effects that compile now meet no stale entry. A program
+  that compiled before can read differently in two forms, `bar % 2` (now
+  `_we_Fmod(bar, float(2))`) and a condition `if (bar)` (now `bar != 0.0`, was
+  `bar != 0`), and both mean the same as before, so a stored program stays correct.
+  Known and not handled: a bool stored into a genuine `int` or `uint`, and a number
+  as an operand of `!`, `&&` or `||`, are still rejected
+  ([Known limitations](renderer.md#known-limitations)). The corpus sweep
+  `unpack_shader_compile_smoke` (`*ParsesCorpus*`) compiled only the material's own
+  combos, so it never saw a scene's choice of `SHAPE`; it now overlays the effect
+  file's pass combos and the scene's entry for the pass, in the engine's order, so
+  it reaches this defect. Tests: `legalize`
+  (`control_flow_coercion_strategy_lowers_bool_stored_into_step_repaired_int`, the
+  per-declarator, composition, scope and stereo-centre-path cases beside it, each
+  compiled for both targets),
+  `MetalSceneDraw.ABooleanMultipliedIntoAStepMaskClipsItOnBothRenderers` (a card
+  masked white above and below a black band by `int` step masks cut apart by
+  booleans: the same picture on both renderers) and
+  `UnpackShaderCompileSmoke.CompilesAnEffectUnderTheCombosTheSceneSetsOnIt`; the
+  first two fail without the change.
 - **Repairs for permissive-path shaders** — the pipeline handles undersized
   cross-stage varying declarations, conditional helper headers, source-defined
   `log10`, legacy scalar/vector argument conversion, compound assignment

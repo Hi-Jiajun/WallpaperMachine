@@ -4372,6 +4372,157 @@ fn control_flow_coercion_strategy_lowers_float_times_bool_assignments() {
 }
 
 #[test]
+fn control_flow_coercion_strategy_lowers_bool_stored_into_step_repaired_int() {
+    // An `int` initialised by `step` is rewritten to `float`, so a boolean
+    // multiplied into it has to be converted like any other float lvalue.
+    let source = concat!(
+        "void main() {\n",
+        "    bool on = gl_FragCoord.y < 10.0;\n",
+        "    int bar = step(0.5, 0.75);\n",
+        "    bar *= on;\n",
+        "    gl_FragColor = vec4(float(bar));\n",
+        "}\n",
+    );
+
+    let legalized = legalize(ShaderStageKind::Fragment, source);
+    let source = legalized.source();
+
+    assert!(source.contains("float bar = step(0.5, 0.75);"), "{source}");
+    assert!(source.contains("bar *= (on ? 1.0 : 0.0);"), "{source}");
+    compile_for_both_targets(&legalized, "a boolean stored into a step-repaired int must convert");
+}
+
+#[test]
+fn control_flow_coercion_strategy_lowers_bool_stored_into_step_repaired_int_declarators() {
+    // The repair applies per declarator: the plain `int` beside it keeps its
+    // type and its own conversion, qualifiers included.
+    let source = concat!(
+        "void main() {\n",
+        "    bool on = gl_FragCoord.y < 10.0;\n",
+        "    const int keep = 1;\n",
+        "    int plain = 2, edge = step(0.5, 0.75);\n",
+        "    edge *= on;\n",
+        "    edge += gl_FragCoord.x > 3.0;\n",
+        "    gl_FragColor = vec4(float(edge) + float(plain + keep));\n",
+        "}\n",
+    );
+
+    let legalized = legalize(ShaderStageKind::Fragment, source);
+    let source = legalized.source();
+
+    assert!(source.contains("int plain = 2;"), "{source}");
+    assert!(source.contains("float edge = step(0.5, 0.75);"), "{source}");
+    assert!(source.contains("edge *= (on ? 1.0 : 0.0);"), "{source}");
+    assert!(
+        source.contains("edge += ((gl_FragCoord.x > 3.0) ? 1.0 : 0.0);"),
+        "{source}"
+    );
+    compile_for_both_targets(&legalized, "step-repaired declarators must accept booleans");
+}
+
+#[test]
+fn control_flow_coercion_strategy_composes_step_repaired_int_with_other_int_repairs() {
+    // Every repair reads the type the earlier repairs leave behind: the
+    // step result is a float for the cast, the conditions and the modulo.
+    let source = concat!(
+        "uniform float u_Level;\n",
+        "void main() {\n",
+        "    int edge = step(0.5, u_Level);\n",
+        "    int level = edge + 1;\n",
+        "    float wrapped = 0.0;\n",
+        "    if (edge) {\n",
+        "        wrapped = edge % 2;\n",
+        "    }\n",
+        "    float picked = edge ? 1.0 : 0.5;\n",
+        "    int rest = step(0.5, u_Level);\n",
+        "    while (rest) {\n",
+        "        picked += 1.0;\n",
+        "        rest = 0;\n",
+        "    }\n",
+        "    gl_FragColor = vec4(float(level), wrapped, picked, 1.0);\n",
+        "}\n",
+    );
+
+    let legalized = legalize(ShaderStageKind::Fragment, source);
+    let source = legalized.source();
+
+    assert!(source.contains("float edge = step(0.5, u_Level);"), "{source}");
+    assert!(source.contains("int level = int(edge + 1);"), "{source}");
+    assert!(source.contains("if (edge != 0.0)"), "{source}");
+    assert!(source.contains("wrapped = _we_Fmod(edge, float(2));"), "{source}");
+    assert!(source.contains("picked = edge != 0.0 ? 1.0 : 0.5;"), "{source}");
+    assert!(source.contains("while (rest != 0.0)"), "{source}");
+    compile_for_both_targets(&legalized, "step-repaired ints must compose with other repairs");
+}
+
+#[test]
+fn control_flow_coercion_strategy_keeps_plain_int_facts_beside_step_repaired_names() {
+    // The float type belongs to the declarator the step initialises; an
+    // unrelated `int` of the same name in another scope keeps its own.
+    let source = concat!(
+        "uniform float u_Level;\n",
+        "void main() {\n",
+        "    float total = 0.0;\n",
+        "    {\n",
+        "        int mask = step(0.5, u_Level);\n",
+        "        total += mask;\n",
+        "    }\n",
+        "    {\n",
+        "        int mask = 3;\n",
+        "        int doubled = mask * 2;\n",
+        "        total += float(doubled);\n",
+        "    }\n",
+        "    gl_FragColor = vec4(total);\n",
+        "}\n",
+    );
+
+    let legalized = legalize(ShaderStageKind::Fragment, source);
+    let source = legalized.source();
+
+    assert!(source.contains("float mask = step(0.5, u_Level);"), "{source}");
+    // The second block's `int` product stays an int, with no cast around it.
+    assert!(source.contains("int doubled = "), "{source}");
+    assert!(!source.contains("int("), "{source}");
+    compile_for_both_targets(&legalized, "scoped int facts must not leak between blocks");
+}
+
+#[test]
+fn control_flow_coercion_strategy_lowers_simple_audio_bars_stereo_centre_path() {
+    // The stereo-centre path of a workshop audio-bars effect: the bar masks
+    // are `int = step(..)`, clipped by booleans and refined by float masks.
+    let source = concat!(
+        "uniform vec2 u_BarBounds;\n",
+        "uniform float u_BarSpacing;\n",
+        "varying vec2 v_TexCoord;\n",
+        "void main() {\n",
+        "    vec2 shapeCoord = v_TexCoord.xy;\n",
+        "    shapeCoord.y = frac(0.5 - shapeCoord.y);\n",
+        "    float barDist = abs(frac(shapeCoord.x * 32.0) * 2 - 1);\n",
+        "    bool isLeftChannel = shapeCoord.y < 0.49;\n",
+        "    bool isRightChannel = shapeCoord.y > 0.51;\n",
+        "    float barHeightLeft = 0.5 * lerp(u_BarBounds.x, u_BarBounds.y, 0.5);\n",
+        "    float barHeightRight = 0.5 * lerp(u_BarBounds.x, u_BarBounds.y, 0.5);\n",
+        "    int barLeft = step(shapeCoord.y, barHeightLeft);\n",
+        "    int barRight = step(1 - shapeCoord.y, barHeightRight);\n",
+        "    barLeft *= isLeftChannel; barRight *= isRightChannel;\n",
+        "    barLeft *= 1.0 - step(shapeCoord.y, 0.5 * u_BarBounds.x);\n",
+        "    barRight *= step(1.0 - shapeCoord.y, u_BarBounds.y);\n",
+        "    float bar = max(barLeft, barRight);\n",
+        "    bar *= step(barDist, 1 - u_BarSpacing);\n",
+        "    gl_FragColor = vec4(vec3(bar), 1.0);\n",
+        "}\n",
+    );
+
+    let legalized = legalize(ShaderStageKind::Fragment, source);
+    let source = legalized.source();
+
+    assert!(source.contains("float barLeft = step("), "{source}");
+    assert!(source.contains("barLeft *= (isLeftChannel ? 1.0 : 0.0);"), "{source}");
+    assert!(source.contains("barRight *= (isRightChannel ? 1.0 : 0.0);"), "{source}");
+    compile_for_both_targets(&legalized, "the stereo-centre audio bars path must compile");
+}
+
+#[test]
 fn alpha_to_coverage_derivative_idiom_reuses_pre_derivative_color_alpha() {
     let source = concat!(
         "void main() {\n",

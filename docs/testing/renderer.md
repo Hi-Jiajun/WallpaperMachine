@@ -590,10 +590,11 @@ version it finds (a parsed model needs geometry; it may have no bones, which the
 renderer draws as a static mesh). Without a corpus it generates no cases and
 `CorpusSmoke.NonEmpty` skips, naming the folder it looked in; pointed at the app's
 `Library` folder (60 items) it takes about 3 seconds. `unpack_shader_compile_smoke`
-checks its compile-job building and path guards on every run. Its corpus sweep
-compiles every shader-bearing material of every scene under
-`WALLPAPER_MACHINE_UNPACK_ROOT`, with `WALLPAPER_MACHINE_ASSETS_ROOT` mounted, and
-took 5 to 6 minutes for 60 scenes, so it is disabled and runs only on request:
+checks its compile-job building (a scene's combos on an effect's passes included) and
+path guards on every run. Its corpus sweep compiles every shader-bearing material of
+every scene under `WALLPAPER_MACHINE_UNPACK_ROOT`, with `WALLPAPER_MACHINE_ASSETS_ROOT`
+mounted and an effect's passes under the combos the scene sets on them, and took 5 to
+6 minutes for 60 scenes, so it is disabled and runs only on request:
 
 ```sh
 WALLPAPER_MACHINE_UNPACK_ROOT=<folder of id/scene.json> \
@@ -762,6 +763,20 @@ into private textures; the three that draw skip visibly without a Metal device.
   vertex colours has no mesh attribute for that input), reflection lists such an
   input like any other, and nothing in it says whether the shader reads it. That
   needs the use information first.
+- **A boolean stored into a declared `int` or `uint` does not compile.** The legalizer
+  turns a comparison or boolean stored into a float lvalue into `1.0`/`0.0`, and an
+  `int` filled from `step` counts as a float
+  ([Shader pipeline](scene-regressions.md#shader-pipeline)), but HLSL promotes a bool
+  to any number: `int n = 2; n *= flag;`, `n = a < b;`, `uint n *= flag;` and `int n
+  = flag;` are accepted by Wallpaper Engine and rejected by Naga, which drops the
+  effect with `Rust shader compile failed`. An effect that does shows up as that
+  error.
+- **A number as an operand of `!`, `&&` or `||` does not compile.** HLSL, which
+  Wallpaper Engine compiles its shaders as, takes a number there as "not zero", so
+  `if (!mask)` and `if (mask && inside)` are valid. The legalizer compares with zero
+  only a number that is the whole condition of an `if`, `while` or `?:`; Naga rejects
+  the operand (a `float` or `int`, a `step` mask included) and drops the effect with
+  `Rust shader compile failed`.
 - Wallpaper Engine's `fur4` shader does not compile on its own: its instanced shells read
   the dialect's cast macros (`CASTF` among them), which the compiler does not supply with
   `CASTI`, `CASTU`, `CAST4U`, `DECLARE_SAMPLER2D_PARAMETER` and `MAKE_SAMPLER2D_ARGUMENT`.
