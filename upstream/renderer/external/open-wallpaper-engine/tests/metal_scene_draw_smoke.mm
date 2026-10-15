@@ -5177,6 +5177,213 @@ TEST_F(MetalSceneDraw, CameraParallaxMovesATextLayerAsItMovesAnImageOnBothRender
 
 namespace
 {
+/// What the group of `WriteComposeParallaxFixture` holds.
+enum class ComposeParallaxLayer
+{
+    None,
+    /// A compose layer through one effect, alone: the layer the effect frames
+    /// with the camera at the origin.
+    Childless,
+    /// The same layer over a child (an empty group, so the picture is the same):
+    /// a compose layer whose first pass the render graph draws through the scene
+    /// camera.
+    WithChild,
+};
+
+/// A smooth, asymmetric backdrop that does not move (red grows to the right,
+/// green downwards) under camera parallax, with a group at depth 2 over it. The
+/// group holds, unless `layer` is None, a 128 by 64 compose layer through one
+/// effect that inverts red: the layer shows the backdrop behind where it is
+/// drawn, with red inverted. The group sits 20 right of and 10 above the centre
+/// of the canvas, the layer 20 left of the group, so with the cursor centred
+/// parallax draws it 40 right of and 20 above where its origin puts it.
+std::filesystem::path WriteComposeParallaxFixture(const std::filesystem::path& root,
+                                                  ComposeParallaxLayer         layer)
+{
+    const auto project = WriteFixture(root);
+    const std::string vertex =
+        "uniform mat4 g_ModelViewProjectionMatrix;\n"
+        "attribute vec3 a_Position;\nattribute vec2 a_TexCoord;\n"
+        "varying vec2 v_TexCoord;\n"
+        "void main(){ gl_Position=g_ModelViewProjectionMatrix*vec4(a_Position,1.0);"
+        "v_TexCoord=a_TexCoord; }\n";
+    const std::map<std::string, std::string> files {
+        { "models/backdrop.json", R"({"width":384,"height":256,"material":"materials/tile.json"})" },
+        { "models/util/composelayer.json",
+          R"({"passthrough":true,"material":"materials/util/composelayer.json"})" },
+        { "materials/util/composelayer.json",
+          R"({"passes":[{"shader":"composelayer","blending":"translucent","cullmode":"nocull",)"
+          R"("depthtest":"disabled","depthwrite":"disabled","textures":["_rt_FullFrameBuffer"]}]})" },
+        // The layer's picture is the screen where its card is: the card's
+        // model-view-projection, turned to a screen coordinate.
+        { "shaders/composelayer.vert",
+          "uniform mat4 g_ModelViewProjectionMatrix;\n"
+          "attribute vec3 a_Position;\nattribute vec2 a_TexCoord;\n"
+          "varying vec2 v_TexCoord;\nvarying vec3 v_ScreenCoord;\n"
+          "void main() {\n"
+          "  v_ScreenCoord = (g_ModelViewProjectionMatrix * vec4(a_Position, 1.0)).xyw;\n"
+          "  vec3 position = vec3(a_TexCoord, 0.0);\n"
+          "#ifdef HLSL\n"
+          "  position.y = 1.0 - position.y;\n"
+          "  v_ScreenCoord.y = -v_ScreenCoord.y;\n"
+          "#endif\n"
+          "  position.xy = position.xy * 2.0 - 1.0;\n"
+          "  gl_Position = vec4(position, 1.0);\n"
+          "  v_TexCoord = a_TexCoord;\n"
+          "}\n" },
+        { "shaders/composelayer.frag",
+          "varying vec2 v_TexCoord;\nvarying vec3 v_ScreenCoord;\n"
+          "uniform sampler2D g_Texture0;\n"
+          "void main() {\n"
+          "  vec2 texCoord = v_ScreenCoord.xy / v_ScreenCoord.z * vec2(0.5, 0.5) + 0.5;\n"
+          "  gl_FragColor = texture(g_Texture0, texCoord);\n"
+          "}\n" },
+        { "effects/invert_red/effect.json",
+          R"({"name":"invert red","passes":[{"material":"materials/invert_red.json"}]})" },
+        { "materials/invert_red.json",
+          R"({"passes":[{"shader":"invert_red","textures":[null],"blending":"normal",)"
+          R"("cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled"}]})" },
+        { "shaders/invert_red.vert", vertex },
+        { "shaders/invert_red.frag",
+          "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\n"
+          "void main() {\n"
+          "  vec4 picture = texture(g_Texture0, v_TexCoord);\n"
+          "  gl_FragColor = vec4(1.0 - picture.r, picture.g, picture.b, picture.a);\n"
+          "}\n" },
+    };
+    for (const auto& [name, contents] : files) {
+        const auto path = root / name;
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream(path) << contents;
+    }
+    std::ofstream(root / "layout.json")
+        << R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+           R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0,0,0],)"
+           R"("cameraparallax":true,"cameraparallaxamount":1,"cameraparallaxdelay":0,)"
+           R"("cameraparallaxmouseinfluence":1,)"
+           R"("orthogonalprojection":{"width":384,"height":256}},)"
+           R"("objects":[{"id":1,"name":"backdrop","image":"models/backdrop.json",)"
+           R"("origin":[192,128,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true,)"
+           R"("parallaxDepth":[0,0]},)"
+           R"({"id":3,"name":"group","origin":[212,138,0],"parallaxDepth":[2,2]})"
+        << (layer != ComposeParallaxLayer::None
+                ? R"(,{"id":2,"name":"layer","image":"models/util/composelayer.json","parent":3,)"
+                  R"("size":[128,64],"origin":[-20,0,0],"scale":[1,1,1],"angles":[0,0,0],)"
+                  R"("visible":true,"effects":[{"file":"effects/invert_red/effect.json",)"
+                  R"("visible":true}]})"
+                : "")
+        << (layer == ComposeParallaxLayer::WithChild
+                ? R"(,{"id":4,"name":"child","parent":2,"origin":[0,0,0],"visible":true})"
+                : "")
+        << "]}";
+    return project;
+}
+} // namespace
+
+TEST_F(MetalSceneDraw, AComposeLayerHoldsWhatIsBehindWhereParallaxDrawsItOnBothRenderers)
+{
+    // A compose layer holds the scene behind the place it is drawn, here with red
+    // inverted. Camera parallax moves the layer: with the cursor centred its group is
+    // 20 right of and 10 above the centre of the view and the depth is 2, so it is drawn
+    // 40 right of and 20 above where its origin puts it, and the picture it holds must
+    // be what the layer covers there. The layer reads the screen in its first pass,
+    // which holds no depth of its own, and read it at the place its origin puts it: the
+    // layer showed the scene displaced by its own parallax offset, a slab of picture
+    // that does not belong where it is. A cursor right of the centre moves the point
+    // the offset is measured from, and the layer with it. A layer without children
+    // frames its effects with a camera at the origin and a layer with one is drawn
+    // through the scene camera: both are held to the same picture.
+    struct Variant
+    {
+        const char* name;
+        double      cursor;
+        int         shift_x; // pixels to the right
+        int         shift_y; // pixels up
+    };
+    struct Layer
+    {
+        const char*          name;
+        ComposeParallaxLayer kind;
+    };
+    for (const auto& variant : { Variant { "cursor centred", 0.5, 40, 20 },
+                                 Variant { "cursor right", 0.5625, -8, 20 } }) {
+        SCOPED_TRACE(variant.name);
+        for (const bool native : { false, true }) {
+            SCOPED_TRACE(native ? "native" : "compatibility");
+            const auto draw = [&](const char* kind, ComposeParallaxLayer layer,
+                                  RendererPicture& picture) {
+                const std::string name = std::string("compose-parallax-") +
+                                         (native ? "native-" : "compat-") + kind + "-" +
+                                         std::to_string(int(variant.cursor * 10000));
+                const auto project = WriteComposeParallaxFixture(root_ / name, layer);
+                LoadedScene loaded;
+                std::string error;
+                ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+                if (native) {
+                    const auto selection = SelectSceneBackend(*loaded.scene);
+                    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal)
+                        << selection.fallback_reason;
+                }
+                loaded.scene->shaderValueUpdater->MouseInput(variant.cursor, 0.5);
+                picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+                ASSERT_TRUE(picture.error.empty()) << picture.error;
+                ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+            };
+            RendererPicture bare;
+            draw("bare", ComposeParallaxLayer::None, bare);
+            if (::testing::Test::HasFatalFailure()) return;
+            for (const auto& which :
+                 { Layer { "a layer without children", ComposeParallaxLayer::Childless },
+                   Layer { "a layer with a child", ComposeParallaxLayer::WithChild } }) {
+                SCOPED_TRACE(which.name);
+                RendererPicture layer;
+                draw(which.kind == ComposeParallaxLayer::Childless ? "layer" : "child", which.kind,
+                     layer);
+                if (::testing::Test::HasFatalFailure()) return;
+                // Where the layer is drawn, in pixels from the top left. Its origin is
+                // (192, 138) in a canvas 256 tall, and the card spans 128 by 64 around it.
+                const int left   = 128 + variant.shift_x;
+                const int right  = 256 + variant.shift_x;
+                const int top    = 256 - 170 - variant.shift_y;
+                const int bottom = 256 - 106 - variant.shift_y;
+                constexpr int kMargin = 3;
+                std::size_t inside = 0, inverted = 0, wrong_inside = 0, wrong_outside = 0;
+                for (int y = 0; y < 256; ++y) {
+                    for (int x = 0; x < 384; ++x) {
+                        const auto* have = &layer.rgb[(std::size_t(y) * 384 + x) * 3];
+                        const auto* base = &bare.rgb[(std::size_t(y) * 384 + x) * 3];
+                        if (x >= left + kMargin && x < right - kMargin && y >= top + kMargin &&
+                            y < bottom - kMargin) {
+                            ++inside;
+                            const int want_red = 255 - base[0];
+                            if (std::abs(want_red - int(base[0])) > 20) ++inverted;
+                            if (std::abs(int(have[0]) - want_red) > 2 ||
+                                std::abs(int(have[1]) - int(base[1])) > 2 ||
+                                std::abs(int(have[2]) - int(base[2])) > 2) {
+                                ++wrong_inside;
+                            }
+                        } else if (x < left - kMargin || x >= right + kMargin ||
+                                   y < top - kMargin || y >= bottom + kMargin) {
+                            if (std::abs(int(have[0]) - int(base[0])) > 1 ||
+                                std::abs(int(have[1]) - int(base[1])) > 1 ||
+                                std::abs(int(have[2]) - int(base[2])) > 1) {
+                                ++wrong_outside;
+                            }
+                        }
+                    }
+                }
+                ASSERT_GT(inside, 6000u);
+                EXPECT_GT(inverted, inside * 6 / 10) << "the layer did not draw its inverted picture";
+                EXPECT_EQ(wrong_inside, 0u)
+                    << "the layer does not hold the scene behind the place it is drawn";
+                EXPECT_EQ(wrong_outside, 0u) << "the layer changed the scene outside its card";
+            }
+        }
+    }
+}
+
+namespace
+{
 /// A 16 by 12 layer with a copy effect, shown 16 times larger: its target holds
 /// one texel to every 16 pixels of the picture, so how the target is sampled is
 /// the whole of what separates a smooth gradient from a staircase.

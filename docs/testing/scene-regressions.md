@@ -93,10 +93,13 @@ Playback, backend, host and startup areas are in
 - **Camera parallax** — `ShaderValueUpdaterCompat.CameraParallaxMovesEachLayerTreeByItsRootsDistanceFromTheCursor`,
   `.ZeroParallaxDelayFollowsTheCursorAtOnce` and
   `.ParallaxLayersAreReportedAsFollowingTheCursor` in `script_runtime_compat_test`;
+  `ScriptRuntimeCompat.AComposeLayersFirstPassReadsTheScreenWhereParallaxDrawsItsCard`
+  in `script_runtime_compat_test`;
   `SceneSchema.ParserCopiesImageParallaxDepthToPuppetMaterialSlots` in
   `scene_schema_tests`; `TextObjectRuntime.CameraParallaxMovesAPlainTextLayerByItsDepth`
   and `.ATextLayerUnderAGroupRidesTheGroupsParallax` in `text_object_runtime_test`;
-  `MetalSceneDraw.CameraParallaxMovesATextLayerAsItMovesAnImageOnBothRenderers` in
+  `MetalSceneDraw.CameraParallaxMovesATextLayerAsItMovesAnImageOnBothRenderers` and
+  `.AComposeLayerHoldsWhatIsBehindWhereParallaxDrawsItOnBothRenderers` in
   `metal_scene_draw_smoke`.
   - In a 2D scene, as in Wallpaper Engine, parallax moves each layer tree by its
     outermost layer's distance from the eased cursor point, times that layer's
@@ -127,6 +130,33 @@ Playback, backend, host and startup areas are in
     from the centre on both renderers and measures how far their ink moves against
     the same scene at depth 0, with the cursor centred and away from the centre, and
     for a text drawn through a copy effect (moved once, not twice).
+  - A compose layer with effects holds the screen behind the place its card is
+    drawn. Its first pass maps the card onto the screen through the layer's
+    model-view-projection (`composelayer.vert`) and its last pass draws the card,
+    and Wallpaper Engine's draw loop gives both the same parallax offset. The
+    layer's own node holds no depth (a layer drawn through effects has it on its
+    effect passes), so the first pass was not moved: it read the screen at the
+    unshifted place and the card showed the scene displaced by its own offset, a
+    hard-edged slab wherever the effect keeps the copy (an audio-bar layer that
+    draws nothing in silence). A pass that reads the screen now takes its depth
+    from `NodeParallaxDepth`, which asks the effect passes first, and measures
+    the offset from the scene camera its matrix is built with. That matters for a
+    layer without children, which frames its effects, and so draws its first
+    pass, with a camera at the origin; a layer with children is drawn through the
+    scene camera already (the render graph names it) and lacked only the depth.
+    `FrameVaryingUniforms` reports `kParallax` for the pass by the same rule. An
+    ordinary effect layer's first pass draws into its own target and is still not
+    moved, nor is a compose layer drawn into a composite through a layer-local
+    camera. A depth a script writes reaches the layer's effect passes and not the
+    record of its own node, so it moves the card and what a compose layer reads,
+    leaves an ordinary effect layer's first pass where it is, and asks for a new
+    render graph only when a layer starts or stops following the cursor. The unit
+    test compares the first pass's model-view-projection with its card's, for a
+    layer with children and one without, with the cursor centred and away from the
+    centre and again after a script writes a depth; the Metal test puts a compose
+    layer, alone and over a child, through an effect that inverts red in a depth-2
+    group over an asymmetric backdrop and requires the backdrop with red inverted
+    where the layer is drawn and nothing changed outside it, on both renderers.
   - `cameraparallaxdelay` of zero means no easing. Dividing by it makes the eased
     cursor NaN, which reaches every parallax layer's model matrix and leaves only
     the clear color on both backends.
@@ -756,7 +786,8 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
     moves it below that layer and its world place follows the parent (a parent
     that names no layer leaves it beside its creator, not at the root), and
     `parallaxDepth` is a property of every layer. A write reaches the layer, the
-    effect passes it is drawn through and the layers below it (Wallpaper Engine
+    effect passes it is drawn through (a layer drawn through them holds the depth
+    on those alone) and the layers below it (Wallpaper Engine
     moves a whole tree by its outermost layer's depth, so a write on a child
     changes only that child's drift; layers above and beside keep theirs), and a
     layer that starts or stops following the cursor asks for a new render graph.

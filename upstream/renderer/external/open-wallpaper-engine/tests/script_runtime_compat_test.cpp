@@ -754,6 +754,226 @@ TEST(ScriptRuntimeCompat, ComposeBackgroundUsesScreenCameraAndParentTransform) {
     }
 }
 
+// A compose layer with effects holds what is behind the place its card is
+// drawn: its first pass maps the card onto the screen to read it, and its last
+// pass draws the card there. Camera parallax moves the card, so it has to move
+// what the first pass reads by the same offset. The layer's own node has no
+// depth of its own -- the layer's is on its effect passes -- so the depth could
+// not be taken from the node as it stands. And a layer without children frames
+// its effects with a camera at the origin, not the scene camera, so the centre
+// of the view the offset is measured from could not be taken from the camera
+// that draws the pass either. (A layer with children is drawn through the scene
+// camera already: the render graph overrides the camera of its first pass.)
+// Read at the unshifted place, the layer showed a slab of the scene displaced
+// by its own parallax offset. An ordinary effect layer's first pass draws into
+// the layer's target and stays where it is.
+TEST(ScriptRuntimeCompat, AComposeLayersFirstPassReadsTheScreenWhereParallaxDrawsItsCard) {
+    Scene scene;
+    scene.ortho[0]   = 640;
+    scene.ortho[1]   = 360;
+    scene.sceneGraph = std::make_shared<SceneNode>();
+    auto screen      = std::make_shared<SceneCamera>(640, 360, -1, 1);
+    auto screen_node = std::make_shared<SceneNode>();
+    screen_node->SetTranslate(Eigen::Vector3f(320, 180, 0));
+    screen->AttatchNode(screen_node);
+    scene.activeCamera     = screen.get();
+    scene.cameras["screen"] = screen;
+    auto composite     = std::make_shared<SceneCamera>(64, 32, -1, 1);
+    composite->SetLayerLocal(true);
+    scene.cameras["composite"] = composite;
+    // The camera every layer without children frames its effects with, at the origin.
+    auto effect_camera_node = std::make_shared<SceneNode>();
+    scene.sceneGraph->AppendChild(effect_camera_node);
+
+    WPShaderValueUpdater updater(&scene);
+    updater.SetCameraParallax({ .enable = true, .amount = 0.5f, .delay = 0.0f,
+                                .mouseinfluence = 1.0f, .canvas_scene = true });
+    scene.frameTime = 1.0 / 60.0;
+
+    auto group = std::make_shared<SceneNode>();
+    group->SetTranslate(Eigen::Vector3f(400, 100, 0));
+    scene.sceneGraph->AppendChild(group);
+
+    // A layer drawn through one effect, as the parser builds it: the layer's own
+    // node draws the first pass and holds no depth, a pass node of its own draws
+    // the card on the scene with the layer's depth.
+    struct EffectLayer
+    {
+        std::shared_ptr<SceneNode> node;
+        std::shared_ptr<SceneNode> card;
+        std::string                camera;
+        // The camera the render graph draws the first pass with, when it names one.
+        std::string                first_pass_camera;
+    };
+    const auto add_node = [&](const char* shader) {
+        auto node = std::make_shared<SceneNode>();
+        auto mesh = std::make_shared<SceneMesh>();
+        SceneMaterial material;
+        material.name = shader;
+        mesh->AddMaterial(std::move(material));
+        node->AddMesh(mesh);
+        return node;
+    };
+    const auto exists = [](std::string_view name) {
+        return name == "g_ModelViewProjectionMatrix";
+    };
+    // A compose layer with children frames its effects with a camera attached to
+    // itself and is drawn through the scene camera; any other layer frames them
+    // with the one at the origin and draws its first pass with it.
+    const auto add_layer = [&](const char* name, const char* shader, bool has_children) {
+        EffectLayer layer { add_node(shader), add_node("copy"), std::string(name) + "-camera",
+                            has_children ? "screen" : "" };
+        layer.node->SetTranslate(Eigen::Vector3f(-40, 20, 0));
+        auto camera = std::make_shared<SceneCamera>(64, 32, -1, 1);
+        camera->AttatchNode(has_children ? layer.node : effect_camera_node);
+        scene.cameras[layer.camera] = camera;
+        layer.node->SetCamera(layer.camera);
+        if (! has_children) layer.node->SetRenderTransformOverride(Eigen::Matrix4d::Identity());
+        group->AppendChild(layer.node);
+        layer.node->UpdateTrans();
+        layer.card->SetRenderTransformOverride(layer.node->ModelTrans());
+        updater.SetNodeData(layer.node.get(), WPShaderValueData {});
+        WPShaderValueData pass;
+        pass.effect_owner   = layer.node.get();
+        pass.parallax_layer = layer.node.get();
+        pass.parallaxDepth  = { 2.0f, 2.0f };
+        updater.SetNodeData(layer.card.get(), pass);
+        updater.InitUniforms(layer.node.get(), exists);
+        updater.InitUniforms(layer.card.get(), exists);
+        return layer;
+    };
+    // The matrix a pass is drawn with, through the camera the render graph names
+    // (`camera_override`) or else the node's own, as the passes swap them.
+    const auto mvp = [&](SceneNode& node, const std::string& camera_override = {}) {
+        const std::string own = node.Camera();
+        if (! camera_override.empty()) node.SetCamera(camera_override);
+        sprite_map_t sprites;
+        ShaderValue  actual;
+        updater.UpdateUniforms(&node, sprites, [&](std::string_view name, const ShaderValue& v) {
+            if (name == "g_ModelViewProjectionMatrix") actual = v;
+        });
+        node.SetCamera(own);
+        return actual;
+    };
+    const auto expect_matrix = [](const ShaderValue& actual, const Eigen::Matrix4d& expected,
+                                  const char* what) {
+        const auto wanted = ShaderValue::fromMatrix(expected);
+        ASSERT_EQ(actual.size(), wanted.size()) << what;
+        for (std::size_t i = 0; i < actual.size(); ++i) EXPECT_NEAR(actual[i], wanted[i], 1e-5) << what;
+    };
+    const auto moved = [](const Eigen::Matrix4d& model, const Eigen::Vector2d& by) -> Eigen::Matrix4d {
+        return Eigen::Affine3d(Eigen::Translation3d(by.x(), by.y(), 0.0)).matrix() * model;
+    };
+    const auto follows_cursor = [&](SceneNode& node, const std::string& camera_override) {
+        return (updater.FrameVaryingUniforms(&node, 0, camera_override) &
+                frame_varying_uniform::kParallax) != 0;
+    };
+
+    const auto with_children = add_layer("with-children", "composelayer", true);
+    const auto leaf          = add_layer("leaf", "composelayer", false);
+    const auto plain         = add_layer("plain", "genericimage", false);
+    // A compose layer without effects draws its card itself and holds its own depth.
+    auto bare = add_node("composelayer");
+    bare->SetTranslate(Eigen::Vector3f(-40, 20, 0));
+    group->AppendChild(bare);
+    bare->UpdateTrans();
+    WPShaderValueData bare_data;
+    bare_data.parallaxDepth = { 2.0f, 2.0f };
+    updater.SetNodeData(bare.get(), bare_data);
+    updater.InitUniforms(bare.get(), exists);
+
+    const Eigen::Matrix4d view_projection = screen->GetViewProjectionMatrix();
+    const Eigen::Matrix4d model           = leaf.node->ModelTrans();
+    // The group is the outermost layer: it sits (80, -80) from the view centre, and
+    // the cursor, when it moves, adds its own distance from the centre of the canvas.
+    const Eigen::Vector2d root_offset(80.0, -80.0);
+    const double          depth_and_amount = 2.0 * 0.5;
+
+    struct Cursor
+    {
+        const char*     name;
+        double          x;
+        Eigen::Vector2d pull;
+    };
+    for (const auto& cursor : { Cursor { "cursor centred", 0.5, { 0.0, 0.0 } },
+                                Cursor { "cursor right", 0.75, { -160.0, 0.0 } } }) {
+        SCOPED_TRACE(cursor.name);
+        updater.MouseInput(cursor.x, 0.5);
+        updater.FrameBegin();
+        const Eigen::Vector2d shift = (cursor.pull + root_offset) * depth_and_amount;
+
+        for (const auto* layer : { &with_children, &leaf }) {
+            SCOPED_TRACE(layer == &leaf ? "a layer without children" : "a layer with children");
+            const auto card_mvp  = mvp(*layer->card);
+            const auto first_mvp = mvp(*layer->node, layer->first_pass_camera);
+            expect_matrix(card_mvp, view_projection * moved(model, shift), "the card on the scene");
+            expect_matrix(first_mvp, view_projection * moved(model, shift),
+                          "the screen the first pass reads must be where the card is drawn");
+            ASSERT_EQ(first_mvp.size(), card_mvp.size());
+            for (std::size_t i = 0; i < first_mvp.size(); ++i) {
+                EXPECT_NEAR(first_mvp[i], card_mvp[i], 1e-6);
+            }
+            // The card of a layer another layer samples is drawn through a layer-local
+            // camera, where the layer sits in the scene does not reach the image.
+            expect_matrix(mvp(*layer->node, "composite"), view_projection * model,
+                          "a compose layer drawn into its composite");
+        }
+        // A layer that holds its depth on its own node is moved by it.
+        expect_matrix(mvp(*bare), view_projection * moved(bare->ModelTrans(), shift),
+                      "a compose layer without effects");
+        // An ordinary effect layer draws its first pass into its own target.
+        expect_matrix(mvp(*plain.node), scene.cameras.at(plain.camera)->GetViewProjectionMatrix(),
+                      "the first pass of an ordinary effect layer");
+    }
+
+    // The first pass moves with the cursor, so it is never reused while it moves.
+    for (const auto* layer : { &with_children, &leaf }) {
+        EXPECT_TRUE(follows_cursor(*layer->node, layer->first_pass_camera));
+        EXPECT_TRUE(follows_cursor(*layer->card, ""));
+        EXPECT_FALSE(follows_cursor(*layer->node, "composite"));
+    }
+    EXPECT_TRUE(follows_cursor(*bare, ""));
+    EXPECT_FALSE(follows_cursor(*plain.node, "")) << "an ordinary effect layer's first pass stands still";
+
+    // A depth a script writes reaches the passes the layer's depth is on, so the
+    // first pass keeps reading where the card is drawn, and stops moving with it
+    // when the depth goes to zero. The first pass of an ordinary effect layer
+    // stays where it is whatever the script writes.
+    updater.MouseInput(0.5, 0.5);
+    updater.FrameBegin();
+    for (const auto* layer : { &with_children, &leaf, &plain }) {
+        const bool compose = layer != &plain;
+        SCOPED_TRACE(layer == &leaf ? "a layer without children"
+                                    : compose ? "a layer with children" : "an ordinary effect layer");
+        const auto first_pass = [&] {
+            return mvp(*layer->node, layer->first_pass_camera);
+        };
+        const auto at_rest = [&] {
+            return compose ? view_projection * model
+                           : scene.cameras.at(layer->camera)->GetViewProjectionMatrix();
+        };
+        EXPECT_FALSE(updater.SetNodeParallaxDepth(layer->node.get(), 4.0f, 1.0f))
+            << "it followed the cursor before and still does";
+        EXPECT_EQ(updater.NodeParallaxDepth(layer->node.get()), (std::array<float, 2> { 4.0f, 1.0f }));
+        if (compose) {
+            const Eigen::Vector2d shift(root_offset.x() * 4.0 * 0.5, root_offset.y() * 1.0 * 0.5);
+            expect_matrix(mvp(*layer->card), view_projection * moved(model, shift),
+                          "the card at the depth the script wrote");
+            expect_matrix(first_pass(), view_projection * moved(model, shift),
+                          "the first pass at the depth the script wrote");
+            EXPECT_TRUE(follows_cursor(*layer->node, layer->first_pass_camera));
+        } else {
+            expect_matrix(first_pass(), at_rest(), "the first pass of an ordinary effect layer");
+            EXPECT_FALSE(follows_cursor(*layer->node, layer->first_pass_camera));
+        }
+        EXPECT_TRUE(updater.SetNodeParallaxDepth(layer->node.get(), 0.0f, 0.0f))
+            << "it stopped following the cursor";
+        expect_matrix(first_pass(), at_rest(), "the first pass once the depth is zero");
+        EXPECT_FALSE(follows_cursor(*layer->node, layer->first_pass_camera));
+        EXPECT_FALSE(follows_cursor(*layer->card, ""));
+    }
+}
+
 TEST(ScriptRuntimeCompat, ThisLayerAndThisSceneResolveCurrentLayer) {
     auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {
         .canvas_width  = 1920,

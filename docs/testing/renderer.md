@@ -863,7 +863,9 @@ into private textures; the three that draw skip visibly without a Metal device.
   static pass sample (`CustomShaderPass::frameSample`,
   `MetalRender::Impl::frameSample`) includes the parallax offset
   `WPShaderValueUpdater::UpdateUniforms` adds to a layer's model matrix (a plain
-  text layer's too: it follows the cursor like an image layer of its depth), so
+  text layer's too: it follows the cursor like an image layer of its depth, and so
+  is the first pass of a compose layer with effects, which reads the screen where
+  the layer's card is drawn), so
   `FrameVaryingUniforms` reports such a pass as `kParallax`, which becomes
   `PointerUniform` and keeps the whole target out of the cache
   (`StaticSubgraphCache::Compile`), whether or not the cursor moves. With

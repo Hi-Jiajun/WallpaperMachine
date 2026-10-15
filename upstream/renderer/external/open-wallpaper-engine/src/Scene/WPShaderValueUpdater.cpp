@@ -62,6 +62,13 @@ struct LightingV1Arrays {
     std::vector<float> directional_color, directional_direction;
 };
 
+/// A material that reads the screen behind a layer through its
+/// model-view-projection matrix, which `composelayer.vert` turns into the screen
+/// coordinate it samples: the first pass of a compose layer.
+bool SamplesScreenBackground(const SceneMaterial& material) {
+    return material.name == "composelayer";
+}
+
 void PutVec4(std::vector<float>& array, std::size_t slot, const Vector3d& xyz, float w) {
     array[slot * 4 + 0] = static_cast<float>(xyz.x());
     array[slot * 4 + 1] = static_cast<float>(xyz.y());
@@ -275,9 +282,15 @@ uint32_t WPShaderValueUpdater::FrameVaryingUniforms(SceneNode*          node,
             data_slots != m_nodeDataMap.end()) {
             auto data = data_slots->second.find(material_slot);
             if (data == data_slots->second.end()) data = data_slots->second.find(0);
-            if (data != data_slots->second.end() &&
-                (data->second.parallaxDepth[0] != 0.0f || data->second.parallaxDepth[1] != 0.0f)) {
-                flags |= frame_varying_uniform::kParallax;
+            if (data != data_slots->second.end()) {
+                // The depth UpdateUniforms moves the pass by.
+                const auto* material = node->Mesh() != nullptr
+                                           ? node->Mesh()->MaterialForSlot(material_slot)
+                                           : nullptr;
+                const auto depth = material != nullptr && SamplesScreenBackground(*material)
+                                       ? NodeParallaxDepth(node)
+                                       : data->second.parallaxDepth;
+                if (depth[0] != 0.0f || depth[1] != 0.0f) flags |= frame_varying_uniform::kParallax;
             }
         }
     }
@@ -508,7 +521,7 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, uint32_t material_sl
     // so where the layer sits in the scene -- transform, scene camera and
     // parallax alike -- must not reach the image another layer samples.
     const bool layer_local = camera->IsLayerLocal();
-    const bool samples_screen_background = material->name == "composelayer";
+    const bool samples_screen_background = SamplesScreenBackground(*material);
     SceneCamera* matrix_camera =
         samples_screen_background && m_scene->activeCamera != nullptr ? m_scene->activeCamera : camera;
     Matrix4d viewProTrans = matrix_camera->GetViewProjectionMatrix();
@@ -542,7 +555,15 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, uint32_t material_sl
                                                         : pNode->RenderTrans();
         if (hasNodeData && cam_name != "effect" && ! layer_local) {
             if (m_parallax.enable) {
-                Vector2f depth(&nodeData->parallaxDepth[0]);
+                // The screen a compose layer's first pass reads is the place its
+                // card is drawn, where the layer's last pass puts it: through the
+                // scene camera, moved by the layer's depth. A layer drawn through
+                // effects holds that depth on those passes, not on its own node,
+                // so it is asked there; read at the unshifted place, the layer
+                // would hold what is behind that place instead.
+                const auto layer_depth = samples_screen_background ? NodeParallaxDepth(pNode)
+                                                                   : nodeData->parallaxDepth;
+                Vector2f depth(layer_depth[0], layer_depth[1]);
                 Vector2f ortho { (float)m_scene->ortho[0], (float)m_scene->ortho[1] };
                 // flip mouse y axis
                 Vector2f mouseVec =
@@ -550,7 +571,11 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, uint32_t material_sl
                 mouseVec = mouseVec.cwiseProduct(ortho) * m_parallax.mouseinfluence;
                 // Parallax moves a layer by the cursor's offset from the
                 // centre of the view and by where the layer sits, scaled by
-                // its depth and the scene's amount.
+                // its depth and the scene's amount. The centre of the view is
+                // that of the camera the matrix is built with: a compose layer
+                // without children frames its effects with a camera at the
+                // origin, but its first pass reads the screen through the scene
+                // camera.
                 Vector2f offset = mouseVec;
                 if (m_parallax.canvas_scene) {
                     // Wallpaper Engine moves the whole tree under an outermost
@@ -569,13 +594,13 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, uint32_t material_sl
                            ! root->IgnoresParentTransform())
                         root = root->Parent();
                     offset += root->ModelTrans().block<2, 1>(0, 3).cast<float>() -
-                              camera->GetPosition().cast<float>().head<2>();
+                              matrix_camera->GetPosition().cast<float>().head<2>();
                 }
                 if (! m_parallax.canvas_scene) {
                     // Where the layer sits in the scene, not its parent-relative
                     // origin, which is near zero for the child of a centred group.
                     const Vector2f nodePos = modelTrans.block<2, 1>(0, 3).cast<float>();
-                    offset += nodePos - camera->GetPosition().cast<float>().head<2>();
+                    offset += nodePos - matrix_camera->GetPosition().cast<float>().head<2>();
                 }
                 const Vector2f paraVec = offset.cwiseProduct(depth) * m_parallax.amount;
                 modelTrans =
@@ -773,9 +798,10 @@ void WPShaderValueUpdater::SetNodeData(void* nodeAddr, uint32_t material_slot,
 // A layer a script made has no record here until it asks for a depth; then it
 // gets the default one, which differs from a layer with no record only in
 // following the cursor by the depth it was given. The layers below it that
-// already have a record, and the effect passes of each layer written, take the
-// same depth; a layer with none is not given one. The answer says whether any
-// record went from standing still to following the cursor or the reverse.
+// already have a record take the same depth, and a layer drawn through effects
+// takes it on its effect passes alone; a layer with none is not given one. The
+// answer says whether any record went from standing still to following the
+// cursor or the reverse.
 bool WPShaderValueUpdater::SetNodeParallaxDepth(SceneNode* node, float x, float y) {
     if (node == nullptr || ! std::isfinite(x) || ! std::isfinite(y)) return false;
     const bool follows = x != 0.0f || y != 0.0f;
@@ -798,13 +824,16 @@ bool WPShaderValueUpdater::SetNodeParallaxDepth(SceneNode* node, float x, float 
     while (! pending.empty()) {
         SceneNode* layer = pending.back();
         pending.pop_back();
-        // A layer drawn through effect passes has its depth on them; its own node
-        // draws nothing of its own, so it is not given a record.
+        // A layer drawn through effect passes has its depth on them, and only
+        // there: its own node draws the first pass into the layer's target, which
+        // stays where it is, so the record it holds (the parser leaves its depth
+        // at zero) is neither given nor written one.
         const auto passes     = m_parallaxPasses.find(layer);
         const bool has_passes = passes != m_parallaxPasses.end() && ! passes->second.empty();
-        write_all(layer, layer == node && ! has_passes);
         if (has_passes) {
             for (void* pass : passes->second) write_all(pass, false);
+        } else {
+            write_all(layer, layer == node);
         }
         for (const auto& child : layer->GetChildren()) pending.push_back(child.get());
     }

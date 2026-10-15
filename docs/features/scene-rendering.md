@@ -75,8 +75,10 @@ by those. `destroyLayer` removes the layers a script made below the layer too.
 A scene script's `init` runs once the scene is built, so it sees all of that.
 `applyGeneralSettings({ language })` is always told `en-us`: the host does not
 yet pass the interface language on. `parallaxDepth` set on a layer reaches the
-layer, its effect passes and the layers below it, and one that starts or stops
-following the cursor rebuilds the render graph.
+layer, its effect passes and the layers below it (a layer drawn through effects
+holds it on its effect passes alone, so its first pass, which draws into the
+layer's own target, stays where it is), and one that starts or stops following the
+cursor rebuilds the render graph.
 
 A scene starts as a desktop with no player. On its first tick, after every script has
 started and before anything is drawn, its scripts are told `mediaPropertiesChanged`
@@ -387,7 +389,11 @@ tested, a plain group or a particle layer is not, and a visible layer under the 
 with `disablepropagation` hides every layer behind it, which hears no enter, leave or
 move meanwhile and keeps whatever hover state it had. A project layer
 (`models/util/projectlayer.json`) is as large as the scene's canvas, and the
-depth-testing composition layer composes like the plain one. A fullscreen layer
+depth-testing composition layer composes like the plain one. Camera parallax moves
+what a composition layer holds along with its card, as Wallpaper Engine's draw loop gives
+every pass of a layer the same offset: the screen its first pass reads is the place its last
+pass draws it, so a layer that only copies what is behind it shows a continuous scene, not
+the scene displaced by the layer's own offset. A fullscreen layer
 (`fullscreen` in its model) is laid over the whole screen whichever group it sits in:
 the group decides whether it shows, never where, how large or how turned, so its
 effects, its result and camera parallax all treat it as the outermost layer of its own
