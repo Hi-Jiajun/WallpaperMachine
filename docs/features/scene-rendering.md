@@ -104,6 +104,18 @@ holds it on its effect passes alone, so its first pass, which draws into the
 layer's own target, stays where it is), and one that starts or stops following the
 cursor rebuilds the render graph.
 
+`layer.getTransformMatrix()` answers the layer's world transform as a `Mat4`: its
+own placement with every ancestor's scale and turn applied, in canvas units with y
+up, so `m[12]` and `m[13]` are its x and y on the canvas (scripts compare them with
+`engine.canvasSize` to tell which side of the screen a widget is on). It is the
+layer's own matrix, not the one it is drawn with: a camera parallax and the identity
+a layer drawn through its effects renders from are not in it. A layer anchored to an
+edge or a corner (`alignment`) answers the centre of its quad, which its anchor
+places, while `layer.origin` still reads the anchor. A layer that ignores its parent's
+transform answers its own placement. The other layer transform calls
+(`getChildren`, `setParent`, `rotateObjectSpace`, `lookAt`, `lookAtYaw` and
+`getAttachment*`) do not exist yet: a script that calls one stops at that line.
+
 A scene starts as a desktop with no player. On its first tick, after every script has
 started and before anything is drawn, its scripts are told `mediaPropertiesChanged`
 with no track and `mediaPlaybackChanged` with `PLAYBACK_STOPPED`, once, whether or not

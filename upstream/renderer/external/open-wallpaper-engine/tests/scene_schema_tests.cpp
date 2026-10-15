@@ -2856,6 +2856,158 @@ void main() {
     EXPECT_NEAR(final_node.RenderTrans()(0, 3), 46.0, 1.0e-5);
 }
 
+namespace {
+
+// A 64x32 image layer, a copy effect to draw one through, and the 640x360
+// canvas the layer transform tests below place their layers on.
+std::shared_ptr<Scene> ParseLayerPlacementScene(fs::VFS& vfs, audio::SoundManager& sound_manager,
+                                                const std::string& objects) {
+    auto files = std::map<std::string, std::string> {
+        { "/image.json", R"({"width":64,"height":32,"material":"mat.json"})" },
+        { "/mat.json",
+          R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":["a.tex"]}]})" },
+        { "/effects/copy/effect.json",
+          R"({"name":"copy","passes":[{"material":"effect_mat.json","bind":[{"name":"previous","index":0}]}]})" },
+        { "/effect_mat.json",
+          R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":[null]}]})" },
+        { "/shaders/genericimage.vert",
+          R"(attribute vec3 a_Position;
+attribute vec2 a_TexCoord;
+varying vec2 v_TexCoord;
+void main() {
+  gl_Position = vec4(a_Position, 1.0);
+  v_TexCoord = a_TexCoord;
+}
+)" },
+        { "/shaders/genericimage.frag",
+          R"(uniform sampler2D g_Texture0;
+varying vec2 v_TexCoord;
+void main() {
+  gl_FragColor = texture(g_Texture0, v_TexCoord);
+}
+)" },
+        { "/materials/a.tex.tex", "" },
+    };
+    EXPECT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+    // Parsed with project properties, as the app always does, so the scene has
+    // the runtime its scripts run on.
+    ProjectProperties properties;
+    return WPSceneParser().Parse(SceneParseRequest {
+                                     .scene_id           = "layer-placement",
+                                     .project_properties = &properties,
+                                 },
+                                 R"({
+      "camera": {"center":[0,0,0], "eye":[0,0,1], "up":[0,1,0]},
+      "general": {
+        "ambientcolor":[0.2,0.2,0.2], "skylightcolor":[0.3,0.3,0.3],
+        "clearcolor":[0,0,0], "cameraparallax":false,
+        "cameraparallaxamount":0, "cameraparallaxdelay":0,
+        "cameraparallaxmouseinfluence":0,
+        "orthogonalprojection":{"width":640,"height":360}
+      },
+      "objects": [)" + objects + "]}",
+                                 vfs, sound_manager);
+}
+
+// A plain layer whose origin is whatever `body` returns when it runs, so the
+// layer's origin reports what a script saw.
+std::string ScriptedReaderLayer(int id, const std::string& name, const std::string& body) {
+    return nlohmann::json {
+        { "id", id }, { "name", name },
+        { "origin", { { "value", "0 0 0" },
+                      { "script", "export function update() { " + body + " }" } } }
+    }.dump();
+}
+
+// `layer.getTransformMatrix()` x and y (m[12], m[13]) of a layer by name.
+std::string StandsAt(const std::string& layer) {
+    return "const m = thisScene.getLayer('" + layer + "').getTransformMatrix().m; "
+           "return new Vec3(m[12], m[13], 0);";
+}
+
+} // namespace
+
+// The matrix a script reads has to be the world transform of the layer the
+// parser built: what its parents put it at, and not the identity a layer drawn
+// through effects renders from (that one is in the node's render transform, not
+// in the placement). A group at (100, 200) scaled by two puts a child at local
+// (10, 20) at (120, 240), with or without an effect on it.
+TEST(SceneSchema, LayerTransformMatrixOfParsedLayersIsWhereTheirParentsPutThem) {
+    fs::VFS             vfs;
+    audio::SoundManager sound_manager;
+    const std::string   objects =
+        R"({"id":1,"name":"group","origin":[100,200,0],"scale":[2,2,1],"visible":true},
+            {"id":2,"parent":1,"name":"plain","image":"image.json",
+             "origin":[10,20,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true},
+            {"id":3,"parent":1,"name":"drawn","image":"image.json",
+             "origin":[30,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true,
+             "effects":[{"file":"effects/copy/effect.json","id":4,"visible":true}]},)" +
+        ScriptedReaderLayer(10, "reads plain", StandsAt("plain")) + "," +
+        ScriptedReaderLayer(11, "reads drawn", StandsAt("drawn")) + "," +
+        ScriptedReaderLayer(12, "reads group", StandsAt("group"));
+    auto scene = ParseLayerPlacementScene(vfs, sound_manager, objects);
+    ASSERT_NE(scene, nullptr);
+    ASSERT_NE(scene->runtime, nullptr);
+    auto& runtime = *scene->runtime;
+
+    // The layer that is drawn through an effect really does render from an
+    // identity of its own, or this would not tell the two matrices apart.
+    auto group = FindRootChildByName(*scene, "group");
+    ASSERT_NE(group, nullptr);
+    auto* drawn = FindFirstChildByName(*group, "drawn");
+    ASSERT_NE(drawn, nullptr);
+    ASSERT_TRUE(drawn->HasRenderTransformOverride());
+
+    runtime.Tick(0.01);
+    EXPECT_TRUE(runtime.NodeTranslate("reads plain").isApprox(Eigen::Vector3f(120, 240, 0)))
+        << runtime.NodeTranslate("reads plain").transpose();
+    EXPECT_TRUE(runtime.NodeTranslate("reads drawn").isApprox(Eigen::Vector3f(160, 200, 0)))
+        << runtime.NodeTranslate("reads drawn").transpose();
+    EXPECT_TRUE(runtime.NodeTranslate("reads group").isApprox(Eigen::Vector3f(100, 200, 0)))
+        << runtime.NodeTranslate("reads group").transpose();
+    for (const auto& error : runtime.scriptErrors()) ADD_FAILURE() << error;
+}
+
+// A layer anchored to an edge is placed by its anchor (`origin`), while its
+// matrix is the centre of the quad the anchor puts it at: half the drawn width
+// to the right of a left anchor, the way Wallpaper Engine's layer matrix is the
+// quad's centre. The matrix keeps up with a script that moves the anchor.
+TEST(SceneSchema, LayerTransformMatrixOfAnAnchoredLayerIsTheCentreOfItsQuad) {
+    fs::VFS             vfs;
+    audio::SoundManager sound_manager;
+    const std::string   objects =
+        R"({"id":1,"name":"anchored","image":"image.json","alignment":"left",
+            "origin":[100,70,0],"scale":[2,1,1],"angles":[0,0,0],"visible":true},
+           {"id":2,"name":"moved","image":"image.json","alignment":"left",
+            "origin":[100,70,0],"scale":[2,1,1],"angles":[0,0,0],"visible":true},)" +
+        ScriptedReaderLayer(10, "reads matrix", StandsAt("anchored")) + "," +
+        ScriptedReaderLayer(11, "reads origin",
+                            "const o = thisScene.getLayer('anchored').origin; "
+                            "return new Vec3(o.x, o.y, 0);") + "," +
+        ScriptedReaderLayer(12, "moves anchor",
+                            "thisScene.getLayer('moved').origin = new Vec3(300, 70, 0); " +
+                                StandsAt("moved"));
+    auto scene = ParseLayerPlacementScene(vfs, sound_manager, objects);
+    ASSERT_NE(scene, nullptr);
+    ASSERT_NE(scene->runtime, nullptr);
+    auto& runtime = *scene->runtime;
+
+    // The left edge is at the anchor; the layer is drawn twice its width.
+    const float half_width = runtime.NodeSize("anchored").x() * 2.0f / 2.0f;
+    ASSERT_GT(half_width, 0.0f);
+
+    runtime.Tick(0.01);
+    EXPECT_TRUE(runtime.NodeTranslate("reads origin").isApprox(Eigen::Vector3f(100, 70, 0)))
+        << runtime.NodeTranslate("reads origin").transpose();
+    EXPECT_TRUE(runtime.NodeTranslate("reads matrix")
+                    .isApprox(Eigen::Vector3f(100 + half_width, 70, 0)))
+        << runtime.NodeTranslate("reads matrix").transpose();
+    EXPECT_TRUE(runtime.NodeTranslate("moves anchor")
+                    .isApprox(Eigen::Vector3f(300 + half_width, 70, 0)))
+        << runtime.NodeTranslate("moves anchor").transpose();
+    for (const auto& error : runtime.scriptErrors()) ADD_FAILURE() << error;
+}
+
 // A layer colour bound to a user property is the property's value: a preset
 // or a saved choice replaces the scene file's default. It has to reach the
 // layer's own material and every effect pass, keep the layer's alpha, and

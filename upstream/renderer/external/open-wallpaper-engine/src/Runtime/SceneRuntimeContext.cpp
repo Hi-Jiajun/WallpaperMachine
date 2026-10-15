@@ -2691,6 +2691,18 @@ Eigen::Vector3f SceneRuntimeContext::NodeScale(std::string_view name) const {
     return iterator->second->Scale();
 }
 
+Eigen::Matrix4d SceneRuntimeContext::NodeTransformMatrix(std::string_view name) const {
+    const auto iterator = m_nodes.find(std::string(name));
+    if (iterator == m_nodes.end() || iterator->second == nullptr) {
+        return Eigen::Matrix4d::Identity();
+    }
+    // The node's own matrix, not the one it is drawn with: a layer drawn
+    // through its effects renders from an identity of its own and a camera
+    // parallax moves only the copy the shader reads.
+    iterator->second->UpdateTrans();
+    return iterator->second->ModelTrans();
+}
+
 Eigen::Vector3f SceneRuntimeContext::NodeRotation(std::string_view name) const {
     const auto iterator = m_nodes.find(std::string(name));
     if (iterator == m_nodes.end() || iterator->second == nullptr) return Eigen::Vector3f::Zero();

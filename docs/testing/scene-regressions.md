@@ -884,9 +884,33 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
     moves a whole tree by its outermost layer's depth, so a write on a child
     changes only that child's drift; layers above and beside keep theirs), and a
     layer that starts or stops following the cursor asks for a new render graph.
+  - *Layer transforms.* `.LayerTransformMatrixPlacesAChildWhereItsParentsPutIt`,
+    `.LayerTransformMatrixCarriesTheTurnAndScaleOfItsParents`,
+    `.LayerTransformMatrixFollowsALayerWhereverItMoves` and
+    `.LayerTransformMatrixOfALayerWithoutANodeIsTheIdentity` (nodes made by hand), and
+    `SceneSchema.LayerTransformMatrixOfParsedLayersIsWhereTheirParentsPutThem` and
+    `SceneSchema.LayerTransformMatrixOfAnAnchoredLayerIsTheCentreOfItsQuad` (layers
+    the parser built): `getTransformMatrix()`
+    is the layer's world transform as a `Mat4` in canvas units, y up (x and y in
+    `m[12]` and `m[13]`, the frame the scripts compare against `engine.canvasSize`).
+    A child's matrix has its parents' scale and turn in it (a group at (100, 200)
+    scaled by two puts a child at (10, 20) at (120, 240); turned a quarter, at
+    (60, 220) with its axes turned and doubled), a layer that ignores its parent's
+    transform answers its own placement, a layer drawn through an effect (which
+    renders from an identity of its own) still answers where it stands, in a parsed
+    scene too (the node registered under its name is the one that carries that
+    identity), and a read right after a write to the layer or to a parent sees the
+    write. A layer anchored to an edge (`alignment`) answers the centre of its quad,
+    half its drawn width right of a left anchor, while `layer.origin` still reads the
+    anchor, and the matrix follows a script that moves the anchor. A name with no
+    node answers the identity, and a script that reassigns the global `Mat4` does
+    not change what the host builds. Each call answers a matrix of its own.
   - Not covered here: `localStorage` persistence, effects, bones, particles,
-    scene properties, the camera, `Intl`, and `getTransformMatrix`; host plumbing
-    for `SetLanguage` (scripts are told `en-us` until the host calls it).
+    scene properties, the camera, `Intl`, and the other layer transform calls
+    (`getChildren`, `setParent`, `rotateObjectSpace`, `lookAt`, `lookAtYaw`,
+    `getAttachment*`: a script that calls one still stops at `not a function`);
+    host plumbing for `SetLanguage` (scripts are told `en-us` until the host calls
+    it).
 - **Scene commits in headless tests** — `scene_schema_tests` helpers wait for
   posted work with a render-looper round trip (`beginSurfaceReconfigure`) and a
   main-looper one (installing a pointer callback replays from the main looper)

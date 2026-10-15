@@ -725,10 +725,11 @@ constexpr char kVectorBootstrap[] = R"JS(
     }
   });
 
-  // The host builds its vectors through these frozen names, so a script that
-  // reassigns the global `Vec3` cannot change what the host hands back.
+  // The host builds its vectors and the layer matrices through these frozen
+  // names, so a script that reassigns the global `Vec3` or `Mat4` cannot change
+  // what the host hands back.
   var exposed = { Vec2: Vec2, Vec3: Vec3, Vec4: Vec4, Mat3: Mat3, Mat4: Mat4 };
-  ['Vec2', 'Vec3', 'Vec4'].forEach(function(key) {
+  ['Vec2', 'Vec3', 'Vec4', 'Mat4'].forEach(function(key) {
     Object.defineProperty(globalThis, '__WE' + key, {
       value: exposed[key], configurable: false, writable: false
     });
@@ -1922,6 +1923,11 @@ void AppendCommonHostBootstrap(std::ostringstream& wrapper) {
         << "        var parent = __layerGetParentName(name);\n"
         << "        return parent ? globalThis.scene.getLayer(parent) : null;\n"
         << "      },\n"
+        // Where the layer stands in the scene, in canvas units: its own
+        // placement with every ancestor's applied, x and y in m[12] and m[13].
+        << "      getTransformMatrix: function() {\n"
+        << "        return new globalThis.__WEMat4(__layerGetTransformMatrix(name));\n"
+        << "      },\n"
         << "      play: function() {\n"
         << "        if (__soundKnown(name)) {\n"
         << "          __soundPlay(name);\n"
@@ -2696,6 +2702,26 @@ JSValue JsLayerGetOrigin(JSContext* context, JSValueConst, int argc, JSValueCons
                                                    : Eigen::Vector3f::Zero();
     if (layer_name != nullptr) JS_FreeCString(context, layer_name);
     return CreateJsVec3(context, value.x(), value.y(), value.z());
+}
+
+JSValue JsLayerGetTransformMatrix(JSContext* context, JSValueConst, int argc,
+                                  JSValueConst* argv) {
+    Eigen::Matrix4d matrix = Eigen::Matrix4d::Identity();
+    auto*           bridge = GetBridgeState(context);
+    if (argc >= 1 && bridge != nullptr && bridge->runtime != nullptr) {
+        if (const char* layer_name = JS_ToCString(context, argv[0]); layer_name != nullptr) {
+            matrix = bridge->runtime->NodeTransformMatrix(layer_name);
+            JS_FreeCString(context, layer_name);
+        }
+    }
+    // Eigen keeps a matrix column after column, which is how a script's Mat4
+    // keeps its elements.
+    JSValue elements = JS_NewArray(context);
+    for (int index = 0; index < 16; ++index) {
+        JS_SetPropertyUint32(
+            context, elements, static_cast<uint32_t>(index), JS_NewFloat64(context, matrix.data()[index]));
+    }
+    return elements;
 }
 
 JSValue JsLayerSetOrigin(JSContext* context, JSValueConst, int argc, JSValueConst* argv) {
@@ -3747,6 +3773,11 @@ bool EnsureSharedHostBindings(JSContext* context, SceneRuntimeContext* runtime,
                           global_object,
                           "__layerGetOrigin",
                           JS_NewCFunction(context, JsLayerGetOrigin, "__layerGetOrigin", 1));
+        JS_SetPropertyStr(
+            context,
+            global_object,
+            "__layerGetTransformMatrix",
+            JS_NewCFunction(context, JsLayerGetTransformMatrix, "__layerGetTransformMatrix", 1));
         JS_SetPropertyStr(context,
                           global_object,
                           "__layerSetOrigin",

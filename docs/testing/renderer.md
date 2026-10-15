@@ -1004,6 +1004,11 @@ into private textures; the three that draw skip visibly without a Metal device.
   a layer. A cover layer that Wallpaper Engine hides while nothing plays through a
   `mediaPlaybackChanged` script stays visible here until the host delivers an idle
   playback state, so it now draws its art or placeholder in that state.
+- **Layer calls a script can make that this renderer lacks.** `getTransformMatrix()` is
+  there; `getChildren`, `setParent`, `rotateObjectSpace`, `lookAt`, `lookAtYaw` and
+  `getAttachment*` (the layer binding Wallpaper Engine registers beside it) are not, so a
+  script that calls one throws `not a function` at that line, and in `init()` skips the
+  rest of it. Wallpaper Engine's order, filtering and frame for them were not read.
 - Unimplemented non-audio scene features, including some script outputs, can
   still affect wallpaper compatibility even when every renderer check passes.
 - No renderer check proves desktop presentation, AppKit behavior, live audio

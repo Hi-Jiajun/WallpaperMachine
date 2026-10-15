@@ -439,6 +439,10 @@ public:
     std::optional<NodeCursorTarget> NodeCursorTargetOf(std::string_view name) const;
     Eigen::Vector3f NodeTranslate(std::string_view name) const;
     Eigen::Vector3f NodeScale(std::string_view name) const;
+    /// Where the layer stands in the scene: its own placement with every
+    /// ancestor's applied, in canvas units. A name with no node is nowhere in
+    /// particular and answers the identity.
+    Eigen::Matrix4d NodeTransformMatrix(std::string_view name) const;
     Eigen::Vector3f NodeRotation(std::string_view name) const;
     Eigen::Vector2f NodeSize(std::string_view name) const;
     std::string     NodeText(std::string_view name) const;

@@ -6542,6 +6542,163 @@ export function init(value) {
 
 namespace
 {
+// A group at (100, 200) scaled by two with a child at (10, 20) inside it, and
+// a layer beside them for the script under test, on a 1920 by 1080 canvas.
+struct PlacedLayers {
+    Scene                                scene;
+    std::unique_ptr<SceneRuntimeContext> runtime = MakeRuntimeWithScene(scene);
+    std::shared_ptr<SceneNode>           group = Named("group"), child = Named("child"),
+                                         reader = Named("reader");
+
+    static std::shared_ptr<SceneNode> Named(const char* name) {
+        return std::make_shared<SceneNode>(Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(),
+                                           Eigen::Vector3f::Zero(), name);
+    }
+    PlacedLayers() {
+        group->SetTranslate(Eigen::Vector3f(100, 200, 0));
+        group->SetScale(Eigen::Vector3f(2, 2, 1));
+        child->SetTranslate(Eigen::Vector3f(10, 20, 0));
+        scene.sceneGraph->AppendChild(group);
+        group->AppendChild(child);
+        scene.sceneGraph->AppendChild(reader);
+        for (const auto& node : { group, child, reader }) {
+            runtime->RegisterNode(node->Name(), node.get());
+        }
+    }
+};
+} // namespace
+
+// A script that places one layer by another asks it where it is in the scene:
+// `getTransformMatrix()` answers the layer's world transform, and m[12], m[13]
+// are its x and y in canvas units. Without the method the script threw in init,
+// so the values it set up there were never assigned.
+TEST(ScriptRuntimeCompat, LayerTransformMatrixPlacesAChildWhereItsParentsPutIt) {
+    PlacedLayers fixture;
+    auto&        runtime = *fixture.runtime;
+    runtime.RegisterNodeTranslate("reader", fixture.reader.get(), ResolveVec3Setting(runtime, {
+        {"value", "0 0 0"}, {"script", R"JS(
+export function init() {
+  const m = thisScene.getLayer('child').getTransformMatrix().m;
+  shared.worldX = m[12];
+  shared.worldY = m[13];
+}
+export function update() { return new Vec3(shared.worldX, shared.worldY, 0); }
+)JS"}}, "reader"));
+
+    runtime.Tick(0.01);
+    // (10, 20) scaled by the group's 2, then moved to (100, 200).
+    EXPECT_TRUE(runtime.NodeTranslate("reader").isApprox(Eigen::Vector3f(120, 240, 0)))
+        << runtime.NodeTranslate("reader").transpose();
+    for (const auto& error : runtime.scriptErrors()) ADD_FAILURE() << error;
+}
+
+// The matrix is the layer's world transform as a Mat4: its parents' turns and
+// scales are in it, a layer placed on its own is not affected by them, and a
+// layer drawn through an effect (which draws from an identity of its own) still
+// reports where it stands in the scene.
+TEST(ScriptRuntimeCompat, LayerTransformMatrixCarriesTheTurnAndScaleOfItsParents) {
+    PlacedLayers fixture;
+    auto&        runtime = *fixture.runtime;
+    fixture.group->SetRotation(Eigen::Vector3f(0, 0, static_cast<float>(M_PI) / 2));
+    auto pinned = PlacedLayers::Named("pinned");
+    pinned->SetTranslate(Eigen::Vector3f(50, 60, 0));
+    pinned->SetIgnoreParentTransform(true);
+    fixture.group->AppendChild(pinned);
+    runtime.RegisterNode("pinned", pinned.get());
+    auto drawn = PlacedLayers::Named("drawn");
+    drawn->SetTranslate(Eigen::Vector3f(5, 5, 0));
+    drawn->SetRenderTransformOverride(Eigen::Matrix4d::Identity());
+    fixture.group->AppendChild(drawn);
+    runtime.RegisterNode("drawn", drawn.get());
+
+    const auto run = RunUpdateOn(runtime, "reader", std::string(kCheckHelpers) + R"JS(
+function close(a, b) { return Math.abs(a - b) < 1e-3; }
+function at(matrix, x, y, z) {
+  const t = matrix.translation();
+  return close(t.x, x) && close(t.y, y) && close(t.z, z);
+}
+export function update(value) {
+  const matrix = thisScene.getLayer('child').getTransformMatrix();
+  check('a Mat4', matrix instanceof Mat4 && matrix.m.length === 16);
+  // (10, 20) scaled by 2 is (20, 40); a quarter turn makes it (-40, 20).
+  check('position', at(matrix, 60, 220, 0));
+  // Its own axes are the group's turned and doubled: x points up, y points left.
+  check('x axis', close(matrix.m[0], 0) && close(matrix.m[1], 2) && close(matrix.m[2], 0));
+  check('y axis', close(matrix.m[4], -2) && close(matrix.m[5], 0) && close(matrix.m[6], 0));
+  check('z axis', close(matrix.m[10], 1) && close(matrix.m[15], 1));
+  check('a point of its own', matrix.transformPoint(new Vec3(1, 0, 0)).equals(new Vec3(60, 222, 0)));
+  check('the group', at(thisScene.getLayer('group').getTransformMatrix(), 100, 200, 0));
+  // A layer without a parent transform answers its own placement.
+  check('pinned', at(thisScene.getLayer('pinned').getTransformMatrix(), 50, 60, 0));
+  // A layer with a render transform of its own is still where its parents put it.
+  check('drawn', at(thisScene.getLayer('drawn').getTransformMatrix(), 100 - 10, 200 + 10, 0));
+  // Each call answers a matrix of its own: writing to one changes nothing.
+  matrix.m[12] = 0;
+  check('a copy', at(thisScene.getLayer('child').getTransformMatrix(), 60, 220, 0));
+  // A script that reassigns the global class does not change what the host builds.
+  const real = Mat4;
+  Mat4 = function() { throw new Error('the script replaced Mat4'); };
+  const kept = thisScene.getLayer('child').getTransformMatrix();
+  Mat4 = real;
+  check('a reassigned Mat4', kept instanceof real && at(kept, 60, 220, 0));
+  return 1;
+}
+)JS");
+    EXPECT_SCRIPT_PASSES(run);
+}
+
+// A layer's place in the scene is asked for every frame (is the widget on the
+// right half of the canvas?), so it has to follow the layer: after a move of the
+// layer itself or of what it hangs from, and right after the script wrote it.
+TEST(ScriptRuntimeCompat, LayerTransformMatrixFollowsALayerWhereverItMoves) {
+    PlacedLayers fixture;
+    auto&        runtime = *fixture.runtime;
+    runtime.RegisterNodeTranslate("reader", fixture.reader.get(), ResolveVec3Setting(runtime, {
+        {"value", "0 0 0"}, {"script", R"JS(
+export function update() {
+  const onTheRight = thisScene.getLayer('child').getTransformMatrix().m[12] > engine.canvasSize.x / 2;
+  return new Vec3(onTheRight ? 1 : -1, 0, 0);
+}
+)JS"}}, "reader"));
+
+    runtime.Tick(0.01);
+    EXPECT_FLOAT_EQ(runtime.NodeTranslate("reader").x(), -1.0f) << "the child sits at x = 120";
+    runtime.SetNodeTranslate("group", Eigen::Vector3f(1000, 200, 0));
+    runtime.Tick(0.01);
+    EXPECT_FLOAT_EQ(runtime.NodeTranslate("reader").x(), 1.0f) << "the child sits at x = 1020";
+    for (const auto& error : runtime.scriptErrors()) ADD_FAILURE() << error;
+
+    const auto run = RunUpdateOn(runtime, "reader", std::string(kCheckHelpers) + R"JS(
+export function update(value) {
+  thisLayer.origin = new Vec3(1500, 300, 0);
+  const own = thisLayer.getTransformMatrix();
+  check('after a write', own.m[12] === 1500 && own.m[13] === 300);
+  thisScene.getLayer('group').scale = new Vec3(1, 1, 1);
+  check('after a parent changes', thisScene.getLayer('child').getTransformMatrix().m[12] === 1010);
+  return 1;
+}
+)JS");
+    EXPECT_SCRIPT_PASSES(run);
+}
+
+// A layer the scene has no node for — a sound layer, a name nothing carries —
+// is not anywhere, and asking where it is must not stop the script: it answers
+// the identity, as the matrix of a layer that was never moved.
+TEST(ScriptRuntimeCompat, LayerTransformMatrixOfALayerWithoutANodeIsTheIdentity) {
+    PlacedLayers fixture;
+    const auto   run = RunUpdateOn(*fixture.runtime, "reader", std::string(kCheckHelpers) + R"JS(
+export function update(value) {
+  const matrix = thisScene.getLayer('nowhere').getTransformMatrix();
+  check('a Mat4', matrix instanceof Mat4);
+  check('identity', matrix.m.join(',') === new Mat4().m.join(','));
+  return 1;
+}
+)JS");
+    EXPECT_SCRIPT_PASSES(run);
+}
+
+namespace
+{
 // `owner` draws a card through an effect pass: its own node has no parallax
 // record, the pass has one, and `kid` below it and `beside` next to it have theirs.
 struct EffectLayerScene {
