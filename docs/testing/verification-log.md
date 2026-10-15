@@ -25,6 +25,17 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-15 — Native SwiftUI control panel
+
+- Change: the WKWebView control panel (WebUI/) is replaced by a native SwiftUI window (b5722da7, 511e3a86, 4767f8b4); typed PanelController actions, live language via per-language catalogs, DesktopActions test guard.
+- Gate: `python3 scripts/test.py` on the final tree (identical to main at 4767f8b4): Python script tests OK; native 3758 passed, 0 failed, 45 skipped of 3803.
+- Earlier full runs on the same tree failed only on load-sensitive waits (PanelDownloadActionsTests, PixivBrowserRenderTests, InstalledPageRenderTests); each was made to wait for state and passed alone and in the final gate.
+- Strings: `scripts/tests/test_localization_catalogs.py` and the new literal check `scripts/tests/test_panel_localization.py` pass; a SWIFT_EMIT_LOC_STRINGS extraction diff found no panel literal without a catalog key (only the pre-existing App Intents `%@`).
+- Regression tests added for two crashes found during integration: Installed→pixiv toolbar search swap (`PanelPageTransitionTests`) and the Installed grid's layout loop at 760×560 with scroll bars that take room (`InstalledPageRenderTests`).
+- Release: `python3 scripts/build.py --swift-only --configuration Release` from the final tree; delivered to build/Build/Products/Release/WallpaperMachine.app (no WebUI resources, signature verified).
+- Not checked (no desktop authorization): the real window — sidebar material, toolbar, full screen and Split View, hover/focus rings, VoiceOver and live drags were seen only in offscreen renders; `python3 scripts/test.py --ui` (updated for the native window) was not run.
+- Known noise: ~455 AppKit runtime warnings per run, all toolbar-title constraint conflicts in squeezed test windows.
+
 ## 2026-10-14 — Settings drawn like System Settings, with its own solid glyphs
 
 Settings restyled after a Claude Design mock-up: centred page cards, translucent grouped boxes, borderless pop-ups, small switches, the ⓘ beside each title, flattened Advanced, and a hand-drawn solid glyph set (WebUI/settings-glyphs.js) for sections and Quick Settings tiles. Layout bugs fixed on the way, plus search hiding an open disclosure whose title missed.
@@ -134,16 +145,3 @@ Native Metal dropped depth writes for translucent and additive materials and dep
 - After rebasing onto `b0f1a177`: `metal_scene_draw_smoke` **58 passed**, `metal_backend_test` **35 passed**
 - Renderer comparison (`LocalProjectsDrawTheSamePictureOnBothRenderers`, on the uncommitted Native Metal compatibility work, which draws model scenes natively) over 28 local model/perspective scenes plus Leon, baseline/fix/baseline: no change beyond run-to-run noise; 3675966045 differs by 0.417 mean in every run, unrelated
 - Not checked: the app on the desktop; the Release build follows the commit
-
-## 2026-10-13 — Workshop effect shaders the legalizer rejected
-
-Shader legalizer repairs for permissive-path expressions that dropped whole Workshop effects on both renderers (scalar builtin broadcasts, mixed-width operands, scalar and bool stores, return conversion, widened float-array component subscripts, runtime global initializers, statements after annotations or directives). ShaderPipelineRevision 11 -> 12.
-
-- `cargo test -p shader` — 528 passed; the 12 new regressions in legalize_type_coercion, legalize, naga_compile and tokenizer each failed before its fix
-- Local-library A/B, 1,269 (scene, shader, combos) programs from 60 scenes, SPIR-V and MSL: failures 64 -> 28, none that compiled stops compiling; changed output for programs that already compiled is semantically neutral
-- The 28 left are outside this change: Naga MSL lacks inverse() (stock lightshafts, perspective, reflection, clouds, waterwaves variants), two preprocessor #if forms, and a builtin scalar call initializing a vector
-- `offscreen_scene_probe` and `metal_scene_draw_smoke` on the 11 affected scenes: 77 Vulkan load/compile failures before, 0 after; on Metal only the stock reflection inverse() failure remains; no native-Metal fallback
-- `python3 scripts/check_rust.py` — exit 0 (core, bridge, core-integration, shader)
-- `python3 scripts/check_renderer.py` — exit 0; generated cases pixel-equal pooled/isolated, no diagnostics; reload cycles clean
-- `python3 scripts/test.py` — first run 1 failure in EnergyUsageMonitorTests.testKernelCountersForThisProcessAdvanceWithGPUWork (8.05 mW < 10 mW, own compute kernel, while another session ran GPU probes); class alone 13/13; rerun exit 0: 2,564 passed, 45 skipped
-- Not checked: whether each restored effect looks as it does in Wallpaper Engine; no desktop run
