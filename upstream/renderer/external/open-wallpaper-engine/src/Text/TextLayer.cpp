@@ -117,7 +117,6 @@ struct LineRun {
     // kind of row `blockalign` justifies.
     bool                  wrapped { false };
 
-    float ExtentLeft() const { return bounds_left; }
     float ExtentRight() const { return bounds_right; }
     float LayoutWidth() const { return bounds_right - bounds_left; }
 };
@@ -131,7 +130,8 @@ struct FaceLayoutMetrics {
 };
 
 // A text block's box. `top` and `bottom` are heights above the first row's
-// baseline, y up; rows step down by `pitch`.
+// baseline, y up; rows step down by `pitch`. `widest_row` is the width of the widest
+// row, which the rows are aligned within.
 struct TextBlock {
     float    min_x { 0.0f };
     float    max_x { 0.0f };
@@ -140,6 +140,7 @@ struct TextBlock {
     float    ascender { 0.0f };
     float    descender { 0.0f };
     float    pitch { 0.0f };
+    float    widest_row { 0.0f };
     uint32_t rows { 0 };
 
     float Width() const { return max_x - min_x; }
@@ -483,16 +484,16 @@ std::vector<uint32_t> DecodeUtf8(std::string_view text) {
     return codepoints;
 }
 
-float HorizontalLineStart(const TextLayerState& state, float line_width, float padding,
-                          uint32_t width) {
+// Where a row's pen starts, from where the widest row's does: the rows of a block are
+// set within the widest one, against its left edge, centred in it or against its right
+// edge. A row has its own bearing from there and nothing of the other rows'.
+float RowOffset(const TextLayerState& state, float widest_row, float row_width) {
     switch (ParseTextHorizontalAlign(state.horizontal_align)) {
-    case TextHorizontalAlign::Right:
-        return std::max(0.0f, static_cast<float>(width) - padding - line_width);
-    case TextHorizontalAlign::Center:
-        return std::max(padding, (static_cast<float>(width) - line_width) * 0.5f);
+    case TextHorizontalAlign::Right: return widest_row - row_width;
+    case TextHorizontalAlign::Center: return (widest_row - row_width) * 0.5f;
     case TextHorizontalAlign::Left: break;
     }
-    return padding;
+    return 0.0f;
 }
 
 void AppendGlyphMetrics(LineRun& line, const GlyphRun& glyph) {
@@ -783,28 +784,11 @@ TextBlock MeasureTextBlock(const std::vector<LineRun>& lines, const FaceLayoutMe
         const float drop = static_cast<float>(index) * pitch;
         block.min_x      = std::min(block.min_x, line.bounds_left);
         block.max_x      = std::max(block.max_x, line.bounds_right);
+        block.widest_row = std::max(block.widest_row, line.LayoutWidth());
         block.top        = std::max(block.top, line.bounds_top - drop);
         block.bottom     = std::min(block.bottom, line.bounds_bottom - drop);
     }
     return block;
-}
-
-// Where the block's top edge sits in a card `height` tall: under the padding,
-// or pushed down to the centre or the bottom of what the padding leaves.
-float BlockTopY(const TextLayerState& state, float padding_y, uint32_t height, float block_height) {
-    const float content_height = std::max(0.0f, static_cast<float>(height) - padding_y * 2.0f);
-
-    float top = padding_y;
-    switch (ParseTextVerticalAlign(state.vertical_align)) {
-    case TextVerticalAlign::Bottom:
-        top = padding_y + std::max(0.0f, content_height - block_height);
-        break;
-    case TextVerticalAlign::Center:
-        top = padding_y + std::max(0.0f, (content_height - block_height) * 0.5f);
-        break;
-    case TextVerticalAlign::Top: break;
-    }
-    return top;
 }
 
 // Wallpaper Engine reads the size metrics FreeType has rounded (the ascender up, the
@@ -855,6 +839,36 @@ FaceLayoutMetrics FallbackMetrics(const TextLayerState& state) {
              .pitch     = pixels * kFallbackLine + LineSpacing(state) };
 }
 
+// How far down from the first row's baseline the vertical alignment puts the layer's
+// origin: the ascender line for `top`, the middle between that line and the last row's
+// baseline for `center`, and for `bottom` the last row's descender line.
+float ReferenceLine(TextVerticalAlign vertical, const TextBlock& block) {
+    const float below = static_cast<float>(block.rows > 0 ? block.rows - 1u : 0u) * block.pitch;
+    switch (vertical) {
+    case TextVerticalAlign::Top: return block.ascender;
+    case TextVerticalAlign::Bottom: return -block.descender - below;
+    case TextVerticalAlign::Center: break;
+    }
+    return (block.ascender - below) * 0.5f;
+}
+
+// Where the card's centre lies from the layer's origin. Across, the origin is on the
+// block's left edge, its middle or its right edge, so the card's centre is half the
+// block's width to the right of it, on it, or half to the left; down, the origin is on the
+// reference line, and the card's centre is where the block's is from it. The padding adds
+// nothing to either: it grows the card outward from the block.
+Eigen::Vector2f CardCentre(const TextLayerState& state, const TextBlock& block) {
+    float across = 0.0f;
+    switch (ParseTextHorizontalAlign(state.horizontal_align)) {
+    case TextHorizontalAlign::Left: across = block.Width() * 0.5f; break;
+    case TextHorizontalAlign::Right: across = -block.Width() * 0.5f; break;
+    case TextHorizontalAlign::Center: break;
+    }
+    const float down = (block.top + block.bottom) * 0.5f -
+                       ReferenceLine(ParseTextVerticalAlign(state.vertical_align), block);
+    return { across, down };
+}
+
 // The layout of a block: the block, the face it was set in, and the card that holds
 // it, which is the block plus the padding on both sides and 2 by 2 plus the padding
 // when there is no text to lay out (Wallpaper Engine has no layout then, and sizes
@@ -879,6 +893,7 @@ TextLayerLayout LayoutOfBlock(const TextLayerState& state, const TextBlock& bloc
     layout.rows   = block.rows;
     layout.card   = { std::max(1.0f, block.Width() + padding.x() * 2.0f),
                       std::max(1.0f, block.Height() + padding.y() * 2.0f) };
+    layout.centre = CardCentre(state, block);
     return layout;
 }
 
@@ -1151,11 +1166,15 @@ void RasterizeFallbackText(const TextLayerState& state, uint32_t width, uint32_t
     const auto lines    = BuildFallbackLines(state);
     const auto metrics  = FallbackMetrics(state);
     const auto block    = MeasureTextBlock(lines, metrics);
-    const auto padding  = CardPadding(state) + Eigen::Vector2f::Constant(TextStyleMargin(state));
+    const Eigen::Vector2f padding =
+        CardPadding(state) + Eigen::Vector2f::Constant(TextStyleMargin(state));
     const float glyph_height = std::max(1.0f, metrics.ascender);
-    float baseline = BlockTopY(state, padding.y(), height, block.Height()) + block.top;
+    // The block sits under the padding, the first row's baseline its tallest ink down; a
+    // row's pen starts where the rows are aligned in the widest, from the pen origin of
+    // the block (the leftmost ink or the pen, whichever lies further left).
+    float baseline = padding.y() + block.top;
     for (const auto& line : lines) {
-        float pen = HorizontalLineStart(state, line.LayoutWidth(), padding.x(), width) - line.ExtentLeft();
+        float pen = padding.x() - block.min_x + RowOffset(state, block.widest_row, line.LayoutWidth());
         for (const auto& glyph : line.glyphs) {
             if (glyph.has_ink) {
                 const float top = baseline - glyph_height;
@@ -1188,12 +1207,15 @@ bool RasterizeFreeTypeText(const TextLayerState& state, uint32_t width, uint32_t
     const auto metrics = FaceMetrics(state, faces.primary());
     const auto block   = MeasureTextBlock(lines, metrics);
     // The style's margin is clear room around the card the text is laid out in.
-    const auto padding = CardPadding(state) + Eigen::Vector2f::Constant(TextStyleMargin(state));
+    const Eigen::Vector2f padding =
+        CardPadding(state) + Eigen::Vector2f::Constant(TextStyleMargin(state));
 
-    float baseline_y = BlockTopY(state, padding.y(), height, block.Height()) + block.top;
+    // The block sits under the padding, the first row's baseline its tallest ink down; a
+    // row's pen starts where the rows are aligned in the widest, from the pen origin of
+    // the block (the leftmost ink or the pen, whichever lies further left).
+    float baseline_y = padding.y() + block.top;
     for (const auto& line : lines) {
-        const float left_edge = HorizontalLineStart(state, line.LayoutWidth(), padding.x(), width);
-        float pen_x = left_edge - line.ExtentLeft();
+        float pen_x = padding.x() - block.min_x + RowOffset(state, block.widest_row, line.LayoutWidth());
         for (const auto& glyph : line.glyphs) {
             FT_Face glyph_face = glyph.fallback ? faces.fallback() : nullptr;
             if (glyph_face == nullptr) glyph_face = faces.primary();
@@ -1303,13 +1325,6 @@ std::string_view TextVerticalAlignWord(TextVerticalAlign align) {
     return "center";
 }
 
-std::string TextAlignmentAnchor(TextHorizontalAlign horizontal, TextVerticalAlign vertical) {
-    std::string anchor(TextHorizontalAlignWord(horizontal));
-    anchor += ' ';
-    anchor += TextVerticalAlignWord(vertical);
-    return anchor;
-}
-
 float TextStyleMargin(const TextLayerState& state) {
     if (! TextStyleActive(state.style)) return 0.0f;
     // One pixel more than the style reaches, for the edge's own antialiasing.
@@ -1388,24 +1403,23 @@ Eigen::Vector2f TextScreenAnchorOffset(TextScreenAnchor anchor, const PresentedM
     return Eigen::Vector2f::Zero();
 }
 
-TextLayerRenderBounds TextLayerRenderBoundsForRasterSize(const TextLayerState& state,
-                                                         Eigen::Vector2f raster_size) {
-    // The card is centred on the layer's origin; the room the style needs lies
-    // outside it on every side.
+TextLayerRenderBounds TextLayerRenderBoundsForLayout(const TextLayerState& state,
+                                                     const TextLayerLayout& layout) {
+    // The card is centred on the layout's centre; the room the style needs lies outside
+    // it on every side.
     const float margin = TextStyleMargin(state);
-    raster_size        = (raster_size - Eigen::Vector2f::Constant(2.0f * margin)).cwiseMax(1.0f);
-
+    const Eigen::Vector2f half = layout.card * 0.5f + Eigen::Vector2f::Constant(margin);
     return {
-        .left   = raster_size.x() * -0.5f - margin,
-        .right  = raster_size.x() * 0.5f + margin,
-        .bottom = raster_size.y() * -0.5f - margin,
-        .top    = raster_size.y() * 0.5f + margin,
+        .left   = layout.centre.x() - half.x(),
+        .right  = layout.centre.x() + half.x(),
+        .bottom = layout.centre.y() - half.y(),
+        .top    = layout.centre.y() + half.y(),
     };
 }
 
-TextLayerRenderFrame TextLayerRenderFrameForRasterSize(const TextLayerState& state,
-                                                       Eigen::Vector2f raster_size) {
-    const auto bounds = TextLayerRenderBoundsForRasterSize(state, raster_size);
+TextLayerRenderFrame TextLayerRenderFrameForLayout(const TextLayerState& state,
+                                                   const TextLayerLayout& layout) {
+    const auto bounds = TextLayerRenderBoundsForLayout(state, layout);
     return {
         .bounds = bounds,
         .size   = Eigen::Vector2f(bounds.right - bounds.left, bounds.top - bounds.bottom),
@@ -1415,9 +1429,9 @@ TextLayerRenderFrame TextLayerRenderFrameForRasterSize(const TextLayerState& sta
 }
 
 TextLayerRenderFrame TextLayerRenderFrameForCapacity(const TextLayerState& state,
-                                                     Eigen::Vector2f raster_size,
+                                                     const TextLayerLayout& layout,
                                                      Eigen::Vector2f capacity_size) {
-    const auto frame = TextLayerRenderFrameForRasterSize(state, raster_size);
+    const auto frame = TextLayerRenderFrameForLayout(state, layout);
     return TextLayerRenderFrameForTargetExtent(frame, capacity_size);
 }
 
@@ -1529,6 +1543,18 @@ TextLayerLayout TextLayerBoxLayoutForTests(const TextLayerState& state) {
     return MeasureFallbackText(state);
 }
 
+void RasterizeTextLayerBoxesForTests(const TextLayerState& state, uint32_t width, uint32_t height,
+                                     std::vector<uint8_t>& rgba) {
+    RasterizeFallbackText(state, width, height, [&](int x, int y, uint8_t coverage) {
+        const std::size_t offset =
+            (static_cast<std::size_t>(y) * width + static_cast<std::size_t>(x)) * 4u;
+        rgba[offset + 0u] = 255u;
+        rgba[offset + 1u] = 255u;
+        rgba[offset + 2u] = 255u;
+        rgba[offset + 3u] = std::max(rgba[offset + 3u], coverage);
+    });
+}
+
 uint64_t TextFontFilesOpenedForTests() {
     const std::lock_guard lock { g_freetype_mutex };
     return FaceCache::Get().FilesOpened();
@@ -1635,7 +1661,7 @@ Eigen::Vector2f TextLayer::rasterSize() const {
 }
 
 TextLayerRenderBounds TextLayer::renderBounds() const {
-    return TextLayerRenderBoundsForRasterSize(m_state, rasterSize());
+    return TextLayerRenderBoundsForLayout(m_state, m_layout);
 }
 
 void TextLayer::Relayout() {

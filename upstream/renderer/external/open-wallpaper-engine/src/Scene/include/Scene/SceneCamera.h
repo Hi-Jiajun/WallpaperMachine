@@ -169,10 +169,11 @@ void FitCanvasPerspective(SceneCamera& perspective, const SceneCamera& canvas);
 inline constexpr float kCanvasShaderEyeDepth = 2000.0f;
 
 /// Intersects the camera ray through NDC `(ndc_x, ndc_y)` with `node`'s local
-/// z = 0 plane. NDC is the shared clip space after the perspective divide,
-/// x/y in [-1, 1], with this engine's near = 0 and far = 1. Returns local
-/// coordinates on the plane, or nullopt if the inverse is degenerate, the ray
-/// is parallel to the plane, or the hit lies outside the clip volume.
+/// z = 0 plane, where the node is drawn (its draw offset included). NDC is the
+/// shared clip space after the perspective divide, x/y in [-1, 1], with this
+/// engine's near = 0 and far = 1. Returns local coordinates on the plane, or
+/// nullopt if the inverse is degenerate, the ray is parallel to the plane, or the
+/// hit lies outside the clip volume.
 [[nodiscard]] std::optional<Eigen::Vector3d> IntersectNdcWithNodePlane(
     const SceneCamera& camera, SceneNode& node, double ndc_x, double ndc_y);
 

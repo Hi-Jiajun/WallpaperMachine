@@ -640,9 +640,17 @@ TEST(TextObjectRuntime, ParserCreatesRuntimeTextNodeAndState) {
 
     auto* node = FindRootChild(*scene, "caption");
     ASSERT_NE(node, nullptr);
-    EXPECT_NE(node->Mesh(), nullptr);
-    EXPECT_LT(node->Translate().x(), 100.0f);
-    EXPECT_GT(node->Translate().y(), 50.0f);
+    ASSERT_NE(node->Mesh(), nullptr);
+    // The layer's alignment hangs the card from its origin and leaves the node on it.
+    EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(100.0f, 50.0f, 0.0f)));
+    const auto layout = scene->runtime->NodeTextLayout("caption");
+    ASSERT_TRUE(layout.has_value());
+    const auto bounds = MeshLocalBounds(*node->Mesh());
+    // Right aligned: the card ends on the origin. Bottom aligned: the descender line of the
+    // last row is on it, so the card reaches one ascender and one descender above.
+    EXPECT_NEAR(bounds.max_x, 0.0f, 1.0e-3f);
+    EXPECT_NEAR(bounds.min_x, -size.x(), 1.0e-3f);
+    EXPECT_NEAR(bounds.max_y, layout->top + layout->descender, 1.0e-3f);
 }
 
 TEST(TextObjectRuntime, ParserCreatesRenderableTextMaterialAndTexture) {
@@ -1595,9 +1603,9 @@ TEST(TextObjectRuntime, AlignedTextEffectTracksMeasuredRenderFrameWhenRasterExpa
     const auto card = scene->runtime->NodeSize("caption");
     EXPECT_TRUE(card.isApprox(layout->card));
     EXPECT_GT(card.x(), 400.0f);
-    EXPECT_NEAR(text->Translate().x(), -card.x() * 0.5f, 1.0e-3f);
-    EXPECT_NEAR(text->Translate().y(), card.y() * 0.5f, 1.0e-3f);
-    const auto render_frame = TextLayerRenderFrameForRasterSize(*state, layout->card);
+    EXPECT_TRUE(text->Translate().isApprox(Eigen::Vector3f::Zero()));
+    const auto render_frame = TextLayerRenderFrameForLayout(*state, *layout);
+    EXPECT_NEAR(render_frame.center.x(), -card.x() * 0.5f, 1.0e-3f);
 
     const auto text_mesh_size = MeshSize(*text->Mesh());
     EXPECT_NEAR(text_mesh_size.x(), render_frame.size.x(), 1.0f);
@@ -1745,10 +1753,12 @@ TEST(TextObjectRuntime, AlignedTextEffectCoversMeasuredRasterWithoutScaling) {
     const auto text_mesh_size = MeshSize(*text->Mesh());
     EXPECT_NEAR(text_mesh_size.x(), card.x(), 1.0f);
     EXPECT_NEAR(text_mesh_size.y(), card.y(), 1.0f);
-    // The card is centred on the layer, which is shifted onto the edges it is aligned to.
+    // The card hangs from the layer's origin by the edges it is aligned to: its right edge
+    // is on the origin, and the descender line of its last row.
     const auto text_mesh_center = MeshCenter(*text->Mesh());
-    EXPECT_NEAR(text_mesh_center.x(), 0.0f, 1.0e-4f);
-    EXPECT_NEAR(text_mesh_center.y(), 0.0f, 1.0e-4f);
+    EXPECT_NEAR(text_mesh_center.x(), layout->centre.x(), 1.0e-4f);
+    EXPECT_NEAR(text_mesh_center.y(), layout->centre.y(), 1.0e-4f);
+    EXPECT_NEAR(text_mesh_center.x(), -card.x() * 0.5f, 1.0e-4f);
 
     auto* pingpong = scene->FindRenderTarget(effect_layer->FirstTarget());
     ASSERT_NE(pingpong, nullptr);
@@ -1782,8 +1792,7 @@ TEST(TextObjectRuntime, AlignedTextEffectCoversMeasuredRasterWithoutScaling) {
     EXPECT_NEAR(MeshCenter(*resolved_final->Mesh()).x(), text_mesh_center.x(), 1.0e-4f);
     EXPECT_NEAR(MeshCenter(*resolved_final->Mesh()).y(), text_mesh_center.y(), 1.0e-4f);
 
-    EXPECT_NEAR(text->Translate().x(), -card.x() * 0.5f, 1.0e-3f);
-    EXPECT_NEAR(text->Translate().y(), card.y() * 0.5f, 1.0e-3f);
+    EXPECT_TRUE(text->Translate().isApprox(Eigen::Vector3f::Zero()));
 }
 
 TEST(TextObjectRuntime, ParserStabilizesCascadingRustShaderDefaultTextureMetadata) {
@@ -3442,7 +3451,7 @@ TEST(TextObjectRuntime, RuntimeTextMutationResizesRenderableMesh) {
     EXPECT_FALSE(scene->runtime->ConsumeSceneGraphMutationFlag());
 }
 
-TEST(TextObjectRuntime, AlignedTextReanchorsWhenTextSizeChanges) {
+TEST(TextObjectRuntime, AlignedTextKeepsItsNodeAndMovesItsCardWhenTheTextChanges) {
     fs::VFS vfs;
     MountAssets(vfs);
     audio::SoundManager sound_manager;
@@ -3464,22 +3473,30 @@ TEST(TextObjectRuntime, AlignedTextReanchorsWhenTextSizeChanges) {
     ASSERT_NE(scene->runtime, nullptr);
     auto* node = FindRootChild(*scene, "caption");
     ASSERT_NE(node, nullptr);
-    const auto before_translate = node->Translate();
-    const auto before_size      = scene->runtime->NodeSize("caption");
+    const Eigen::Vector3f origin(100.0f, 50.0f, 0.0f);
+    EXPECT_TRUE(node->Translate().isApprox(origin));
+    const auto before_size = scene->runtime->NodeSize("caption");
+    EXPECT_NEAR(MeshLocalBounds(*node->Mesh()).max_x, 0.0f, 1.0e-3f);
 
     ASSERT_TRUE(scene->runtime->SetNodeText("caption", "aaaaaaaaaa"));
     PumpTextUntilClean(*scene->runtime);
 
-    const auto after_translate = node->Translate();
-    const auto after_size      = scene->runtime->NodeSize("caption");
+    // The layer is where the scene put it, and the card grew to the left of it: the right
+    // edge of the text is still on the origin.
+    const auto after_size = scene->runtime->NodeSize("caption");
     EXPECT_GT(after_size.x(), before_size.x());
-    EXPECT_LT(after_translate.x(), before_translate.x());
-    EXPECT_FLOAT_EQ(after_translate.y(), before_translate.y());
-    EXPECT_NEAR(after_translate.x(), 100.0f - after_size.x() * 0.5f, 1.0e-4f);
-    EXPECT_NEAR(after_translate.y(), 50.0f + after_size.y() * 0.5f, 1.0e-4f);
+    EXPECT_TRUE(node->Translate().isApprox(origin));
+    const auto bounds = MeshLocalBounds(*node->Mesh());
+    EXPECT_NEAR(bounds.max_x, 0.0f, 1.0e-3f);
+    EXPECT_NEAR(bounds.min_x, -after_size.x(), 1.0e-3f);
+    // Bottom aligned: the descender line of the (only) row is on the origin.
+    const auto layout = scene->runtime->NodeTextLayout("caption");
+    ASSERT_TRUE(layout.has_value());
+    EXPECT_NEAR(bounds.max_y, layout->top + layout->descender, 1.0e-3f);
+    EXPECT_NEAR(bounds.min_y, layout->bottom + layout->descender, 1.0e-3f);
 }
 
-TEST(TextObjectRuntime, ScaledTextAnchoringUsesRenderedSizeFromOriginalOrigin) {
+TEST(TextObjectRuntime, AScaledAlignedTextHasItsCardEdgeOnTheOriginWhateverItsSize) {
     fs::VFS vfs;
     MountAssets(vfs);
     audio::SoundManager sound_manager;
@@ -3502,15 +3519,26 @@ TEST(TextObjectRuntime, ScaledTextAnchoringUsesRenderedSizeFromOriginalOrigin) {
     auto* node = FindRootChild(*scene, "caption");
     ASSERT_NE(node, nullptr);
 
+    // The node is the origin the scene gave; the card, at the layer's scale of (2, 3), ends
+    // on the origin and its bottom-aligned descender line is on it.
+    const auto world_edges = [&] {
+        const auto  bounds = MeshLocalBounds(*node->Mesh());
+        const auto  layout = scene->runtime->NodeTextLayout("caption");
+        EXPECT_TRUE(layout.has_value());
+        EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(100.0f, 50.0f, 0.0f)));
+        EXPECT_NEAR(node->Translate().x() + 2.0f * bounds.max_x, 100.0f, 1.0e-3f);
+        EXPECT_NEAR(node->Translate().y() + 3.0f * bounds.max_y,
+                    50.0f + 3.0f * (layout->top + layout->descender), 1.0e-3f);
+        return node->Translate().x() + 2.0f * bounds.min_x;
+    };
     const auto size = scene->runtime->NodeSize("caption");
-    EXPECT_NEAR(node->Translate().x(), 100.0f - size.x(), 1.0e-4f);
-    EXPECT_NEAR(node->Translate().y(), 50.0f + size.y() * 1.5f, 1.0e-4f);
+    EXPECT_NEAR(world_edges(), 100.0f - 2.0f * size.x(), 1.0e-3f);
 
     ASSERT_TRUE(scene->runtime->SetNodeText("caption", "aaaaaa"));
     PumpTextUntilClean(*scene->runtime);
     const auto resized = scene->runtime->NodeSize("caption");
-    EXPECT_NEAR(node->Translate().x(), 100.0f - resized.x(), 1.0e-4f);
-    EXPECT_NEAR(node->Translate().y(), 50.0f + resized.y() * 1.5f, 1.0e-4f);
+    EXPECT_GT(resized.x(), size.x());
+    EXPECT_NEAR(world_edges(), 100.0f - 2.0f * resized.x(), 1.0e-3f);
 }
 
 TEST(TextObjectRuntime, PumpTextLayerCacheClearsDirtyStateWithoutLosingText) {
@@ -3808,10 +3836,16 @@ TEST(TextObjectRuntime, HorizontalAlignIsTheOnlyKeyThatAlignsTheTextHorizontally
     auto* override = FindRootChild(*scene, "override");
     ASSERT_NE(fallback, nullptr);
     ASSERT_NE(override, nullptr);
-    EXPECT_FLOAT_EQ(fallback->Translate().x(), 100.0f);
-    EXPECT_LT(override->Translate().x(), 100.0f);
-    EXPECT_FLOAT_EQ(fallback->Translate().y(), 50.0f);
-    EXPECT_FLOAT_EQ(override->Translate().y(), 50.0f);
+    // Neither is moved: the key only says which edge of the text the origin sits on. The
+    // key-less layer is centred (the card straddles the origin), the other ends on it.
+    for (auto* node : { fallback, override }) {
+        EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(100.0f, 50.0f, 0.0f)));
+    }
+    ASSERT_NE(fallback->Mesh(), nullptr);
+    ASSERT_NE(override->Mesh(), nullptr);
+    EXPECT_NEAR(MeshCenter(*fallback->Mesh()).x(), 0.0f, 1.0e-3f);
+    EXPECT_NEAR(MeshLocalBounds(*override->Mesh()).max_x, 0.0f, 1.0e-3f);
+    EXPECT_LT(MeshCenter(*override->Mesh()).x(), -1.0f);
     EXPECT_EQ(scene->runtime->NodeTextState("fallback")->horizontal_align, "center");
 }
 
@@ -3839,10 +3873,15 @@ TEST(TextObjectRuntime, VerticalAlignIsTheOnlyKeyThatAlignsTheTextVertically) {
     auto* override = FindRootChild(*scene, "override");
     ASSERT_NE(fallback, nullptr);
     ASSERT_NE(override, nullptr);
-    EXPECT_FLOAT_EQ(fallback->Translate().y(), 50.0f);
-    EXPECT_GT(override->Translate().y(), 50.0f);
-    EXPECT_FLOAT_EQ(fallback->Translate().x(), 100.0f);
-    EXPECT_FLOAT_EQ(override->Translate().x(), 100.0f);
+    for (auto* node : { fallback, override }) {
+        EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(100.0f, 50.0f, 0.0f)));
+    }
+    ASSERT_NE(fallback->Mesh(), nullptr);
+    ASSERT_NE(override->Mesh(), nullptr);
+    // The key-less layer is centred on its rows, the other has the text above its origin.
+    EXPECT_GT(MeshCenter(*override->Mesh()).y(), MeshCenter(*fallback->Mesh()).y() + 1.0f);
+    EXPECT_NEAR(MeshCenter(*fallback->Mesh()).x(), 0.0f, 1.0e-3f);
+    EXPECT_NEAR(MeshCenter(*override->Mesh()).x(), 0.0f, 1.0e-3f);
     EXPECT_EQ(scene->runtime->NodeTextState("fallback")->vertical_align, "center");
 }
 
@@ -4360,6 +4399,10 @@ TEST(TextObjectRuntime, LayoutRecordMatchesFreeType) {
     EXPECT_TRUE(empty.BlockSize().isZero());
     EXPECT_TRUE(empty.card.isApprox(Eigen::Vector2f(18.0f, 8.0f)));
     EXPECT_FLOAT_EQ(empty.ascender, ascender);
+    // It has no offsets either: the 2 by 2 card is on the origin whatever the alignment.
+    state.horizontal_align = "right";
+    state.vertical_align   = "bottom";
+    EXPECT_TRUE(MeasureTextLayerLayout(state).centre.isZero());
 }
 
 // Where no font opens the text is laid out in boxes: 0.9 em of ascender, 0.3 em of
@@ -4426,25 +4469,26 @@ TEST(TextObjectRuntime, CardPaddingSizesTheCardAndNeverNarrowsTheWrap) {
     EXPECT_GT(MeasureTextLayerSize(padded).x(), padded.max_width);
 }
 
-TEST(TextObjectRuntime, CardPaddingInsetsAlignedTextOnEachAxis) {
-    auto state             = HelveticaState("Hg", 20.0f);
-    state.padding          = { 24.0f, 10.0f };
-    state.horizontal_align = "right";
-    state.vertical_align   = "bottom";
-    const auto bottom_right = RasterOf(state);
-    const auto box          = InkBounds(bottom_right.rgba, bottom_right.width, bottom_right.height);
-    ASSERT_TRUE(box.Any());
-    EXPECT_LE(box.max_x, static_cast<int>(bottom_right.width) - 24);
-    EXPECT_GT(box.max_x, static_cast<int>(bottom_right.width) - 24 - 8);
-    EXPECT_LE(box.max_y, static_cast<int>(bottom_right.height) - 10);
-
-    state.horizontal_align = "left";
-    state.vertical_align   = "top";
-    const auto top_left    = RasterOf(state);
-    const auto top_box     = InkBounds(top_left.rgba, top_left.width, top_left.height);
-    ASSERT_TRUE(top_box.Any());
-    EXPECT_GE(top_box.min_x, 24);
-    EXPECT_GE(top_box.min_y, 10);
+// The card is the block with its padding on every side, whichever way it is aligned: the
+// ink is the padding away from the card's edges on every axis.
+TEST(TextObjectRuntime, CardPaddingGrowsTheCardOutwardOnEveryAxis) {
+    for (const std::string_view horizontal : { "left", "center", "right" }) {
+        for (const std::string_view vertical : { "top", "center", "bottom" }) {
+            SCOPED_TRACE(std::string(horizontal) + " " + std::string(vertical));
+            auto state             = HelveticaState("Hg", 20.0f);
+            state.padding          = { 24.0f, 10.0f };
+            state.horizontal_align = std::string(horizontal);
+            state.vertical_align   = std::string(vertical);
+            const auto image       = RasterOf(state);
+            const auto box         = InkBounds(image.rgba, image.width, image.height);
+            ASSERT_TRUE(box.Any());
+            EXPECT_GE(box.min_x, 24);
+            EXPECT_LE(box.max_x, static_cast<int>(image.width) - 24);
+            EXPECT_GT(box.max_x, static_cast<int>(image.width) - 24 - 8);
+            EXPECT_GE(box.min_y, 10);
+            EXPECT_LE(box.max_y, static_cast<int>(image.height) - 10);
+        }
+    }
 }
 
 TEST(TextObjectRuntime, SpacingAddsToEveryAdvanceAndToTheLinePitch) {
@@ -5253,6 +5297,31 @@ TEST(TextObjectRuntime, AddColorBlendTextIsDrawnAdditivelyOntoTheScene) {
     EXPECT_EQ(onto_scene, 1u);
 }
 
+namespace
+{
+// Where the layer's origin is drawn: its draw matrix taken on the point.
+Eigen::Vector3d DrawnOrigin(SceneNode& node) {
+    node.UpdateTrans();
+    return (node.RenderTrans() * Eigen::Vector4d(0.0, 0.0, 0.0, 1.0)).head<3>();
+}
+
+Eigen::Vector3d ModelOrigin(SceneNode& node) {
+    node.UpdateTrans();
+    return node.ModelTrans().block<3, 1>(0, 3);
+}
+
+// A display that shows 560 of the canvas's 640 columns from column 10 on, and all of its
+// 360 rows: left 10, right 70, top and bottom 0.
+CursorViewport PannedViewport() {
+    return CursorViewport { .origin = { 10.0f, 0.0f }, .size = { 560.0f, 360.0f },
+                            .content_origin = { 10.0f, 0.0f }, .content_size = { 560.0f, 360.0f } };
+}
+CursorViewport WholeCanvas() {
+    return CursorViewport { .origin = { 0.0f, 0.0f }, .size = { 640.0f, 360.0f },
+                            .content_origin = { 0.0f, 0.0f }, .content_size = { 640.0f, 360.0f } };
+}
+} // namespace
+
 TEST(TextObjectRuntime, ScreenAnchorOffsetsPinTheLayerToTheEdgeItNames) {
     // Margins in scene units, y up: positive where the canvas is cropped.
     const PresentedMargins margins { .left = 10.0f, .top = 4.0f, .right = 30.0f, .bottom = 6.0f };
@@ -5303,8 +5372,8 @@ TEST(TextObjectRuntime, ScreenAnchoredTextFollowsThePresentedAreaAndNothingElseD
     const auto names = { "top right", "left", "centre", "free", "no key", "edge only" };
     std::map<std::string, Eigen::Vector3f> resting;
     const auto placed = [&](const char* name) -> Eigen::Vector3f {
-        // The node itself, which the anchor offset and the layer's own alignment move.
-        return FindRootChild(*fixture.scene, name)->Translate();
+        // Where the layer's origin is drawn, which the anchor offset moves.
+        return DrawnOrigin(*FindRootChild(*fixture.scene, name)).cast<float>();
     };
     for (const char* name : names) resting[name] = placed(name);
 
@@ -5507,7 +5576,7 @@ TEST(TextObjectRuntime, StyledTextCardGrowsOutwardAndKeepsTheLayoutBoxWhereItWas
     state.horizontal_align = "left";
     state.vertical_align   = "top";
     const auto plain_size   = TextLayerRasterSize(state);
-    const auto plain_bounds = TextLayerRenderBoundsForRasterSize(state, plain_size);
+    const auto plain_bounds = TextLayerRenderBoundsForLayout(state, MeasureTextLayerLayout(state));
     EXPECT_EQ(TextStyleMargin(state), 0.0f);
 
     state.style.outline = true;
@@ -5519,7 +5588,7 @@ TEST(TextObjectRuntime, StyledTextCardGrowsOutwardAndKeepsTheLayoutBoxWhereItWas
     // The layout card, which the layer is placed by, does not move: the raster gains
     // the margin on every side.
     EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(plain_size));
-    const auto bounds = TextLayerRenderBoundsForRasterSize(state, size);
+    const auto bounds = TextLayerRenderBoundsForLayout(state, MeasureTextLayerLayout(state));
     EXPECT_FLOAT_EQ(bounds.left, plain_bounds.left - margin);
     EXPECT_FLOAT_EQ(bounds.right, plain_bounds.right + margin);
     EXPECT_FLOAT_EQ(bounds.top, plain_bounds.top + margin);
@@ -5976,6 +6045,784 @@ TEST(TextObjectRuntime, PlainAlignedTextKeepsItsCardEdgeOnTheOrigin) {
                 0.15f * em_pixels * 2.0f);
     EXPECT_NEAR(right.left + static_cast<float>(texture_right.last_ink_column + 1) * texel_right,
                 300.0f, 1.0f * 2.0f + 1.0e-3f);
+}
+
+// ---------------------------------------------------------------------------
+// Where an aligned text lies about its layer's origin, as Wallpaper Engine places it: the
+// layer's alignment offsets the card inside the layer's own draw and nothing else. The
+// node stays where the scene put it, the origin sits on the edge of the text's block the
+// alignment names (the left, middle or right of it across; down, the ascender line, the
+// middle of the rows, or the last row's descender line), and the padding grows the card
+// outward from there.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+// A box in a layer's own units from its origin, y up.
+struct NodeRect {
+    float left { 0.0f };
+    float right { 0.0f };
+    float bottom { 0.0f };
+    float top { 0.0f };
+};
+
+// The pixels `first_column..last_column` by `first_row..last_row` (inclusive) of a text's
+// raster, where the quad that shows the raster lays them.
+NodeRect PixelsFromOrigin(const TextLayerState& state, const Rastered& image, int first_column,
+                          int last_column, int first_row, int last_row) {
+    const auto bounds = TextLayerRenderBoundsForLayout(state, MeasureTextLayerLayout(state));
+    const float texel_width  = (bounds.right - bounds.left) / static_cast<float>(image.width);
+    const float texel_height = (bounds.top - bounds.bottom) / static_cast<float>(image.height);
+    return {
+        .left   = bounds.left + texel_width * static_cast<float>(first_column),
+        .right  = bounds.left + texel_width * static_cast<float>(last_column + 1),
+        .bottom = bounds.top - texel_height * static_cast<float>(last_row + 1),
+        .top    = bounds.top - texel_height * static_cast<float>(first_row),
+    };
+}
+
+// Each run of raster rows that holds some ink, top to bottom, as (first, last).
+std::vector<std::pair<int, int>> InkRowRuns(const Rastered& image) {
+    std::vector<std::pair<int, int>> runs;
+    for (uint32_t y = 0; y < image.height; ++y) {
+        bool inked = false;
+        for (uint32_t x = 0; x < image.width && ! inked; ++x) {
+            inked = image.rgba[(static_cast<std::size_t>(y) * image.width + x) * 4u + 3u] != 0u;
+        }
+        if (! inked) continue;
+        if (! runs.empty() && runs.back().second == static_cast<int>(y) - 1) {
+            runs.back().second = static_cast<int>(y);
+        } else {
+            runs.emplace_back(static_cast<int>(y), static_cast<int>(y));
+        }
+    }
+    return runs;
+}
+
+// The face's numbers as FreeType gives them, read the way Wallpaper Engine reads them: the
+// face sized in points at 300 dpi, its size metrics cut to whole pixels.
+struct FaceNumbers {
+    float ascender { 0.0f };
+    float descender { 0.0f };
+    float pitch { 0.0f };
+};
+
+FaceNumbers FreeTypeFaceNumbers(const std::string& path, float point_size) {
+    FaceNumbers numbers;
+    FT_Library  library = nullptr;
+    if (FT_Init_FreeType(&library) != 0) return numbers;
+    FT_Face face = nullptr;
+    if (FT_New_Face(library, path.c_str(), 0, &face) == 0) {
+        if (FT_Set_Char_Size(face, 0, static_cast<FT_F26Dot6>(point_size * 64.0f), 300, 300) == 0) {
+            numbers.ascender  = static_cast<float>(face->size->metrics.ascender >> 6);
+            numbers.descender = static_cast<float>(-(face->size->metrics.descender >> 6));
+            numbers.pitch     = static_cast<float>(face->size->metrics.height >> 6);
+        }
+        FT_Done_Face(face);
+    }
+    FT_Done_FreeType(library);
+    return numbers;
+}
+
+// Where, down from the first row's baseline, the vertical alignment puts the layer's
+// origin: the ascender line, the middle between it and the last baseline, or the last
+// row's descender line.
+float ReferenceLineOf(std::string_view vertical, const FaceNumbers& face, uint32_t rows,
+                      float extra_pitch = 0.0f) {
+    const float pitch = face.pitch + extra_pitch;
+    const float below = static_cast<float>(rows - 1u) * pitch;
+    if (vertical == "top") return face.ascender;
+    if (vertical == "bottom") return -face.descender - below;
+    return (face.ascender - below) * 0.5f;
+}
+} // namespace
+
+// The first baseline lies `X` below the origin: the ascender for `top`, half of it for
+// `center`, and for `bottom` the last row's descender line is on the origin. The numbers
+// are FreeType's, read apart from the layout, and the baseline is found in the pixels.
+TEST(TextObjectRuntime, TheReferenceLineOfTheVerticalAlignmentSitsOnTheOrigin) {
+    const auto face = FreeTypeFaceNumbers(HelveticaState("H", 32.0f).resolved_font_path, 32.0f);
+#ifdef __APPLE__
+    ASSERT_GT(face.ascender, 0.0f);
+#endif
+    for (const std::string_view text : { "H", "H\nH\nH" }) {
+        for (const float spacing : { 0.0f, 9.0f }) {
+            const uint32_t rows = text.size() == 1 ? 1u : 3u;
+            for (const std::string_view vertical : { "top", "center", "bottom" }) {
+                SCOPED_TRACE(std::string(text) + " " + std::string(vertical) + " spacing " +
+                             std::to_string(spacing));
+                auto state            = HelveticaState(std::string(text), 32.0f);
+                state.spacing         = { 0.0f, spacing };
+                state.vertical_align  = std::string(vertical);
+                const auto  image     = Rastered(RasterOf(state));
+                const auto  runs      = InkRowRuns(image);
+                ASSERT_EQ(runs.size(), static_cast<std::size_t>(rows));
+                const float reference = ReferenceLineOf(vertical, face, rows, spacing);
+                const float pitch     = face.pitch + spacing;
+                for (std::size_t row = 0; row < runs.size(); ++row) {
+                    const auto cap = PixelsFromOrigin(state, image, 0,
+                                                      static_cast<int>(image.width) - 1,
+                                                      runs[row].first, runs[row].second);
+                    EXPECT_NEAR(cap.bottom, -reference - static_cast<float>(row) * pitch, 1.5f)
+                        << "row " << row;
+                }
+                const auto layout = MeasureTextLayerLayout(state);
+                EXPECT_EQ(layout.rows, rows);
+                EXPECT_NEAR(layout.centre.y(),
+                            (layout.top + layout.bottom) * 0.5f - reference, 1.0e-3f);
+            }
+        }
+    }
+}
+
+// Wallpaper Engine's own numbers for the rule, from its frames of an Arial layer at 32
+// points: the card is 153 tall (153 pixels of line, saved by the editor), so a single row
+// has the ascender line at the top of it. Aligned to the top that line is the origin, so
+// the card hangs 153 below it; to the centre the card's middle is half the line's
+// overhang (153 less the ascender) below it; to the bottom, the descender above it.
+TEST(TextObjectRuntime, ArialAtThirtyTwoPointsHangsFromTheOriginByTheReferenceLine) {
+    TextLayerState state {
+        .text                   = "Text Layer",
+        .font_key               = "systemfont_arial",
+        .resolved_font_kind     = "system",
+        .resolved_font_identity = "arial",
+        .resolved_font_path     = ResolveSystemFontPath("systemfont_arial"),
+        .point_size             = 32.0f,
+        .horizontal_align       = "left",
+    };
+    if (state.resolved_font_path.empty()) GTEST_SKIP() << "no Arial on this system";
+    const auto face = FreeTypeFaceNumbers(state.resolved_font_path, 32.0f);
+    ASSERT_FLOAT_EQ(face.pitch, 153.0f) << "the card Wallpaper Engine saved for this text";
+
+    state.vertical_align = "top";
+    auto layout          = MeasureTextLayerLayout(state);
+    EXPECT_NEAR(layout.centre.y(), -153.0f * 0.5f, 1.0e-3f);
+    EXPECT_NEAR(layout.centre.x(), 615.0f * 0.5f, 1.0e-3f);
+    state.vertical_align = "center";
+    layout               = MeasureTextLayerLayout(state);
+    EXPECT_NEAR(layout.centre.y(), (face.ascender - 153.0f) * 0.5f, 1.0e-3f);
+    state.vertical_align = "bottom";
+    layout               = MeasureTextLayerLayout(state);
+    EXPECT_NEAR(layout.centre.y(), face.ascender - 153.0f * 0.5f + face.descender, 1.0e-3f);
+}
+
+// The card is placed by the layout's offset alone: the block's left, middle or right across
+// and the reference line down, with the padding added outward on every side, whichever
+// way the text is aligned. The same offsets with the padding gate on or off differ by the
+// padding and by nothing else.
+TEST(TextObjectRuntime, TheCardHangsFromTheOriginByTheEdgeTheTextIsAlignedTo) {
+    for (const Eigen::Vector2f padding : { Eigen::Vector2f(0.0f, 0.0f), Eigen::Vector2f(24.0f, 10.0f) }) {
+        for (const std::string_view text : { "Hg", "Hg\nHgHg\nH" }) {
+            for (const std::string_view horizontal : { "left", "center", "right" }) {
+                for (const std::string_view vertical : { "top", "center", "bottom" }) {
+                    SCOPED_TRACE(std::string(horizontal) + " " + std::string(vertical) + " " +
+                                 std::string(text) + " padding " + std::to_string(padding.x()));
+                    auto state             = HelveticaState(std::string(text), 24.0f);
+                    state.padding          = padding;
+                    state.horizontal_align = std::string(horizontal);
+                    state.vertical_align   = std::string(vertical);
+                    const auto layout      = MeasureTextLayerLayout(state);
+                    const auto block       = layout.BlockSize();
+                    const float reference = ReferenceLineOf(
+                        vertical, FaceNumbers { layout.ascender, layout.descender, layout.pitch },
+                        layout.rows);
+                    const float across = horizontal == "left"    ? block.x() * 0.5f
+                                         : horizontal == "right" ? -block.x() * 0.5f
+                                                                 : 0.0f;
+                    EXPECT_NEAR(layout.centre.x(), across, 1.0e-3f);
+                    EXPECT_NEAR(layout.centre.y(), (layout.top + layout.bottom) * 0.5f - reference,
+                                1.0e-3f);
+                    // The edge the text is aligned to is on the origin, and the padding lies
+                    // beyond it.
+                    const float card_left  = layout.centre.x() - layout.card.x() * 0.5f;
+                    const float card_right = layout.centre.x() + layout.card.x() * 0.5f;
+                    const float card_top   = layout.centre.y() + layout.card.y() * 0.5f;
+                    const float card_bottom = layout.centre.y() - layout.card.y() * 0.5f;
+                    if (horizontal == "left") EXPECT_NEAR(card_left, -padding.x(), 1.0e-3f);
+                    if (horizontal == "right") EXPECT_NEAR(card_right, padding.x(), 1.0e-3f);
+                    if (horizontal == "center") EXPECT_NEAR(card_left + card_right, 0.0f, 1.0e-3f);
+                    if (vertical == "top") EXPECT_NEAR(card_top, padding.y(), 1.0e-3f);
+                    if (vertical == "bottom") {
+                        EXPECT_NEAR(card_bottom, layout.bottom - reference - padding.y(), 1.0e-3f);
+                    }
+                    // The card does not depend on the alignment: only where it hangs does.
+                    auto other = state;
+                    other.horizontal_align = "left";
+                    other.vertical_align   = "top";
+                    EXPECT_TRUE(MeasureTextLayerLayout(other).card.isApprox(layout.card));
+                }
+            }
+        }
+    }
+}
+
+// Padding is room around the block, added on the outside of the aligned edges. A text
+// that gets padding (a layer that gains an effect) stays where it was: its ink is at
+// the same distance from the origin with and without it.
+TEST(TextObjectRuntime, PaddingGrowsTheCardOutwardAndLeavesTheTextWhereItWas) {
+    for (const std::string_view horizontal : { "left", "center", "right" }) {
+        for (const std::string_view vertical : { "top", "center", "bottom" }) {
+            SCOPED_TRACE(std::string(horizontal) + " " + std::string(vertical));
+            auto plain             = HelveticaState("HIH\nHH", 24.0f);
+            plain.horizontal_align = std::string(horizontal);
+            plain.vertical_align   = std::string(vertical);
+            auto padded            = plain;
+            padded.padding         = { 24.0f, 10.0f };
+            const auto plain_image  = RasterOf(plain);
+            const auto padded_image = RasterOf(padded);
+            const auto plain_ink =
+                InkBounds(plain_image.rgba, plain_image.width, plain_image.height);
+            const auto padded_ink =
+                InkBounds(padded_image.rgba, padded_image.width, padded_image.height);
+            ASSERT_TRUE(plain_ink.Any());
+            ASSERT_TRUE(padded_ink.Any());
+            const auto at_plain = PixelsFromOrigin(plain, plain_image, plain_ink.min_x,
+                                                   plain_ink.max_x, plain_ink.min_y, plain_ink.max_y);
+            const auto at_padded = PixelsFromOrigin(padded, padded_image, padded_ink.min_x,
+                                                    padded_ink.max_x, padded_ink.min_y,
+                                                    padded_ink.max_y);
+            EXPECT_NEAR(at_padded.left, at_plain.left, 1.5f);
+            EXPECT_NEAR(at_padded.right, at_plain.right, 1.5f);
+            EXPECT_NEAR(at_padded.top, at_plain.top, 1.5f);
+            EXPECT_NEAR(at_padded.bottom, at_plain.bottom, 1.5f);
+            // The card is larger by the padding on each side.
+            EXPECT_NEAR(static_cast<double>(padded_image.width),
+                        static_cast<double>(plain_image.width) + 48.0, 1.0);
+            EXPECT_NEAR(static_cast<double>(padded_image.height),
+                        static_cast<double>(plain_image.height) + 20.0, 1.0);
+        }
+    }
+}
+
+// Alignment never changes what the card holds, only where the card hangs: one row of
+// text is the same picture whichever way it is aligned.
+TEST(TextObjectRuntime, AlignmentDoesNotChangeThePixelsOfARow) {
+    auto state    = HelveticaState("Hg", 24.0f);
+    state.padding = { 24.0f, 10.0f };
+    const auto reference = RasterOf(state);
+    for (const std::string_view horizontal : { "left", "center", "right" }) {
+        for (const std::string_view vertical : { "top", "center", "bottom" }) {
+            state.horizontal_align = std::string(horizontal);
+            state.vertical_align   = std::string(vertical);
+            const auto image       = RasterOf(state);
+            EXPECT_EQ(image.width, reference.width);
+            EXPECT_EQ(image.height, reference.height);
+            EXPECT_EQ(image.rgba, reference.rgba) << horizontal << " " << vertical;
+        }
+    }
+}
+
+// The rows of a block are set within the widest row: its left edge for `left`, centred in
+// it for `center`, against its right edge for `right`.
+TEST(TextObjectRuntime, RowsOfABlockAlignWithinTheWidestRow) {
+    const auto row_width = [](const char* text) {
+        return MeasureTextLayerLayout(HelveticaState(text, 24.0f)).BlockSize().x();
+    };
+    const float widest = row_width("HHHHH");
+    ASSERT_GT(widest, row_width("HH"));
+    ASSERT_GT(row_width("HH"), row_width("H"));
+    for (const std::string_view horizontal : { "left", "center", "right" }) {
+        SCOPED_TRACE(horizontal);
+        auto state             = HelveticaState("HHHHH\nHH\nH", 24.0f);
+        state.horizontal_align = std::string(horizontal);
+        const auto image       = RasterOf(state);
+        const auto runs        = InkRowRuns(image);
+        ASSERT_EQ(runs.size(), 3u);
+        const char* const row_text[] = { "HHHHH", "HH", "H" };
+        std::vector<float> starts;
+        for (std::size_t row = 0; row < runs.size(); ++row) {
+            const auto box = InkBounds(image.rgba, image.width, image.height,
+                                       static_cast<uint32_t>(runs[row].first),
+                                       static_cast<uint32_t>(runs[row].second) + 1u);
+            ASSERT_TRUE(box.Any());
+            starts.push_back(static_cast<float>(box.min_x));
+            const float own = row_width(row_text[row]);
+            const float offset = horizontal == "left"    ? 0.0f
+                                 : horizontal == "center" ? (widest - own) * 0.5f
+                                                          : widest - own;
+            // The first row is the widest, so its ink starts where every row's offset is 0.
+            EXPECT_NEAR(static_cast<float>(box.min_x) - starts.front(), offset, 1.5f)
+                << "row " << row;
+        }
+    }
+}
+
+// A row's pen starts at its offset in the widest row and its first glyph then hangs by its
+// own bearing, whatever the other rows start with: a row opened by a glyph that overhangs
+// to the left is drawn that far left, and a row after it is not moved by it.
+TEST(TextObjectRuntime, ARowsFirstGlyphKeepsItsOwnBearingWhateverTheOtherRowsStartWith) {
+    const auto state_of = [](std::string text) { return HelveticaState(std::move(text), 32.0f); };
+    // A glyph whose ink starts left of its pen: found in the face, since which one does
+    // depends on the font.
+    const auto face_path = state_of("H").resolved_font_path;
+    FT_Library library   = nullptr;
+    ASSERT_EQ(FT_Init_FreeType(&library), 0);
+    FT_Face face = nullptr;
+    ASSERT_EQ(FT_New_Face(library, face_path.c_str(), 0, &face), 0);
+    ASSERT_EQ(FT_Set_Char_Size(face, 0, 32 * 64, 300, 300), 0);
+    uint32_t overhang         = 0;
+    int      overhang_bearing = 0;
+    for (uint32_t codepoint = 'A'; codepoint <= 'z' && overhang == 0; ++codepoint) {
+        if (FT_Load_Char(face, codepoint, FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL) != 0) continue;
+        if (face->glyph->bitmap_left < -1) {
+            overhang         = codepoint;
+            overhang_bearing = face->glyph->bitmap_left;
+        }
+    }
+    ASSERT_EQ(FT_Load_Char(face, 'H', FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL), 0);
+    const int plain_bearing = face->glyph->bitmap_left;
+    FT_Done_Face(face);
+    FT_Done_FreeType(library);
+    ASSERT_NE(overhang, 0u) << "no glyph of this font starts left of its pen";
+
+    for (const std::string_view horizontal : { "center", "right" }) {
+        SCOPED_TRACE(horizontal);
+        const std::string over(1, static_cast<char>(overhang));
+        auto state             = state_of(over + "HHH\nH");
+        state.horizontal_align = std::string(horizontal);
+        const auto image       = RasterOf(state);
+        const auto runs        = InkRowRuns(image);
+        ASSERT_EQ(runs.size(), 2u);
+        const auto second = InkBounds(image.rgba, image.width, image.height,
+                                      static_cast<uint32_t>(runs[1].first),
+                                      static_cast<uint32_t>(runs[1].second) + 1u);
+        ASSERT_TRUE(second.Any());
+        // The second row is a lone H: set as the row alone would be in the block's widest
+        // row, its ink a bearing from where its pen is.
+        const float widest = MeasureTextLayerLayout(state_of(over + "HHH")).BlockSize().x();
+        const float own    = MeasureTextLayerLayout(state_of("H")).BlockSize().x();
+        const float offset = horizontal == "center" ? (widest - own) * 0.5f : widest - own;
+        const auto  layout = MeasureTextLayerLayout(state);
+        const float pen_origin = -layout.min_x;
+        EXPECT_NEAR(static_cast<float>(second.min_x), pen_origin + offset + static_cast<float>(plain_bearing),
+                    1.5f);
+    }
+
+    // The overhang may be on a row that is not the widest. The rows are set within the widest
+    // row's own width, not within the block's, which the overhang of a narrower row stretches
+    // to the left: the wide row below starts at its pen, and the narrow one is offset from it
+    // by the difference of the two rows' widths alone.
+    const std::string over(1, static_cast<char>(overhang));
+    const float       narrow = MeasureTextLayerLayout(state_of(over + "H")).BlockSize().x();
+    const float       wide   = MeasureTextLayerLayout(state_of("HHHH")).BlockSize().x();
+    ASSERT_GT(wide, narrow) << "the row below must be the widest";
+    for (const std::string_view horizontal : { "center", "right" }) {
+        SCOPED_TRACE(horizontal);
+        auto state             = state_of(over + "H\nHHHH");
+        state.horizontal_align = std::string(horizontal);
+        const auto image       = RasterOf(state);
+        const auto runs        = InkRowRuns(image);
+        ASSERT_EQ(runs.size(), 2u);
+        const auto first = InkBounds(image.rgba, image.width, image.height,
+                                     static_cast<uint32_t>(runs[0].first),
+                                     static_cast<uint32_t>(runs[0].second) + 1u);
+        const auto second = InkBounds(image.rgba, image.width, image.height,
+                                      static_cast<uint32_t>(runs[1].first),
+                                      static_cast<uint32_t>(runs[1].second) + 1u);
+        ASSERT_TRUE(first.Any());
+        ASSERT_TRUE(second.Any());
+        const float pen_origin = -MeasureTextLayerLayout(state).min_x;
+        const float offset     = horizontal == "center" ? (wide - narrow) * 0.5f : wide - narrow;
+        EXPECT_NEAR(static_cast<float>(second.min_x), pen_origin + static_cast<float>(plain_bearing), 1.5f);
+        EXPECT_NEAR(static_cast<float>(first.min_x), pen_origin + offset + static_cast<float>(overhang_bearing),
+                    1.5f);
+    }
+}
+
+// The baseline is the face's, not the ink's: a glyph that rises above the ascender makes
+// the card taller and moves nothing else.
+TEST(TextObjectRuntime, TheFirstBaselineDoesNotDependOnInkAboveTheAscender) {
+    auto plain = HelveticaState("H", 32.0f);
+    auto ringed = HelveticaState("\xC3\x85", 32.0f);
+    const auto plain_layout  = MeasureTextLayerLayout(plain);
+    const auto ringed_layout = MeasureTextLayerLayout(ringed);
+    ASSERT_GT(ringed_layout.top, plain_layout.top)
+        << "this font's A with a ring no longer rises above its ascender";
+    for (const std::string_view vertical : { "top", "center", "bottom" }) {
+        SCOPED_TRACE(vertical);
+        plain.vertical_align  = std::string(vertical);
+        ringed.vertical_align = std::string(vertical);
+        const auto lone   = Rastered(RasterOf(plain));
+        const auto rung   = Rastered(RasterOf(ringed));
+        const auto lone_ink = InkBounds(lone.rgba, lone.width, lone.height);
+        const auto rung_ink = InkBounds(rung.rgba, rung.width, rung.height);
+        ASSERT_TRUE(lone_ink.Any());
+        ASSERT_TRUE(rung_ink.Any());
+        const auto lone_at = PixelsFromOrigin(plain, lone, lone_ink.min_x, lone_ink.max_x,
+                                              lone_ink.min_y, lone_ink.max_y);
+        const auto rung_at = PixelsFromOrigin(ringed, rung, rung_ink.min_x, rung_ink.max_x,
+                                              rung_ink.min_y, rung_ink.max_y);
+        // Both sit on the baseline the alignment names.
+        EXPECT_NEAR(rung_at.bottom, lone_at.bottom, 1.5f);
+        EXPECT_GT(rung_at.top, lone_at.top);
+    }
+    EXPECT_GT(MeasureTextLayerLayout(ringed).card.y(), MeasureTextLayerLayout(plain).card.y());
+}
+
+// What a scene makes of it: the node stays at the layer's authored origin, scale and angle
+// whatever the alignment is, the quad hangs from it by the layout's offset, in the layer's
+// own axes, and a layer parented to a text sits on that text's origin.
+TEST(TextObjectRuntime, AlignmentOffsetsTheQuadAndNeverTheNode) {
+    std::string objects = "[";
+    int         id      = 1;
+    for (const char* horizontal : { "left", "center", "right" }) {
+        for (const char* vertical : { "top", "center", "bottom" }) {
+            if (id > 1) objects += ",";
+            objects += R"({"id":)" + std::to_string(id) + R"(,"name":")" + horizontal + "-" +
+                       vertical + R"(","text":"Hg","font":"Arial","pointsize":20,"origin":[300,120,0],)"
+                       R"("scale":[2,3,1],"angles":[0,0,25],"horizontalalign":")" +
+                       horizontal + R"(","verticalalign":")" + vertical + R"(","visible":true})";
+            ++id;
+        }
+    }
+    objects += "]";
+    TextSceneFixture fixture(objects, "text-alignment-offsets");
+    ASSERT_NE(fixture.scene, nullptr);
+    for (const char* horizontal : { "left", "center", "right" }) {
+        for (const char* vertical : { "top", "center", "bottom" }) {
+            const std::string name = std::string(horizontal) + "-" + vertical;
+            SCOPED_TRACE(name);
+            auto* node = FindRootChild(*fixture.scene, name);
+            ASSERT_NE(node, nullptr);
+            ASSERT_NE(node->Mesh(), nullptr);
+            EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(300.0f, 120.0f, 0.0f)));
+            EXPECT_TRUE(node->Scale().isApprox(Eigen::Vector3f(2.0f, 3.0f, 1.0f)));
+            EXPECT_GT(node->Rotation().z(), 0.1f);
+            const auto layout = fixture.scene->runtime->NodeTextLayout(name);
+            ASSERT_TRUE(layout.has_value());
+            const auto bounds = MeshLocalBounds(*node->Mesh());
+            const auto expected = TextLayerRenderBoundsForLayout(fixture.State(name), *layout);
+            EXPECT_NEAR(bounds.min_x, expected.left, 1.0e-3f);
+            EXPECT_NEAR(bounds.max_x, expected.right, 1.0e-3f);
+            EXPECT_NEAR(bounds.min_y, expected.bottom, 1.0e-3f);
+            EXPECT_NEAR(bounds.max_y, expected.top, 1.0e-3f);
+            // The quad's aligned edge passes through the origin along the layer's own axes:
+            // the point of the right edge, the left edge or the middle at the quad's height,
+            // taken into the scene, lies on the layer's rotated vertical axis.
+            node->UpdateTrans();
+            const Eigen::Matrix4d model = node->ModelTrans();
+            const double edge_x = std::string_view(horizontal) == "left"    ? bounds.min_x
+                                  : std::string_view(horizontal) == "right" ? bounds.max_x
+                                                                           : (bounds.min_x + bounds.max_x) * 0.5;
+            const Eigen::Vector3d origin = model.block<3, 1>(0, 3);
+            const Eigen::Vector3d edge =
+                (model * Eigen::Vector4d(edge_x, layout->centre.y(), 0.0, 1.0)).head<3>();
+            const Eigen::Vector3d across = model.block<3, 1>(0, 0).normalized();
+            EXPECT_NEAR((edge - origin).dot(across), 0.0, 1.0e-3);
+        }
+    }
+}
+
+TEST(TextObjectRuntime, ChildrenOfAlignedTextStayOnTheParentsOrigin) {
+    TextSceneFixture fixture(R"([
+      {"id":1,"name":"parent","text":"parent","font":"Arial","pointsize":20,"origin":[400,200,0],
+       "scale":[1.5,0.8,1],"angles":[0,0,30],"horizontalalign":"right","verticalalign":"bottom",
+       "visible":true},
+      {"id":2,"name":"child","parent":1,"text":"child","font":"Arial","pointsize":20,
+       "origin":[0,35,0],"horizontalalign":"center","verticalalign":"center","visible":true}
+    ])", "text-aligned-parent");
+    ASSERT_NE(fixture.scene, nullptr);
+    auto* parent = FindRootChild(*fixture.scene, "parent");
+    ASSERT_NE(parent, nullptr);
+    ASSERT_EQ(parent->GetChildren().size(), 1u);
+    auto* child = parent->GetChildren().front().get();
+    parent->UpdateTrans();
+    child->UpdateTrans();
+    // The child's own origin is its place in the parent's space: (0, 35) from the parent's.
+    const Eigen::Vector3d expected =
+        (parent->ModelTrans() * Eigen::Vector4d(0.0, 35.0, 0.0, 1.0)).head<3>();
+    const Eigen::Vector3d actual = child->ModelTrans().block<3, 1>(0, 3);
+    EXPECT_NEAR(actual.x(), expected.x(), 1.0e-3);
+    EXPECT_NEAR(actual.y(), expected.y(), 1.0e-3);
+    // And the parent's origin is where the scene put it.
+    EXPECT_NEAR(parent->ModelTrans()(0, 3), 400.0, 1.0e-3);
+    EXPECT_NEAR(parent->ModelTrans()(1, 3), 200.0, 1.0e-3);
+}
+
+// A script that changes `horizontalalign` changes where the card hangs and nothing about
+// its size: the quad is moved by the relayout, the node is not.
+TEST(TextObjectRuntime, ChangingTheAlignmentMovesTheQuadWithoutResizingIt) {
+    TextSceneFixture fixture(R"([
+      {"id":1,"name":"caption","text":"aligned","font":"Arial","pointsize":20,
+       "origin":[100,50,0],"horizontalalign":"right","verticalalign":"top","visible":true}
+    ])", "text-align-flip");
+    ASSERT_NE(fixture.scene, nullptr);
+    auto& runtime = *fixture.scene->runtime;
+    auto* node    = FindRootChild(*fixture.scene, "caption");
+    ASSERT_NE(node, nullptr);
+    const auto card = runtime.NodeSize("caption");
+    auto       bounds = MeshLocalBounds(*node->Mesh());
+    EXPECT_NEAR(bounds.max_x, 0.0f, 1.0e-3f);
+    EXPECT_NEAR(bounds.min_x, -card.x(), 1.0e-3f);
+
+    ASSERT_TRUE(runtime.SetNodeTextStyle("caption", "horizontalalign", "left"));
+    PumpTextUntilClean(runtime);
+    EXPECT_TRUE(runtime.NodeSize("caption").isApprox(card));
+    bounds = MeshLocalBounds(*node->Mesh());
+    EXPECT_NEAR(bounds.min_x, 0.0f, 1.0e-3f);
+    EXPECT_NEAR(bounds.max_x, card.x(), 1.0e-3f);
+    EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(100.0f, 50.0f, 0.0f)));
+
+    ASSERT_TRUE(runtime.SetNodeTextStyle("caption", "verticalalign", "bottom"));
+    PumpTextUntilClean(runtime);
+    bounds = MeshLocalBounds(*node->Mesh());
+    const auto layout = runtime.NodeTextLayout("caption");
+    ASSERT_TRUE(layout.has_value());
+    EXPECT_NEAR(bounds.max_y, layout->top + layout->descender, 1.0e-3f);
+    EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(100.0f, 50.0f, 0.0f)));
+}
+
+// The chain a text layer draws through follows its card when the alignment moves it: the
+// card the chain ends in, the target it is drawn from and the camera that frames it
+// all hang off the new side of the origin, with the card still inside what the chain
+// draws into and no graph rebuilt for a card that did not change size.
+TEST(TextObjectRuntime, AnEffectChainFollowsTheCardWhenTheAlignmentMovesIt) {
+    TextSceneFixture fixture(R"([
+      {"id":1,"name":"caption","text":"aligned","font":"Arial","pointsize":20,"padding":0,
+       "origin":[100,50,0],"horizontalalign":"right","verticalalign":"center","colorBlendMode":12,
+       "visible":true}
+    ])", "text-align-flip-effect", ColorBlendAssets());
+    ASSERT_NE(fixture.scene, nullptr);
+    auto& runtime = *fixture.scene->runtime;
+    auto* node    = FindRootChild(*fixture.scene, "caption");
+    ASSERT_NE(node, nullptr);
+    ASSERT_FALSE(node->Camera().empty());
+    auto camera = fixture.scene->cameras.at(node->Camera());
+    ASSERT_TRUE(camera->HasImgEffect());
+    const auto effect_layer = camera->GetImgEffect();
+    ASSERT_NE(effect_layer, nullptr);
+    const auto card = runtime.NodeSize("caption");
+
+    const auto expect_card_at = [&](float side) {
+        const auto layout = runtime.NodeTextLayout("caption");
+        ASSERT_TRUE(layout.has_value());
+        EXPECT_NEAR(layout->centre.x(), side * card.x() * 0.5f, 1.0e-3f);
+        const auto final_box = MeshLocalBounds(effect_layer->FinalMesh());
+        EXPECT_NEAR(MeshCenter(effect_layer->FinalMesh()).x(), layout->centre.x(), 1.0e-3f);
+        EXPECT_NEAR(MeshCenter(effect_layer->FinalMesh()).y(), layout->centre.y(), 1.0e-3f);
+        EXPECT_NEAR(final_box.Size().x(), card.x(), 1.0f);
+        // The final card is cut from what the chain drew: its texture coordinates stay in range.
+        const auto uv = MeshTexCoordBounds(effect_layer->FinalMesh());
+        EXPECT_GE(uv.min_u, -1.0e-4f);
+        EXPECT_LE(uv.max_u, 1.0f + 1.0e-4f);
+        EXPECT_GE(uv.min_v, -1.0e-4f);
+        EXPECT_LE(uv.max_v, 1.0f + 1.0e-4f);
+        EXPECT_NEAR(camera->GetPosition().x(), layout->centre.x(), 1.0e-3);
+        EXPECT_NEAR(MeshCenter(*node->Mesh()).x(), layout->centre.x(), 1.0e-3f);
+    };
+    expect_card_at(-1.0f);
+
+    auto graph = sceneToRenderGraph(*fixture.scene);
+    ASSERT_NE(graph, nullptr);
+    runtime.ConsumeSceneGraphMutationFlag();
+    ASSERT_TRUE(runtime.SetNodeTextStyle("caption", "horizontalalign", "left"));
+    PumpTextUntilClean(runtime);
+    expect_card_at(1.0f);
+    EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(100.0f, 50.0f, 0.0f)));
+    EXPECT_TRUE(runtime.NodeSize("caption").isApprox(card));
+    EXPECT_FALSE(runtime.ConsumeSceneGraphMutationFlag())
+        << "moving a card that kept its size rebuilt the graph";
+}
+
+// A text layer has no `alignment`: a script that sets one on it changes nothing, where an
+// image layer is moved onto the edge it names.
+TEST(TextObjectRuntime, ScriptsCannotSetAnAlignmentOnATextLayer) {
+    TextSceneFixture fixture(R"([
+      {"id":1,"name":"caption","text":"aligned","font":"Arial","pointsize":20,
+       "origin":[100,50,0],"horizontalalign":"center","verticalalign":"center","visible":true}
+    ])", "text-no-alignment-property");
+    ASSERT_NE(fixture.scene, nullptr);
+    auto& runtime = *fixture.scene->runtime;
+    auto* node    = FindRootChild(*fixture.scene, "caption");
+    ASSERT_NE(node, nullptr);
+    const auto before = MeshLocalBounds(*node->Mesh());
+    EXPECT_FALSE(runtime.SetNodeAlignment("caption", "right bottom"));
+    runtime.Tick(1.0 / 60.0);
+    EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(100.0f, 50.0f, 0.0f)));
+    EXPECT_TRUE(runtime.NodeTranslate("caption").isApprox(Eigen::Vector3f(100.0f, 50.0f, 0.0f)));
+    const auto after = MeshLocalBounds(*node->Mesh());
+    EXPECT_FLOAT_EQ(after.min_x, before.min_x);
+    EXPECT_FLOAT_EQ(after.max_y, before.max_y);
+}
+
+// The boxes a text is drawn in where no font opens are placed by the same rule as a face's
+// glyphs: the same reference line, the same row offsets.
+TEST(TextObjectRuntime, TheBoxesOfTheFallbackAreSetByTheRuleTheGlyphsAre) {
+    for (const std::string_view horizontal : { "left", "center", "right" }) {
+        for (const std::string_view vertical : { "top", "center", "bottom" }) {
+            SCOPED_TRACE(std::string(horizontal) + " " + std::string(vertical));
+            TextLayerState state {
+                .text             = "ab\ncdef\ng",
+                .point_size       = 20.0f,
+                .spacing          = { 0.0f, 3.0f },
+                .horizontal_align = std::string(horizontal),
+                .vertical_align   = std::string(vertical),
+            };
+            const auto layout = TextLayerBoxLayoutForTests(state);
+            ASSERT_EQ(layout.rows, 3u);
+            const auto size = layout.card + Eigen::Vector2f::Constant(2.0f * TextStyleMargin(state));
+            Rastered   image;
+            image.width  = static_cast<uint32_t>(std::ceil(size.x()));
+            image.height = static_cast<uint32_t>(std::ceil(size.y()));
+            image.rgba.assign(static_cast<std::size_t>(image.width) * image.height * 4u, 0u);
+            RasterizeTextLayerBoxesForTests(state, image.width, image.height, image.rgba);
+            const auto runs = InkRowRuns(image);
+            ASSERT_EQ(runs.size(), 3u);
+            const float reference = ReferenceLineOf(
+                vertical, FaceNumbers { layout.ascender, layout.descender, layout.pitch }, 3u);
+            const auto bounds = TextLayerRenderBoundsForLayout(state, layout);
+            const float texel_height = (bounds.top - bounds.bottom) / static_cast<float>(image.height);
+            const float texel_width  = (bounds.right - bounds.left) / static_cast<float>(image.width);
+            for (std::size_t row = 0; row < runs.size(); ++row) {
+                const float baseline =
+                    bounds.top - texel_height * static_cast<float>(runs[row].second + 1);
+                EXPECT_NEAR(baseline, -reference - static_cast<float>(row) * layout.pitch, 1.5f)
+                    << "row " << row;
+            }
+            // Rows of 2, 4 and 1 boxes of one width: each is set within the widest.
+            const float box_advance = 0.6f * 20.0f * 300.0f / 72.0f;
+            const float widest      = 3.0f * box_advance + 0.45f * 20.0f * 300.0f / 72.0f;
+            std::vector<float> starts;
+            for (const auto& run : runs) {
+                const auto box = InkBounds(image.rgba, image.width, image.height,
+                                           static_cast<uint32_t>(run.first),
+                                           static_cast<uint32_t>(run.second) + 1u);
+                ASSERT_TRUE(box.Any());
+                starts.push_back(bounds.left + texel_width * static_cast<float>(box.min_x));
+            }
+            const float own_widths[] = { box_advance + 0.45f * 20.0f * 300.0f / 72.0f, widest,
+                                         0.45f * 20.0f * 300.0f / 72.0f };
+            for (std::size_t row = 0; row < runs.size(); ++row) {
+                const float offset = horizontal == "left"    ? 0.0f
+                                     : horizontal == "center" ? (widest - own_widths[row]) * 0.5f
+                                                              : widest - own_widths[row];
+                EXPECT_NEAR(starts[row] - starts[1], offset, 2.0f) << "row " << row;
+            }
+        }
+    }
+}
+
+
+// The screen `anchor` shifts where a text layer is drawn, in the scene's own axes, and
+// nothing that hangs from the layer: not its children, not what a script reads as its
+// origin.
+
+TEST(TextObjectRuntime, ScreenAnchorDoesNotMoveTheChildrenOfTheLayer) {
+    TextSceneFixture fixture(R"([
+      {"id":1,"name":"parent","text":"parent","font":"Arial","pointsize":20,"origin":[600,340,0],
+       "anchor":"topright","horizontalalign":"right","verticalalign":"top","visible":true},
+      {"id":2,"name":"child","parent":1,"text":"child","font":"Arial","pointsize":20,
+       "origin":[0,-30,0],"horizontalalign":"right","verticalalign":"top","visible":true}
+    ])", "text-anchor-children");
+    ASSERT_NE(fixture.scene, nullptr);
+    auto& runtime = *fixture.scene->runtime;
+    auto* parent  = FindRootChild(*fixture.scene, "parent");
+    ASSERT_NE(parent, nullptr);
+    ASSERT_EQ(parent->GetChildren().size(), 1u);
+    auto*      child   = parent->GetChildren().front().get();
+    const auto parent_at = ModelOrigin(*parent);
+    const auto child_at  = ModelOrigin(*child);
+    EXPECT_TRUE(DrawnOrigin(*parent).isApprox(parent_at));
+
+    runtime.SetCursorViewport(PannedViewport());
+    // The parent is drawn 70 columns to the left, by the right edge of what is shown ...
+    EXPECT_TRUE(DrawnOrigin(*parent).isApprox(parent_at + Eigen::Vector3d(-70.0, 0.0, 0.0)));
+    // ... and what hangs from it is placed from where the parent is, not from where it is drawn.
+    EXPECT_TRUE(ModelOrigin(*parent).isApprox(parent_at));
+    EXPECT_TRUE(ModelOrigin(*child).isApprox(child_at));
+    // The child is not anchored to anything itself, so it is drawn where it is.
+    EXPECT_TRUE(DrawnOrigin(*child).isApprox(child_at));
+}
+
+TEST(TextObjectRuntime, ScreenAnchorIsAWorldTranslationWhateverTheLayerScaleAndTurn) {
+    TextSceneFixture fixture(R"([
+      {"id":1,"name":"plain","text":"a","font":"Arial","origin":[320,180,0],
+       "anchor":"left","horizontalalign":"center","verticalalign":"center","visible":true},
+      {"id":2,"name":"turned","text":"a","font":"Arial","origin":[320,180,0],"scale":[3,0.5,1],
+       "angles":[0,0,40],"anchor":"left","horizontalalign":"right","verticalalign":"bottom",
+       "visible":true}
+    ])", "text-anchor-world");
+    ASSERT_NE(fixture.scene, nullptr);
+    auto& runtime = *fixture.scene->runtime;
+    auto* plain   = FindRootChild(*fixture.scene, "plain");
+    auto* turned  = FindRootChild(*fixture.scene, "turned");
+    ASSERT_NE(plain, nullptr);
+    ASSERT_NE(turned, nullptr);
+    ASSERT_GT(turned->Rotation().z(), 0.1f);
+
+    runtime.SetCursorViewport(PannedViewport());
+    // 10 columns to the right in the scene, whatever scale and turn the layer has.
+    for (auto* node : { plain, turned }) {
+        EXPECT_TRUE(DrawnOrigin(*node).isApprox(ModelOrigin(*node) + Eigen::Vector3d(10.0, 0.0, 0.0)))
+            << node->Name();
+        EXPECT_TRUE(node->DrawOffset().isApprox(Eigen::Vector3f(10.0f, 0.0f, 0.0f))) << node->Name();
+    }
+    // The matrix that places the node, and so the layer's own axes, is untouched.
+    EXPECT_TRUE(turned->Translate().isApprox(Eigen::Vector3f(320.0f, 180.0f, 0.0f)));
+    EXPECT_TRUE(turned->Scale().isApprox(Eigen::Vector3f(3.0f, 0.5f, 1.0f)));
+    // And the draw matrix keeps the layer's own scale and turn.
+    turned->UpdateTrans();
+    const Eigen::Matrix3d drawn_axes = turned->RenderTrans().block<3, 3>(0, 0);
+    const Eigen::Matrix3d model_axes = turned->ModelTrans().block<3, 3>(0, 0);
+    EXPECT_TRUE(drawn_axes.isApprox(model_axes));
+
+    runtime.SetCursorViewport(WholeCanvas());
+    for (auto* node : { plain, turned }) {
+        EXPECT_TRUE(node->DrawOffset().isZero()) << node->Name();
+        EXPECT_TRUE(DrawnOrigin(*node).isApprox(ModelOrigin(*node))) << node->Name();
+    }
+}
+
+// A script that reads `origin` and writes it back must not walk the layer: the offset is
+// not in the value it reads.
+TEST(TextObjectRuntime, AScreenAnchoredLayersOriginReadsBackAsTheSceneGaveIt) {
+    TextSceneFixture fixture(R"([
+      {"id":1,"name":"caption","text":"a","font":"Arial","origin":[600,340,0],
+       "anchor":"topright","horizontalalign":"right","verticalalign":"top","visible":true}
+    ])", "text-anchor-origin");
+    ASSERT_NE(fixture.scene, nullptr);
+    auto& runtime = *fixture.scene->runtime;
+    auto* node    = FindRootChild(*fixture.scene, "caption");
+    ASSERT_NE(node, nullptr);
+    runtime.SetCursorViewport(PannedViewport());
+    const Eigen::Vector3f origin(600.0f, 340.0f, 0.0f);
+    EXPECT_TRUE(runtime.NodeTranslate("caption").isApprox(origin));
+    EXPECT_TRUE(node->Translate().isApprox(origin));
+
+    // origin.x += 5, twice.
+    for (int step = 0; step < 2; ++step) {
+        auto value = runtime.NodeTranslate("caption");
+        value.x() += 5.0f;
+        ASSERT_TRUE(runtime.SetNodeTranslate("caption", value));
+    }
+    EXPECT_TRUE(runtime.NodeTranslate("caption").isApprox(Eigen::Vector3f(610.0f, 340.0f, 0.0f)));
+    EXPECT_TRUE(DrawnOrigin(*node).isApprox(Eigen::Vector3d(610.0 - 70.0, 340.0, 0.0)));
+}
+
+// The card another pass of the layer draws, the final card of an effect chain, is drawn
+// where the anchor puts the layer, as a plain card is.
+TEST(TextObjectRuntime, ScreenAnchorMovesTheFinalCardOfALayerWithAnEffectChain) {
+    TextSceneFixture fixture(R"([
+      {"id":1,"name":"caption","text":"a","font":"Arial","pointsize":20,"origin":[600,340,0],
+       "anchor":"topright","horizontalalign":"right","verticalalign":"top","colorBlendMode":12,
+       "visible":true}
+    ])", "text-anchor-effect", ColorBlendAssets());
+    ASSERT_NE(fixture.scene, nullptr);
+    auto& runtime = *fixture.scene->runtime;
+    auto* node    = FindRootChild(*fixture.scene, "caption");
+    ASSERT_NE(node, nullptr);
+    ASSERT_FALSE(node->Camera().empty());
+    const auto effect_layer = fixture.scene->cameras.at(node->Camera())->GetImgEffect();
+    ASSERT_NE(effect_layer, nullptr);
+
+    runtime.Tick(1.0 / 60.0);
+    const Eigen::Vector3d resting = DrawnOrigin(effect_layer->FinalNode());
+    EXPECT_TRUE(resting.isApprox(Eigen::Vector3d(600.0, 340.0, 0.0)));
+    runtime.SetCursorViewport(PannedViewport());
+    runtime.Tick(1.0 / 60.0);
+    EXPECT_TRUE(DrawnOrigin(effect_layer->FinalNode()).isApprox(resting + Eigen::Vector3d(-70.0, 0.0, 0.0)));
+    // The pass that draws into the chain's own buffer is not moved by it.
+    EXPECT_TRUE(DrawnOrigin(*node).isApprox(Eigen::Vector3d::Zero()));
 }
 
 TEST(TextObjectRuntime, PenAdvancesAreUnhintedWholePixelsKernedWithTheNextGlyph) {

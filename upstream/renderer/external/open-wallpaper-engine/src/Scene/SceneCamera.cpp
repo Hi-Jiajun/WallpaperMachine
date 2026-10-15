@@ -129,8 +129,11 @@ SceneCamera::Axes SceneCamera::GetAxes() const {
 std::optional<Eigen::Vector3d> wallpaper::IntersectNdcWithNodePlane(
 	const SceneCamera& camera, SceneNode& node, double ndc_x, double ndc_y) {
 	node.UpdateTrans();
-	const Eigen::Matrix4d clip_from_local =
-		camera.GetViewProjectionMatrix() * node.ModelTrans();
+	// The plane of the node where it is drawn: its world matrix, and the draw offset
+	// a screen-anchored layer adds to where it is shown.
+	Eigen::Matrix4d drawn = node.ModelTrans();
+	drawn.block<3, 1>(0, 3) += node.DrawOffset().cast<double>();
+	const Eigen::Matrix4d clip_from_local = camera.GetViewProjectionMatrix() * drawn;
 	Eigen::FullPivLU<Eigen::Matrix4d> lu(clip_from_local);
 	if (! lu.isInvertible()) return std::nullopt;
 	const Eigen::Matrix4d local_from_clip = lu.inverse();

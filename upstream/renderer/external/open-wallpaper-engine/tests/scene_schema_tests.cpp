@@ -2856,6 +2856,46 @@ void main() {
     EXPECT_NEAR(final_node.RenderTrans()(0, 3), 46.0, 1.0e-5);
 }
 
+// A node's draw offset is a translation in world space added to where the node is drawn
+// and to nothing else: what hangs from the node, a camera on it and a hit test of its
+// world matrix keep the matrix the node has, and a node drawn through an override draws
+// where the override says.
+TEST(SceneSchema, ANodesDrawOffsetMovesItsDrawAndNothingParentedToIt) {
+    SceneNode parent(Eigen::Vector3f(10, 20, 0), Eigen::Vector3f(2, 3, 1), Eigen::Vector3f(0, 0, 0.5f),
+                     "parent");
+    auto child = std::make_shared<SceneNode>(Eigen::Vector3f(5, 7, 0), Eigen::Vector3f::Ones(),
+                                              Eigen::Vector3f::Zero(), "child");
+    parent.AppendChild(child);
+    parent.UpdateTrans();
+    child->UpdateTrans();
+    const Eigen::Matrix4d model       = parent.ModelTrans();
+    const Eigen::Matrix4d child_model = child->ModelTrans();
+    EXPECT_TRUE(parent.RenderTrans().isApprox(model, 0.0));
+    EXPECT_TRUE(parent.DrawOffset().isZero());
+
+    parent.SetDrawOffset(Eigen::Vector3f(-70, 4, 0));
+    parent.UpdateTrans();
+    child->UpdateTrans();
+    EXPECT_TRUE(parent.ModelTrans().isApprox(model, 0.0));
+    EXPECT_TRUE(child->ModelTrans().isApprox(child_model, 0.0));
+    // Drawn 70 left and 4 up in the scene, whatever the node's scale and turn: the offset
+    // is not scaled or turned with the node.
+    Eigen::Matrix4d moved = model;
+    moved(0, 3) -= 70.0;
+    moved(1, 3) += 4.0;
+    EXPECT_TRUE(parent.RenderTrans().isApprox(moved, 1.0e-12));
+    EXPECT_TRUE(Eigen::Matrix3d(parent.RenderTrans().block<3, 3>(0, 0))
+                    .isApprox(Eigen::Matrix3d(model.block<3, 3>(0, 0)), 0.0));
+
+    // A node drawn through an override draws where it says; the offset is not added to it.
+    parent.SetRenderTransformOverride(Eigen::Matrix4d::Identity());
+    EXPECT_TRUE(parent.RenderTrans().isApprox(Eigen::Matrix4d::Identity(), 0.0));
+    parent.ClearRenderTransformOverride();
+    EXPECT_TRUE(parent.RenderTrans().isApprox(moved, 1.0e-12));
+    parent.SetDrawOffset(Eigen::Vector3f::Zero());
+    EXPECT_TRUE(parent.RenderTrans().isApprox(model, 0.0));
+}
+
 namespace {
 
 // A 64x32 image layer, a copy effect to draw one through, and the 640x360
@@ -8618,9 +8658,60 @@ TEST(SceneSchema, ATextLayerAScriptMakesIgnoresAnAuthoredSize) {
     EXPECT_TRUE(card.isApprox(runtime.NodeSize("label")));
 }
 
+// createLayer({ text, horizontalalign, verticalalign }) goes through the same path, so the
+// layer it makes is placed as a scene's own: where the script puts its origin, with the
+// card hung from it by the edges it is aligned to.
+TEST(SceneSchema, ATextLayerAScriptMakesHangsFromItsOriginLikeASceneOne) {
+    fs::VFS vfs;
+    MountSceneFiles(vfs);
+    const auto scene = ParseScriptParityScene(vfs, ScriptParityScene(nlohmann::json::array({
+        { { "id", 1 }, { "name", "owner" }, { "image", "image.json" },
+          { "visible",
+            { { "value", true },
+              { "script",
+                "export function init(value) {\n"
+                "  const label = thisScene.createLayer({ text: 'hello', font: 'Arial', pointsize: 24,\n"
+                "    name: 'label', horizontalalign: 'right', verticalalign: 'bottom',\n"
+                "    size: '640 400' });\n"
+                "  label.origin = new Vec3(300, 100, 0);\n"
+                "  return value;\n"
+                "}\n"
+                "export function update(value) { return value; }\n" } } } },
+    })));
+    ASSERT_NE(scene, nullptr);
+    ASSERT_NE(scene->runtime, nullptr);
+    auto& runtime = *scene->runtime;
+    runtime.Tick(1.0 / 60.0);
+    for (const auto& error : runtime.scriptErrors()) ADD_FAILURE() << error;
+
+    const std::string name = runtime.ResolveLayerName("label");
+    ASSERT_TRUE(runtime.HasNodeNamed(name));
+    SceneNode* node = nullptr;
+    for (const auto& child : scene->sceneGraph->GetChildren()) {
+        if (child->Name() == name) node = child.get();
+    }
+    ASSERT_NE(node, nullptr);
+    ASSERT_NE(node->Mesh(), nullptr);
+    EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(300.0f, 100.0f, 0.0f)));
+    EXPECT_TRUE(runtime.NodeTranslate(name).isApprox(Eigen::Vector3f(300.0f, 100.0f, 0.0f)));
+    const auto layout = runtime.NodeTextLayout(name);
+    ASSERT_TRUE(layout.has_value());
+    const auto& vertices = node->Mesh()->GetVertexArray(0);
+    float       max_x = -1.0e9f;
+    float       max_y = -1.0e9f;
+    for (std::size_t index = 0; index < vertices.VertexCount(); ++index) {
+        max_x = std::max(max_x, vertices.Data()[index * vertices.OneSize()]);
+        max_y = std::max(max_y, vertices.Data()[index * vertices.OneSize() + 1u]);
+    }
+    EXPECT_NEAR(max_x, 0.0f, 1.0e-3f) << "right aligned: the card ends on the origin";
+    EXPECT_NEAR(max_y, layout->top + layout->descender, 1.0e-3f)
+        << "bottom aligned: the descender line of the row is on the origin";
+    EXPECT_LT(runtime.NodeSize(name).x(), 640.0f);
+}
+
 // A text layer's style is changed by script through the parser's own font
 // resolution: a named system font resolves like the scene file's, a larger size
-// and a new alignment lay the text out again and keep the layer anchored.
+// and a new alignment lay the text out again and move the card about the layer's origin.
 TEST(SceneSchema, ScriptsRestyleASceneTextLayerAndItIsLaidOutAgain) {
     fs::VFS vfs;
     MountSceneFiles(vfs);

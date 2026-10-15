@@ -463,8 +463,11 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   `.ScriptedRingBarsHangOutwardFromTheirCircle`, plus `nodes.txt` translate diffs
   from `offscreen_scene_probe`.
   - Alignment is an anchor, not a one-off offset. `SceneRuntimeContext` owns it
-    for image and text layers and re-derives `origin + size * scale * 0.5` for the
-    named edges whenever origin, scale, size or rotation changes; baking the
+    for image layers and re-derives `origin + size * scale * 0.5` for the
+    named edges whenever origin, scale, size or rotation changes; a text layer is
+    not one of them (its alignment hangs its card from the node, see *Text
+    placement about the origin*, and `SetNodeAlignment` turns a text layer
+    down, as Wallpaper Engine's text object has no `alignment` to set). Baking the
     offset into the node translate loses it as soon as a scripted or user-bound
     origin writes the translate, and ignores scale. Centre-aligned image layers
     carry no offset. An alignment a script sets on a layer that had none
@@ -888,8 +891,8 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
     `.ScriptsRestyleASceneTextLayerAndItIsLaidOutAgain` and
     `.TextLayersAScriptMadeAndDestroyedLeaveNoTextureBehind`: `font`, `pointsize`,
     `horizontalalign` and `verticalalign` read and write the text layer, a write
-    lays it out again and keeps its anchor (setting one axis keeps the other's
-    authored edge); the alignments take only `left`/`center`/`right` and
+    lays it out again and moves the card about the layer's origin (setting one axis
+    keeps the other's authored edge); the alignments take only `left`/`center`/`right` and
     `top`/`center`/`bottom` (anything else stays a plain property); the size reads
     back as the float it is; a font is resolved by the parser's own rule;
     `createLayer({ text, font, pointsize, color, alpha, ... })` parses a text
@@ -1184,8 +1187,8 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
     (`ASampledTextLayerIsItsCardInItsOwnComposite`; pixels on the native backend
     in `MetalSceneDraw.AHiddenTextLayerAnotherSamplesIsItsCardInItsComposite`).
     With effects the card is the chain's final card, not the larger capacity
-    the chain renders at, and a card aligned to one side of an overflowed box is
-    framed off the layer's origin. A relayout moves the composite camera with
+    the chain renders at, and a card aligned to one side of the origin is framed
+    off the layer's origin. A relayout moves the composite camera with
     the card and resizes the target to keep one texel per unit, since a consumer
     may place the image by its size (`g_Texture1Resolution`); only a size change
     in texels costs a new graph. The target is the card's width and height with
@@ -1644,8 +1647,8 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   `.PointSizeIsClampedToTheRangeWallpaperEngineAccepts` pins the 1 through 256 clamp
   for measurement and estimate alike. `.EmptyTextIsATwoByTwoCardPlusPadding`,
   `.CardPaddingSizesTheCardAndNeverNarrowsTheWrap` (a limit that just fits keeps the
-  text on one row whatever the padding) and `.CardPaddingInsetsAlignedTextOnEachAxis`
-  cover the card; `.ANegativePaddingTakesTheCardInAndOnlyTheTopIsCapped` pins that
+  text on one row whatever the padding) and `.CardPaddingGrowsTheCardOutwardOnEveryAxis`
+  (the ink is the padding in from the card's edge for every alignment) cover the card; `.ANegativePaddingTakesTheCardInAndOnlyTheTopIsCapped` pins that
   a lane is capped at 512 and not floored (a card never goes below a pixel);
   `.PaddingAndSpacingReadTheFormsWallpaperEngineReads` (number, `"x y"`, a lone
   `"x"`, a bound `value`, the 32-pixel default, the 512 cap, a negative lane, and a
@@ -1724,6 +1727,53 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   `size` appears in no other expectation; `.CenteredTextIsCenteredInItsCard` and the
   clock parent test (`.Workshop3409533530ClockParentKeepsVisibleRuntimeTexture`) read
   the card from the text.
+- **Text placement about the origin** — `text_object_runtime_test`. The alignment keys
+  hang the card from the layer's origin and leave the node on it.
+  `TextObjectRuntime.TheReferenceLineOfTheVerticalAlignmentSitsOnTheOrigin` finds the
+  baselines of one row and of three, with and without a `spacing` y, in the pixels of
+  the raster, and requires the first to lie an ascender below the origin for `top`, half
+  of it for `center`, and for `bottom` the rows' pitches and a descender above it, with
+  the face's numbers read from FreeType apart from the layout. The ground truth is
+  Wallpaper Engine's own, from the probe scenes it drew: DIN Engschrift at 48 points put
+  the first baseline 159, 79.5 below the origin and 50 above it.
+  `.ArialAtThirtyTwoPointsHangsFromTheOriginByTheReferenceLine` states the offsets of
+  the 153-pixel Arial card Wallpaper Engine saved,
+  `.TheCardHangsFromTheOriginByTheEdgeTheTextIsAlignedTo` the nine alignments with and
+  without padding and with one and three rows (the card is the same card for every
+  alignment; the padded edges lie beyond the origin),
+  `.PaddingGrowsTheCardOutwardAndLeavesTheTextWhereItWas` that the ink is as far from
+  the origin with the padding as without, `.AlignmentDoesNotChangeThePixelsOfARow` that
+  one row is the same raster whichever way it is aligned, and
+  `.TheFirstBaselineDoesNotDependOnInkAboveTheAscender` that an A with a ring makes the
+  card taller and moves the baseline nowhere (it fails, not skips, if the font's ring no
+  longer rises above its ascender). `.RowsOfABlockAlignWithinTheWidestRow` and
+  `.ARowsFirstGlyphKeepsItsOwnBearingWhateverTheOtherRowsStartWith` set rows of three
+  widths and rows opened by a glyph that overhangs to the left, and read where each
+  row's ink starts against the widest row; the second fails if a row's pen is moved by
+  another row's bearing, and, with the overhang on a narrower row above a wider one, if
+  the rows are set within the block's width (which that overhang stretches) and not
+  within the widest row's. `.TheBoxesOfTheFallbackAreSetByTheRuleTheGlyphsAre` puts the
+  boxes drawn where no font opens through the same rule. At the scene,
+  `.AlignmentOffsetsTheQuadAndNeverTheNode` requires the nine layers' nodes to stay at
+  the authored origin, scale and turn with their quad off it by the layout's offset, in
+  the layer's own axes, `.ChildrenOfAlignedTextStayOnTheParentsOrigin` that a child of a
+  scaled and turned text sits at its own place in the parent's space,
+  `.ChangingTheAlignmentMovesTheQuadWithoutResizingIt` that a script's write of
+  `horizontalalign` moves the quad on the next layout and not the node,
+  `.ScriptsCannotSetAnAlignmentOnATextLayer` that `alignment` is no property of a text
+  layer, and `SceneSchema.ATextLayerAScriptMakesHangsFromItsOriginLikeASceneOne` that a
+  layer a script makes is placed like a scene's own. The cursor is over the card where
+  it hangs: `MouseInput.ATextLayersHitBoxIsItsCardWhereItIsDrawn` (a left- and
+  top-aligned, scaled and turned card, on each side of the origin) and
+  `.ACoverageMaskIsReadAcrossTheCardWhereItHangs`. On both renderers,
+  `MetalSceneDraw.AnAlignedTextLayersBlockEdgeSitsOnItsOriginOnBothRenderers` draws an H
+  for each of the nine alignments, plain and with an effect, and requires the ink's
+  right edge on the origin (within three pixels, because the probe frames put it up to
+  three units inside) and the baseline where the reference line puts it;
+  `.AnAlignedTextLayerIsTheSamePictureOnBothRenderers` that the native and the
+  compatibility renderer draw one picture, and
+  `.EnablingAnEffectDoesNotMoveAnAlignedTextLayerOnBothRenderers` that padding moves
+  nothing.
 - **Alignment words and brightness** — `text_object_runtime_test`.
   `TextObjectRuntime.AlignmentKeysAreReadAsTheEnumRegistryReadsThem` parses a scene
   with every shape of the two keys (absent, each word, wrong case, empty, a longer
@@ -1750,10 +1800,25 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   half of white once (128, 159, 128), mode 31 adds half of it (128, 191, 128), and
   the pictures are identical. `.ScreenAnchorOffsetsPinTheLayerToTheEdgeItNames`
   tabulates the nine anchors against the presented margins, and
-  `.ScreenAnchoredTextFollowsThePresentedAreaAndNothingElseDoes` moves anchored
-  layers with `SetCursorViewport` (a pan, a display that shows more than the canvas,
-  and back) while layers with `none`, no key, or only the key keep their place: the
-  `anchor` key is never a pivot.
+  `.ScreenAnchoredTextFollowsThePresentedAreaAndNothingElseDoes` moves the draw of
+  anchored layers with `SetCursorViewport` (a pan, a display that shows more than the
+  canvas, and back) while layers with `none`, no key, or only the key keep their
+  place: the `anchor` key is never a pivot. The shift is the node's draw offset
+  (`SceneNode::SetDrawOffset`, carried by `RenderTrans` and by the final card of an
+  effect chain) and not its translate, so `.ScreenAnchorDoesNotMoveTheChildrenOfTheLayer`
+  keeps the layers parented to it on its origin,
+  `.ScreenAnchorIsAWorldTranslationWhateverTheLayerScaleAndTurn` shifts a scaled and
+  turned layer by the margins in the scene's axes,
+  `.AScreenAnchoredLayersOriginReadsBackAsTheSceneGaveIt` reads an origin, adds to it
+  twice and writes it back without the layer walking by the margin, and
+  `.ScreenAnchorMovesTheFinalCardOfALayerWithAnEffectChain` moves the card an effect
+  chain draws as well. `SceneSchema.ANodesDrawOffsetMovesItsDrawAndNothingParentedToIt`
+  pins the node rule (an override is not moved by it),
+  `MouseInput.ACursorHitFollowsAScreenAnchoredCard` the cursor over the card where it is
+  drawn, `MetalProjection.TheLayerPlaneIsWhereTheLayerIsDrawn` the perspective hit
+  plane, and `MetalSceneDraw.AScreenAnchoredTextLayerIsDrawnWhereItsAnchorPutsItOnBothRenderers`
+  the picture on both renderers, with and without an effect chain: 40 columns in
+  for a display that shows 344 of 384.
 - **Outline, blur and drop shadow** — `TextObjectRuntime.OutlineGrowsTheGlyphByItsThicknessInPixels`,
   `.OutlineThicknessIsCappedWithTheGlyphAtlasAndNeverBelowOnePixel`,
   `.BlurSoftensEdgesOverItsSizeAndKeepsTheGlyphWhereItIs`,
@@ -2036,7 +2101,8 @@ Rust regressions in `crates/shader/tests` (`legalize`, `preprocess`,
   the effect projection, and `.EffectTextureProjectionMapsTheLayerCardOntoTheScreen`
   that `g_EffectTextureProjectionMatrix(Inverse)` maps the layer card onto the
   screen wherever the card is moved, turned or flipped, so a cursor effect lands
-  under the cursor on a layer that does not fill the canvas.
+  under the cursor on a layer that does not fill the canvas; both also run with a
+  screen anchor's draw offset on the layer, which the matrices follow.
 - **Trailing commas** — `SceneSchema.EffectFilesWithTrailingCommasLoadTheirPasses`
   loads an effect and material whose arrays and objects end with a comma, as
   Wallpaper Engine's own `effects/fluidsimulation/effect.json` does; strict

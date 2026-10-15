@@ -455,6 +455,10 @@ public:
     Eigen::Matrix4d NodeTransformMatrix(std::string_view name) const;
     Eigen::Vector3f NodeRotation(std::string_view name) const;
     Eigen::Vector2f NodeSize(std::string_view name) const;
+    /// Where the centre of the layer's box (`NodeSize` across) lies from its origin, in
+    /// its own plane, y up: zero for a layer centred on its origin, and for a text layer
+    /// the card's offset from it (`TextLayerLayout::centre`).
+    Eigen::Vector2f NodeBoxCentre(std::string_view name) const;
     std::string     NodeText(std::string_view name) const;
     bool            NodeTextDirty(std::string_view name) const;
     std::optional<TextLayerState> NodeTextState(std::string_view name) const;
@@ -616,8 +620,10 @@ private:
         /// in the layer's own axes, so turning the layer moves the offset.
         Eigen::Vector3f rotation { Eigen::Vector3f::Zero() };
         /// The edge or corner of the presented area the node is pinned to, and
-        /// the shift that puts it there. The shift is in the parent's space, so
-        /// the node's own scale and rotation do not touch it.
+        /// the shift that puts it there. The shift is a translation in world space
+        /// added to where the node is drawn (`SceneNode::SetDrawOffset`), so the
+        /// node's own scale and rotation do not touch it and neither does anything
+        /// that is parented to the node or reads its origin.
         TextScreenAnchor screen_anchor { TextScreenAnchor::None };
         Eigen::Vector2f  screen_offset { Eigen::Vector2f::Zero() };
     };

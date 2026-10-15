@@ -439,10 +439,15 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, uint32_t material_sl
         if (info.has_layer_model) {
             updateOp("g_LayerModelMatrix", ShaderValue::fromMatrix(layer_model));
         }
-        Matrix4d effect_model = layer_model;
+        // The card the chain ends in is drawn where the layer is drawn, which a screen anchor
+        // moves without moving the layer (`SceneNode::DrawOffset`), so the matrices that say
+        // where the effect lands on the screen follow the draw, as the final card does.
+        Matrix4d drawn_model = layer_model;
+        drawn_model.block<3, 1>(0, 3) += owner->DrawOffset().cast<double>();
+        Matrix4d effect_model = drawn_model;
         // Intermediate passes use a unit quad; final passes use the layer card.
         if (hasNodeData && nodeData->effect_owner != nullptr && cam_name == "effect") {
-            effect_model = layer_model * Affine3d(Scaling(
+            effect_model = drawn_model * Affine3d(Scaling(
                 double(nodeData->effect_extent.x()) * 0.5,
                 double(nodeData->effect_extent.y()) * 0.5, 1.0)).matrix();
         }
@@ -458,7 +463,7 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, uint32_t material_sl
         if ((info.has_ETVP || info.has_ETVPI) && hasNodeData && nodeData->effect_owner != nullptr &&
             m_scene->activeCamera != nullptr) {
             const Matrix4d texture_projection =
-                m_scene->activeCamera->GetViewProjectionMatrix() * layer_model *
+                m_scene->activeCamera->GetViewProjectionMatrix() * drawn_model *
                 Affine3d(Scaling(double(nodeData->effect_extent.x()) * 0.5,
                                  double(nodeData->effect_extent.y()) * 0.5, 1.0))
                     .matrix();

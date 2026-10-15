@@ -140,8 +140,19 @@ public:
     }
     void ClearRenderTransformOverride() { m_renderTransformOverride.reset(); }
     bool HasRenderTransformOverride() const { return m_renderTransformOverride.has_value(); }
+    /// A translation in world space added to where the node is drawn and to nothing
+    /// else. `RenderTrans` carries it; `ModelTrans`, which the node's children, its
+    /// cameras and its hit test compose from, does not (a hit test adds it itself).
+    /// A node drawn through a `RenderTransformOverride` draws where that says, which
+    /// is a whole matrix already.
+    void SetDrawOffset(const Eigen::Vector3f& offset) { m_drawOffset = offset; }
+    const Eigen::Vector3f& DrawOffset() const { return m_drawOffset; }
     Eigen::Matrix4d RenderTrans() const {
-        return m_renderTransformOverride.value_or(m_trans);
+        if (m_renderTransformOverride) return *m_renderTransformOverride;
+        if (m_drawOffset.isZero()) return m_trans;
+        Eigen::Matrix4d moved = m_trans;
+        moved.block<3, 1>(0, 3) += m_drawOffset.cast<double>();
+        return moved;
     }
 
     // update self modle trans (will update parent before)
@@ -182,6 +193,7 @@ private:
     Eigen::Vector3f m_scale { 1.0f, 1.0f, 1.0f };
     Eigen::Vector3f m_rotation { 0.0f, 0.0f, 0.0f };
     std::optional<Eigen::Matrix4d> m_renderTransformOverride {};
+    Eigen::Vector3f m_drawOffset { 0.0f, 0.0f, 0.0f };
     std::optional<Eigen::Matrix4d> m_attachmentTransform;
 
     std::shared_ptr<SceneMesh> m_mesh;

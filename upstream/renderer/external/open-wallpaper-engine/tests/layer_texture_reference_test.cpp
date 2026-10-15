@@ -1291,6 +1291,8 @@ TEST(LayerTextureReference, ASampledTextLayerIsItsCardInItsOwnComposite) {
                 auto files = CopyEffectFiles();
                 files["/linked_mat.json"] =
                     R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":["_rt_imageLayerComposite_416_a"]}]})";
+                // Left-aligned, the card hangs to the right of the layer's origin and is
+                // not centred on it.
                 const std::string objects =
                     std::string(R"([
                     {"id":680,"name":"marquee","image":"linked.json")") +
@@ -1371,6 +1373,8 @@ TEST(LayerTextureReference, ASampledTextLayerIsItsCardInItsOwnComposite) {
                 const auto before = find_composite(*graph);
                 expect_composite_is_the_card(before);
                 ASSERT_NE(before.pass, nullptr);
+                ASSERT_GT(std::abs((before.lower.x() + before.upper.x()) * 0.5), 1.0)
+                    << "the fixture's card must sit off the layer's origin";
 
                 // A longer title widens the card while the layer stays hidden.
                 ASSERT_TRUE(runtime.SetNodeText("title", "Wind over the river"));

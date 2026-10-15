@@ -4189,6 +4189,13 @@ vulkan::StaticPassSample MetalRender::Impl::frameSample(Scene& scene, std::size_
         desc.node->UpdateTrans();
         const auto model = desc.node->ModelTrans();
         hash = vulkan::StaticHashBytes(hash, model.data(), sizeof(double) * 16);
+        // Where the node is drawn, when that is not where its world matrix puts it: a
+        // layer a screen anchor shifts, or a final card drawn through an override that
+        // carries the shift.
+        if (desc.node->HasRenderTransformOverride() || ! desc.node->DrawOffset().isZero()) {
+            const auto drawn = desc.node->RenderTrans();
+            hash = vulkan::StaticHashBytes(hash, drawn.data(), sizeof(double) * 16);
+        }
         if (auto* mesh = desc.node->Mesh(); mesh != nullptr) {
             hash = vulkan::StaticHashMix(hash, mesh->DirtyGeneration());
             if (const auto* material = mesh->MaterialForSlot(desc.material_slot);

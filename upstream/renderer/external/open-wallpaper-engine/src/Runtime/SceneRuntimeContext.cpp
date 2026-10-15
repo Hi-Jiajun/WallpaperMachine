@@ -93,7 +93,7 @@ RuntimePreparedTextLayerImage PrepareTextLayerImage(std::string name, uint64_t r
         std::clamp(static_cast<uint32_t>(std::ceil(std::max(1.0f, raster_size.x()))), 1u, 4096u);
     const uint32_t height =
         std::clamp(static_cast<uint32_t>(std::ceil(std::max(1.0f, raster_size.y()))), 1u, 4096u);
-    const auto render_frame = TextLayerRenderFrameForRasterSize(state, raster_size);
+    const auto render_frame = TextLayerRenderFrameForLayout(state, layout);
     std::vector<uint8_t> rgba(static_cast<std::size_t>(width) * height * 4u, 0u);
     RasterizeTextLayer(state, width, height, rgba);
 
@@ -109,14 +109,20 @@ RuntimePreparedTextLayerImage PrepareTextLayerImage(std::string name, uint64_t r
     };
 }
 
-Eigen::Vector2f CardMeshSize(const SceneMesh& mesh) {
-    if (mesh.VertexCount() == 0) return Eigen::Vector2f::Zero();
+// The box a card mesh covers, by its size and its centre in the layer's own plane.
+struct CardMeshBox {
+    Eigen::Vector2f size { Eigen::Vector2f::Zero() };
+    Eigen::Vector2f centre { Eigen::Vector2f::Zero() };
+};
+
+CardMeshBox CardMeshBoxOf(const SceneMesh& mesh) {
+    if (mesh.VertexCount() == 0) return {};
 
     const auto& vertices = mesh.GetVertexArray(0);
-    if (vertices.VertexCount() == 0 || vertices.OneSize() < 2) return Eigen::Vector2f::Zero();
+    if (vertices.VertexCount() == 0 || vertices.OneSize() < 2) return {};
 
     const float* data = vertices.Data();
-    if (data == nullptr) return Eigen::Vector2f::Zero();
+    if (data == nullptr) return {};
 
     float min_x = data[0];
     float max_x = data[0];
@@ -131,7 +137,8 @@ Eigen::Vector2f CardMeshSize(const SceneMesh& mesh) {
         max_y         = std::max(max_y, y);
     }
 
-    return Eigen::Vector2f(max_x - min_x, max_y - min_y);
+    return { .size   = Eigen::Vector2f(max_x - min_x, max_y - min_y),
+             .centre = Eigen::Vector2f((min_x + max_x) * 0.5f, (min_y + max_y) * 0.5f) };
 }
 
 bool SizeNearlyEqual(Eigen::Vector2f lhs, Eigen::Vector2f rhs, float tolerance) {
@@ -221,8 +228,12 @@ const SceneCamera* CameraForHitNode(const Scene& scene, const SceneNode& node) {
 // their authored rectangle, then consults the coverage mask when present.
 // A perspective camera unprojects the click through the real view-projection
 // onto that plane; an ortho camera keeps the existing canvas-space inverse.
-bool HitTestNode(SceneNode& node, Eigen::Vector2f size, const Eigen::Vector3f& cursor,
-                 const NodeHitMask* mask, const SceneCamera* camera, Eigen::Vector2d ndc) {
+// The rectangle is `size` across, centred on `centre` in the layer's own plane (a
+// text layer's card hangs off its origin by its alignment) and drawn where the
+// node's draw offset puts it.
+bool HitTestNode(SceneNode& node, Eigen::Vector2f size, Eigen::Vector2f centre,
+                 const Eigen::Vector3f& cursor, const NodeHitMask* mask,
+                 const SceneCamera* camera, Eigen::Vector2d ndc) {
     node.UpdateTrans();
     if (size.x() <= 0.0f && size.y() <= 0.0f) {
         size = Eigen::Vector2f(100.0f, 100.0f);
@@ -234,7 +245,8 @@ bool HitTestNode(SceneNode& node, Eigen::Vector2f size, const Eigen::Vector3f& c
         if (! hit) return false;
         local = Eigen::Vector4d(hit->x(), hit->y(), hit->z(), 1.0);
     } else {
-        const Eigen::Matrix4d model = node.ModelTrans();
+        Eigen::Matrix4d model = node.ModelTrans();
+        model.block<3, 1>(0, 3) += node.DrawOffset().cast<double>();
         if (! std::isfinite(model.determinant()) || std::abs(model.determinant()) < 1e-12) {
             return false;
         }
@@ -243,15 +255,17 @@ bool HitTestNode(SceneNode& node, Eigen::Vector2f size, const Eigen::Vector3f& c
 
     const double half_width  = static_cast<double>(size.x()) * 0.5;
     const double half_height = static_cast<double>(size.y()) * 0.5;
-    if (local.x() < -half_width || local.x() > half_width || local.y() < -half_height ||
-        local.y() > half_height) {
+    const double across      = local.x() - static_cast<double>(centre.x());
+    const double down        = local.y() - static_cast<double>(centre.y());
+    if (across < -half_width || across > half_width || down < -half_height ||
+        down > half_height) {
         return false;
     }
     if (mask == nullptr || half_width <= 0.0 || half_height <= 0.0) return true;
 
     // Card meshes map local (left, top) to texture (0, 0).
-    const float u = static_cast<float>((local.x() + half_width) / (2.0 * half_width));
-    const float v = static_cast<float>((half_height - local.y()) / (2.0 * half_height));
+    const float u = static_cast<float>((across + half_width) / (2.0 * half_width));
+    const float v = static_cast<float>((half_height - down) / (2.0 * half_height));
     return mask->covers(u, v);
 }
 
@@ -476,7 +490,10 @@ Eigen::Matrix3f NodeRotationMatrix(const Eigen::Vector3f& angles) {
 
 void SyncEffectFinalNode(SceneNode& source, SceneImageEffectLayer& layer) {
     source.UpdateTrans();
-    const auto matrix = source.ModelTrans();
+    // The final card is what reaches the scene, so it is drawn where the source layer
+    // is drawn: its world matrix with the offset a screen anchor adds to the draw.
+    auto matrix = source.ModelTrans();
+    if (! source.DrawOffset().isZero()) matrix.block<3, 1>(0, 3) += source.DrawOffset().cast<double>();
     const auto sync_node = [&source, &matrix](SceneNode& target) {
         if (! target.HasRenderTransformOverride() ||
             ! (target.RenderTrans().array() == matrix.array()).all()) {
@@ -1084,9 +1101,12 @@ bool SceneRuntimeContext::ApplyPreparedTextLayer(const RuntimePreparedTextLayerI
     if (layer.state().texture_cache_key != prepared.state.texture_cache_key) return false;
     const Eigen::Vector2f raster_size = TextLayerRasterSizeForLayout(prepared.state, prepared.layout);
     // The card is the text and its padding, and the raster the card and the style's
-    // margin, so the two change together.
+    // margin, so the two change together. Where the card hangs from the layer's origin
+    // changes with its width for a text aligned to one side, and with the alignment
+    // itself, which moves the card without resizing it.
     const bool card_changed = ! SizeNearlyEqual(layer.rasterSize(), raster_size, 1.0e-3f) ||
-                              ! SizeNearlyEqual(layer.size(), prepared.layout.card, 1.0e-3f);
+                              ! SizeNearlyEqual(layer.size(), prepared.layout.card, 1.0e-3f) ||
+                              ! SizeNearlyEqual(layer.layout().centre, prepared.layout.centre, 1.0e-3f);
     // A continuously changing label can always be ahead of its worker. Publish
     // completed revisions monotonically, keeping the newer request pending.
     if (! layer.ApplyPreparedLayout(prepared.revision, prepared.layout)) return false;
@@ -1096,9 +1116,10 @@ bool SceneRuntimeContext::ApplyPreparedTextLayer(const RuntimePreparedTextLayerI
         if (node_iterator != m_nodes.end() && node_iterator->second != nullptr &&
             node_iterator->second->Mesh() != nullptr) {
             auto* mesh = node_iterator->second->Mesh();
-            if (! SizeNearlyEqual(CardMeshSize(*mesh), raster_size, 1.0f)) {
-                ResizeCardMesh(
-                    *mesh, TextLayerRenderBoundsForRasterSize(prepared.state, raster_size));
+            const auto drawn = CardMeshBoxOf(*mesh);
+            if (! SizeNearlyEqual(drawn.size, raster_size, 1.0f) ||
+                ! SizeNearlyEqual(drawn.centre, prepared.layout.centre, 1.0e-3f)) {
+                ResizeCardMesh(*mesh, TextLayerRenderBoundsForLayout(prepared.state, prepared.layout));
                 if (! mesh->Dynamic()) m_scene_graph_mutated = true;
             }
         }
@@ -1133,7 +1154,7 @@ bool SceneRuntimeContext::ApplyPreparedTextLayer(const RuntimePreparedTextLayerI
                 }
                 const bool grew = ! SizeNearlyEqual(capacity, target_frame.size, 1.0f);
                 target_frame = TextLayerRenderFrameForCapacity(
-                    prepared.state, raster_size, capacity);
+                    prepared.state, prepared.layout, capacity);
                 auto& binding = effect_iterator->second;
                 auto camera = m_scene->cameras.at(binding.node->Camera());
                 camera->SetWidth(capacity.x());
@@ -2659,6 +2680,10 @@ bool SceneRuntimeContext::SetNodeScale(std::string_view name, const Eigen::Vecto
 bool SceneRuntimeContext::SetNodeAlignment(std::string_view name, std::string alignment) {
     const auto iterator = m_nodes.find(std::string(name));
     if (iterator == m_nodes.end() || iterator->second == nullptr) return false;
+    // A text object has no `alignment` (its `horizontalalign` and `verticalalign` hang its
+    // card from its origin), so there is nothing to set; anchoring it here would shift the
+    // node by half its card.
+    if (m_text_layers.contains(std::string(name))) return false;
 
     auto& binding = m_node_alignment[std::string(name)];
     if (binding.alignment.empty()) {
@@ -2755,6 +2780,12 @@ Eigen::Vector2f SceneRuntimeContext::NodeSize(std::string_view name) const {
     const auto iterator = m_node_size.find(std::string(name));
     if (iterator == m_node_size.end()) return Eigen::Vector2f::Zero();
     return iterator->second;
+}
+
+Eigen::Vector2f SceneRuntimeContext::NodeBoxCentre(std::string_view name) const {
+    const auto iterator = m_text_layers.find(std::string(name));
+    if (iterator == m_text_layers.end()) return Eigen::Vector2f::Zero();
+    return iterator->second.layout().centre;
 }
 
 std::string SceneRuntimeContext::NodeText(std::string_view name) const {
@@ -3152,12 +3183,14 @@ void SceneRuntimeContext::ApplyNodeTransform(SceneNode& node, NodeAlignmentBindi
             offset = NodeRotationMatrix(binding.rotation) * offset;
         }
         binding.cached_translate = binding.origin + offset;
-        binding.cached_translate.x() += binding.screen_offset.x();
-        binding.cached_translate.y() += binding.screen_offset.y();
         binding.transform_dirty = false;
     }
     node.SetScale(binding.scale);
     node.SetTranslate(binding.cached_translate);
+    // A screen anchor moves where the layer is drawn and nothing else: the node, which its
+    // children are placed from and a script reads the origin of, stays where the scene
+    // put it.
+    node.SetDrawOffset(Eigen::Vector3f(binding.screen_offset.x(), binding.screen_offset.y(), 0.0f));
 }
 
 void SceneRuntimeContext::DispatchMediaPlaybackChanged(std::string_view name, bool playing) {
@@ -3208,6 +3241,7 @@ bool SceneRuntimeContext::CursorHitsLayerGeometry(std::string_view name) const {
     const Eigen::Vector2d ndc = CursorWorldToNdc(m_cursor_viewport, m_cursor_plane_position);
     return HitTestNode(*node_iterator->second,
                        NodeSize(name),
+                       NodeBoxCentre(name),
                        m_cursor_plane_position,
                        mask,
                        camera,
@@ -3933,16 +3967,8 @@ bool SceneRuntimeContext::SetNodeTextStyle(std::string_view name, std::string_vi
         std::string h          = state.horizontal_align;
         std::string v          = state.vertical_align;
         (horizontal ? h : v)   = std::string(value);
+        // The layout that follows moves the card about the layer's origin; the node stays.
         layer->second.SetAlignment(std::move(h), std::move(v));
-        // The layer is placed by its alignment: moving it re-derives the offset
-        // from the same anchor point.
-        const auto& aligned = layer->second.state();
-        const auto  anchor  = TextAlignmentAnchor(ParseTextHorizontalAlign(aligned.horizontal_align),
-                                                  ParseTextVerticalAlign(aligned.vertical_align));
-        const auto binding = m_node_alignment.find(key);
-        if (binding != m_node_alignment.end() && binding->second.size_anchor) {
-            SetNodeAnchorAlignment(key, anchor, binding->second.origin);
-        }
         return true;
     }
     return false;

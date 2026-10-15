@@ -2238,9 +2238,6 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
                                             font_key,
                                             runtime_name,
                                             context.scene->fog_distance || context.scene->fog_height);
-    // The node is shifted onto the edges the text is aligned to.
-    const auto anchor = TextAlignmentAnchor(ParseTextHorizontalAlign(text_state.horizontal_align),
-                                            ParseTextVerticalAlign(text_state.vertical_align));
     // Cache glyph coverage, not animated styling. A fade or colour change only
     // updates uniforms; it must never measure, rasterize or upload the text again.
     text_state.color = Eigen::Vector3f::Ones();
@@ -2249,7 +2246,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
     // Measured once: the card, the texture and the layer's runtime state all start from it.
     const auto layout              = MeasureTextLayerLayout(text_state);
     const auto raster_size         = TextLayerRasterSizeForLayout(text_state, layout);
-    auto       render_frame        = TextLayerRenderFrameForRasterSize(text_state, raster_size);
+    auto       render_frame        = TextLayerRenderFrameForLayout(text_state, layout);
     auto       effect_target_size =
         ResolveTextEffectCapacity(obj, context, raster_size,
                                   std::any_of(obj.effects.begin(), obj.effects.end(),
@@ -2259,7 +2256,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
                                                           &effect != &obj.effects[*color_blend_effect]);
                                               }));
     auto       effect_target_frame =
-        TextLayerRenderFrameForCapacity(text_state, raster_size, effect_target_size);
+        TextLayerRenderFrameForCapacity(text_state, layout, effect_target_size);
     auto       effect_render_extent = TextCardTexelExtent(effect_target_frame.size);
     effect_target_frame = TextLayerRenderFrameForTargetExtent(
         effect_target_frame,
@@ -2278,6 +2275,9 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
                           : std::make_shared<SceneNode>();
     const auto previous_runtime_name = node->Name();
     node->SetName(runtime_name);
+    // The node is where the scene put the layer: its alignment hangs the card from this
+    // origin (the mesh is off it by the layout's offset) and never moves the node, so what
+    // is parented to the layer stays on its origin.
     node->SetTranslate(Vector3f(obj.origin.data()));
     node->SetScale(Vector3f(obj.scale.data()));
     node->SetRotation(Vector3f(obj.angles.data()));
@@ -2379,8 +2379,6 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
             context.scene->runtime->RegisterTextValue(
                 runtime_name, std::move(runtime_text_value), false);
         }
-        context.scene->runtime->SetNodeAnchorAlignment(
-            runtime_name, anchor, Vector3f(obj.origin.data()));
         context.scene->runtime->SetNodeCursorTarget(runtime_name, true, obj.solid,
                                                     obj.disablepropagation);
         // Pinned to the edge of what the display shows, where that differs from
@@ -2421,8 +2419,6 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         if (context.referenced_layer_ids.contains(obj.id)) {
             RegisterTextComposite(context, obj, *node, card);
         }
-    } else {
-        LoadAlignment(*node, anchor, layout.card);
     }
 
     QueueSceneScriptIfNeeded(context, runtime_name, obj.visible_setting);

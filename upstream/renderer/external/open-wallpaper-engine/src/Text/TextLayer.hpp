@@ -99,12 +99,6 @@ TextVerticalAlign   ParseTextVerticalAlign(std::string_view word);
 std::string_view    TextHorizontalAlignWord(TextHorizontalAlign align);
 std::string_view    TextVerticalAlignWord(TextVerticalAlign align);
 
-/// The anchor string the node's placement reads for an alignment, as
-/// "<horizontal> <vertical>" ("left top", "center center"): its edge words move the
-/// layer's origin onto the edge the text is aligned to, and the string being there
-/// at all marks the layer as placed by its own anchor, which a centred one is too.
-std::string TextAlignmentAnchor(TextHorizontalAlign horizontal, TextVerticalAlign vertical);
-
 struct TextLayerState {
     std::string          text;
     std::string          layer_key;
@@ -177,6 +171,12 @@ struct TextLayerLayout {
     // The block plus twice the padding, never under a pixel; 2 by 2 plus twice the
     // padding with no text. This is the layer's size.
     Eigen::Vector2f card { Eigen::Vector2f::Zero() };
+    // Where the card's centre lies from the layer's origin, y up, along the layer's own
+    // axes. The layer's alignment is this and nothing else: the origin sits on the edge
+    // of the block the text is aligned to (the left, middle or right of it across, and
+    // the ascender line, the middle of the rows or the last row's descender line down),
+    // and the padding grows the card outward from there. The node is not moved by it.
+    Eigen::Vector2f centre { Eigen::Vector2f::Zero() };
 
     Eigen::Vector2f BlockSize() const { return { max_x - min_x, top - bottom }; }
 };
@@ -215,8 +215,10 @@ struct PresentedMargins {
 /// The anchor named by a scene file; anything unnamed is `None`.
 TextScreenAnchor ParseTextScreenAnchor(std::string_view name);
 
-/// The shift an anchor adds to the layer's placement in its parent's space, y up:
-/// the layer follows the edge or corner of the presented area it is pinned to.
+/// The shift an anchor adds to where the layer is drawn, a translation in the scene's
+/// own axes, y up (`SceneNode::SetDrawOffset`): the layer follows the edge or corner of
+/// the presented area it is pinned to, and nothing parented to it or read from its origin
+/// moves.
 Eigen::Vector2f TextScreenAnchorOffset(TextScreenAnchor anchor, const PresentedMargins& margins);
 
 struct TextLayerRenderBounds {
@@ -293,12 +295,15 @@ Eigen::Vector2f MeasureTextLayerSize(const TextLayerState& state);
 Eigen::Vector2f TextLayerRasterSizeForLayout(const TextLayerState& state,
                                              const TextLayerLayout& layout);
 Eigen::Vector2f TextLayerRasterSize(const TextLayerState& state);
-TextLayerRenderBounds TextLayerRenderBoundsForRasterSize(const TextLayerState& state,
-                                                         Eigen::Vector2f raster_size);
-TextLayerRenderFrame TextLayerRenderFrameForRasterSize(const TextLayerState& state,
-                                                       Eigen::Vector2f raster_size);
+/// Where the quad of a laid-out text lies from the layer's origin: the card, centred
+/// where the layout puts it, and the room the style reaches on every side.
+TextLayerRenderBounds TextLayerRenderBoundsForLayout(const TextLayerState& state,
+                                                     const TextLayerLayout& layout);
+TextLayerRenderFrame TextLayerRenderFrameForLayout(const TextLayerState& state,
+                                                   const TextLayerLayout& layout);
+/// The frame of a buffer `capacity_size` wide and tall, centred on the card.
 TextLayerRenderFrame TextLayerRenderFrameForCapacity(const TextLayerState& state,
-                                                     Eigen::Vector2f raster_size,
+                                                     const TextLayerLayout& layout,
                                                      Eigen::Vector2f capacity_size);
 TextLayerRenderFrame TextLayerRenderFrameForTargetExtent(const TextLayerRenderFrame& frame,
                                                          Eigen::Vector2f target_extent);
@@ -321,6 +326,10 @@ void            ResetTextLayerMeasurementCountForTests();
 /// The layout of the boxes a layer is laid out in where no font opens, which no machine
 /// with a font reaches: 0.9 em of ascender, 0.3 em of descender, 1.2 em of line.
 TextLayerLayout TextLayerBoxLayoutForTests(const TextLayerState& state);
+/// The boxes of that layout painted into an RGBA raster of `width` by `height`, as the
+/// text is where no font opens.
+void            RasterizeTextLayerBoxesForTests(const TextLayerState& state, uint32_t width,
+                                                uint32_t height, std::vector<uint8_t>& rgba);
 /// What the font faces have cost since `ResetTextFontCacheForTests`, which also drops
 /// every face the cache holds: font files opened (a face found in the cache is not
 /// one), glyph-fallback faces asked for (one per layout that lacks a glyph), and

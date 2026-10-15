@@ -283,7 +283,9 @@ void ParticleSubSystem::KeepWorldPositions() {
     Eigen::Matrix4d draw = Eigen::Matrix4d::Identity();
     draw.topRightCorner<3, 1>() = world->origin;
     const auto place = [&draw](SceneNode& node) {
+        // A shift a screen anchor adds to where the node is drawn goes with it.
         Eigen::Matrix4d placed = draw;
+        placed.topRightCorner<3, 1>() += node.DrawOffset().cast<double>();
         if (! node.HasRenderTransformOverride() ||
             ! (node.RenderTrans().array() == placed.array()).all()) {
             node.SetRenderTransformOverride(placed);

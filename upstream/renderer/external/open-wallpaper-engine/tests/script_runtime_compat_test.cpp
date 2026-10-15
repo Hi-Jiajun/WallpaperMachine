@@ -4080,6 +4080,12 @@ TEST(ShaderValueUpdaterCompat, EffectModelMatrixAndInverseProjectionMatchTheEffe
     owner.SetScale(Eigen::Vector3f(0.8f, 0.6f, 1.0f));
     owner.SetTranslate(Eigen::Vector3f(100.0f, 200.0f, 0.0f));
     owner.UpdateTrans();
+    // Once as the layer sits, once drawn off its place by a screen anchor's offset: the
+    // effect lands where the card is drawn.
+    for (const Eigen::Vector3f offset : { Eigen::Vector3f(0.0f, 0.0f, 0.0f),
+                                          Eigen::Vector3f(-37.0f, 11.0f, 0.0f) }) {
+    SCOPED_TRACE(offset.x());
+    owner.SetDrawOffset(offset);
     auto node = std::make_shared<SceneNode>();
     auto mesh = std::make_shared<SceneMesh>();
     mesh->AddMaterial(SceneMaterial {});
@@ -4109,13 +4115,14 @@ TEST(ShaderValueUpdaterCompat, EffectModelMatrixAndInverseProjectionMatchTheEffe
     };
     // The unit quad's corner (1, 1) lands on the layer card's corner.
     const Eigen::Vector4d corner = matrix("g_EffectModelMatrix") * Eigen::Vector4d(1, 1, 0, 1);
-    EXPECT_NEAR(corner.x(), 100.0 + 0.8 * 140.0, 1e-3);
-    EXPECT_NEAR(corner.y(), 200.0 + 0.6 * 150.0, 1e-3);
+    EXPECT_NEAR(corner.x(), 100.0 + offset.x() + 0.8 * 140.0, 1e-3);
+    EXPECT_NEAR(corner.y(), 200.0 + offset.y() + 0.6 * 150.0, 1e-3);
     const Eigen::Matrix4d mvp = matrix("g_EffectModelViewProjectionMatrix");
     EXPECT_TRUE((camera->GetViewProjectionMatrix() * matrix("g_EffectModelMatrix"))
                     .isApprox(mvp, 1e-5));
     EXPECT_TRUE((matrix("g_EffectModelViewProjectionMatrixInverse") * mvp)
                     .isApprox(Eigen::Matrix4d::Identity(), 1e-4));
+    }
 }
 
 // A pointer or direction effect maps the screen back into the layer's own
@@ -4132,8 +4139,11 @@ TEST(ShaderValueUpdaterCompat, EffectTextureProjectionMapsTheLayerCardOntoTheScr
     owner.SetRotation(Eigen::Vector3f(0.0f, 0.0f, 0.5f));
     owner.SetTranslate(Eigen::Vector3f(100.0f, 200.0f, 0.0f));
     owner.UpdateTrans();
+    // Once as the layer sits, once drawn off its place by a screen anchor's offset.
+    for (const bool anchored : { false, true }) {
     for (const char* pass_camera : { "effect", "" }) {
-        SCOPED_TRACE(pass_camera);
+        SCOPED_TRACE(std::string(pass_camera) + (anchored ? ", anchored" : ""));
+        owner.SetDrawOffset(anchored ? Eigen::Vector3f(-37.0f, 11.0f, 0.0f) : Eigen::Vector3f::Zero());
         auto node = std::make_shared<SceneNode>();
         auto mesh = std::make_shared<SceneMesh>();
         mesh->AddMaterial(SceneMaterial {});
@@ -4163,8 +4173,9 @@ TEST(ShaderValueUpdaterCompat, EffectTextureProjectionMapsTheLayerCardOntoTheScr
         };
         // The card's (1, 1) corner, in its own half-extent space, lands where
         // the layer's transform puts its corner on the screen.
+        // The card is drawn where `RenderTrans` puts it, which carries the draw offset.
         const Eigen::Vector4d card_corner =
-            owner.ModelTrans() * Eigen::Vector4d(140.0, 150.0, 0.0, 1.0);
+            owner.RenderTrans() * Eigen::Vector4d(140.0, 150.0, 0.0, 1.0);
         const Eigen::Vector4d expected = camera->GetViewProjectionMatrix() * card_corner;
         const Eigen::Vector4d mapped =
             matrix("g_EffectTextureProjectionMatrix") * Eigen::Vector4d(1, 1, 0, 1);
@@ -4172,6 +4183,7 @@ TEST(ShaderValueUpdaterCompat, EffectTextureProjectionMapsTheLayerCardOntoTheScr
         EXPECT_TRUE((matrix("g_EffectTextureProjectionMatrixInverse") *
                      matrix("g_EffectTextureProjectionMatrix"))
                         .isApprox(Eigen::Matrix4d::Identity(), 1e-4));
+    }
     }
 }
 
@@ -4322,31 +4334,6 @@ TEST(ScriptRuntimeCompat, TransformBindingsRepairDestinationsAndRefreshIdentityA
     runtime->Tick(0.0);
     EXPECT_TRUE(replacement->Translate().isApprox(Eigen::Vector3f(50, 50, 0)));
     EXPECT_TRUE(replacement->Scale().isApprox(Eigen::Vector3f(2, 3, 1)));
-}
-
-TEST(ScriptRuntimeCompat, TextReflowInvalidatesAnchoredTranslationWithoutSourceChanges) {
-    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
-    auto node = std::make_shared<SceneNode>();
-    runtime->RegisterNodeTranslate("caption", node.get(),
-        std::make_unique<DynamicValue>(Eigen::Vector3f(10, 20, 0)));
-    runtime->RegisterTextLayer("caption", TextLayerState {
-        .text = "a", .font_key = "Arial", .point_size = 10.0f,
-    });
-    runtime->SetNodeAnchorAlignment("caption", "left top", Eigen::Vector3f(10, 20, 0));
-    runtime->Tick(0.0);
-    const auto before = runtime->NodeSize("caption");
-    ASSERT_TRUE(runtime->SetNodeText("caption", "a substantially longer caption"));
-    for (int attempt = 0; attempt < 200 && runtime->NodeTextDirty("caption"); ++attempt) {
-        runtime->PumpTextLayerCache();
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-    }
-    ASSERT_FALSE(runtime->NodeTextDirty("caption"));
-    const auto size = runtime->NodeSize("caption");
-    ASSERT_GT(size.x(), before.x());
-    EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(10 + size.x() * 0.5f, 20 - size.y() * 0.5f, 0)));
-    node->SetTranslate(Eigen::Vector3f::Zero());
-    runtime->Tick(0.0);
-    EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(10 + size.x() * 0.5f, 20 - size.y() * 0.5f, 0)));
 }
 
 Eigen::Vector3f NodePointInScene(SceneNode& node, float x, float y) {
@@ -5791,12 +5778,12 @@ void WaitForTextLayout(SceneRuntimeContext& runtime, const std::string& layer) {
 TEST(ScriptRuntimeCompat, TextLayerStyleIsReadAndWrittenThroughTheLayer) {
     auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
     auto node    = std::make_shared<SceneNode>();
+    node->SetTranslate(Eigen::Vector3f(100, 200, 0));
     runtime->RegisterNode("clock", node.get());
     runtime->RegisterTextLayer("clock", TextLayerState {
         .text = "12:30", .font_key = "Arial", .point_size = 12.0f, .horizontal_align = "center",
         .vertical_align = "center",
     });
-    runtime->SetNodeAnchorAlignment("clock", "left top", Eigen::Vector3f(100, 200, 0));
     std::vector<std::string> requested_fonts;
     runtime->SetTextFontResolver([&](TextLayerState& state, const std::string& font_key) {
         requested_fonts.push_back(font_key);
@@ -5841,9 +5828,15 @@ export function update(value) {
     const auto after = runtime->NodeSize("clock");
     EXPECT_GT(after.y(), before.y()) << "a larger point size makes a taller layer";
     EXPECT_GT(after.x(), before.x());
-    // Anchored to its right and bottom edges now: the layer hangs up and to the left of the anchor.
-    EXPECT_NEAR(node->Translate().x(), 100.0f - after.x() * 0.5f, 1e-3f);
-    EXPECT_NEAR(node->Translate().y(), 200.0f + after.y() * 0.5f, 1e-3f);
+    // Aligned to its right and bottom edges now: the layer's origin stays where it was and
+    // the card hangs up and to the left of it.
+    EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(100, 200, 0)));
+    const auto layout = runtime->NodeTextLayout("clock");
+    ASSERT_TRUE(layout.has_value());
+    EXPECT_NEAR(runtime->NodeBoxCentre("clock").x(), -after.x() * 0.5f, 1e-3f);
+    EXPECT_GT(runtime->NodeBoxCentre("clock").y(), 0.0f);
+    EXPECT_NEAR(runtime->NodeBoxCentre("clock").y() + after.y() * 0.5f,
+                layout->top + layout->descender, 1e-3f);
 }
 
 TEST(ScriptRuntimeCompat, TextStyleOnAnotherKindOfLayerStaysAPlainProperty) {
@@ -6557,10 +6550,10 @@ export function update(value) {
 TEST(ScriptRuntimeCompat, TextAlignmentOnlyTakesTheWordsItIsDefinedFor) {
     auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
     auto node    = std::make_shared<SceneNode>();
+    node->SetTranslate(Eigen::Vector3f(10, 20, 0));
     runtime->RegisterNode("clock", node.get());
     runtime->RegisterTextLayer("clock", TextLayerState { .text = "x", .font_key = "Arial", .point_size = 20.0f,
                                                         .horizontal_align = "center", .vertical_align = "center" });
-    runtime->SetNodeAnchorAlignment("clock", "left top", Eigen::Vector3f(10, 20, 0));
     const auto run = RunUpdateOn(*runtime, "clock", std::string(kCheckHelpers) + R"JS(
 export function update(value) {
   ['top', 'Left', 'banana', '', 'LEFT', 'middle'].forEach(function(word) {
@@ -6585,10 +6578,12 @@ export function update(value) {
     ASSERT_TRUE(state.has_value());
     EXPECT_EQ(state->horizontal_align, "center");
     EXPECT_EQ(state->vertical_align, "top");
-    // The layer is placed by the words it ended on, none of them made up: nothing
-    // moves it sideways, and it hangs below its anchor.
-    EXPECT_FLOAT_EQ(node->Translate().x(), 10.0f);
-    EXPECT_LT(node->Translate().y(), 20.0f);
+    // The card hangs by the words it ended on, none of them made up: centred across, so
+    // nothing moves it sideways, and below the origin for `top`. The node stays put.
+    EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(10, 20, 0)));
+    WaitForTextLayout(*runtime, "clock");
+    EXPECT_FLOAT_EQ(runtime->NodeBoxCentre("clock").x(), 0.0f);
+    EXPECT_LT(runtime->NodeBoxCentre("clock").y(), 0.0f);
 }
 
 // The size reads back as the float it is, so a script that reads it, adds a

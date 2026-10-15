@@ -6493,6 +6493,185 @@ TEST_F(MetalSceneDraw, ATextLayersBrightnessReachesTheHdrPipelineOnBothRenderers
     }
 }
 
+namespace
+{
+/// The box of the lit pixels of a picture: columns and rows, the top row first.
+struct LitBox
+{
+    int  left { 1 << 30 };
+    int  right { -1 };
+    int  top { 1 << 30 };
+    int  bottom { -1 };
+    bool any() const { return right >= left; }
+};
+
+LitBox LitBoxOf(const RendererPicture& picture)
+{
+    LitBox box;
+    for (uint32_t y = 0; y < picture.height; ++y) {
+        for (uint32_t x = 0; x < picture.width; ++x) {
+            const auto* pixel = &picture.rgb[(static_cast<std::size_t>(y) * picture.width + x) * 3u];
+            if (pixel[0] < 64 && pixel[1] < 64 && pixel[2] < 64) continue;
+            box.left   = std::min(box.left, static_cast<int>(x));
+            box.right  = std::max(box.right, static_cast<int>(x));
+            box.top    = std::min(box.top, static_cast<int>(y));
+            box.bottom = std::max(box.bottom, static_cast<int>(y));
+        }
+    }
+    return box;
+}
+} // namespace
+
+TEST_F(MetalSceneDraw, AnAlignedTextLayersBlockEdgeSitsOnItsOriginOnBothRenderers)
+{
+    // The fixture's layer is at (192, 128) of a 384 by 256 scene drawn 1:1, so its origin
+    // is pixel column 192 and, from the top, pixel row 128. Wallpaper Engine puts the
+    // text's block on that origin by the edges the alignment names -- the right edge of
+    // the ink for `right`, its first baseline an ascender below for `top`, half of it for
+    // `center`, a descender above for `bottom` -- and the same layer with an effect on it
+    // (which gives it padding) stays where it was.
+    constexpr int kOriginColumn = 192;
+    constexpr int kOriginRow    = 128;
+    constexpr int kTolerance    = 3;
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        for (const char* horizontal : { "left", "center", "right" }) {
+            for (const char* vertical : { "top", "center", "bottom" }) {
+                for (const bool with_effect : { false, true }) {
+                    if (with_effect && std::string_view(horizontal) == "center") continue;
+                    const std::string name = std::string("text-align-") + (native ? "native-" : "compat-") +
+                                             horizontal + "-" + vertical + (with_effect ? "-fx" : "");
+                    SCOPED_TRACE(name);
+                    const auto project = WriteTextFixture(
+                        root_ / name, "H", with_effect, {},
+                        std::string(R"(,"pointsize":14,"horizontalalign":")") + horizontal +
+                            R"(","verticalalign":")" + vertical + R"(")");
+                    LoadedScene loaded;
+                    std::string error;
+                    ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+                    ASSERT_NE(loaded.scene->runtime, nullptr);
+                    const auto layout = loaded.scene->runtime->NodeTextLayout("caption");
+                    ASSERT_TRUE(layout.has_value());
+                    const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+                    ASSERT_TRUE(picture.error.empty()) << picture.error;
+                    const auto box = LitBoxOf(picture);
+                    ASSERT_TRUE(box.any());
+
+                    // Across: the block's edge is the ink's, so a right-aligned H ends on the
+                    // origin; a left-aligned one starts a left bearing past it.
+                    const int ink_width = box.right + 1 - box.left;
+                    if (std::string_view(horizontal) == "right") {
+                        EXPECT_NEAR(box.right + 1, kOriginColumn, kTolerance);
+                    } else if (std::string_view(horizontal) == "left") {
+                        EXPECT_GE(box.left, kOriginColumn - 1);
+                        EXPECT_NEAR(box.left, kOriginColumn, 0.2 * layout->ascender);
+                    } else {
+                        EXPECT_NEAR(box.left + ink_width * 0.5, kOriginColumn,
+                                    0.1 * layout->ascender);
+                    }
+                    // Down: the baseline is the bottom of the H.
+                    const float below = std::string_view(vertical) == "top"    ? layout->ascender
+                                        : std::string_view(vertical) == "center" ? layout->ascender * 0.5f
+                                                                              : -layout->descender;
+                    EXPECT_NEAR(box.bottom + 1, kOriginRow + below, kTolerance);
+                }
+            }
+        }
+    }
+}
+
+TEST_F(MetalSceneDraw, EnablingAnEffectDoesNotMoveAnAlignedTextLayerOnBothRenderers)
+{
+    // Padding is room around the block on the outside of the aligned edges, so a layer
+    // that gains an effect (and with it a padded card) has its text where it was: the
+    // pictures with and without the effect have the same box of text.
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        std::map<bool, LitBox> boxes;
+        for (const bool with_effect : { false, true }) {
+            const std::string name = std::string("text-padding-") + (native ? "native-" : "compat-") +
+                                     (with_effect ? "fx" : "plain");
+            const auto project = WriteTextFixture(
+                root_ / name, "CLOCK", with_effect, {},
+                R"(,"pointsize":10,"horizontalalign":"right","verticalalign":"bottom","padding":"60 40")");
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
+            boxes[with_effect] = LitBoxOf(picture);
+            ASSERT_TRUE(boxes[with_effect].any());
+        }
+        EXPECT_NEAR(boxes[true].left, boxes[false].left, 1);
+        EXPECT_NEAR(boxes[true].right, boxes[false].right, 1);
+        EXPECT_NEAR(boxes[true].top, boxes[false].top, 1);
+        EXPECT_NEAR(boxes[true].bottom, boxes[false].bottom, 1);
+    }
+}
+
+TEST_F(MetalSceneDraw, AnAlignedTextLayerIsTheSamePictureOnBothRenderers)
+{
+    for (const char* horizontal : { "left", "right" }) {
+        for (const char* vertical : { "top", "bottom" }) {
+            std::map<bool, RendererPicture> pictures;
+            for (const bool native : { false, true }) {
+                const std::string name = std::string("text-align-same-") + (native ? "native-" : "compat-") +
+                                         horizontal + "-" + vertical;
+                const auto project = WriteTextFixture(
+                    root_ / name, "CLOCK", false, {},
+                    std::string(R"(,"pointsize":10,"horizontalalign":")") + horizontal +
+                        R"(","verticalalign":")" + vertical + R"(")");
+                LoadedScene loaded;
+                std::string error;
+                ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+                pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+                ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+            }
+            EXPECT_EQ(pictures[true].rgb, pictures[false].rgb) << horizontal << " " << vertical;
+        }
+    }
+}
+
+TEST_F(MetalSceneDraw, AScreenAnchoredTextLayerIsDrawnWhereItsAnchorPutsItOnBothRenderers)
+{
+    // `anchor` pins a text layer to an edge of the area the display shows. The display
+    // here shows 344 of the scene's 384 columns, so a layer anchored to the right edge is
+    // drawn 40 columns in from where its origin puts it -- whether it is drawn from its own
+    // card or, with an effect on it, from the final card of the chain -- and nothing else
+    // about the picture changes.
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        for (const bool with_effect : { false, true }) {
+            std::map<bool, LitBox> boxes;
+            for (const bool presented : { false, true }) {
+                const std::string name = std::string("text-anchor-") + (native ? "native-" : "compat-") +
+                                         (with_effect ? "fx-" : "plain-") + (presented ? "shown" : "whole");
+                const auto project = WriteTextFixture(
+                    root_ / name, "H", with_effect, {},
+                    R"(,"pointsize":14,"anchor":"right","horizontalalign":"right","verticalalign":"center")");
+                LoadedScene loaded;
+                std::string error;
+                ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+                ASSERT_NE(loaded.scene->runtime, nullptr);
+                if (presented) {
+                    loaded.scene->runtime->SetCursorViewport(CursorViewport {
+                        .origin = { 0.0f, 0.0f }, .size = { 344.0f, 256.0f },
+                        .content_origin = { 0.0f, 0.0f }, .content_size = { 344.0f, 256.0f } });
+                }
+                const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+                ASSERT_TRUE(picture.error.empty()) << picture.error;
+                boxes[presented] = LitBoxOf(picture);
+                ASSERT_TRUE(boxes[presented].any());
+            }
+            SCOPED_TRACE(with_effect ? "with an effect" : "plain");
+            EXPECT_NEAR(boxes[true].left, boxes[false].left - 40, 1);
+            EXPECT_NEAR(boxes[true].right, boxes[false].right - 40, 1);
+            EXPECT_EQ(boxes[true].top, boxes[false].top);
+            EXPECT_EQ(boxes[true].bottom, boxes[false].bottom);
+        }
+    }
+}
+
 TEST_F(MetalSceneDraw, TextStylingChangesPixelsWithoutRerasterizingGlyphs)
 {
     for (const bool with_effect : { false, true }) {

@@ -691,6 +691,131 @@ struct CursorStage {
 };
 } // namespace
 
+namespace
+{
+// A text layer under the cursor. Its card hangs from the layer's origin by the layout's
+// offset, in the layer's own axes, so a left-aligned layer's card lies to the right of the
+// node and a top-aligned one's below it. A script on the layer shows a marker while the
+// cursor is over the card.
+struct TextCursorStage {
+    std::unique_ptr<SceneRuntimeContext> runtime;
+    std::shared_ptr<SceneNode>           node  = std::make_shared<SceneNode>();
+    std::shared_ptr<SceneNode>           marker = std::make_shared<SceneNode>();
+    CursorViewport                       viewport {
+        .origin = { 0.0f, 0.0f }, .size = { 1920.0f, 1080.0f },
+        .content_origin = { 0.0f, 0.0f }, .content_size = { 1920.0f, 1080.0f } };
+    bool was_in_window { false };
+
+    TextCursorStage() {
+        runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {
+            .canvas_width = 1920, .canvas_height = 1080 });
+        node->SetTranslate(Eigen::Vector3f(800.0f, 500.0f, 0.0f));
+        node->SetScale(Eigen::Vector3f(1.5f, 0.8f, 1.0f));
+        node->SetRotation(Eigen::Vector3f(0.0f, 0.0f, 0.4f));
+        runtime->RegisterNode("text", node.get());
+        runtime->RegisterTextLayer("text", TextLayerState {
+            .text = "HHHHHH", .font_key = "Arial", .point_size = 20.0f,
+            .horizontal_align = "left", .vertical_align = "top" });
+        marker->SetVisible(false);
+        runtime->RegisterNode("marker", marker.get());
+        runtime->RegisterSceneScript(
+            "function cursorEnter() { scene.getObject('marker').visible = true; }\n"
+            "function cursorLeave() { scene.getObject('marker').visible = false; }\n",
+            "text");
+    }
+
+    TextLayerLayout Layout() const { return runtime->NodeTextLayout("text").value(); }
+
+    // Where a point of the layer's own plane is drawn, in the scene.
+    Eigen::Vector3d Drawn(double x, double y) const {
+        node->UpdateTrans();
+        return (node->RenderTrans() * Eigen::Vector4d(x, y, 0.0, 1.0)).head<3>();
+    }
+
+    // The cursor at the point of the card `across` and `down` fractions of the way over its
+    // width and height from its top left, where the card is drawn.
+    bool OverCard(double across, double down) {
+        const auto layout = Layout();
+        const double x = layout.centre.x() + (across - 0.5) * layout.card.x();
+        const double y = layout.centre.y() + (0.5 - down) * layout.card.y();
+        return OverLocal(x, y);
+    }
+    bool OverLocal(double x, double y) {
+        const auto world = Drawn(x, y);
+        runtime->SetCursorInput(
+            static_cast<float>((world.x() - viewport.origin.x()) / viewport.size.x()),
+            static_cast<float>(1.0 - (world.y() - viewport.origin.y()) / viewport.size.y()));
+        runtime->SetCursorEnter(true);
+        was_in_window = runtime->DispatchCursorFrameEvents(was_in_window);
+        runtime->Tick(1.0 / 60.0);
+        return runtime->NodeVisible("marker");
+    }
+};
+} // namespace
+
+// Wallpaper Engine tests the cursor against the quad it draws. A text layer's quad is its
+// card, which hangs from the layer's origin: a left-aligned top-aligned card lies to the
+// right of the origin and below it, so the cursor is over it there, and not on the other
+// sides of the origin where a box centred on the node would reach.
+TEST(MouseInput, ATextLayersHitBoxIsItsCardWhereItIsDrawn) {
+    TextCursorStage stage;
+    const auto      layout = stage.Layout();
+    ASSERT_FALSE(layout.centre.isZero()) << "the card hangs off the origin in both axes";
+    EXPECT_TRUE(stage.OverCard(0.1, 0.1));
+    EXPECT_TRUE(stage.OverCard(0.9, 0.9));
+    EXPECT_TRUE(stage.OverCard(0.5, 0.5));
+    EXPECT_FALSE(stage.OverCard(-0.1, 0.5)) << "left of the card";
+    EXPECT_FALSE(stage.OverCard(1.1, 0.5)) << "right of the card";
+    EXPECT_FALSE(stage.OverCard(0.5, -0.1)) << "above the card";
+    EXPECT_FALSE(stage.OverCard(0.5, 1.1)) << "below the card";
+    // The origin is the card's top left corner: just outside it on the near sides, just in.
+    EXPECT_TRUE(stage.OverLocal(0.02 * layout.card.x(), -0.02 * layout.card.y()));
+    EXPECT_FALSE(stage.OverLocal(-0.02 * layout.card.x(), -0.02 * layout.card.y()));
+    EXPECT_FALSE(stage.OverLocal(0.02 * layout.card.x(), 0.02 * layout.card.y()));
+    EXPECT_EQ(stage.runtime->scriptErrorCount(), 0u);
+}
+
+// A layer's coverage mask is read across the card where it hangs: the left texel of a
+// two-texel mask is the left half of the card, wherever the card lies from the node.
+TEST(MouseInput, ACoverageMaskIsReadAcrossTheCardWhereItHangs) {
+    TextCursorStage stage;
+    stage.runtime->RegisterNodeHitMask(
+        "text", NodeHitMask { .width = 2, .height = 1, .alpha = { 255, 0 } });
+    EXPECT_TRUE(stage.OverCard(0.25, 0.5));
+    EXPECT_FALSE(stage.OverCard(0.75, 0.5));
+    EXPECT_TRUE(stage.OverCard(0.1, 0.9));
+    EXPECT_FALSE(stage.OverCard(0.9, 0.1));
+    EXPECT_EQ(stage.runtime->scriptErrorCount(), 0u);
+}
+
+// A screen anchor moves the card with the draw, and the cursor follows what is drawn.
+TEST(MouseInput, ACursorHitFollowsAScreenAnchoredCard) {
+    TextCursorStage stage;
+    stage.runtime->SetNodeScreenAnchor("text", TextScreenAnchor::Right);
+    // The display shows 1840 of the 1920 columns from column 10: the right edge of what is
+    // shown is 70 columns in from the canvas's.
+    stage.viewport = CursorViewport {
+        .origin = { 10.0f, 0.0f }, .size = { 1840.0f, 1080.0f },
+        .content_origin = { 10.0f, 0.0f }, .content_size = { 1840.0f, 1080.0f } };
+    stage.runtime->SetCursorViewport(stage.viewport);
+    const auto layout = stage.Layout();
+    // Over the card near its far end where it is drawn ...
+    EXPECT_TRUE(stage.OverCard(0.97, 0.5));
+    EXPECT_TRUE(stage.node->DrawOffset().isApprox(Eigen::Vector3f(-70.0f, 0.0f, 0.0f)));
+    // ... and not at the world point that same spot is at without the anchor, 70 columns
+    // right of the end of the card.
+    const Eigen::Vector4d spot(layout.centre.x() + 0.47 * layout.card.x(), layout.centre.y(), 0.0, 1.0);
+    stage.node->UpdateTrans();
+    const Eigen::Vector4d unshifted = stage.node->ModelTrans() * spot;
+    stage.runtime->SetCursorInput(
+        static_cast<float>((unshifted.x() - 10.0) / 1840.0),
+        static_cast<float>(1.0 - unshifted.y() / 1080.0));
+    stage.runtime->SetCursorEnter(true);
+    stage.was_in_window = stage.runtime->DispatchCursorFrameEvents(stage.was_in_window);
+    stage.runtime->Tick(1.0 / 60.0);
+    EXPECT_FALSE(stage.runtime->NodeVisible("marker"));
+}
+
 TEST(MouseInput, OnlySolidImageTextAndModelLayersAreHitTested) {
     CursorStage stage;
     stage.AddLayer("solid", 100.0f);

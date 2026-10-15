@@ -935,8 +935,14 @@ into private textures; the three that draw skip visibly without a Metal device.
   blur and shadow are made here from the union of the glyphs, at their reach but not
   clipped to the atlas margin. `msdf` alone, `opaquebackground`, `backgroundcolor` and
   `backgroundbrightness` are read and draw nothing. The screen `anchor` of a text layer
-  moves the layer in its parent's space, so its children move with it; whether
-  Wallpaper Engine's children inherit the shift is not established. A script's write
+  shifts its draw by the margins of the area the display shows, as a translation in the
+  scene's axes that its children do not inherit; that the shift is made in the scene's
+  axes is read from the decompile, and that its margins are those of the visible area
+  is inferred, with no frame of a display whose shape differs from the canvas to
+  check either. Where the right edge of a right-aligned text lies is the ink's own
+  (the last glyph's bearing is not added): the probe frames agree to a unit on every
+  glyph measured, which does not settle an italic or a glyph with a large right
+  bearing. A script's write
   of `horizontalalign` or `verticalalign` with a word outside the registry is turned
   away. The decompile narrows what Wallpaper Engine does: the C-string setter the
   alignment registrations carry (`FUN_14025a880`) stores the registry's first entry for a

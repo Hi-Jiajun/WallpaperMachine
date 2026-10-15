@@ -466,7 +466,16 @@ ignored, as Wallpaper Engine ignores it: the card is laid out again with every c
 of the text, so a clock that gets shorter has a smaller card. The layout is one record,
 the ink of the rows and the face's ascender, descender and pitch (the block runs from
 the ascender, or the tallest ink above it, down one pitch per row), measured once as
-the layer is parsed.
+the layer is parsed. A layer's alignment hangs that card from the layer's origin and
+never moves the layer: across, the origin sits on the left edge of the text's block,
+its middle or its right edge; down, on the first row's ascender line (`top`), halfway
+between that line and the last row's baseline (`center`) or on the last row's descender
+line (`bottom`), whatever ink rises above the ascender. The padding grows the card
+outward from there, so a layer that gains an effect, and with it padding, keeps its
+text where it was, and the layers parented to a text layer sit on its origin. The rows
+of a block are set within its widest row, each starting at its own pen against its
+left edge, centred or against its right edge. The cursor is over the card where it
+hangs.
 
 Every buffer of a card, an effect's or the composite another layer
 samples, is built at the card's width and height with the fraction cut off, at least 4
@@ -504,7 +513,14 @@ at it by a preview of changed properties (a load-only property); a script or a
 timeline on one of them is not followed. `anchor` pins a text
 layer to an edge or corner of the area the display shows, on top of its origin and
 alignment: where the display's shape differs from the canvas's (Fill crops it, Fit or a
-pan adds room), the layer follows that edge, and a scene shown whole moves nothing.
+pan adds room), the layer is drawn that far along that edge, and a scene shown whole
+moves nothing. The shift is a translation of the drawn layer in the scene's own axes,
+whatever the layer's scale and turn: the layer's origin, what a script reads as it
+and the layers parented to it stay where they are. The effects of the layer follow the
+draw: the matrices that say where the effect lands on the screen
+(`g_EffectModelMatrix`, `g_EffectModelViewProjectionMatrix` and the effect texture
+projection a pointer effect undoes) are the drawn card's, so a cursor effect finds the cursor
+over the text where it is drawn; `g_LayerModelMatrix` is the layer's own.
 Camera parallax moves a text layer as it moves an image layer, as Wallpaper Engine's
 draw loop adds the offset to every object it draws: by the layer's distance from the
 eased cursor point times its `parallaxDepth` and the scene's amount, so a text label
