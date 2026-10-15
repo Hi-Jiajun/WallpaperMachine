@@ -347,6 +347,25 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   would overwrite what a script that writes `thisLayer.color` and returns nothing
   just set. A layer whose placeholder a runtime image replaces drops a bound
   colour as it drops an authored one.
+- **Image layer brightness** — `SceneSchema.AnImageLayersBrightnessTintsItsMaterialsOnlyInAnHdrSceneAndFollowsItsBindings`,
+  `MetalSceneDraw.AnImageLayersBrightnessTintsItOnlyWhereTheSceneRendersHdrOnBothRenderers`
+  and `.AnImageLayersBoundBrightnessFollowsItsPropertyAndScriptOnBothRenderers`.
+  Wallpaper Engine's layer draw (`FUN_140208670`, and the effect layer's final composite
+  `FUN_140207740`) sets `g_Color4` to the layer's colour times its brightness only
+  when the 0x2000 back-buffer bit is set, the HDR pipeline (`scene.hdr`, so `hdr` with
+  bloom on), and to the colour alone otherwise. `ParseImageObj` builds `g_Color4` that
+  way for the layer's own material, every effect pass and the compose passthrough;
+  `SceneMaterial::tint` keeps the colour and the HDR brightness apart so a bound colour,
+  a scripted `thisLayer.color` and a bound brightness each rebuild the product from
+  the other's current value. The layer's brightness is not also the `g_Brightness` of
+  a shader that declares one (`generic3`, `generic4`, `chroma4`, `foliage4`, an unversioned
+  `genericimage2`): Wallpaper Engine reads the layer's brightness for the draw colour
+  only and leaves that uniform, a material property, to the material; no stock shader
+  declares both it and `g_Color4`. The pixel test draws grey 0.8 through a `g_Color4`
+  shader (brightness 0.5, colour `0.5 1 1`: 0.2, 0.4, 0.4 in HDR, 0.4, 0.8, 0.8 without
+  bloom or HDR), with and without a copy effect and a `g_Brightness` shader, changes a
+  bound `glow` property while the scene runs and drives the brightness from a script.
+  A text layer's brightness is separate (text-spec T6).
 - **User properties and interactive scenes** — `applyUserProperties` runs once
   initially, then only for changed properties, after the whole property set has
   been refreshed. Exercise clock clicks and hidden-helper enter/leave through

@@ -390,13 +390,32 @@ void ApplyMaterialAlpha(SceneMaterial& material, float alpha) {
     values["g_Color4"] = color;
 }
 
-void ApplyMaterialColor(SceneMaterial& material, const Eigen::Vector3f& color) {
+// The layer's colour times its brightness where the scene renders HDR, with the
+// alpha `g_Color4` already holds.
+void ApplyMaterialTint(SceneMaterial& material) {
     auto& values = material.customShader.constValues;
     const auto color4 = values.find("g_Color4");
     const float alpha = color4 != values.end() && color4->second.size() > 3
                             ? color4->second[3] : 1.0f;
-    values["g_Color"] = std::array<float, 3> { color.x(), color.y(), color.z() };
-    values["g_Color4"] = std::array<float, 4> { color.x(), color.y(), color.z(), alpha };
+    const auto& tint = material.tint;
+    values["g_Color4"] = std::array<float, 4> {
+        tint.color[0] * tint.brightness,
+        tint.color[1] * tint.brightness,
+        tint.color[2] * tint.brightness,
+        alpha,
+    };
+}
+
+void ApplyMaterialColor(SceneMaterial& material, const Eigen::Vector3f& color) {
+    material.tint.color = { color.x(), color.y(), color.z() };
+    material.customShader.constValues["g_Color"] =
+        std::array<float, 3> { color.x(), color.y(), color.z() };
+    ApplyMaterialTint(material);
+}
+
+void ApplyMaterialBrightness(SceneMaterial& material, float brightness) {
+    material.tint.brightness = brightness;
+    ApplyMaterialTint(material);
 }
 
 ShaderValue ShaderValueFromDynamicValue(const DynamicValue& value) {
@@ -1890,6 +1909,25 @@ void SceneRuntimeContext::BindMaterialColor(std::vector<std::shared_ptr<SceneMat
             const auto color = current.getVec3();
             for (const auto& material : materials) {
                 if (material != nullptr) ApplyMaterialColor(*material, color);
+            }
+        });
+}
+
+void SceneRuntimeContext::BindMaterialBrightness(
+    std::vector<std::shared_ptr<SceneMaterial>> materials, std::unique_ptr<DynamicValue> value) {
+    if (value == nullptr) return;
+    // A brightness nothing draws with (outside an HDR scene) is still the runtime's
+    // to keep: a script drives it.
+    if (materials.empty()) {
+        m_owned_values.push_back(std::move(value));
+        return;
+    }
+    RegisterDynamicValueListener(
+        std::move(value), [materials = std::move(materials)](const DynamicValue& current) {
+            const float brightness = current.getFloat();
+            if (! std::isfinite(brightness)) return;
+            for (const auto& material : materials) {
+                if (material != nullptr) ApplyMaterialBrightness(*material, brightness);
             }
         });
 }

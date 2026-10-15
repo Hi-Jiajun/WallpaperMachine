@@ -727,6 +727,19 @@ into private textures; the three that draw skip visibly without a Metal device.
   `ShaderValue: … not found in glsl` line is authored leftovers, not a binding
   failure. Wallpaper Engine's own `clipping_mask` effect fails to translate (see
   [Shader pipeline](scene-regressions.md#shader-pipeline)).
+- **An image layer's brightness is applied where its colour is, ahead of its effects.**
+  Wallpaper Engine multiplies it into the `g_Color4` of the layer's final composite and
+  gives the effect chain's own passes a white one. Here the colour, the alpha and the
+  HDR-only brightness go into the pass that draws the layer's image, the first of its
+  chain, as the colour and alpha always have; the two agree for effects that scale
+  linearly and can differ where an effect clamps or thresholds its input. A later pass
+  whose shader takes `g_Color4` itself, such as the passthrough that stands in for a
+  chain whose effects a script has all switched off, takes the colour and the HDR
+  brightness a second time when the layer's first pass already applied them (the colour
+  is squared, as it was before this change); on a compose layer, whose first pass reads no
+  `g_Color4`, that passthrough is where the colour lands once. Only a script
+  on the `brightness` property drives an image layer's brightness; a `thisLayer.brightness`
+  write is not read, and a text layer's brightness is not yet limited to HDR scenes.
 - **Shadows, spot cookies and volumetric lights are not drawn.** A light with
   `castshadow` lights as if nothing cast a shadow (`_rt_shadowAtlas` is never
   written), a spot cookie lights through its cone instead of its cookie image, and

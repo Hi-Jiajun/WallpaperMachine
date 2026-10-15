@@ -78,6 +78,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <string>
 #include <thread>
@@ -3080,6 +3081,174 @@ TEST_F(MetalSceneDraw, AColorBlendLayersColourAndAlphaApplyOnceOnBothRenderers)
     EXPECT_NEAR(rgb[centre + 1], 32, 2) << "the layer's alpha was not taken once";
     EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
         << "the native renderer blended the layer differently from the compatibility renderer";
+}
+
+namespace
+{
+/// The fixture's card as a "new" generic shader draws a layer -- flat grey 0.8
+/// times its `g_Color4` -- over black, in a scene whose `hdr` and `bloom`
+/// switches are as given. Bloom is on with nothing to add: its strength is 0.
+/// With `declares_brightness` the shader also multiplies by a `g_Brightness`, a
+/// material constant as the generic shaders that declare one have it; with
+/// `with_effect` a copying effect is over the layer. `object_fields` goes on the
+/// layer, and the project declares a `glow` slider for it to bind to.
+std::filesystem::path WriteLayerBrightnessFixture(const std::filesystem::path& root, bool hdr,
+                                                  bool bloom, bool declares_brightness,
+                                                  bool with_effect, std::string_view object_fields)
+{
+    const auto project = WriteParsedRadianceFixture(root, hdr);
+    std::ofstream(project)
+        << R"({"title":"Metal brightness smoke","type":"scene","file":"layout.json","general":)"
+           R"({"properties":{"glow":{"type":"slider","value":0.5}}}})";
+    std::ofstream(root / "shaders/metal_probe.frag")
+        << (declares_brightness
+                ? "uniform float g_Brightness; // {\"material\":\"Brightness\",\"default\":1}\n"
+                : "")
+        << "uniform vec4 g_Color4;\n"
+           "varying vec2 v_TexCoord;\n"
+           "void main() {\n"
+           "  gl_FragColor = vec4(vec3(0.8)"
+        << (declares_brightness ? " * g_Brightness" : "") << ", 1.0) * g_Color4;\n"
+        << "}\n";
+    std::ofstream(root / "materials/copyfx.json")
+        << R"({"passes":[{"shader":"parsed_sample","blending":"normal","cullmode":"nocull",)"
+           R"("depthtest":"disabled","depthwrite":"disabled","textures":[null]}]})";
+    std::filesystem::create_directories(root / "effects");
+    std::ofstream(root / "effects/copyfx.json")
+        << R"({"name":"copy","passes":[{"material":"materials/copyfx.json",)"
+           R"("bind":[{"name":"previous","index":0}]}]})";
+
+    std::ifstream source(root / "layout.json");
+    auto layout = nlohmann::json::parse(source);
+    source.close();
+    auto& general = layout["general"];
+    general["bloom"] = bloom;
+    general["bloomstrength"] = 0.0;
+    general["bloomhdrstrength"] = 0.0;
+    auto object = nlohmann::json::parse(
+        R"({"id":1,"name":"tile","image":"models/tile.json","origin":[192,128,0],)"
+        R"("scale":[1,1,1],"angles":[0,0,0],"visible":true})");
+    const auto fields = nlohmann::json::parse("{" + std::string(object_fields) + "}");
+    for (const auto& [key, value] : fields.items()) object[key] = value;
+    if (with_effect) {
+        object["effects"] = nlohmann::json::array({
+            { { "file", "effects/copyfx.json" }, { "visible", true } },
+        });
+    }
+    layout["objects"] = nlohmann::json::array({ object });
+    std::ofstream(root / "layout.json") << layout;
+    return project;
+}
+
+std::array<int, 3> CentreOf(const RendererPicture& picture)
+{
+    const std::size_t centre = (128u * 384u + 192u) * 3u;
+    if (picture.rgb.size() < centre + 3) return { -1, -1, -1 };
+    return { picture.rgb[centre], picture.rgb[centre + 1], picture.rgb[centre + 2] };
+}
+} // namespace
+
+TEST_F(MetalSceneDraw, AnImageLayersBrightnessTintsItOnlyWhereTheSceneRendersHdrOnBothRenderers)
+{
+    // Wallpaper Engine multiplies a layer's colour by its brightness into the
+    // `g_Color4` it draws the layer with, and only in a scene that renders HDR:
+    // the scene asks for HDR and has bloom on. Anywhere else the brightness is
+    // 1. A shader that takes the tint through `g_Color4` alone (the newer generic
+    // shaders) used to lose the brightness altogether, and one that also declares
+    // a `g_Brightness` must not be handed the layer's as well. Grey 0.8
+    // tinted `0.5 1 1` at brightness 0.5 is 0.2 red and 0.4 green and blue in HDR.
+    struct Mode {
+        bool               hdr, bloom;
+        std::array<int, 3> expected;
+    };
+    for (const auto& mode : { Mode { true, true, { 51, 102, 102 } },
+                              Mode { true, false, { 102, 204, 204 } },
+                              Mode { false, true, { 102, 204, 204 } } }) {
+        for (const bool declares_brightness : { false, true }) {
+            for (const bool with_effect : { false, true }) {
+                SCOPED_TRACE(std::string(mode.hdr ? "hdr" : "ldr") + (mode.bloom ? " bloom" : " no bloom") +
+                             (declares_brightness ? " g_Brightness" : "") + (with_effect ? " effect" : ""));
+                std::map<bool, RendererPicture> pictures;
+                for (const bool native : { false, true }) {
+                    const std::string name = std::string("brightness-") + (native ? "native-" : "compat-") +
+                                             (mode.hdr ? "h" : "l") + (mode.bloom ? "b" : "n") +
+                                             (declares_brightness ? "g" : "c") + (with_effect ? "e" : "p");
+                    const auto project = WriteLayerBrightnessFixture(
+                        root_ / name, mode.hdr, mode.bloom, declares_brightness, with_effect,
+                        R"("color":"0.5 1 1","brightness":0.5)");
+                    LoadedScene loaded;
+                    std::string error;
+                    ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+                    if (native) {
+                        const auto selection = SelectSceneBackend(*loaded.scene);
+                        ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+                    }
+                    pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+                    ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+                    const auto centre = CentreOf(pictures[native]);
+                    for (std::size_t c = 0; c < 3; ++c) {
+                        EXPECT_NEAR(centre[c], mode.expected[c], 2)
+                            << (native ? "native" : "compatibility") << " channel " << c;
+                    }
+                }
+                EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
+                    << "the native renderer tinted the layer differently from the compatibility renderer";
+            }
+        }
+    }
+}
+
+TEST_F(MetalSceneDraw, AnImageLayersBoundBrightnessFollowsItsPropertyAndScriptOnBothRenderers)
+{
+    // A brightness a user property or a script drives is live, as the colour and
+    // the alpha are: the property's value replaces the scene file's, and a change
+    // while the scene runs reaches the layer's draw, with and without an effect.
+    // Outside an HDR scene it changes nothing.
+    struct Case {
+        const char*        fields;
+        bool               hdr;
+        std::optional<float> glow_at_frame_one;
+        std::array<int, 3> expected;
+    };
+    const char* const bound   = R"("brightness":{"user":"glow","value":1})";
+    const char* const scripted = R"("brightness":{"value":1,"script":"export function update(value) { return 0.25; }"})";
+    int index = 0;
+    for (const auto& c : { Case { bound, true, std::nullopt, { 102, 102, 102 } },
+                           Case { bound, true, 0.25f, { 51, 51, 51 } },
+                           Case { bound, true, 1.0f, { 204, 204, 204 } },
+                           Case { bound, false, 0.25f, { 204, 204, 204 } },
+                           Case { scripted, true, std::nullopt, { 51, 51, 51 } },
+                           Case { scripted, false, std::nullopt, { 204, 204, 204 } } }) {
+        for (const bool with_effect : { false, true }) {
+            SCOPED_TRACE(std::string(c.fields) + (c.hdr ? " hdr" : " ldr") + (with_effect ? " effect" : ""));
+            std::map<bool, RendererPicture> pictures;
+            for (const bool native : { false, true }) {
+                const std::string name = "bound-brightness-" + std::to_string(index++);
+                const auto project = WriteLayerBrightnessFixture(root_ / name, c.hdr, true, false,
+                                                                 with_effect, c.fields);
+                LoadedScene loaded;
+                std::string error;
+                ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+                Scene& scene = *loaded.scene;
+                pictures[native] = DrawWithRenderer(
+                    scene, native, 384, 256, 4, 1.0 / 60.0, [&](int frame) {
+                        if (frame == 1 && c.glow_at_frame_one.has_value()) {
+                            scene.runtime->ApplyProjectPropertyOverride(
+                                { { "glow", RuntimeScalarValue::Float(*c.glow_at_frame_one) } });
+                        }
+                    });
+                ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+                const auto centre = CentreOf(pictures[native]);
+                for (std::size_t channel = 0; channel < 3; ++channel) {
+                    EXPECT_NEAR(centre[channel], c.expected[channel], 2)
+                        << (native ? "native" : "compatibility") << " channel " << channel;
+                }
+                EXPECT_EQ(scene.runtime->scriptErrorCount(), 0u);
+            }
+            EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
+                << "the native renderer tinted the layer differently from the compatibility renderer";
+        }
+    }
 }
 
 TEST_F(MetalSceneDraw, AnEffectsSwappedBuffersAccumulateAndItsFloatBuffersKeepTheirSignOnBothRenderers)

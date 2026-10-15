@@ -917,7 +917,12 @@ reduction, not a fixed ceiling on total process memory.
 An authored `hdr` scene with its bloom on selects the HDR path on either scene
 backend, as in Wallpaper Engine: overbright color is preserved in half-float targets
 and bloom is HDR, while other scenes, an `hdr` scene with bloom off included, keep the
-8-bit path. A scene that leaves `bloom` out has it on, at strength 2 above 0.65, as
+8-bit path. An image layer's `brightness` multiplies its colour into the `g_Color4` the
+layer is drawn with in that path only, as in Wallpaper Engine, where every other scene
+counts it as 1; the layer's brightness is not also the `g_Brightness` of a shader that
+declares one, which stays that material's own constant. A brightness bound
+to a user property or a script follows it while the scene runs, beside the layer's colour
+and alpha. A scene that leaves `bloom` out has it on, at strength 2 above 0.65, as
 Wallpaper Engine has it. Half-float targets cost eight rather than four bytes per
 pixel, and the cache accounts for that actual size; an eight-level bloom pyramid
 starting at half-resolution holds under a third of a full-size target's pixels. This

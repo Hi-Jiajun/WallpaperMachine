@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <string>
 #include <vector>
 #include <memory>
@@ -15,6 +16,15 @@ struct SceneMaterialCustomShader {
     ShaderValues                 constValues;
 };
 
+/// What the colour of a layer's `g_Color4` is made of. Wallpaper Engine multiplies
+/// the layer's colour by its brightness where the scene renders HDR -- the brightness
+/// is 1 here everywhere else -- and either may change while the scene runs (a user
+/// property, a script), so the product is built again from both.
+struct SceneMaterialTint {
+    std::array<float, 3> color { 1.0f, 1.0f, 1.0f };
+    float                brightness { 1.0f };
+};
+
 struct SceneMaterial {
 public:
     SceneMaterial()                     = default;
@@ -29,6 +39,8 @@ public:
     bool hasSprite { false };
 
     SceneMaterialCustomShader customShader;
+    /// Set on the materials that take a layer's `g_Color4`; the rest keep white.
+    SceneMaterialTint         tint;
     BlendMode                 blenmode { BlendMode::Disable };
     /// As authored. A renderer draws with `ResolveSceneDepthState`, not these.
     bool                      depth_test { false };

@@ -4198,12 +4198,25 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         context.layer_parent_ids[wpimgobj.id] = wpimgobj.parent_id;
     };
     // A colour bound to a user property, and the materials it has to reach:
-    // every one that takes the layer's `g_Color4`, as its alpha does.
+    // every one that takes the layer's `g_Color4`, as its alpha does. The
+    // brightness multiplies that colour where the scene renders HDR, and is
+    // followed the same way when a property or a script drives it.
     std::unique_ptr<DynamicValue>               user_color;
     std::vector<std::shared_ptr<SceneMaterial>> user_color_materials;
-    const auto registerImageLayerMaterial = [&context, &wpimgobj, &runtime_name, &user_color,
-                                             &user_color_materials](std::shared_ptr<SceneMaterial> material) {
-        if (user_color != nullptr && material != nullptr) user_color_materials.push_back(material);
+    std::unique_ptr<DynamicValue>               bound_brightness;
+    std::vector<std::shared_ptr<SceneMaterial>> bound_brightness_materials;
+    float                                       tint_brightness = 1.0f;
+    const auto tintLayerMaterial = [&wpimgobj, &user_color, &user_color_materials, &bound_brightness,
+                                    &bound_brightness_materials,
+                                    &tint_brightness](const std::shared_ptr<SceneMaterial>& material) {
+        if (material == nullptr) return;
+        material->tint = SceneMaterialTint { wpimgobj.color, tint_brightness };
+        if (user_color != nullptr) user_color_materials.push_back(material);
+        if (bound_brightness != nullptr) bound_brightness_materials.push_back(material);
+    };
+    const auto registerImageLayerMaterial = [&context, &wpimgobj, &runtime_name,
+                                             &tintLayerMaterial](std::shared_ptr<SceneMaterial> material) {
+        tintLayerMaterial(material);
         RegisterLayerAlpha(context, runtime_name, wpimgobj.alpha_setting, wpimgobj.alpha,
                            std::move(material));
     };
@@ -4302,6 +4315,22 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             wpimgobj.color   = { color.x(), color.y(), color.z() };
         }
     }
+    // Likewise the brightness: a property's value replaces the scene file's, and
+    // a script's runs with the scene. Wallpaper Engine multiplies it into the
+    // layer's colour only where it renders HDR; elsewhere it is 1, and a bound
+    // brightness has no material to follow.
+    if (context.scene->runtime != nullptr) {
+        if (const auto setting = wpimgobj.field_bindings.find("brightness");
+            setting != wpimgobj.field_bindings.end()) {
+            bound_brightness = ResolveFloatSetting(*context.scene->runtime, *setting, runtime_name);
+            wpimgobj.brightness = bound_brightness->getFloat();
+            QueueSceneScriptIfNeeded(context, runtime_name, *setting);
+        }
+    }
+    tint_brightness = context.scene->hdr ? wpimgobj.brightness : 1.0f;
+    if (! context.scene->hdr && bound_brightness != nullptr) {
+        context.scene->runtime->BindMaterialBrightness({}, std::move(bound_brightness));
+    }
 
     SceneMaterial     material;
     WPShaderValueData svData;
@@ -4316,14 +4345,19 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             }
         }
 
+        // The layer's brightness reaches the shader here, in the colour, and
+        // nowhere else: the `g_Brightness` of the older generic shaders is their
+        // material's own constant.
         baseConstSvs["g_Color4"] = std::array<float, 4> {
-            wpimgobj.color[0], wpimgobj.color[1], wpimgobj.color[2], wpimgobj.alpha
+            wpimgobj.color[0] * tint_brightness,
+            wpimgobj.color[1] * tint_brightness,
+            wpimgobj.color[2] * tint_brightness,
+            wpimgobj.alpha,
         };
         baseConstSvs["g_Color"] =
             std::array<float, 3> { wpimgobj.color[0], wpimgobj.color[1], wpimgobj.color[2] };
         baseConstSvs["g_Alpha"]      = wpimgobj.alpha;
         baseConstSvs["g_UserAlpha"]  = wpimgobj.alpha;
-        baseConstSvs["g_Brightness"] = wpimgobj.brightness;
 
         shaderInfo.baseConstSvs = baseConstSvs;
 
@@ -4525,7 +4559,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             std::shared_ptr<SceneMaterial> slot;
             auto effect = MakePassthroughEffect(context, effect_ppong_a, baseConstSvs,
                                                 runtime_name, wpimgobj.name, &slot);
-            if (effect != nullptr && user_color != nullptr) user_color_materials.push_back(slot);
+            if (effect != nullptr) tintLayerMaterial(slot);
             return effect;
         };
         if (render_as_compose && wpimgobj.effects.empty()) {
@@ -4694,6 +4728,10 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         if (user_color != nullptr) {
             context.scene->runtime->BindMaterialColor(std::move(user_color_materials),
                                                       std::move(user_color));
+        }
+        if (bound_brightness != nullptr) {
+            context.scene->runtime->BindMaterialBrightness(std::move(bound_brightness_materials),
+                                                           std::move(bound_brightness));
         }
         context.scene->runtime->RegisterLayerTemplate(
             wpimgobj.image,

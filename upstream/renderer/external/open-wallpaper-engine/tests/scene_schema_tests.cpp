@@ -2964,6 +2964,197 @@ void main() {
     EXPECT_EQ(parsed->runtime->scriptErrorCount(), 0u);
 }
 
+// Wallpaper Engine multiplies a layer's colour by its brightness into the
+// `g_Color4` of the layer's draw where it renders HDR -- the scene asks for HDR
+// and has bloom on -- and draws every other scene as if the brightness were 1.
+// The layer's own material and each effect pass take the product like they take
+// the colour, and the brightness is not also handed to the shader as
+// `g_Brightness`, which a shader that declares it takes from its own material.
+// A brightness a user property or a script drives follows it, beside a colour
+// that does the same.
+TEST(SceneSchema, AnImageLayersBrightnessTintsItsMaterialsOnlyInAnHdrSceneAndFollowsItsBindings) {
+    struct Layer {
+        const char*          name;
+        std::size_t          materials;
+        std::array<float, 3> before;  // g_Color4.rgb as loaded, HDR scene
+        std::array<float, 3> after;   // after the property document below, HDR scene
+    };
+    // glow loads at 0.75 and is then set to 0.25; tint loads at "0 0 1" and
+    // is then set to "0.5 1 1".
+    const std::array<Layer, 6> layers { {
+        { "plain", 1u, { 0.25f, 0.5f, 0.5f }, { 0.25f, 0.5f, 0.5f } },
+        { "with effect", 2u, { 0.25f, 0.5f, 0.5f }, { 0.25f, 0.5f, 0.5f } },
+        { "bound", 1u, { 0.75f, 0.75f, 0.75f }, { 0.25f, 0.25f, 0.25f } },
+        { "bound with effect", 2u, { 0.75f, 0.75f, 0.75f }, { 0.25f, 0.25f, 0.25f } },
+        { "bound with colour", 1u, { 0.0f, 0.0f, 0.75f }, { 0.125f, 0.25f, 0.25f } },
+        { "scripted", 1u, { 0.5f, 0.5f, 0.5f }, { 0.5f, 0.5f, 0.5f } },
+    } };
+    const std::array<const char*, 2> shaders { "genericimage", "genericimage2" };
+
+    for (const auto& [hdr, bloom] : std::array<std::pair<bool, bool>, 3> {
+             std::pair { true, true }, { true, false }, { false, false } }) {
+        // A scene renders HDR only with bloom on as well.
+        const bool renders_hdr = hdr && bloom;
+        for (const char* shader : shaders) {
+            SCOPED_TRACE(std::string(hdr ? "hdr" : "sdr") + (bloom ? " bloom " : " no bloom ") + shader);
+            fs::VFS vfs;
+            auto files = std::map<std::string, std::string> {
+                { "/image.json", R"({"width":64,"height":32,"material":"mat.json"})" },
+                { "/mat.json",
+                  std::string(R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":")") +
+                      shader + R"(","textures":["a.tex"]}]})" },
+                { "/effects/copy/effect.json",
+                  R"({"name":"copy","passes":[{"material":"effect_mat.json","bind":[{"name":"previous","index":0}]}]})" },
+                { "/effect_mat.json",
+                  R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":[null]}]})" },
+                { "/shaders/genericimage.vert",
+                  R"(attribute vec3 a_Position;
+attribute vec2 a_TexCoord;
+varying vec2 v_TexCoord;
+void main() {
+  gl_Position = vec4(a_Position, 1.0);
+  v_TexCoord = a_TexCoord;
+}
+)" },
+                { "/shaders/genericimage.frag",
+                  R"(uniform sampler2D g_Texture0;
+uniform vec4 g_Color4;
+varying vec2 v_TexCoord;
+void main() {
+  gl_FragColor = texture(g_Texture0, v_TexCoord) * g_Color4;
+}
+)" },
+                { "/shaders/genericimage2.vert",
+                  R"(attribute vec3 a_Position;
+attribute vec2 a_TexCoord;
+varying vec2 v_TexCoord;
+void main() {
+  gl_Position = vec4(a_Position, 1.0);
+  v_TexCoord = a_TexCoord;
+}
+)" },
+                { "/shaders/genericimage2.frag",
+                  R"(uniform sampler2D g_Texture0;
+uniform vec4 g_Color4;
+uniform float g_Brightness; // {"material":"Brightness","default":1,"range":[0,2]}
+varying vec2 v_TexCoord;
+void main() {
+  vec4 color = texture(g_Texture0, v_TexCoord);
+  color.rgb *= g_Brightness;
+  gl_FragColor = color * g_Color4;
+}
+)" },
+                { "/materials/a.tex.tex", "" },
+            };
+            if (renders_hdr) AddHdrBloomFixtureFiles(files);
+            EXPECT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+            audio::SoundManager sound_manager(audio::SoundManager::OutputBackend::Null);
+            ProjectProperties   properties { { "glow", RuntimeScalarValue::Float(0.75f) },
+                                             { "tint", RuntimeScalarValue::String("0 0 1") } };
+            const std::string   scene = std::string(R"({
+      "camera": {"center":[0,0,0], "eye":[0,0,1], "up":[0,1,0]},
+      "general": {
+        "ambientcolor":[0.2,0.2,0.2], "skylightcolor":[0.3,0.3,0.3],
+        "clearcolor":[0,0,0], "cameraparallax":false,
+        "cameraparallaxamount":0, "cameraparallaxdelay":0,
+        "cameraparallaxmouseinfluence":0, "hdr":)") + (hdr ? "true" : "false") +
+                                        R"(, "bloom":)" + (bloom ? "true" : "false") + R"(,
+        "orthogonalprojection":{"width":640,"height":360}
+      },
+      "objects": [
+        {"id":1,"name":"plain","image":"image.json","color":"0.5 1 1","brightness":0.5,
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true},
+        {"id":2,"name":"with effect","image":"image.json","color":"0.5 1 1","brightness":0.5,
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true,
+         "effects":[{"file":"effects/copy/effect.json","id":3,"visible":true}]},
+        {"id":4,"name":"bound","image":"image.json",
+         "brightness":{"user":"glow","value":0.5},
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true},
+        {"id":5,"name":"bound with effect","image":"image.json",
+         "brightness":{"user":"glow","value":0.5},
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true,
+         "effects":[{"file":"effects/copy/effect.json","id":6,"visible":true}]},
+        {"id":7,"name":"bound with colour","image":"image.json",
+         "color":{"user":"tint","value":"1 1 1"},
+         "brightness":{"user":"glow","value":0.5},
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true},
+        {"id":8,"name":"scripted","image":"image.json",
+         "brightness":{"script":"export function update(value) { return 0.5; }","value":1},
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true}
+      ]
+    })";
+
+            auto parsed = WPSceneParser().Parse(SceneParseRequest {
+                                                    .scene_id           = "image-brightness",
+                                                    .project_properties = &properties,
+                                                },
+                                                scene,
+                                                vfs,
+                                                sound_manager);
+            ASSERT_NE(parsed, nullptr);
+            ASSERT_NE(parsed->runtime, nullptr);
+            EXPECT_EQ(parsed->hdr, renders_hdr);
+
+            const auto materials_of = [&parsed](std::string_view name) {
+                std::vector<SceneMaterial*> materials;
+                auto node = FindRootChildByName(*parsed, name);
+                if (node == nullptr || node->Mesh() == nullptr) return materials;
+                materials.push_back(node->Mesh()->Material());
+                if (const auto camera = parsed->cameras.find(node->Camera());
+                    camera != parsed->cameras.end() && camera->second->HasImgEffect()) {
+                    auto& layer = *camera->second->GetImgEffect();
+                    for (std::size_t index = 0; index < layer.EffectCount(); ++index) {
+                        for (auto& effect_node : layer.GetEffect(index)->nodes) {
+                            materials.push_back(effect_node.sceneNode->Mesh()->Material());
+                        }
+                    }
+                }
+                return materials;
+            };
+            // The colour a layer has without its brightness, as loaded and as set.
+            const auto plain_colour = [](const Layer& layer, bool after) {
+                const std::string name = layer.name;
+                if (name == "plain" || name == "with effect") return std::array { 0.5f, 1.0f, 1.0f };
+                if (name == "bound with colour") {
+                    return after ? std::array { 0.5f, 1.0f, 1.0f } : std::array { 0.0f, 0.0f, 1.0f };
+                }
+                return std::array { 1.0f, 1.0f, 1.0f };
+            };
+            const auto expect_tint = [&](const Layer& layer, bool after) {
+                SCOPED_TRACE(std::string(layer.name) + (after ? " after" : " before"));
+                const auto materials = materials_of(layer.name);
+                ASSERT_EQ(materials.size(), layer.materials);
+                const auto expected = renders_hdr ? (after ? layer.after : layer.before)
+                                                  : plain_colour(layer, after);
+                for (std::size_t slot = 0; slot < materials.size(); ++slot) {
+                    SCOPED_TRACE(slot);
+                    const auto& values = materials[slot]->customShader.constValues;
+                    ASSERT_TRUE(values.contains("g_Color4"));
+                    for (std::size_t index = 0; index < 3; ++index) {
+                        EXPECT_FLOAT_EQ(values.at("g_Color4")[index], expected[index]);
+                    }
+                    EXPECT_FLOAT_EQ(values.at("g_Color4")[3], 1.0f);
+                    // The older shaders keep the brightness of their own material.
+                    if (slot == 0 && values.contains("g_Brightness")) {
+                        EXPECT_FLOAT_EQ(values.at("g_Brightness")[0], 1.0f);
+                    }
+                }
+            };
+
+            // A script has run once before anything is drawn.
+            parsed->runtime->Tick(1.0 / 60.0);
+            for (const auto& layer : layers) expect_tint(layer, false);
+
+            parsed->runtime->ApplyProjectPropertyOverride(
+                { { "glow", RuntimeScalarValue::Float(0.25f) },
+                  { "tint", RuntimeScalarValue::String("0.5 1 1") } });
+            parsed->runtime->Tick(1.0 / 60.0);
+            for (const auto& layer : layers) expect_tint(layer, true);
+            EXPECT_EQ(parsed->runtime->scriptErrorCount(), 0u);
+        }
+    }
+}
+
 // Wallpaper Engine reads a comma before a closing `]` or `}`, and its own
 // fluid simulation effect is written that way. An effect file or material
 // with one has to load like any other instead of dropping the effect.

@@ -323,6 +323,11 @@ public:
     // `g_Color4` is left to the alpha bindings.
     void BindMaterialColor(std::vector<std::shared_ptr<SceneMaterial>> materials,
                            std::unique_ptr<DynamicValue> value);
+    // A user-bound or scripted image `brightness` multiplies the colour of every
+    // material the layer tints with, and only in an HDR scene: with no material
+    // given the value is kept for its script alone.
+    void BindMaterialBrightness(std::vector<std::shared_ptr<SceneMaterial>> materials,
+                                std::unique_ptr<DynamicValue> value);
     std::shared_ptr<ScalarAnimationPlayback> RegisterScalarAnimation(std::string_view layer_name,
                                                                    ScalarAnimation animation);
     ScalarAnimationPlayback* FindScalarAnimation(std::string_view layer_name,
