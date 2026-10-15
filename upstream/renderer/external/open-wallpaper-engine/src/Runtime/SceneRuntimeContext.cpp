@@ -1261,6 +1261,7 @@ void SceneRuntimeContext::UnregisterNode(std::string_view name) {
     m_node_rotation.erase(key);
     m_node_effect_final.erase(key);
     m_node_alpha.erase(key);
+    m_node_color.erase(key);
     if (m_nodes.erase(key) != 0) {
         std::erase(m_node_order, key);
         m_node_rank_valid = false;
@@ -1901,9 +1902,11 @@ void SceneRuntimeContext::BindMaterialAlpha(std::shared_ptr<SceneMaterial> mater
     });
 }
 
-void SceneRuntimeContext::BindMaterialColor(std::vector<std::shared_ptr<SceneMaterial>> materials,
+void SceneRuntimeContext::BindMaterialColor(std::string layer_name,
+                                            std::vector<std::shared_ptr<SceneMaterial>> materials,
                                             std::unique_ptr<DynamicValue> value) {
     if (materials.empty() || value == nullptr) return;
+    if (! layer_name.empty()) m_node_color[std::move(layer_name)] = value.get();
     RegisterDynamicValueListener(
         std::move(value), [materials = std::move(materials)](const DynamicValue& current) {
             const auto color = current.getVec3();
@@ -2461,6 +2464,15 @@ Eigen::Vector3f SceneRuntimeContext::NodeColor(std::string_view name) const {
 }
 
 bool SceneRuntimeContext::SetNodeColor(std::string_view name, const Eigen::Vector3f& color) {
+    // A colour bound to a property or a script takes what a script writes as
+    // its value, as a script's visibility and origin writes do: the next
+    // evaluation continues from it, where an `update()` that returns nothing
+    // would otherwise put the old value straight back, and every material
+    // that takes the layer's colour follows, not only the layer's own.
+    if (const auto binding = m_node_color.find(std::string(name));
+        binding != m_node_color.end() && binding->second != nullptr) {
+        binding->second->update(color);
+    }
     const auto node = m_nodes.find(std::string(name));
     if (node == m_nodes.end() || node->second == nullptr || node->second->Mesh() == nullptr ||
         node->second->Mesh()->Material() == nullptr) return false;

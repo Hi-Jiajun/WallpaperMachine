@@ -2687,6 +2687,121 @@ TEST_F(MetalSceneDraw, ANoMusicPlaceholderShowsWhileNothingPlaysOnBothRenderers)
     EXPECT_EQ(pictures[true].rgb, pictures[false].rgb);
 }
 
+/// The fixture's card painted in its layer colour alone -- `g_Color4`, opaque --
+/// over black, with `color_json` as the card's `color` verbatim, and a small
+/// white marker card apart from it that shows the scene drew at all.
+std::filesystem::path WriteLayerColourFixture(const std::filesystem::path& root,
+                                              std::string_view            color_json)
+{
+    const auto project = WriteFixture(root);
+    const auto file    = [&](const std::string& path, const std::string& text) {
+        std::filesystem::create_directories((root / path).parent_path());
+        std::ofstream(root / path) << text;
+    };
+    file("shaders/metal_probe.frag",
+         "uniform vec4 g_Color4;\nvarying vec2 v_TexCoord;\n"
+         "void main() {\n  gl_FragColor = vec4(g_Color4.rgb, 1.0);\n}\n");
+    file("shaders/marker.vert",
+         "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\n"
+         "attribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+         "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+         "  v_TexCoord = a_TexCoord;\n}\n");
+    file("shaders/marker.frag", "void main() {\n  gl_FragColor = vec4(1.0);\n}\n");
+    file("materials/marker.json",
+         R"({"passes":[{"shader":"marker","blending":"translucent","cullmode":"nocull",)"
+         R"("depthtest":"disabled","depthwrite":"disabled"}]})");
+    file("models/marker.json", R"({"width":64,"height":64,"material":"materials/marker.json"})");
+    file("layout.json",
+         R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+         R"("general":{"clearcolor":[0,0,0],"bloom":false,"cameraparallax":false,)"
+         R"("orthogonalprojection":{"width":384,"height":256}},)"
+         R"("objects":[{"id":1,"name":"tile","image":"models/tile.json","origin":[192,128,0],)"
+         R"("scale":[1,1,1],"angles":[0,0,0],"visible":true,"color":)" +
+             std::string(color_json) +
+             R"(},{"id":2,"name":"marker","image":"models/marker.json","origin":[30,128,0],)"
+             R"("scale":[0.1,0.1,1],"angles":[0,0,0],"visible":true}]})");
+    return project;
+}
+
+TEST_F(MetalSceneDraw, AnImageLayersColourScriptDecidesItsColourOnBothRenderers)
+{
+    // Wallpaper Engine runs the script of an image layer's `color` every frame
+    // and draws the layer in what it returns, over the scene file's `value`:
+    // the media widgets' template returns black until a cover arrives, so the
+    // layer is black while nothing plays. A script that returns nothing leaves
+    // the colour alone, and one that writes `thisLayer.color` and returns
+    // nothing sets it.
+    struct Variant
+    {
+        const char*          name;
+        const char*          color_json;
+        bool                 with_cover;
+        std::array<int, 3>   expected;
+        /// The frame index a cover arrives at, after earlier frames were drawn.
+        int                  cover_frame { -1 };
+    };
+    const std::string cover_template =
+        R"({"value":"0.33 0.64 0.74","script":"let newColor = new Vec3(0, 0, 0);\n)"
+        R"(export function update() { return newColor; }\n)"
+        R"(export function mediaThumbnailChanged(event) { newColor = event.primaryColor; }"})";
+    const Variant variants[] {
+        { "returns", R"({"value":"0 1 0","script":"export function update() { return new Vec3(1, 0, 0); }"})",
+          false, { 255, 0, 0 } },
+        { "nothing", R"({"value":"0 1 0","script":"export function update() { }"})",
+          false, { 0, 255, 0 } },
+        { "writes", R"({"value":"0 1 0","script":"export function update() { thisLayer.color = new Vec3(0, 0, 1); }"})",
+          false, { 0, 0, 255 } },
+        { "plain", R"("0 1 0")", false, { 0, 255, 0 } },
+        { "idle", cover_template.c_str(), false, { 0, 0, 0 } },
+        { "cover", cover_template.c_str(), true, { 64, 128, 191 } },
+        // The colour a cover brings after frames have been drawn black reaches
+        // the screen too, not only one that was there before the first frame.
+        { "late cover", cover_template.c_str(), false, { 64, 128, 191 }, 3 },
+    };
+    const std::string cover_event =
+        R"({"type":"mediaThumbnailChanged","hasThumbnail":true,"primaryColor":[0.25,0.5,0.75],)"
+        R"("secondaryColor":[0,0,0],"tertiaryColor":[0,0,0],"textColor":[1,1,1],"highContrastColor":[0,0,0]})";
+    for (const auto& variant : variants) {
+        std::map<bool, RendererPicture> pictures;
+        for (const bool native : { false, true }) {
+            const std::string name    = std::string("layer-colour-") + variant.name +
+                                        (native ? "-native" : "-compat");
+            const auto        project = WriteLayerColourFixture(root_ / name, variant.color_json);
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            if (native) {
+                const auto selection = SelectSceneBackend(*loaded.scene);
+                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            }
+            if (variant.with_cover || variant.cover_frame >= 0) {
+                loaded.scene->runtime->SetMediaIntegrationEnabled(true);
+            }
+            if (variant.with_cover) loaded.scene->runtime->DispatchMediaEventJson(cover_event);
+            const auto arrive = [&](int frame) {
+                if (frame == variant.cover_frame) {
+                    loaded.scene->runtime->DispatchMediaEventJson(cover_event);
+                }
+            };
+            pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 6, 1.0 / 60.0, arrive);
+            ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+            ASSERT_EQ(pictures[native].rgb.size(), 384u * 256u * 3u);
+            EXPECT_EQ(loaded.scene->runtime->scriptErrorCount(), 0u);
+        }
+        for (const bool native : { false, true }) {
+            SCOPED_TRACE(std::string(variant.name) + (native ? " native" : " compatibility"));
+            const auto centre = RgbAt(pictures[native], 192, 128);
+            for (std::size_t channel = 0; channel < 3; ++channel) {
+                EXPECT_NEAR(centre[channel], variant.expected[channel], 2)
+                    << "the layer is not drawn in the colour its script decides";
+            }
+            EXPECT_EQ(RgbAt(pictures[native], 30, 128), (std::array<int, 3> { 255, 255, 255 }))
+                << "the scene drew nothing at all, so the check above says nothing";
+        }
+        EXPECT_EQ(pictures[true].rgb, pictures[false].rgb) << variant.name;
+    }
+}
+
 TEST_F(MetalSceneDraw, ACompositingEffectSeesTheScreenUprightOnBothRenderers)
 {
     // An effect that composes a layer over the screen (Wallpaper Engine's

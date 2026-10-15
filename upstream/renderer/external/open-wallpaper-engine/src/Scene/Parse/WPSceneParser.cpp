@@ -4197,21 +4197,21 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     auto registerImageNode = [&context, &wpimgobj, &spImgNode]() {
         context.layer_parent_ids[wpimgobj.id] = wpimgobj.parent_id;
     };
-    // A colour bound to a user property, and the materials it has to reach:
-    // every one that takes the layer's `g_Color4`, as its alpha does. The
-    // brightness multiplies that colour where the scene renders HDR, and is
+    // A colour bound to a user property or a script, and the materials it has
+    // to reach: every one that takes the layer's `g_Color4`, as its alpha does.
+    // The brightness multiplies that colour where the scene renders HDR, and is
     // followed the same way when a property or a script drives it.
-    std::unique_ptr<DynamicValue>               user_color;
-    std::vector<std::shared_ptr<SceneMaterial>> user_color_materials;
+    std::unique_ptr<DynamicValue>               bound_color;
+    std::vector<std::shared_ptr<SceneMaterial>> bound_color_materials;
     std::unique_ptr<DynamicValue>               bound_brightness;
     std::vector<std::shared_ptr<SceneMaterial>> bound_brightness_materials;
     float                                       tint_brightness = 1.0f;
-    const auto tintLayerMaterial = [&wpimgobj, &user_color, &user_color_materials, &bound_brightness,
+    const auto tintLayerMaterial = [&wpimgobj, &bound_color, &bound_color_materials, &bound_brightness,
                                     &bound_brightness_materials,
                                     &tint_brightness](const std::shared_ptr<SceneMaterial>& material) {
         if (material == nullptr) return;
         material->tint = SceneMaterialTint { wpimgobj.color, tint_brightness };
-        if (user_color != nullptr) user_color_materials.push_back(material);
+        if (bound_color != nullptr) bound_color_materials.push_back(material);
         if (bound_brightness != nullptr) bound_brightness_materials.push_back(material);
     };
     const auto registerImageLayerMaterial = [&context, &wpimgobj, &runtime_name,
@@ -4275,6 +4275,10 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     QueueSceneScriptIfNeeded(context, runtime_name, wpimgobj.origin_setting);
     QueueSceneScriptIfNeeded(context, runtime_name, wpimgobj.scale_setting);
     QueueSceneScriptIfNeeded(context, runtime_name, wpimgobj.angles_setting);
+    if (const auto setting = wpimgobj.field_bindings.find("color");
+        setting != wpimgobj.field_bindings.end()) {
+        QueueSceneScriptIfNeeded(context, runtime_name, *setting);
+    }
     if (! runtime_owns_anchor) {
         LoadAlignment(*spImgNode, wpimgobj.alignment, { wpimgobj.size[0], wpimgobj.size[1] });
     }
@@ -4304,14 +4308,13 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
 
     // The scene file's colour is only the property's default: a preset or the
     // user's own choice replaces it, so the layer is built with that value. A
-    // scripted colour is left alone; such scripts may write `thisLayer.color`
-    // themselves and return nothing.
+    // script's value replaces it from the first tick on, as it does on a text
+    // layer, and until then the layer holds the scene file's.
     if (context.scene->runtime != nullptr) {
         if (const auto setting = wpimgobj.field_bindings.find("color");
-            setting != wpimgobj.field_bindings.end() && setting->contains("user") &&
-            ! setting->contains("script")) {
-            user_color = ResolveVec3Setting(*context.scene->runtime, *setting, runtime_name);
-            const auto color = user_color->getVec3();
+            setting != wpimgobj.field_bindings.end() && HasDynamicSetting(*setting)) {
+            bound_color = ResolveVec3Setting(*context.scene->runtime, *setting, runtime_name);
+            const auto color = bound_color->getVec3();
             wpimgobj.color   = { color.x(), color.y(), color.z() };
         }
     }
@@ -4725,9 +4728,10 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     registerImageNode();
     runtime_node_registration.Commit();
     if (context.scene->runtime != nullptr) {
-        if (user_color != nullptr) {
-            context.scene->runtime->BindMaterialColor(std::move(user_color_materials),
-                                                      std::move(user_color));
+        if (bound_color != nullptr) {
+            context.scene->runtime->BindMaterialColor(runtime_name,
+                                                      std::move(bound_color_materials),
+                                                      std::move(bound_color));
         }
         if (bound_brightness != nullptr) {
             context.scene->runtime->BindMaterialBrightness(std::move(bound_brightness_materials),

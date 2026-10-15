@@ -91,6 +91,22 @@ consent that real events do. A real event that reached the scene first (the repl
 a scene that has just attached) is not repeated as idle, per event type, and a real
 one after it is delivered as usual ([media integration](media-integration.md#scene-wallpapers)).
 
+An image layer's `color` that a script decides is that script's value, every frame, as
+it is in Wallpaper Engine and on a text layer: the media widgets' colour script returns
+black until a cover's colour arrives, so a widget's solid layer is black while nothing
+plays, and tints with the cover once one does. The layer holds the scene file's value
+until its script has run, on the first tick, and the value reaches the layer's own
+material, every effect pass and a compose layer's passthrough, as a colour bound to a
+user property does (alpha stays with the alpha bindings). A script whose `update()`
+returns nothing leaves the colour as it is, and one that writes `thisLayer.color` sets
+it from then on: the next `update(value)` is given it, and a value `update()` returns
+replaces it, as for `visible` and `origin`. A write to the colour of a layer that has no
+property or script bound to it reaches only the layer's own material, not its effect
+passes. A scripted colour costs one script call a frame, as a text layer's does, and
+no pass or memory. It is also a script like any other, so a scene whose only script is
+an image layer's colour no longer goes idle (it did, while the colour script was never
+created); a scene with other scripts did not idle before either.
+
 A scene follows the cursor anywhere on its display, but, as in Wallpaper Engine, a
 mouse press counts only where it lands on the desktop: the wallpaper, Finder's icons or
 a desktop widget. A click in another app's window, in the menu bar or the Dock, or in

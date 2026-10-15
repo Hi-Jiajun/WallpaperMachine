@@ -342,11 +342,8 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   before building `g_Color`/`g_Color4`, then `BindMaterialColor` feeds the layer's
   own material, every effect pass and a compose layer's passthrough from one
   value, keeping each `g_Color4` alpha. It is a listener, so it costs nothing per
-  frame and runs only when the property changes. A scripted `color` is
-  deliberately not bound: `DynamicValue` notifies on every update, so a binding
-  would overwrite what a script that writes `thisLayer.color` and returns nothing
-  just set. A layer whose placeholder a runtime image replaces drops a bound
-  colour as it drops an authored one.
+  frame and runs only when the property changes. A layer whose placeholder a
+  runtime image replaces drops a bound colour as it drops an authored one.
 - **Image layer brightness** — `SceneSchema.AnImageLayersBrightnessTintsItsMaterialsOnlyInAnHdrSceneAndFollowsItsBindings`,
   `MetalSceneDraw.AnImageLayersBrightnessTintsItOnlyWhereTheSceneRendersHdrOnBothRenderers`
   and `.AnImageLayersBoundBrightnessFollowsItsPropertyAndScriptOnBothRenderers`.
@@ -366,6 +363,35 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   bloom or HDR), with and without a copy effect and a `g_Brightness` shader, changes a
   bound `glow` property while the scene runs and drives the brightness from a script.
   A text layer's brightness is separate (text-spec T6).
+- **Scripted image colour** — `SceneSchema.ScriptedImageColourIsTheScriptsValueOnEveryLayerMaterial`
+  and `MetalSceneDraw.AnImageLayersColourScriptDecidesItsColourOnBothRenderers`.
+  An image layer's `color` that carries a script is that script's value every frame,
+  over the scene file's `value`, as on a text layer: `ParseImageObj` resolves it
+  like a bound colour and `BindMaterialColor` feeds the layer's own material, every
+  effect pass and the passthrough from the script's value. It is the colour the
+  media widgets' template returns, black until `mediaThumbnailChanged` brings a
+  cover's colour (the two tests run that template idle and after a cover), where the
+  layer used to keep the scene file's colour for ever (the MP3 player's display of
+  one local scene drew light teal where Wallpaper Engine draws black). A script that
+  returns nothing keeps the colour, and one that writes `thisLayer.color` and returns
+  nothing sets it: `SetNodeColor` also updates the bound value, as `SetNodeVisible`
+  and `SetNodeTranslate` do, because `DynamicValue` notifies on every update and the
+  bound value would otherwise put the old colour back over the write on the same tick
+  (this was the reason a scripted `color` used to be left unbound). The Metal test
+  covers a returned colour, a write, nothing returned, a plain colour, the idle
+  widget and a cover on both renderers, equal to each other; the schema test reads
+  every material of a layer with an effect, a written colour over three ticks, a
+  colour script made of `scene.on` handlers (queued as a scene script on its layer,
+  and its write reaches the effect pass), a script whose next `update(value)` is given
+  the colour it just wrote, a cover that arrives after them, and the scene's
+  `Script` demand reason. The Metal test also has a cover that arrives after
+  frames were drawn black, on both renderers. In an HDR
+  scene the layer's brightness multiplies the script's colour into `g_Color4` like any
+  other colour: `SceneSchema.AnImageLayersBrightnessTintsItsMaterialsOnlyInAnHdrSceneAndFollowsItsBindings`
+  keeps the product through a colour a script returns and one it writes with
+  `thisLayer.color`, and has the script's colour alone where the scene does not render
+  HDR. Before the change a scripted colour stayed the scene file's on every material,
+  so every case that depends on the script failed.
 - **User properties and interactive scenes** — `applyUserProperties` runs once
   initially, then only for changed properties, after the whole property set has
   been refreshed. Exercise clock clicks and hidden-helper enter/leave through

@@ -2852,7 +2852,9 @@ void main() {
 // A layer colour bound to a user property is the property's value: a preset
 // or a saved choice replaces the scene file's default. It has to reach the
 // layer's own material and every effect pass, keep the layer's alpha, and
-// follow the property when it changes. A scripted colour is not a property.
+// follow the property when it changes. A scripted colour is the script's value
+// from its first tick on (`ScriptedImageColour*` below), whatever the scene
+// file's `value` says.
 TEST(SceneSchema, UserBoundImageColourTintsEveryLayerMaterialAndFollowsTheProperty) {
     fs::VFS vfs;
     auto files = std::map<std::string, std::string> {
@@ -2954,6 +2956,7 @@ void main() {
 
     expect_colour("plain", { 0.0f, 0.0f, 1.0f }, 1u);
     expect_colour("with effect", { 0.0f, 0.0f, 1.0f }, 2u);
+    // Until its script has run, the scripted layer holds the scene file's value.
     expect_colour("scripted", { 0.9f, 0.15f, 0.27f }, 1u);
 
     parsed->runtime->ApplyProjectPropertyOverride(
@@ -2961,6 +2964,176 @@ void main() {
     parsed->runtime->Tick(1.0 / 60.0);
     expect_colour("plain", { 0.25f, 0.5f, 0.75f }, 1u);
     expect_colour("with effect", { 0.25f, 0.5f, 0.75f }, 2u);
+    // The script's value, not the scene file's, once it has run.
+    expect_colour("scripted", { 0.0f, 1.0f, 0.0f }, 1u);
+    EXPECT_EQ(parsed->runtime->scriptErrorCount(), 0u);
+}
+
+// Wallpaper Engine runs a colour script on an image layer like one on a text
+// layer: its `update()` is the layer's colour every frame, over the scene file's
+// `value`, on the layer's own material and on every effect pass. The media
+// widgets' colour script returns black until a cover's colour arrives. A script
+// that returns nothing leaves the colour as it is, and one that writes
+// `thisLayer.color` and returns nothing sets it.
+TEST(SceneSchema, ScriptedImageColourIsTheScriptsValueOnEveryLayerMaterial) {
+    fs::VFS vfs;
+    auto files = std::map<std::string, std::string> {
+        { "/image.json", R"({"width":64,"height":32,"material":"mat.json"})" },
+        { "/mat.json",
+          R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":["a.tex"]}]})" },
+        { "/effects/copy/effect.json",
+          R"({"name":"copy","passes":[{"material":"effect_mat.json","bind":[{"name":"previous","index":0}]}]})" },
+        { "/effect_mat.json",
+          R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":[null]}]})" },
+        { "/shaders/genericimage.vert",
+          R"(attribute vec3 a_Position;
+attribute vec2 a_TexCoord;
+varying vec2 v_TexCoord;
+void main() {
+  gl_Position = vec4(a_Position, 1.0);
+  v_TexCoord = a_TexCoord;
+}
+)" },
+        { "/shaders/genericimage.frag",
+          R"(uniform sampler2D g_Texture0;
+uniform vec4 g_Color4;
+varying vec2 v_TexCoord;
+void main() {
+  gl_FragColor = texture(g_Texture0, v_TexCoord) * g_Color4;
+}
+)" },
+        { "/materials/a.tex.tex", "" },
+    };
+    EXPECT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+    audio::SoundManager sound_manager(audio::SoundManager::OutputBackend::Null);
+    const std::string   scene = R"({
+      "camera": {"center":[0,0,0], "eye":[0,0,1], "up":[0,1,0]},
+      "general": {
+        "ambientcolor":[0.2,0.2,0.2], "skylightcolor":[0.3,0.3,0.3],
+        "clearcolor":[0,0,0], "cameraparallax":false,
+        "cameraparallaxamount":0, "cameraparallaxdelay":0,
+        "cameraparallaxmouseinfluence":0,
+        "orthogonalprojection":{"width":640,"height":360}
+      },
+      "objects": [
+        {"id":1,"name":"returns","image":"image.json","alpha":0.5,
+         "color":{"script":"export function update() { return new Vec3(1, 0, 0); }",
+                  "value":"0 1 0"},
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true,
+         "effects":[{"file":"effects/copy/effect.json","id":2,"visible":true}]},
+        {"id":3,"name":"returns nothing","image":"image.json","alpha":0.5,
+         "color":{"script":"export function update(value) { }","value":"0.9 0.15 0.27"},
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true},
+        {"id":4,"name":"writes","image":"image.json","alpha":0.5,
+         "color":{"script":"export function update() { thisLayer.color = new Vec3(0, 0, 1); }",
+                  "value":"1 0 0"},
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true,
+         "effects":[{"file":"effects/copy/effect.json","id":5,"visible":true}]},
+        {"id":6,"name":"cover","image":"image.json","alpha":0.5,
+         "color":{"script":"let newColor = new Vec3(0, 0, 0);\nexport function update() { return newColor; }\nexport function mediaThumbnailChanged(event) { newColor = event.primaryColor; }",
+                  "value":"0.33 0.64 0.74"},
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true},
+        {"id":7,"name":"handler","image":"image.json","alpha":0.5,
+         "color":{"script":"scene.on('mediaThumbnailChanged', function(event) { thisLayer.color = event.primaryColor; });",
+                  "value":"0 1 0"},
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true,
+         "effects":[{"file":"effects/copy/effect.json","id":8,"visible":true}]},
+        {"id":9,"name":"reads its write","image":"image.json","alpha":0.5,
+         "color":{"script":"let ticks = 0;\nexport function update(value) { ticks += 1; if (ticks == 1) { thisLayer.color = new Vec3(0, 0, 1); return; } return new Vec3(0.5, value.y, value.z); }",
+                  "value":"1 0 0"},
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true}
+      ]
+    })";
+
+    ProjectProperties properties;
+    auto              parsed = WPSceneParser().Parse(SceneParseRequest {
+                                                         .scene_id           = "scripted-image-colour",
+                                                         .project_properties = &properties,
+                                                     },
+                                                     scene,
+                                                     vfs,
+                                                     sound_manager);
+    ASSERT_NE(parsed, nullptr);
+    ASSERT_NE(parsed->runtime, nullptr);
+
+    const auto materials_of = [&parsed](std::string_view name) {
+        std::vector<SceneMaterial*> materials;
+        auto node = FindRootChildByName(*parsed, name);
+        if (node == nullptr || node->Mesh() == nullptr) return materials;
+        materials.push_back(node->Mesh()->Material());
+        if (const auto camera = parsed->cameras.find(node->Camera());
+            camera != parsed->cameras.end() && camera->second->HasImgEffect()) {
+            auto& layer = *camera->second->GetImgEffect();
+            for (std::size_t index = 0; index < layer.EffectCount(); ++index) {
+                for (auto& effect_node : layer.GetEffect(index)->nodes) {
+                    materials.push_back(effect_node.sceneNode->Mesh()->Material());
+                }
+            }
+        }
+        return materials;
+    };
+    const auto expect_colour = [&](std::string_view name, std::array<float, 3> rgb,
+                                   std::size_t expected_materials) {
+        SCOPED_TRACE(std::string(name));
+        const auto materials = materials_of(name);
+        ASSERT_EQ(materials.size(), expected_materials);
+        for (const auto* material : materials) {
+            const auto& values = material->customShader.constValues;
+            ASSERT_TRUE(values.contains("g_Color4"));
+            ASSERT_TRUE(values.contains("g_Color"));
+            for (std::size_t index = 0; index < 3; ++index) {
+                EXPECT_FLOAT_EQ(values.at("g_Color4")[index], rgb[index]);
+                EXPECT_FLOAT_EQ(values.at("g_Color")[index], rgb[index]);
+            }
+            EXPECT_FLOAT_EQ(values.at("g_Color4")[3], 0.5f);
+        }
+    };
+
+    // As the scene loads, before any script has run: the scene file's values.
+    expect_colour("returns", { 0.0f, 1.0f, 0.0f }, 2u);
+    expect_colour("returns nothing", { 0.9f, 0.15f, 0.27f }, 1u);
+    expect_colour("writes", { 1.0f, 0.0f, 0.0f }, 2u);
+    expect_colour("cover", { 0.33f, 0.64f, 0.74f }, 1u);
+    expect_colour("handler", { 0.0f, 1.0f, 0.0f }, 2u);
+    expect_colour("reads its write", { 1.0f, 0.0f, 0.0f }, 1u);
+
+    // Scripts that decide a colour are scripts: the scene keeps its clock, which
+    // is the cost of following them (an image colour script made none before).
+    EXPECT_NE(parsed->runtime->DescribeTimeAdvancingWork() & SceneDemandReason::Script, 0u);
+
+    // What the script wrote on the first tick is the value its second call is given
+    // (it would be the scene file's (1, 0, 0), and the result (0.5, 0, 0), if not).
+    parsed->runtime->Tick(1.0 / 60.0);
+    expect_colour("reads its write", { 0.0f, 0.0f, 1.0f }, 1u);
+    parsed->runtime->Tick(1.0 / 60.0);
+    expect_colour("reads its write", { 0.5f, 0.0f, 1.0f }, 1u);
+
+    // Every tick, not just the first: a colour that wore off would show here.
+    for (int tick = 0; tick < 3; ++tick) {
+        parsed->runtime->Tick(1.0 / 60.0);
+        SCOPED_TRACE(tick);
+        expect_colour("returns", { 1.0f, 0.0f, 0.0f }, 2u);
+        // `update()` returned nothing, so the colour stays what it was.
+        expect_colour("returns nothing", { 0.9f, 0.15f, 0.27f }, 1u);
+        // It wrote the colour itself; the tick must not put the scene file's back.
+        expect_colour("writes", { 0.0f, 0.0f, 1.0f }, 2u);
+        // The media widgets' template: black until a cover's colour arrives.
+        expect_colour("cover", { 0.0f, 0.0f, 0.0f }, 1u);
+        // Written only by a handler, which has not been called yet.
+        expect_colour("handler", { 0.0f, 1.0f, 0.0f }, 2u);
+    }
+
+    parsed->runtime->SetMediaIntegrationEnabled(true);
+    parsed->runtime->DispatchMediaEventJson(
+        R"({"type":"mediaThumbnailChanged","hasThumbnail":true,"primaryColor":[0.25,0.5,0.75],"secondaryColor":[0,0,0],"tertiaryColor":[0,0,0],"textColor":[1,1,1],"highContrastColor":[0,0,0]})");
+    parsed->runtime->Tick(1.0 / 60.0);
+    expect_colour("cover", { 0.25f, 0.5f, 0.75f }, 1u);
+    // A colour script made of event handlers writes the colour from its handler,
+    // and the write reaches the effect pass too.
+    expect_colour("handler", { 0.25f, 0.5f, 0.75f }, 2u);
+    parsed->runtime->Tick(1.0 / 60.0);
+    expect_colour("cover", { 0.25f, 0.5f, 0.75f }, 1u);
+    expect_colour("handler", { 0.25f, 0.5f, 0.75f }, 2u);
     EXPECT_EQ(parsed->runtime->scriptErrorCount(), 0u);
 }
 
@@ -2968,8 +3141,9 @@ void main() {
 // `g_Color4` of the layer's draw where it renders HDR -- the scene asks for HDR
 // and has bloom on -- and draws every other scene as if the brightness were 1.
 // The layer's own material and each effect pass take the product like they take
-// the colour, and the brightness is not also handed to the shader as
-// `g_Brightness`, which a shader that declares it takes from its own material.
+// the colour, a colour a script returns or writes included, and the brightness is
+// not also handed to the shader as `g_Brightness`, which a shader that declares it
+// takes from its own material.
 // A brightness a user property or a script drives follows it, beside a colour
 // that does the same.
 TEST(SceneSchema, AnImageLayersBrightnessTintsItsMaterialsOnlyInAnHdrSceneAndFollowsItsBindings) {
@@ -2981,13 +3155,17 @@ TEST(SceneSchema, AnImageLayersBrightnessTintsItsMaterialsOnlyInAnHdrSceneAndFol
     };
     // glow loads at 0.75 and is then set to 0.25; tint loads at "0 0 1" and
     // is then set to "0.5 1 1".
-    const std::array<Layer, 6> layers { {
+    const std::array<Layer, 8> layers { {
         { "plain", 1u, { 0.25f, 0.5f, 0.5f }, { 0.25f, 0.5f, 0.5f } },
         { "with effect", 2u, { 0.25f, 0.5f, 0.5f }, { 0.25f, 0.5f, 0.5f } },
         { "bound", 1u, { 0.75f, 0.75f, 0.75f }, { 0.25f, 0.25f, 0.25f } },
         { "bound with effect", 2u, { 0.75f, 0.75f, 0.75f }, { 0.25f, 0.25f, 0.25f } },
         { "bound with colour", 1u, { 0.0f, 0.0f, 0.75f }, { 0.125f, 0.25f, 0.25f } },
         { "scripted", 1u, { 0.5f, 0.5f, 0.5f }, { 0.5f, 0.5f, 0.5f } },
+        // A colour script's return value and its `thisLayer.color` write both
+        // reach the layer's materials through the product, not around it.
+        { "scripted colour", 2u, { 0.0f, 0.5f, 0.0f }, { 0.0f, 0.5f, 0.0f } },
+        { "scripted colour write", 1u, { 0.0f, 0.0f, 0.5f }, { 0.0f, 0.0f, 0.5f } },
     } };
     const std::array<const char*, 2> shaders { "genericimage", "genericimage2" };
 
@@ -3080,6 +3258,13 @@ void main() {
          "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true},
         {"id":8,"name":"scripted","image":"image.json",
          "brightness":{"script":"export function update(value) { return 0.5; }","value":1},
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true},
+        {"id":9,"name":"scripted colour","image":"image.json","brightness":0.5,
+         "color":{"script":"export function update() { return new Vec3(0, 1, 0); }","value":"1 0 0"},
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true,
+         "effects":[{"file":"effects/copy/effect.json","id":10,"visible":true}]},
+        {"id":11,"name":"scripted colour write","image":"image.json","brightness":0.5,
+         "color":{"script":"export function update() { thisLayer.color = new Vec3(0, 0, 1); }","value":"1 0 0"},
          "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true}
       ]
     })";
@@ -3118,6 +3303,8 @@ void main() {
                 if (name == "bound with colour") {
                     return after ? std::array { 0.5f, 1.0f, 1.0f } : std::array { 0.0f, 0.0f, 1.0f };
                 }
+                if (name == "scripted colour") return std::array { 0.0f, 1.0f, 0.0f };
+                if (name == "scripted colour write") return std::array { 0.0f, 0.0f, 1.0f };
                 return std::array { 1.0f, 1.0f, 1.0f };
             };
             const auto expect_tint = [&](const Layer& layer, bool after) {

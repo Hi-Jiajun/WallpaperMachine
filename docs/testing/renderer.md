@@ -863,6 +863,18 @@ into private textures; the three that draw skip visibly without a Metal device.
   binary. The one frame that covers it, a media widget whose text script returns an
   empty title while its visibility script writes the sound layer's name, shows the
   text script's value.
+- **Layer colour writes.** An image layer's colour that a script or a user property
+  decides takes what a script writes to `thisLayer.color` as its value, on every
+  material the layer draws with. Not matched: a write to an image layer whose colour is
+  bound to nothing reaches only the layer's own material, not its effect passes; and a
+  write from a script that does not own the colour (a handler, a scene script, another
+  layer's script) lasts until the owning script's `update()` returns a value or the
+  property changes, so which of two scripts writing one colour Wallpaper Engine shows
+  was not read from the binary. A text layer's `color` is bound to its own material
+  constant, which is applied every tick, so a script that only writes `thisLayer.color`
+  there (one local scene's song-title text does) keeps the scene file's colour; a text
+  script that returns the colour is followed. That gap was seen in a probe, not
+  against a Wallpaper Engine frame.
 - **Cursor walk details.** Layers are walked in the scene's layer order, and the quad
   test keeps a coverage mask for layers whose scripts handle the cursor, which
   Wallpaper Engine's does not have. Wallpaper Engine lets no blocker stop the walk while

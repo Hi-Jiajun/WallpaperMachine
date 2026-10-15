@@ -318,10 +318,12 @@ public:
     // The flat shader reads `g_Alpha`, so the live value has to land there.
     void BindMaterialAlpha(std::shared_ptr<SceneMaterial> material,
                            std::unique_ptr<DynamicValue> value);
-    // A user-bound image `color` tints every material the layer draws with:
-    // its own and each effect pass. One value feeds them all, and the alpha in
-    // `g_Color4` is left to the alpha bindings.
-    void BindMaterialColor(std::vector<std::shared_ptr<SceneMaterial>> materials,
+    // A user-bound or scripted image `color` tints every material the layer
+    // draws with: its own and each effect pass. One value feeds them all, and
+    // the alpha in `g_Color4` is left to the alpha bindings. What a script
+    // writes to `thisLayer.color` becomes that value (see `SetNodeColor`).
+    void BindMaterialColor(std::string layer_name,
+                           std::vector<std::shared_ptr<SceneMaterial>> materials,
                            std::unique_ptr<DynamicValue> value);
     // A user-bound or scripted image `brightness` multiplies the colour of every
     // material the layer tints with, and only in an HDR scene: with no material
@@ -792,6 +794,8 @@ private:
     int32_t                                                        m_next_generated_text_id { 0x40000000 };
     std::unordered_map<std::string, std::string>                   m_layer_aliases;
     std::unordered_map<std::string, NodeVisibilityBinding>         m_node_visibility;
+    /// The colour value an image layer takes its materials' colour from.
+    std::unordered_map<std::string, DynamicValue*>                 m_node_color;
     std::unordered_map<std::string, NodeVec3Binding>               m_node_translate;
     std::unordered_map<std::string, NodeVec3Binding>               m_node_scale;
     std::unordered_map<std::string, NodeVec3Binding>               m_node_rotation;
