@@ -5834,11 +5834,6 @@ export function update(value) {
     EXPECT_EQ(state->resolved_font_identity, "Courier New");
     EXPECT_EQ(state->horizontal_align, "right");
     EXPECT_EQ(state->vertical_align, "bottom");
-    // The anchor keeps naming the edges the layer is placed by: the new ones.
-    EXPECT_NE(state->anchor.find("right"), std::string::npos);
-    EXPECT_NE(state->anchor.find("bottom"), std::string::npos);
-    EXPECT_EQ(state->anchor.find("left"), std::string::npos);
-    EXPECT_EQ(state->anchor.find("top"), std::string::npos);
     EXPECT_TRUE(runtime->NodeTextDirty("clock")) << "the text has to be laid out again";
 
     WaitForTextLayout(*runtime, "clock");
@@ -6588,7 +6583,12 @@ export function update(value) {
     EXPECT_SCRIPT_PASSES(run);
     const auto state = runtime->NodeTextState("clock");
     ASSERT_TRUE(state.has_value());
-    EXPECT_EQ(state->anchor, "top") << "the anchor never held a made-up word";
+    EXPECT_EQ(state->horizontal_align, "center");
+    EXPECT_EQ(state->vertical_align, "top");
+    // The layer is placed by the words it ended on, none of them made up: nothing
+    // moves it sideways, and it hangs below its anchor.
+    EXPECT_FLOAT_EQ(node->Translate().x(), 10.0f);
+    EXPECT_LT(node->Translate().y(), 20.0f);
 }
 
 // The size reads back as the float it is, so a script that reads it, adds a

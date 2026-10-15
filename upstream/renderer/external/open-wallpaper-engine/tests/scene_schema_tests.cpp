@@ -8537,6 +8537,9 @@ TEST(SceneSchema, CreateLayerBuildsATextLayerThroughTheParsersOwnTextPath) {
                 "    color: '0.2 0.4 0.6', alpha: 0.5, name: 'shadow', horizontalalign: 'left'\n"
                 "  });\n"
                 "  shadow.origin = new Vec3(40, 50, 0);\n"
+                // A text object has no `alignment`: a layer made with one is centred.
+                "  thisScene.createLayer({ text: 'ghost', font: 'Arial', name: 'ghost',\n"
+                "    alignment: 'right', verticalalign: 'Top' });\n"
                 "  return value;\n"
                 "}\n"
                 "export function update(value) { return value; }\n" } } } },
@@ -8556,6 +8559,10 @@ TEST(SceneSchema, CreateLayerBuildsATextLayerThroughTheParsersOwnTextPath) {
     EXPECT_FLOAT_EQ(state->point_size, 24.0f);
     EXPECT_EQ(state->font_key, "Arial");
     EXPECT_EQ(state->horizontal_align, "left");
+    const auto ghost = runtime.NodeTextState(runtime.ResolveLayerName("ghost"));
+    ASSERT_TRUE(ghost.has_value());
+    EXPECT_EQ(ghost->horizontal_align, "center") << "`alignment` names nothing a text layer has";
+    EXPECT_EQ(ghost->vertical_align, "center") << "`Top` is not a word of the registry";
     EXPECT_GT(runtime.NodeSize(name).x(), 0.0f) << "laid out like the scene's own text";
     EXPECT_NEAR(runtime.NodeSize(name).x(), runtime.NodeSize("label").x(), 1e-3f);
 
@@ -8573,7 +8580,7 @@ TEST(SceneSchema, CreateLayerBuildsATextLayerThroughTheParsersOwnTextPath) {
     EXPECT_FLOAT_EQ(constants.at("g_Color")[2], 0.6f);
     EXPECT_FLOAT_EQ(constants.at("g_Alpha")[0], 0.5f);
     EXPECT_TRUE(runtime.ConsumeSceneGraphMutationFlag());
-    EXPECT_EQ(runtime.LayerCount(), 3u);
+    EXPECT_EQ(runtime.LayerCount(), 4u);
     EXPECT_EQ(runtime.LayerNameAt(2), name) << "created layers follow the scene's own";
 }
 
@@ -8604,8 +8611,7 @@ TEST(SceneSchema, ScriptsRestyleASceneTextLayerAndItIsLaidOutAgain) {
     runtime.Tick(1.0 / 60.0);
     WaitForTextLayoutToSettle(runtime, "clock");
     const auto before        = runtime.NodeSize("clock");
-    const auto anchor_before = runtime.NodeTextState("clock")->anchor;
-    EXPECT_NE(anchor_before.find("left"), std::string::npos);
+    EXPECT_EQ(runtime.NodeTextState("clock")->horizontal_align, "left");
 
     // The script's cursorClick runs when the pointer is over the owner's card.
     runtime.DispatchCursorClick();
@@ -8617,10 +8623,8 @@ TEST(SceneSchema, ScriptsRestyleASceneTextLayerAndItIsLaidOutAgain) {
     EXPECT_EQ(state->font_key, "systemfont_arial");
     EXPECT_EQ(state->resolved_font_kind, "system") << "resolved by the parser's own rule";
     EXPECT_EQ(state->horizontal_align, "right");
-    // The authored vertical anchor survives a horizontal change.
-    EXPECT_NE(state->anchor.find("top"), std::string::npos);
-    EXPECT_NE(state->anchor.find("right"), std::string::npos);
-    EXPECT_EQ(state->anchor.find("left"), std::string::npos);
+    // The authored vertical alignment survives a horizontal change.
+    EXPECT_EQ(state->vertical_align, "top");
 
     WaitForTextLayoutToSettle(runtime, "clock");
     ASSERT_FALSE(runtime.NodeTextDirty("clock"));

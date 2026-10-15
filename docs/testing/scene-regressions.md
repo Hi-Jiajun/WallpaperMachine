@@ -1688,6 +1688,24 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   not kept: their text is private, so nothing re-checks them. The other fixtures use
   a system font, so the tests state relations to the font's own metrics, not pixel
   counts, and the ground-truth tests skip where Arial is not installed.
+- **Alignment words and brightness** — `text_object_runtime_test`.
+  `TextObjectRuntime.AlignmentKeysAreReadAsTheEnumRegistryReadsThem` parses a scene
+  with every shape of the two keys (absent, each word, wrong case, empty, a longer
+  word, a number, `null`, an object) and `.AlignmentWordsParseLikeTheEnumRegistry`
+  checks the two parse functions on their own: exact words, `left` for any other
+  horizontal value and `center` for any other vertical one, and no `alignment` key
+  (`.HorizontalAlignIsTheOnlyKeyThatAlignsTheTextHorizontally` and its vertical twin).
+  `SceneSchema.CreateLayerBuildsATextLayerThroughTheParsersOwnTextPath` makes a layer
+  with an `alignment` and a wrong-case word and gets a centred one.
+  `.TextBrightnessAppliesOnlyInTheHdrPipeline` reads the material's brightness in a
+  plain scene, one with `hdr` and no `bloom`, and one with both (brightness 0, 2.39, a
+  user-bound one that follows its property), and
+  `.ABrightnessScriptStillRunsWhereBrightnessDoesNothing` keeps a brightness script
+  running where it draws nothing. `MetalSceneDraw.ATextLayersBrightnessDoesNothingOutsideTheHdrPipelineOnBothRenderers`
+  draws white text at brightness 0, 2.39 and 1, and with every effect off, and gets the
+  same picture on both renderers, and
+  `.ATextLayersBrightnessReachesTheHdrPipelineOnBothRenderers` draws nothing at
+  brightness 0 in an HDR scene.
 - **Text colour blend and screen anchor** —
   `TextObjectRuntime.ColorBlendModeMixesTextWithTheScreenThroughThePassthroughPass`
   and `.AddColorBlendTextIsDrawnAdditivelyOntoTheScene` (CPU, in the gate) and
@@ -1760,9 +1778,11 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   of this change made every script's write the property's value, and the widget
   drew the sound layer's name where Wallpaper Engine draws nothing.
 - **Raster caches and revisions** — text raster caches hold neutral glyph
-  coverage. Color, brightness and alpha bindings reach uniforms, including text
+  coverage. Color and alpha bindings reach uniforms, including text
   under effects, without relayout or uploads
-  (`MetalSceneDraw.TextStylingChangesPixelsWithoutRerasterizingGlyphs`). Text
+  (`MetalSceneDraw.TextStylingChangesPixelsWithoutRerasterizingGlyphs`); a
+  brightness binding does too, but only in the HDR pipeline, where it is read at all
+  (`TextObjectRuntime.TextBrightnessAppliesOnlyInTheHdrPipeline`). Text
   scripts first run on the normal ordered tick, not while objects are still being
   parsed. The layout queue is FIFO and coalesces updates in place;
   `TextObjectRuntime.AWaitingClockIsNotStarvedByNewerReadoutUpdates` blocks the

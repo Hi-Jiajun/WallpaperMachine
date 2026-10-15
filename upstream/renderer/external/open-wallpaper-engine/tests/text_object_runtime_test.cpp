@@ -623,7 +623,6 @@ TEST(TextObjectRuntime, ParserCreatesRuntimeTextNodeAndState) {
             "origin": [100, 50, 0],
             "horizontalalign": "right",
             "verticalalign": "bottom",
-            "alignment": "left",
             "visible": true
           }
         ])"),
@@ -3240,7 +3239,6 @@ TEST(TextObjectRuntime, RuntimeTextMutationUpdatesPersistentTextAndSize) {
                                    .padding          = { 2.0f, 2.0f },
                                    .horizontal_align = "left",
                                    .vertical_align   = "top",
-                                   .anchor           = "left top",
                                });
 
     const auto before       = runtime->NodeSize("caption");
@@ -3951,7 +3949,10 @@ TEST(TextObjectRuntime, TextCacheKeysAreUniquePerLayerEvenWithSameFontAndSize) {
     EXPECT_NE(first_state->texture_cache_key, second_state->texture_cache_key);
 }
 
-TEST(TextObjectRuntime, HorizontalAlignOverridesLegacyAlignment) {
+// A text object has no `alignment` key in Wallpaper Engine's registry, only
+// `horizontalalign`, `verticalalign` and the screen `anchor`: a scene that carries
+// one has it ignored, so a layer with only that key is centred like any other.
+TEST(TextObjectRuntime, HorizontalAlignIsTheOnlyKeyThatAlignsTheTextHorizontally) {
     fs::VFS vfs;
     MountAssets(vfs);
     audio::SoundManager sound_manager;
@@ -3975,13 +3976,14 @@ TEST(TextObjectRuntime, HorizontalAlignOverridesLegacyAlignment) {
     auto* override = FindRootChild(*scene, "override");
     ASSERT_NE(fallback, nullptr);
     ASSERT_NE(override, nullptr);
-    EXPECT_GT(fallback->Translate().x(), 100.0f);
+    EXPECT_FLOAT_EQ(fallback->Translate().x(), 100.0f);
     EXPECT_LT(override->Translate().x(), 100.0f);
     EXPECT_FLOAT_EQ(fallback->Translate().y(), 50.0f);
     EXPECT_FLOAT_EQ(override->Translate().y(), 50.0f);
+    EXPECT_EQ(scene->runtime->NodeTextState("fallback")->horizontal_align, "center");
 }
 
-TEST(TextObjectRuntime, VerticalAlignOverridesLegacyAlignment) {
+TEST(TextObjectRuntime, VerticalAlignIsTheOnlyKeyThatAlignsTheTextVertically) {
     fs::VFS vfs;
     MountAssets(vfs);
     audio::SoundManager sound_manager;
@@ -4005,10 +4007,11 @@ TEST(TextObjectRuntime, VerticalAlignOverridesLegacyAlignment) {
     auto* override = FindRootChild(*scene, "override");
     ASSERT_NE(fallback, nullptr);
     ASSERT_NE(override, nullptr);
-    EXPECT_LT(fallback->Translate().y(), 50.0f);
+    EXPECT_FLOAT_EQ(fallback->Translate().y(), 50.0f);
     EXPECT_GT(override->Translate().y(), 50.0f);
     EXPECT_FLOAT_EQ(fallback->Translate().x(), 100.0f);
     EXPECT_FLOAT_EQ(override->Translate().x(), 100.0f);
+    EXPECT_EQ(scene->runtime->NodeTextState("fallback")->vertical_align, "center");
 }
 
 TEST(TextObjectRuntime, ScriptThisLayerTextSetterMutatesRuntimeText) {
@@ -4803,6 +4806,26 @@ struct TextSceneFixture {
     }
 };
 
+// Stand-ins for the HDR bloom materials a scene with `hdr` and `bloom` loads, so a
+// test can parse such a scene: the pipeline is what matters here, not the glow.
+std::map<std::string, std::string> HdrBloomAssets() {
+    const std::string vert = "attribute vec3 a_Position;\nattribute vec2 a_TexCoord;\n"
+                             "varying vec2 v_TexCoord;\nvoid main() {\n"
+                             "  gl_Position = vec4(a_Position, 1.0);\n  v_TexCoord = a_TexCoord;\n}\n";
+    const std::string frag = "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\n"
+                             "void main() {\n  gl_FragColor = texture(g_Texture0, v_TexCoord);\n}\n";
+    std::map<std::string, std::string> files;
+    for (const auto* material : { "hdr_downsample_bloom", "hdr_downsample", "hdr_upsample",
+                                  "hdr_upsample_cubic", "combine_hdr_upsample_linear" }) {
+        files[std::string("/materials/util/") + material + ".json"] =
+            std::string(R"({"passes":[{"blending":"normal","cullmode":"nocull","depthtest":"disabled",)"
+                        R"("depthwrite":"disabled","shader":")") + material + R"("}]})";
+        files[std::string("/shaders/") + material + ".vert"] = vert;
+        files[std::string("/shaders/") + material + ".frag"] = frag;
+    }
+    return files;
+}
+
 // What a colour blend needs: a passthrough material and a shader that samples
 // the screen when a blend mode is set.
 std::map<std::string, std::string> ColorBlendAssets() {
@@ -5039,6 +5062,157 @@ TEST(TextObjectRuntime, StyleColoursFollowTheirPropertiesAndTheBakedKeysAreReadO
     runtime.Tick(1.0 / 60.0);
     EXPECT_TRUE(colour("g_OutlineColor").isApprox(Eigen::Vector3f(0.0f, 0.0f, 1.0f)));
     EXPECT_FLOAT_EQ(fixture.State("caption").style.outline_thickness, 2.0f);
+}
+
+// Wallpaper Engine reads the two alignment keys as enumerations. A key that is
+// missing leaves the layer centred. A key that is there takes the word that
+// matches it exactly (case counts), and anything else -- another string, an empty
+// one, a number, `null` -- takes the registry's first entry: `left` for the
+// horizontal key and `center` for the vertical one, whose registry is built in
+// the order center, top, bottom.
+TEST(TextObjectRuntime, AlignmentKeysAreReadAsTheEnumRegistryReadsThem) {
+    struct Case {
+        const char* fields;
+        const char* horizontal;
+        const char* vertical;
+    };
+    const std::vector<Case> cases {
+        { R"()", "center", "center" },
+        { R"(,"horizontalalign":"left","verticalalign":"top")", "left", "top" },
+        { R"(,"horizontalalign":"center","verticalalign":"center")", "center", "center" },
+        { R"(,"horizontalalign":"right","verticalalign":"bottom")", "right", "bottom" },
+        { R"(,"horizontalalign":"Left","verticalalign":"Top")", "left", "center" },
+        { R"(,"horizontalalign":"","verticalalign":"")", "left", "center" },
+        { R"(,"horizontalalign":"leftt","verticalalign":"middle")", "left", "center" },
+        { R"(,"horizontalalign":"RIGHT","verticalalign":"bottomm")", "left", "center" },
+        { R"(,"horizontalalign":7,"verticalalign":7)", "left", "center" },
+        { R"(,"horizontalalign":null,"verticalalign":null)", "left", "center" },
+        // A key that is not a string is not a word. That an object (a value wrapper) is one of
+        // those is inferred: the loader that would unwrap it was not found, and no scene has one.
+        { R"(,"horizontalalign":{"value":"right"},"verticalalign":{"value":"top"})", "left", "center" },
+        { R"(,"horizontalalign":["right"],"verticalalign":true)", "left", "center" },
+        { R"(,"horizontalalign":"right")", "right", "center" },
+        { R"(,"verticalalign":"top")", "center", "top" },
+        { R"(,"alignment":"left")", "center", "center" },
+        { R"(,"alignment":"bottom","horizontalalign":"left")", "left", "center" },
+    };
+    std::string objects = "[";
+    for (std::size_t index = 0; index < cases.size(); ++index) {
+        if (index != 0) objects += ",";
+        objects += R"({"id":)" + std::to_string(index + 1) + R"(,"name":"c)" + std::to_string(index) +
+                   R"(","text":"aaaa","font":"Arial","pointsize":10,"visible":true)" +
+                   cases[index].fields + "}";
+    }
+    objects += "]";
+    TextSceneFixture fixture(objects, "text-align-enum-registry");
+    ASSERT_NE(fixture.scene, nullptr);
+    ASSERT_NE(fixture.scene->runtime, nullptr);
+    for (std::size_t index = 0; index < cases.size(); ++index) {
+        SCOPED_TRACE(cases[index].fields);
+        const auto state = fixture.State("c" + std::to_string(index));
+        EXPECT_EQ(state.horizontal_align, cases[index].horizontal);
+        EXPECT_EQ(state.vertical_align, cases[index].vertical);
+    }
+}
+
+// The same rule on its own: the exact words, and the registry's first entry for
+// everything else. `middle`, `Left` and a word with something after it are not
+// words, so none of them places the text.
+TEST(TextObjectRuntime, AlignmentWordsParseLikeTheEnumRegistry) {
+    EXPECT_EQ(ParseTextHorizontalAlign("left"), TextHorizontalAlign::Left);
+    EXPECT_EQ(ParseTextHorizontalAlign("center"), TextHorizontalAlign::Center);
+    EXPECT_EQ(ParseTextHorizontalAlign("right"), TextHorizontalAlign::Right);
+    for (const std::string_view word : { "", "Left", "RIGHT", "leftt", "middle", "left ", "top", " center" }) {
+        SCOPED_TRACE(std::string(word));
+        EXPECT_EQ(ParseTextHorizontalAlign(word), TextHorizontalAlign::Left);
+    }
+    EXPECT_EQ(ParseTextVerticalAlign("top"), TextVerticalAlign::Top);
+    EXPECT_EQ(ParseTextVerticalAlign("center"), TextVerticalAlign::Center);
+    EXPECT_EQ(ParseTextVerticalAlign("bottom"), TextVerticalAlign::Bottom);
+    for (const std::string_view word : { "", "Top", "BOTTOM", "bottomm", "middle", "top ", "left", "topleft" }) {
+        SCOPED_TRACE(std::string(word));
+        EXPECT_EQ(ParseTextVerticalAlign(word), TextVerticalAlign::Center);
+    }
+    // The word an alignment is written back as is the one that parses to it.
+    for (const auto align : { TextHorizontalAlign::Left, TextHorizontalAlign::Center,
+                              TextHorizontalAlign::Right }) {
+        EXPECT_EQ(ParseTextHorizontalAlign(TextHorizontalAlignWord(align)), align);
+    }
+    for (const auto align : { TextVerticalAlign::Bottom, TextVerticalAlign::Center,
+                              TextVerticalAlign::Top }) {
+        EXPECT_EQ(ParseTextVerticalAlign(TextVerticalAlignWord(align)), align);
+    }
+}
+
+// Wallpaper Engine multiplies a text layer's colour by its `brightness` only in
+// its HDR pipeline, which is the scene asking for HDR with bloom on (the same
+// pipeline that gives the shaders their `HDR` combo and 16-bit targets). Everywhere
+// else the brightness is 1 whatever the layer says: a layer authored at brightness
+// 0 is still drawn in its colour. A property or a script that drives the
+// brightness follows the same rule.
+TEST(TextObjectRuntime, TextBrightnessAppliesOnlyInTheHdrPipeline) {
+    struct Pipeline {
+        const char* general;
+        bool        hdr;
+    };
+    for (const auto& pipeline : { Pipeline { "", false }, Pipeline { R"("hdr":true,"bloom":false,)", false },
+                                  Pipeline { R"("hdr":true,"bloom":true,)", true } }) {
+        SCOPED_TRACE(pipeline.general);
+        TextSceneFixture fixture(R"([
+          {"id":1,"name":"dark","text":"a","font":"Arial","brightness":0,"visible":true},
+          {"id":2,"name":"bright","text":"a","font":"Arial","brightness":2.39,"visible":true},
+          {"id":3,"name":"plain","text":"a","font":"Arial","visible":true},
+          {"id":4,"name":"bound","text":"a","font":"Arial","brightness":{"user":"glow","value":0.5},
+           "visible":true}
+        ])", "text-brightness-pipeline", HdrBloomAssets(),
+                                 ProjectProperties { { "glow", RuntimeScalarValue::Float(3.0f) } },
+                                 pipeline.general);
+        ASSERT_NE(fixture.scene, nullptr);
+        ASSERT_NE(fixture.scene->runtime, nullptr);
+        EXPECT_EQ(fixture.scene->hdr, pipeline.hdr);
+        const auto brightness = [&](const char* name) {
+            auto* node = FindRootChild(*fixture.scene, name);
+            EXPECT_NE(node, nullptr);
+            if (node == nullptr || node->Mesh() == nullptr || node->Mesh()->Material() == nullptr) {
+                return -1.0f;
+            }
+            return node->Mesh()->Material()->customShader.constValues.at("g_Brightness")[0];
+        };
+        EXPECT_FLOAT_EQ(brightness("dark"), pipeline.hdr ? 0.0f : 1.0f);
+        EXPECT_FLOAT_EQ(brightness("bright"), pipeline.hdr ? 2.39f : 1.0f);
+        EXPECT_FLOAT_EQ(brightness("plain"), 1.0f);
+        EXPECT_FLOAT_EQ(brightness("bound"), pipeline.hdr ? 3.0f : 1.0f);
+        fixture.scene->runtime->ApplyProjectPropertyOverride(
+            { { "glow", RuntimeScalarValue::Float(0.25f) } });
+        fixture.scene->runtime->Tick(1.0 / 60.0);
+        EXPECT_FLOAT_EQ(brightness("bound"), pipeline.hdr ? 0.25f : 1.0f);
+    }
+}
+
+// Where the brightness does nothing, a script that drives it still runs: it may
+// be doing something else (here it counts for another layer's script), and its
+// value is still the layer's brightness for any script that reads it.
+TEST(TextObjectRuntime, ABrightnessScriptStillRunsWhereBrightnessDoesNothing) {
+    for (const char* general : { "", R"("hdr":true,"bloom":true,)" }) {
+        SCOPED_TRACE(general);
+        TextSceneFixture fixture(R"([
+          {"id":1,"name":"counter","text":"a","font":"Arial","visible":true,
+           "brightness":{"value":5,"script":"export function update(value) { shared.runs = (shared.runs || 0) + 1; return value; }"}},
+          {"id":2,"name":"reader","font":"Arial","visible":true,
+           "text":{"value":"waiting","script":"export function update() { return String(shared.runs || 0); }"}}
+        ])", "text-brightness-script", HdrBloomAssets(), {}, general);
+        ASSERT_NE(fixture.scene, nullptr);
+        ASSERT_NE(fixture.scene->runtime, nullptr);
+        auto& runtime = *fixture.scene->runtime;
+        EXPECT_EQ(runtime.scriptErrorCount(), 0u);
+        runtime.Tick(1.0 / 60.0);
+        const auto first = std::stoi(runtime.NodeText("reader"));
+        runtime.Tick(1.0 / 60.0);
+        const auto second = std::stoi(runtime.NodeText("reader"));
+        EXPECT_GT(first, 0);
+        EXPECT_EQ(second, first + 1) << "the brightness script has to run once a tick";
+        EXPECT_EQ(runtime.scriptErrorCount(), 0u);
+    }
 }
 
 TEST(TextObjectRuntime, SpacingAndBlockAlignReachTheLayerState) {

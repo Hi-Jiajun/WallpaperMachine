@@ -74,6 +74,36 @@ struct TextStyle {
 /// shadow combos, which Wallpaper Engine turns on from the same fields.
 bool TextStyleActive(const TextStyle& style);
 
+/// Where a text layer's origin sits along each axis of its text. Wallpaper
+/// Engine registers `horizontalalign` and `verticalalign` as enumerations whose
+/// words match exactly (case counts) and, when nothing matches, takes the
+/// registry's first entry: `left` for the horizontal one, `center` for the
+/// vertical one (its registry is built in the order center, top, bottom).
+enum class TextHorizontalAlign
+{
+    Left,
+    Center,
+    Right,
+};
+
+enum class TextVerticalAlign
+{
+    Bottom,
+    Center,
+    Top,
+};
+
+TextHorizontalAlign ParseTextHorizontalAlign(std::string_view word);
+TextVerticalAlign   ParseTextVerticalAlign(std::string_view word);
+std::string_view    TextHorizontalAlignWord(TextHorizontalAlign align);
+std::string_view    TextVerticalAlignWord(TextVerticalAlign align);
+
+/// The anchor string the node's placement reads for an alignment, as
+/// "<horizontal> <vertical>" ("left top", "center center"): its edge words move the
+/// layer's origin onto the edge the text is aligned to, and the string being there
+/// at all marks the layer as placed by its own anchor, which a centred one is too.
+std::string TextAlignmentAnchor(TextHorizontalAlign horizontal, TextVerticalAlign vertical);
+
 struct TextLayerState {
     std::string          text;
     std::string          layer_key;
@@ -98,9 +128,10 @@ struct TextLayerState {
     Eigen::Vector3f      color { Eigen::Vector3f::Ones() };
     float                alpha { 1.0f };
     float                brightness { 1.0f };
-    std::string          horizontal_align;
-    std::string          vertical_align;
-    std::string          anchor;
+    // The words `horizontalalign` and `verticalalign` take, read through
+    // `ParseTextHorizontalAlign` and `ParseTextVerticalAlign`.
+    std::string          horizontal_align { "center" };
+    std::string          vertical_align { "center" };
     float                max_width { 0.0f };
     uint32_t             max_rows { 0 };
     bool                 limit_width { false };
@@ -197,7 +228,7 @@ public:
     void SetPointSize(float point_size);
     void SetFont(std::string font_key, std::string kind, std::string identity, std::string path,
                  std::string face, SharedFontData data);
-    void SetAlignment(std::string horizontal, std::string vertical, std::string anchor);
+    void SetAlignment(std::string horizontal, std::string vertical);
     bool ApplyPreparedLayout(uint64_t revision, Eigen::Vector2f layout_size,
                              Eigen::Vector2f raster_size);
     void ClearDirty();

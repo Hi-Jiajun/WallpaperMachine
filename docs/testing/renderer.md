@@ -742,7 +742,7 @@ into private textures; the three that draw skip visibly without a Metal device.
   is squared, as it was before this change); on a compose layer, whose first pass reads no
   `g_Color4`, that passthrough is where the colour lands once. Only a script
   on the `brightness` property drives an image layer's brightness; a `thisLayer.brightness`
-  write is not read, and a text layer's brightness is not yet limited to HDR scenes.
+  write is not read.
 - **Shadows, spot cookies and volumetric lights are not drawn.** A light with
   `castshadow` lights as if nothing cast a shadow (`_rt_shadowAtlas` is never
   written), a spot cookie lights through its cone instead of its cookie image, and
@@ -936,7 +936,22 @@ into private textures; the three that draw skip visibly without a Metal device.
   clipped to the atlas margin. `msdf` alone, `opaquebackground`, `backgroundcolor` and
   `backgroundbrightness` are read and draw nothing. The screen `anchor` of a text layer
   moves the layer in its parent's space, so its children move with it; whether
-  Wallpaper Engine's children inherit the shift is not established. **The authored
+  Wallpaper Engine's children inherit the shift is not established. A script's write
+  of `horizontalalign` or `verticalalign` with a word outside the registry is turned
+  away. The decompile narrows what Wallpaper Engine does: the C-string setter the
+  alignment registrations carry (`FUN_14025a880`) stores the registry's first entry for a
+  word that matches none, as its scene file reader does, and ignores a null string, so if a
+  script writes through it (not traced) `thisLayer.horizontalalign = 'middle'` gives `left`
+  (and `center` vertically) instead of being turned away. Which path a script write takes is
+  open, so the script setter keeps its rejection; the test that pins it is
+  `ScriptRuntimeCompat.TextAlignmentOnlyTakesTheWordsItIsDefinedFor`, and it is the one to
+  change if a trace shows the setter. A text layer's `brightness`
+  follows `hdr` with `bloom`, the predicate that already gives the scene its 16-bit
+  targets: Wallpaper Engine tests the flag of its HDR post-processing quality, which
+  this renderer treats as always on (see above). That the flag is the one
+  `hdr` with `bloom` sets is read from the decompile, not seen on a text layer: no
+  frame of Wallpaper Engine has been compared (the same flag's effect shows on an
+  image layer of one local HDR scene). **The authored
   `size` of a text object is kept**: Wallpaper Engine ignores it and sets the card from
   the layout every time the text is laid out (the text object's size function writes
   the layout box plus twice the padding, and its guard byte only keeps it from

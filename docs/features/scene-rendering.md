@@ -503,8 +503,21 @@ draw loop adds the offset to every object it draws: by the layer's distance from
 eased cursor point times its `parallaxDepth` and the scene's amount, so a text label
 beside a depth-0.06 underline moves with it, and with the cursor centred a layer off the
 centre of the canvas already sits that far out. A layer drawn through effects takes the
-offset once, on its final pass. A text object that leaves keys out has Wallpaper
-Engine's defaults: 32 points, `maxwidth` 500 and `maxrows` 1.
+offset once, on its final pass.
+A text object that leaves keys out has Wallpaper Engine's defaults: 32 points,
+`maxwidth` 500 and `maxrows` 1, and `horizontalalign` and `verticalalign` `center`.
+The two alignment keys are read as Wallpaper Engine reads its enumerations: the words
+are `left`, `center` and `right`, and `top`, `center` and `bottom`, matched exactly
+(case counts), and a key that is there with anything else, a string that is no
+word, a number or `null`, takes the first entry of its registry, which is
+`left` horizontally and `center` vertically (an object, such as a `{ "user": ..., "value": ... }`
+wrapper, is read the same way, which is inferred: nothing seen shows whether Wallpaper Engine's
+loader unwraps one before the enumeration reads it, and no local scene has one). A text object has no `alignment` key, so
+one is not read. A text layer's `brightness` multiplies its colour only in a scene that
+runs the HDR pipeline (`hdr` with `bloom`, the one that also gives it 16-bit targets
+and the `HDR` combo); in any other scene it is 1, so a layer authored at brightness 0
+is drawn in its colour, and a property or script that drives the brightness changes
+nothing there (the script still runs).
 
 A texture slot a material binds to the now-playing cover (a `usertextures` entry of
 type `system`, `$mediaThumbnail` or `$mediaPreviousThumbnail`, on an image layer or

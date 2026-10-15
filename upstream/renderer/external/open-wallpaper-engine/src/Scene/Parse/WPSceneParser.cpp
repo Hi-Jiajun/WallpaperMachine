@@ -1696,21 +1696,6 @@ std::string JsonStringOrObjectValue(const nlohmann::json& value, std::string_vie
     return {};
 }
 
-// The edge or corner of the layer's own box that its origin sits on. This is
-// `horizontalalign` and `verticalalign`; the layer's `anchor` is something else,
-// the screen edge the layer follows, and never names a point of the layer.
-std::string TextAnchorForObject(const wpscene::WPTextObject& obj) {
-    if (! obj.horizontalalign.empty() || ! obj.verticalalign.empty()) {
-        std::string anchor = obj.horizontalalign;
-        if (! obj.verticalalign.empty()) {
-            if (! anchor.empty()) anchor += ' ';
-            anchor += obj.verticalalign;
-        }
-        return anchor;
-    }
-    return obj.alignment;
-}
-
 std::string TextRuntimeName(const ParseContext& context, const wpscene::WPTextObject& obj) {
     if (! obj.name.empty()) {
         const auto count = context.text_name_counts.find(obj.name);
@@ -2098,7 +2083,7 @@ Eigen::Vector2f ResolveTextCardPadding(const wpscene::WPTextObject& obj, bool sc
 
 TextLayerState ResolveTextLayerState(const wpscene::WPTextObject& obj, fs::VFS& vfs,
                                      std::string text, std::string font_key,
-                                     Eigen::Vector2f explicit_size, std::string anchor,
+                                     Eigen::Vector2f explicit_size,
                                      std::string layer_key, bool scene_fog) {
     TextLayerState state {
         .text             = std::move(text),
@@ -2111,9 +2096,10 @@ TextLayerState ResolveTextLayerState(const wpscene::WPTextObject& obj, fs::VFS& 
         .color            = Eigen::Vector3f(obj.color.data()),
         .alpha            = obj.alpha,
         .brightness       = obj.brightness,
-        .horizontal_align = obj.horizontalalign.empty() ? obj.alignment : obj.horizontalalign,
-        .vertical_align   = obj.verticalalign,
-        .anchor           = std::move(anchor),
+        .horizontal_align = std::string(
+            TextHorizontalAlignWord(ParseTextHorizontalAlign(obj.horizontalalign))),
+        .vertical_align   = std::string(
+            TextVerticalAlignWord(ParseTextVerticalAlign(obj.verticalalign))),
         .max_width        = obj.maxwidth,
         .max_rows         = obj.maxrows,
         .limit_width      = obj.limitwidth,
@@ -2255,7 +2241,6 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         });
     auto       text         = JsonStringOrObjectValue(obj.text, "text");
     const auto font_key     = JsonStringOrObjectValue(obj.font, {});
-    const auto anchor       = TextAnchorForObject(obj);
     std::unique_ptr<DynamicValue> runtime_text_value;
     if (context.scene->runtime != nullptr && HasRuntimeTextValueBinding(obj.text)) {
         runtime_text_value =
@@ -2269,9 +2254,11 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
                                             text,
                                             font_key,
                                             Eigen::Vector2f(obj.size[0], obj.size[1]),
-                                            anchor,
                                             runtime_name,
                                             context.scene->fog_distance || context.scene->fog_height);
+    // The node is shifted onto the edges the text is aligned to.
+    const auto anchor = TextAlignmentAnchor(ParseTextHorizontalAlign(text_state.horizontal_align),
+                                            ParseTextVerticalAlign(text_state.vertical_align));
     // Cache glyph coverage, not animated styling. A fade or colour change only
     // updates uniforms; it must never measure, rasterize or upload the text again.
     text_state.color = Eigen::Vector3f::Ones();
@@ -2340,7 +2327,11 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
             *context.vfs, context.scene->scene_id, texture_name, styled, outlined);
         material.customShader.constValues["g_Color"] = obj.color;
         material.customShader.constValues["g_Alpha"] = obj.alpha;
-        material.customShader.constValues["g_Brightness"] = obj.brightness;
+        // Wallpaper Engine multiplies the colour by the brightness only in its HDR
+        // pipeline: a text layer authored dark is still drawn in its colour in any
+        // other scene.
+        const bool brightness_applies = context.scene->hdr;
+        material.customShader.constValues["g_Brightness"] = brightness_applies ? obj.brightness : 1.0f;
         if (outlined) material.customShader.constValues["g_OutlineColor"] = obj.outlinecolor;
         if (styled) material.customShader.constValues["g_ShadowColor"] = obj.dropshadowcolor;
         if (material.customShader.shader != nullptr) {
@@ -2373,9 +2364,14 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         }
         if (const auto setting = obj.field_bindings.find("brightness");
             setting != obj.field_bindings.end()) {
-            context.scene->runtime->RegisterMaterialConstant(
-                mesh->MaterialSlotPtr(), "g_Brightness",
-                ResolveFloatSetting(*context.scene->runtime, *setting, runtime_name));
+            auto value = ResolveFloatSetting(*context.scene->runtime, *setting, runtime_name);
+            if (brightness_applies) {
+                context.scene->runtime->RegisterMaterialConstant(
+                    mesh->MaterialSlotPtr(), "g_Brightness", std::move(value));
+            } else {
+                // Nothing draws with it, but a script that drives it still runs.
+                context.scene->runtime->BindMaterialBrightness({}, std::move(value));
+            }
             QueueSceneScriptIfNeeded(context, runtime_name, *setting);
         }
         // The outline and shadow colours are uniforms of the card's shader, so a

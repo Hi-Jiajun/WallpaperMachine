@@ -3857,35 +3857,12 @@ std::string FormatPointSize(float value) {
 }
 
 // What `horizontalalign` and `verticalalign` may be set to: Wallpaper Engine
-// registers them as enumerations, so anything else is not an alignment.
+// registers them as enumerations, so anything else is not an alignment. (Whether
+// its script setter turns a bad word away, or reads it as the scene file's reader
+// does -- as the registry's first entry -- is not known.)
 bool IsAlignmentWord(bool horizontal, std::string_view value) {
     return horizontal ? value == "left" || value == "center" || value == "right"
                       : value == "top" || value == "center" || value == "bottom";
-}
-
-// The anchor string a text layer is placed by names an edge or two: "left",
-// "top", "bottomright". Setting one axis replaces that axis's words and keeps
-// the other's.
-std::string ReplaceAnchorAxis(std::string anchor, bool horizontal, std::string_view value) {
-    const std::array<std::string_view, 2> words =
-        horizontal ? std::array<std::string_view, 2> { "left", "right" }
-                   : std::array<std::string_view, 2> { "top", "bottom" };
-    for (const auto word : words) {
-        for (auto at = anchor.find(word); at != std::string::npos; at = anchor.find(word, at)) {
-            anchor.erase(at, word.size());
-        }
-    }
-    std::string squeezed;
-    for (const char character : anchor) {
-        if (character == ' ' && (squeezed.empty() || squeezed.back() == ' ')) continue;
-        squeezed.push_back(character);
-    }
-    while (! squeezed.empty() && squeezed.back() == ' ') squeezed.pop_back();
-    if (! value.empty() && value != "center") {
-        if (! squeezed.empty()) squeezed.push_back(' ');
-        squeezed.append(value);
-    }
-    return squeezed;
 }
 } // namespace
 
@@ -3897,10 +3874,10 @@ std::optional<std::string> SceneRuntimeContext::NodeTextStyle(std::string_view n
     if (property == "font") return state.font_key;
     if (property == "pointsize") return FormatPointSize(state.point_size);
     if (property == "horizontalalign") {
-        return state.horizontal_align.empty() ? std::string("center") : state.horizontal_align;
+        return std::string(TextHorizontalAlignWord(ParseTextHorizontalAlign(state.horizontal_align)));
     }
     if (property == "verticalalign") {
-        return state.vertical_align.empty() ? std::string("center") : state.vertical_align;
+        return std::string(TextVerticalAlignWord(ParseTextVerticalAlign(state.vertical_align)));
     }
     return std::nullopt;
 }
@@ -3941,10 +3918,12 @@ bool SceneRuntimeContext::SetNodeTextStyle(std::string_view name, std::string_vi
         std::string h          = state.horizontal_align;
         std::string v          = state.vertical_align;
         (horizontal ? h : v)   = std::string(value);
-        const std::string anchor = ReplaceAnchorAxis(state.anchor, horizontal, value);
-        layer->second.SetAlignment(std::move(h), std::move(v), anchor);
-        // The layer is placed by this anchor: moving it re-derives the offset
+        layer->second.SetAlignment(std::move(h), std::move(v));
+        // The layer is placed by its alignment: moving it re-derives the offset
         // from the same anchor point.
+        const auto& aligned = layer->second.state();
+        const auto  anchor  = TextAlignmentAnchor(ParseTextHorizontalAlign(aligned.horizontal_align),
+                                                  ParseTextVerticalAlign(aligned.vertical_align));
         const auto binding = m_node_alignment.find(key);
         if (binding != m_node_alignment.end() && binding->second.size_anchor) {
             SetNodeAnchorAlignment(key, anchor, binding->second.origin);

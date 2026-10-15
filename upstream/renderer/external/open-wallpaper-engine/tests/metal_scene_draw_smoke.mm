@@ -584,18 +584,35 @@ protected:
     std::filesystem::path root_;
 };
 
-// Entirely original shaders behind the ordinary authored material/effect
-// interfaces. The HDR combo changes emitted radiance, an effect halves it, and
-// two layer-as-texture consumers carry that result into the scene and bloom.
-std::filesystem::path WriteParsedRadianceFixture(const std::filesystem::path& root, bool hdr)
+// One authored material with one pass over `shader`, for the stand-ins below.
+void WriteStandInMaterial(const std::filesystem::path& root, std::string_view path,
+                          std::string_view shader, const nlohmann::json& textures,
+                          bool additive = false)
 {
-    const auto project = WriteFixture(root);
-    const std::string vertex =
-        "uniform mat4 g_ModelViewProjectionMatrix;\n"
-        "attribute vec3 a_Position;\nattribute vec2 a_TexCoord;\n"
-        "varying vec2 v_TexCoord;\n"
-        "void main(){ gl_Position=g_ModelViewProjectionMatrix*vec4(a_Position,1.0);"
-        "v_TexCoord=a_TexCoord; }\n";
+    nlohmann::json pass {
+        { "shader", shader }, { "textures", textures },
+        { "blending", additive ? "additive" : "normal" }, { "cullmode", "nocull" },
+        { "depthtest", "disabled" }, { "depthwrite", "disabled" },
+    };
+    const auto destination = root / path;
+    std::filesystem::create_directories(destination.parent_path());
+    std::ofstream(destination) << nlohmann::json {
+        { "passes", nlohmann::json::array({ pass }) },
+    };
+}
+
+constexpr const char* kStandInVertexShader =
+    "uniform mat4 g_ModelViewProjectionMatrix;\n"
+    "attribute vec3 a_Position;\nattribute vec2 a_TexCoord;\n"
+    "varying vec2 v_TexCoord;\n"
+    "void main(){ gl_Position=g_ModelViewProjectionMatrix*vec4(a_Position,1.0);"
+    "v_TexCoord=a_TexCoord; }\n";
+
+// Entirely original stand-ins for the materials a scene with `bloom` (and, with
+// `hdr`, the HDR bloom chain) loads from Wallpaper Engine's assets: plain extract,
+// sample and combine shaders, so such a scene parses and draws.
+void WriteBloomStandIns(const std::filesystem::path& root)
+{
     const std::string sample =
         "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\n"
         "void main(){ gl_FragColor=texture(g_Texture0,v_TexCoord); }\n";
@@ -617,13 +634,6 @@ std::filesystem::path WriteParsedRadianceFixture(const std::filesystem::path& ro
         "bright(v_TexCoord+vec2(0.125,0.0)))*"
         "(g_BloomStrength/3.0)*g_BloomTint,1.0); }\n";
     const std::map<std::string, std::string> fragments {
-        { "parsed_emitter",
-          "uniform sampler2D g_Texture2; // {\"combo\":\"MASKS\",\"components\":[{\"combo\":\"M0\"},{\"combo\":\"M1\"},{\"combo\":\"M2\"},{\"combo\":\"EMISSIVE_MAP\"}]}\n"
-          "varying vec2 v_TexCoord;\nvoid main(){\n#if HDR && EMISSIVE_MAP\n"
-          "float radiance=4.0*texture(g_Texture2,v_TexCoord).a;\n#else\nfloat radiance=0.5;\n#endif\n"
-          "gl_FragColor=vec4(v_TexCoord.x<0.5?radiance:0.0,0.0,0.0,1.0); }\n" },
-        { "parsed_effect", "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\n"
-          "void main(){ gl_FragColor=vec4(texture(g_Texture0,v_TexCoord).rgb*0.5,1.0); }\n" },
         { "parsed_sample", sample },
         { "parsed_extract", extract },
         { "parsed_upsample",
@@ -639,22 +649,47 @@ std::filesystem::path WriteParsedRadianceFixture(const std::filesystem::path& ro
           "gl_FragColor=vec4(max(texture(g_Texture0,v_TexCoord).rgb-"
           "vec3(g_BloomThreshold),vec3(0.0))*g_BloomStrength,1.0); }\n" },
     };
+    std::filesystem::create_directories(root / "shaders");
     for (const auto& [name, fragment] : fragments) {
-        std::ofstream(root / ("shaders/" + name + ".vert")) << vertex;
+        std::ofstream(root / ("shaders/" + name + ".vert")) << kStandInVertexShader;
+        std::ofstream(root / ("shaders/" + name + ".frag")) << fragment;
+    }
+    WriteStandInMaterial(root, "materials/util/hdr_downsample_bloom.json", "parsed_extract", { "_rt_default" });
+    WriteStandInMaterial(root, "materials/util/hdr_downsample.json", "parsed_sample", { "_rt_default" });
+    WriteStandInMaterial(root, "materials/util/hdr_upsample.json", "parsed_upsample", { "_rt_default" }, true);
+    WriteStandInMaterial(root, "materials/util/combine_hdr_upsample_linear.json", "parsed_combine",
+                         { "_rt_default", "_rt_default" });
+    WriteStandInMaterial(root, "materials/util/downsample_quarter_bloom.json", "parsed_ldr_extract",
+                         { "_rt_default" });
+    WriteStandInMaterial(root, "materials/util/downsample_eighth_blur_v.json", "parsed_sample",
+                         { "_rt_bloom_mip1" });
+    WriteStandInMaterial(root, "materials/util/blur_h_bloom.json", "parsed_sample", { "_rt_bloom_mip2" });
+    WriteStandInMaterial(root, "materials/util/combine_ldr.json", "parsed_combine",
+                         { "_rt_default", "_rt_bloom_mip1" });
+}
+
+// Entirely original shaders behind the ordinary authored material/effect
+// interfaces. The HDR combo changes emitted radiance, an effect halves it, and
+// two layer-as-texture consumers carry that result into the scene and bloom.
+std::filesystem::path WriteParsedRadianceFixture(const std::filesystem::path& root, bool hdr)
+{
+    const auto project = WriteFixture(root);
+    const std::map<std::string, std::string> fragments {
+        { "parsed_emitter",
+          "uniform sampler2D g_Texture2; // {\"combo\":\"MASKS\",\"components\":[{\"combo\":\"M0\"},{\"combo\":\"M1\"},{\"combo\":\"M2\"},{\"combo\":\"EMISSIVE_MAP\"}]}\n"
+          "varying vec2 v_TexCoord;\nvoid main(){\n#if HDR && EMISSIVE_MAP\n"
+          "float radiance=4.0*texture(g_Texture2,v_TexCoord).a;\n#else\nfloat radiance=0.5;\n#endif\n"
+          "gl_FragColor=vec4(v_TexCoord.x<0.5?radiance:0.0,0.0,0.0,1.0); }\n" },
+        { "parsed_effect", "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\n"
+          "void main(){ gl_FragColor=vec4(texture(g_Texture0,v_TexCoord).rgb*0.5,1.0); }\n" },
+    };
+    for (const auto& [name, fragment] : fragments) {
+        std::ofstream(root / ("shaders/" + name + ".vert")) << kStandInVertexShader;
         std::ofstream(root / ("shaders/" + name + ".frag")) << fragment;
     }
     const auto material = [&](std::string_view path, std::string_view shader,
-                              const nlohmann::json& textures, bool additive = false) {
-        nlohmann::json pass {
-            { "shader", shader }, { "textures", textures },
-            { "blending", additive ? "additive" : "normal" }, { "cullmode", "nocull" },
-            { "depthtest", "disabled" }, { "depthwrite", "disabled" },
-        };
-        const auto destination = root / path;
-        std::filesystem::create_directories(destination.parent_path());
-        std::ofstream(destination) << nlohmann::json {
-            { "passes", nlohmann::json::array({ pass }) },
-        };
+                              const nlohmann::json& textures) {
+        WriteStandInMaterial(root, path, shader, textures);
     };
     {
         std::ofstream texture(root / "materials/emissive.tex", std::ios::binary);
@@ -684,15 +719,7 @@ std::filesystem::path WriteParsedRadianceFixture(const std::filesystem::path& ro
     std::filesystem::create_directories(root / "effects");
     std::ofstream(root / "effects/half.json")
         << R"({"name":"halve radiance","passes":[{"material":"materials/effect.json","bind":[{"name":"previous","index":0}]}]})";
-    material("materials/util/hdr_downsample_bloom.json", "parsed_extract", { "_rt_default" });
-    material("materials/util/hdr_downsample.json", "parsed_sample", { "_rt_default" });
-    material("materials/util/hdr_upsample.json", "parsed_upsample", { "_rt_default" }, true);
-    material("materials/util/combine_hdr_upsample_linear.json", "parsed_combine",
-             { "_rt_default", "_rt_default" });
-    material("materials/util/downsample_quarter_bloom.json", "parsed_ldr_extract", { "_rt_default" });
-    material("materials/util/downsample_eighth_blur_v.json", "parsed_sample", { "_rt_bloom_mip1" });
-    material("materials/util/blur_h_bloom.json", "parsed_sample", { "_rt_bloom_mip2" });
-    material("materials/util/combine_ldr.json", "parsed_combine", { "_rt_default", "_rt_bloom_mip1" });
+    WriteBloomStandIns(root);
 
     std::ifstream source(root / "layout.json");
     auto layout = nlohmann::json::parse(source);
@@ -6366,6 +6393,106 @@ TEST_F(MetalSceneDraw, ATextLayerWhoseEffectsAreAllOffIsDrawnAsPlainTextOnBothRe
     }
 }
 
+namespace
+{
+/// Turns the fixture at `root` into a scene that runs the HDR pipeline: hdr and bloom on,
+/// with the bloom stand-in materials.
+void MakeSceneHdr(const std::filesystem::path& root)
+{
+    WriteBloomStandIns(root);
+    const auto layout_path = root / "layout.json";
+    std::ifstream source(layout_path);
+    auto layout = nlohmann::json::parse(source);
+    source.close();
+    auto& general = layout["general"];
+    general["hdr"] = true;
+    general["bloom"] = true;
+    general["bloomhdrstrength"] = 1.0;
+    general["bloomhdrthreshold"] = 0.25;
+    general["bloomhdrfeather"] = 0.0;
+    general["bloomhdriterations"] = 2;
+    general["bloomhdrscatter"] = 0.25;
+    general["bloomtint"] = { 1.0, 1.0, 1.0 };
+    std::ofstream(layout_path) << layout;
+}
+} // namespace
+
+TEST_F(MetalSceneDraw, ATextLayersBrightnessDoesNothingOutsideTheHdrPipelineOnBothRenderers)
+{
+    // Wallpaper Engine multiplies a text layer's colour by its brightness only in
+    // its HDR pipeline. Anywhere else the layer is drawn in its own colour whatever
+    // brightness it carries: white text authored at brightness 0 is still white,
+    // and at 2.39 is no brighter than a white 8-bit target already shows.
+    const std::string hidden_effect = R"("effects":[{"file":"effects/probe.json","visible":false}])";
+    struct Variant {
+        const char* name;
+        std::string fields;
+    };
+    const std::vector<Variant> variants {
+        { "plain", "" },
+        { "dark", R"(,"brightness":0)" },
+        { "bright", R"(,"brightness":2.39)" },
+        // The shape of a layer whose effects are all off in a scene's file.
+        { "dark-hidden-effect", R"(,"brightness":0,)" + hidden_effect },
+    };
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        std::map<std::string, RendererPicture> pictures;
+        for (const auto& variant : variants) {
+            const std::string name = std::string("text-brightness-ldr-") + (native ? "native-" : "compat-") + variant.name;
+            const auto project = WriteTextFixture(root_ / name, "CLOCK", false, {}, variant.fields);
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            ASSERT_FALSE(loaded.scene->hdr);
+            pictures[variant.name] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+            ASSERT_TRUE(pictures[variant.name].error.empty()) << pictures[variant.name].error;
+        }
+        const auto peak = [](const RendererPicture& picture) {
+            return *std::max_element(picture.rgb.begin(), picture.rgb.end());
+        };
+        EXPECT_EQ(peak(pictures["plain"]), 255) << "the reference text is white";
+        for (const auto& variant : variants) {
+            EXPECT_EQ(pictures[variant.name].rgb, pictures["plain"].rgb)
+                << variant.name << " is not drawn as the text at brightness 1";
+        }
+    }
+}
+
+TEST_F(MetalSceneDraw, ATextLayersBrightnessReachesTheHdrPipelineOnBothRenderers)
+{
+    // In the HDR pipeline (the scene asks for HDR and has bloom on) the colour is
+    // multiplied by the brightness: the same white text at brightness 0 draws
+    // nothing, and at brightness 1 draws.
+    const auto lit = [](const RendererPicture& picture) {
+        std::size_t count = 0;
+        for (std::size_t i = 0; i + 2 < picture.rgb.size(); i += 3) {
+            if (picture.rgb[i] != 0 || picture.rgb[i + 1] != 0 || picture.rgb[i + 2] != 0) ++count;
+        }
+        return count;
+    };
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        std::map<std::string, std::size_t> pixels;
+        for (const std::string_view brightness : { "0", "1" }) {
+            const std::string name = std::string("text-brightness-hdr-") + (native ? "native-" : "compat-") +
+                                     std::string(brightness);
+            const auto project = WriteTextFixture(root_ / name, "CLOCK", false, {},
+                                                  R"(,"brightness":)" + std::string(brightness));
+            MakeSceneHdr(root_ / name);
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            ASSERT_TRUE(loaded.scene->hdr);
+            const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
+            pixels[std::string(brightness)] = lit(picture);
+        }
+        EXPECT_GT(pixels["1"], 0u);
+        EXPECT_EQ(pixels["0"], 0u) << "the brightness was not applied in the HDR pipeline";
+    }
+}
+
 TEST_F(MetalSceneDraw, TextStylingChangesPixelsWithoutRerasterizingGlyphs)
 {
     for (const bool with_effect : { false, true }) {
@@ -6373,8 +6500,7 @@ TEST_F(MetalSceneDraw, TextStylingChangesPixelsWithoutRerasterizingGlyphs)
         const auto project = WriteTextFixture(
             root_ / (with_effect ? "styled-effect" : "styled-text"), "FADE", with_effect, {},
             R"(,"alpha":{"value":1,"script":"export function update() { return engine.runtime < 0.5 ? 1 : engine.runtime < 1 ? 0.5 : 0; }"},)"
-            R"("color":{"value":"1 0 0","script":"export function update() { return engine.runtime < 0.5 ? new Vec3(1,0,0) : new Vec3(0,0,1); }"},)"
-            R"("brightness":{"value":0.5,"user":"intensity"})");
+            R"("color":{"value":"1 0 0","script":"export function update() { return engine.runtime < 0.5 ? new Vec3(1,0,0) : new Vec3(0,0,1); }"})");
         LoadedScene loaded;
         std::string error;
         ASSERT_TRUE(LoadScene(project, root_ / "style-cache", loaded, error)) << error;
@@ -6402,13 +6528,10 @@ TEST_F(MetalSceneDraw, TextStylingChangesPixelsWithoutRerasterizingGlyphs)
                 return value;
             };
             const auto red = ReadOutput(render, *loaded.scene);
-            EXPECT_NEAR(peak(red, 0), 128, 2);
+            EXPECT_NEAR(peak(red, 0), 255, 2);
             EXPECT_EQ(peak(red, 2), 0);
             const auto uploads = render.RuntimeImageUploadsForTests();
             ResetTextLayerMeasurementCountForTests();
-            loaded.scene->runtime->ApplyProjectPropertyOverride({
-                { "intensity", RuntimeScalarValue::Float(1.0f) },
-            });
             loaded.scene->runtime->Tick(0.5);
             ASSERT_TRUE(render.drawFrame(*loaded.scene)) << render.lastError();
             const auto blue = ReadOutput(render, *loaded.scene);
@@ -6417,6 +6540,58 @@ TEST_F(MetalSceneDraw, TextStylingChangesPixelsWithoutRerasterizingGlyphs)
             loaded.scene->runtime->Tick(0.5);
             ASSERT_TRUE(render.drawFrame(*loaded.scene)) << render.lastError();
             EXPECT_EQ(LitPixels(ReadOutput(render, *loaded.scene)), 0u);
+            EXPECT_EQ(render.RuntimeImageUploadsForTests(), uploads);
+            EXPECT_EQ(TextLayerMeasurementCountForTests(), 0u);
+            EXPECT_EQ(loaded.scene->runtime->scriptErrorCount(), 0u);
+            render.destroy();
+        }
+    }
+}
+
+TEST_F(MetalSceneDraw, AScriptedTextBrightnessChangesPixelsOnlyInTheHdrPipelineAndNeverRelaysTheText)
+{
+    // A brightness a script drives moves the pixels of a layer in the HDR pipeline without
+    // a new layout or upload, and does nothing anywhere else, where the layer keeps its colour.
+    for (const bool hdr : { false, true }) {
+        SCOPED_TRACE(hdr);
+        const std::string name = hdr ? "scripted-brightness-hdr" : "scripted-brightness-ldr";
+        const auto project = WriteTextFixture(
+            root_ / name, "CLOCK", false, {},
+            R"(,"brightness":{"value":1,"script":"export function update() { return engine.runtime < 0.5 ? 1 : 0; }"})");
+        if (hdr) MakeSceneHdr(root_ / name);
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+        ASSERT_EQ(loaded.scene->hdr, hdr);
+        @autoreleasepool {
+            id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+            CAMetalLayer* layer = [CAMetalLayer layer];
+            layer.device = device;
+            layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+            layer.drawableSize = CGSizeMake(384, 256);
+            MetalRender render;
+            MetalRenderInitInfo info {
+                .metal_layer = (__bridge void*)layer,
+                .width = 384, .height = 256, .render_width = 384, .render_height = 256,
+                .display_scale_factor = 1.0,
+            };
+            ASSERT_TRUE(render.init(info)) << render.lastError();
+            auto graph = sceneToRenderGraph(*loaded.scene);
+            ASSERT_TRUE(render.compileRenderGraph(*loaded.scene, *graph)) << render.lastError();
+            render.UpdateCameraFillMode(*loaded.scene, FillMode::ASPECTFIT);
+            for (int frame = 0; frame < 8; ++frame) AdvanceSceneFrame(render, *loaded.scene);
+            const auto before = LitPixels(ReadOutput(render, *loaded.scene));
+            EXPECT_GT(before, 0u) << "the text is not drawn at brightness 1";
+            const auto uploads = render.RuntimeImageUploadsForTests();
+            ResetTextLayerMeasurementCountForTests();
+            loaded.scene->runtime->Tick(0.6);
+            ASSERT_TRUE(render.drawFrame(*loaded.scene)) << render.lastError();
+            const auto after = LitPixels(ReadOutput(render, *loaded.scene));
+            if (hdr) {
+                EXPECT_EQ(after, 0u) << "a scripted brightness of 0 did not reach the HDR pipeline";
+            } else {
+                EXPECT_EQ(after, before) << "a scripted brightness changed a layer outside the HDR pipeline";
+            }
             EXPECT_EQ(render.RuntimeImageUploadsForTests(), uploads);
             EXPECT_EQ(TextLayerMeasurementCountForTests(), 0u);
             EXPECT_EQ(loaded.scene->runtime->scriptErrorCount(), 0u);

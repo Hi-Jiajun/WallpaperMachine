@@ -472,18 +472,14 @@ std::vector<uint32_t> DecodeUtf8(std::string_view text) {
     return codepoints;
 }
 
-bool ContainsSubstring(std::string_view value, std::string_view needle) {
-    return value.find(needle) != std::string_view::npos;
-}
-
 float HorizontalLineStart(const TextLayerState& state, float line_width, float padding,
                           uint32_t width) {
-    const std::string_view align = state.horizontal_align;
-    if (ContainsSubstring(align, "right")) {
+    switch (ParseTextHorizontalAlign(state.horizontal_align)) {
+    case TextHorizontalAlign::Right:
         return std::max(0.0f, static_cast<float>(width) - padding - line_width);
-    }
-    if (ContainsSubstring(align, "center") || align.empty()) {
+    case TextHorizontalAlign::Center:
         return std::max(padding, (static_cast<float>(width) - line_width) * 0.5f);
+    case TextHorizontalAlign::Left: break;
     }
     return padding;
 }
@@ -782,14 +778,16 @@ TextBlock MeasureTextBlock(const std::vector<LineRun>& lines, float ascender, fl
 // or pushed down to the centre or the bottom of what the padding leaves.
 float BlockTopY(const TextLayerState& state, float padding_y, uint32_t height, float block_height) {
     const float content_height = std::max(0.0f, static_cast<float>(height) - padding_y * 2.0f);
-    const std::string_view align =
-        state.vertical_align.empty() ? state.anchor : state.vertical_align;
 
     float top = padding_y;
-    if (ContainsSubstring(align, "bottom")) {
+    switch (ParseTextVerticalAlign(state.vertical_align)) {
+    case TextVerticalAlign::Bottom:
         top = padding_y + std::max(0.0f, content_height - block_height);
-    } else if (ContainsSubstring(align, "center") || ContainsSubstring(align, "middle")) {
+        break;
+    case TextVerticalAlign::Center:
         top = padding_y + std::max(0.0f, (content_height - block_height) * 0.5f);
+        break;
+    case TextVerticalAlign::Top: break;
     }
     return top;
 }
@@ -1253,6 +1251,43 @@ Eigen::Vector2f TextLayerRasterSizeForMeasured(const TextLayerState& state,
 
 bool TextStyleActive(const TextStyle& style) { return style.outline || style.blur || style.drop_shadow; }
 
+TextHorizontalAlign ParseTextHorizontalAlign(std::string_view word) {
+    if (word == "center") return TextHorizontalAlign::Center;
+    if (word == "right") return TextHorizontalAlign::Right;
+    return TextHorizontalAlign::Left;
+}
+
+TextVerticalAlign ParseTextVerticalAlign(std::string_view word) {
+    if (word == "top") return TextVerticalAlign::Top;
+    if (word == "bottom") return TextVerticalAlign::Bottom;
+    return TextVerticalAlign::Center;
+}
+
+std::string_view TextHorizontalAlignWord(TextHorizontalAlign align) {
+    switch (align) {
+    case TextHorizontalAlign::Center: return "center";
+    case TextHorizontalAlign::Right: return "right";
+    case TextHorizontalAlign::Left: break;
+    }
+    return "left";
+}
+
+std::string_view TextVerticalAlignWord(TextVerticalAlign align) {
+    switch (align) {
+    case TextVerticalAlign::Top: return "top";
+    case TextVerticalAlign::Bottom: return "bottom";
+    case TextVerticalAlign::Center: break;
+    }
+    return "center";
+}
+
+std::string TextAlignmentAnchor(TextHorizontalAlign horizontal, TextVerticalAlign vertical) {
+    std::string anchor(TextHorizontalAlignWord(horizontal));
+    anchor += ' ';
+    anchor += TextVerticalAlignWord(vertical);
+    return anchor;
+}
+
 float TextStyleMargin(const TextLayerState& state) {
     if (! TextStyleActive(state.style)) return 0.0f;
     // One pixel more than the style reaches, for the edge's own antialiasing.
@@ -1350,22 +1385,28 @@ TextLayerRenderBounds TextLayerRenderBoundsForRasterSize(const TextLayerState& s
         .top    = raster_size.y() * 0.5f,
     };
 
-    if (ContainsSubstring(state.horizontal_align, "left")) {
+    switch (ParseTextHorizontalAlign(state.horizontal_align)) {
+    case TextHorizontalAlign::Left:
         bounds.left  = layout_size.x() * -0.5f;
         bounds.right = bounds.left + raster_size.x();
-    } else if (ContainsSubstring(state.horizontal_align, "right")) {
+        break;
+    case TextHorizontalAlign::Right:
         bounds.right = layout_size.x() * 0.5f;
         bounds.left  = bounds.right - raster_size.x();
+        break;
+    case TextHorizontalAlign::Center: break;
     }
 
-    const std::string_view vertical_align =
-        state.vertical_align.empty() ? state.anchor : state.vertical_align;
-    if (ContainsSubstring(vertical_align, "bottom")) {
+    switch (ParseTextVerticalAlign(state.vertical_align)) {
+    case TextVerticalAlign::Bottom:
         bounds.bottom = layout_size.y() * -0.5f;
         bounds.top    = bounds.bottom + raster_size.y();
-    } else if (ContainsSubstring(vertical_align, "top")) {
+        break;
+    case TextVerticalAlign::Top:
         bounds.top    = layout_size.y() * 0.5f;
         bounds.bottom = bounds.top - raster_size.y();
+        break;
+    case TextVerticalAlign::Center: break;
     }
 
     bounds.left -= margin;
@@ -1559,14 +1600,10 @@ void TextLayer::SetFont(std::string font_key, std::string kind, std::string iden
     MarkCacheDirty();
 }
 
-void TextLayer::SetAlignment(std::string horizontal, std::string vertical, std::string anchor) {
-    if (m_state.horizontal_align == horizontal && m_state.vertical_align == vertical &&
-        m_state.anchor == anchor) {
-        return;
-    }
+void TextLayer::SetAlignment(std::string horizontal, std::string vertical) {
+    if (m_state.horizontal_align == horizontal && m_state.vertical_align == vertical) return;
     m_state.horizontal_align = std::move(horizontal);
     m_state.vertical_align   = std::move(vertical);
-    m_state.anchor           = std::move(anchor);
     m_state.dirty            = true;
     m_state.layout_pending   = true;
     MarkCacheDirty();

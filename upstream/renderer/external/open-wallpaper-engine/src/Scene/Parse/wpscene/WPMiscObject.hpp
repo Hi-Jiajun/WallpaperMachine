@@ -32,6 +32,19 @@ inline bool HasDynamicMiscSetting(const nlohmann::json& value) {
     return value.is_object() && (value.contains("script") || value.contains("user"));
 }
 
+// A setting Wallpaper Engine registers as an enumeration, read as the word it
+// is written as. A key that is missing leaves `word` as it was. A key that is
+// there and is not a string (a number, `null`, an object) names no entry, and
+// takes the registry's first one, `first_entry`; a typed string reader would
+// leave the default there instead. Whether a string matches an entry is for the
+// reader of the word to decide.
+inline void ReadMiscEnumWord(const nlohmann::json& json, const char* key, const char* first_entry,
+                             std::string& word) {
+    if (! json.contains(key)) return;
+    const auto& source = json.at(key);
+    word               = source.is_string() ? source.get<std::string>() : std::string(first_entry);
+}
+
 inline void ReadMiscVec3Setting(const nlohmann::json& json, const char* key,
                                 std::array<float, 3>* destination,
                                 nlohmann::json* setting, bool* dynamic) {
@@ -140,10 +153,14 @@ struct WPTextObject : WPMiscObjectBase {
     // applies is the parser's decision; see `ResolveTextCardPadding`.
     std::array<float, 2> padding { 32.0f, 32.0f };
     std::array<float, 2> spacing { 0.0f, 0.0f };
-    std::string          horizontalalign;
-    std::string          verticalalign;
+    // Wallpaper Engine registers both as enumerations: a key that is missing
+    // leaves the layer centred. `TextLayer` reads the word; see
+    // `ParseTextHorizontalAlign` and `ParseTextVerticalAlign`. There is no
+    // `alignment` key on a text object, and this one is not read.
+    std::string          horizontalalign { "center" };
+    std::string          verticalalign { "center" };
+    // The screen edge the layer follows, which is not a point of the layer.
     std::string          anchor;
-    std::string          alignment { "center" };
     uint32_t             maxrows { 1 };
     float                maxwidth { 500.0f };
     bool                 limitrows { false };
@@ -192,10 +209,11 @@ struct WPTextObject : WPMiscObjectBase {
         GET_JSON_NAME_VALUE_NOWARN(json, "pointsize", pointsize);
         ReadMiscVec2Setting(json, "padding", padding);
         ReadMiscVec2Setting(json, "spacing", spacing);
-        GET_JSON_NAME_VALUE_NOWARN(json, "horizontalalign", horizontalalign);
-        GET_JSON_NAME_VALUE_NOWARN(json, "verticalalign", verticalalign);
+        // A key that is there but not a string takes the registry's first entry,
+        // which is `left` for the horizontal registry and `center` for the vertical.
+        ReadMiscEnumWord(json, "horizontalalign", "left", horizontalalign);
+        ReadMiscEnumWord(json, "verticalalign", "center", verticalalign);
         GET_JSON_NAME_VALUE_NOWARN(json, "anchor", anchor);
-        GET_JSON_NAME_VALUE_NOWARN(json, "alignment", alignment);
         GET_JSON_NAME_VALUE_NOWARN(json, "maxrows", maxrows);
         GET_JSON_NAME_VALUE_NOWARN(json, "maxwidth", maxwidth);
         GET_JSON_NAME_VALUE_NOWARN(json, "limitrows", limitrows);

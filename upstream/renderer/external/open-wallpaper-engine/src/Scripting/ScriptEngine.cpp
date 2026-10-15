@@ -2113,7 +2113,7 @@ void AppendCommonHostBootstrap(std::ostringstream& wrapper) {
         << "      return value !== null && typeof value === 'object' && 'value' in value ? value.value : value;\n"
         << "    }\n"
         << "    var config = { text: String(plain(options.text)), visible: true };\n"
-        << "    ['font', 'horizontalalign', 'verticalalign', 'anchor', 'alignment'].forEach(function(key) {\n"
+        << "    ['font', 'horizontalalign', 'verticalalign', 'anchor'].forEach(function(key) {\n"
         << "      var value = plain(options[key]);\n"
         << "      if (value !== undefined && value !== null) config[key] = String(value);\n"
         << "    });\n"
