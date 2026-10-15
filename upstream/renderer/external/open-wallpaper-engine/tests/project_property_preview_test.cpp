@@ -926,6 +926,186 @@ TEST(SoundLayerVolume, ALoadedSoundLayerFollowsItsSliderAndAPlainOneDoesNot) {
     EXPECT_EQ(runtime->SoundLayerVolume("click"), 0.75f);
 }
 
+// ---- A flag bound to a choice ------------------------------------------------
+//
+// An author who turns a toggle into a combo keeps the layers the toggle showed
+// bound to it by name alone, with no condition. A choice is a string, so what
+// such a binding reads is the choice's own truth, the way a string property is
+// read as a flag everywhere else (`true` or `1`), and not "never". A binding
+// that names a condition compares the choice with it instead.
+
+constexpr std::string_view kChoiceLayers = R"([
+  {"id":1,"name":"bare","image":"image.json","visible":{"user":"mode","value":true}},
+  {"id":2,"name":"is_one","image":"image.json",
+   "visible":{"user":{"name":"mode","condition":"1"},"value":true}},
+  {"id":3,"name":"is_two","image":"image.json",
+   "visible":{"user":{"name":"mode","condition":"2"},"value":true}}
+])";
+
+struct ChoiceShows {
+    bool bare { false };
+    bool is_one { false };
+    bool is_two { false };
+
+    bool operator==(const ChoiceShows&) const = default;
+};
+
+ChoiceShows ChoiceAfterATick(LoadedScene& loaded) {
+    loaded.runtime().Tick(1.0 / 60.0);
+    return ChoiceShows {
+        .bare   = loaded.runtime().NodeVisible("bare"),
+        .is_one = loaded.runtime().NodeVisible("is_one"),
+        .is_two = loaded.runtime().NodeVisible("is_two"),
+    };
+}
+
+TEST(ChoiceProperty, ABindingWithoutAConditionReadsTheChoiceAsAFlag) {
+    struct Case {
+        const char* choice;
+        ChoiceShows shows;
+    };
+    for (const auto& [choice, want] : std::vector<Case> {
+             { "1", { .bare = true, .is_one = true } },
+             { "true", { .bare = true } },
+             { "TRUE", { .bare = true } },
+             { "0", {} },
+             { "false", {} },
+             { "", {} },
+             { "None", {} },
+         }) {
+        SCOPED_TRACE(choice);
+        const ProjectProperties saved { { "mode", RuntimeScalarValue::String(choice) } };
+        const auto              loaded = Load(kChoiceLayers, saved, nullptr);
+        ASSERT_NE(loaded, nullptr);
+        EXPECT_EQ(ChoiceAfterATick(*loaded), want);
+    }
+
+    // The condition compares the choice with itself, so `2` shows the layer that
+    // waits for it and not the one that waits for `1`.
+    const auto second = Load(kChoiceLayers, { { "mode", RuntimeScalarValue::String("2") } }, nullptr);
+    ASSERT_NE(second, nullptr);
+    EXPECT_EQ(ChoiceAfterATick(*second), (ChoiceShows { .is_two = true }));
+}
+
+// Picking another option on a running scene is the same as loading with it.
+TEST(ChoiceProperty, ABindingWithoutAConditionFollowsTheChoiceWhileTheSceneRuns) {
+    const auto loaded = Load(kChoiceLayers, { { "mode", RuntimeScalarValue::String("0") } }, nullptr);
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_EQ(ChoiceAfterATick(*loaded), ChoiceShows {});
+
+    loaded->runtime().ApplyProjectPropertyOverride({ { "mode", RuntimeScalarValue::String("1") } });
+    EXPECT_EQ(ChoiceAfterATick(*loaded), (ChoiceShows { .bare = true, .is_one = true }));
+
+    loaded->runtime().ApplyProjectPropertyOverride({ { "mode", RuntimeScalarValue::String("2") } });
+    EXPECT_EQ(ChoiceAfterATick(*loaded), (ChoiceShows { .is_two = true }));
+
+    loaded->runtime().ApplyProjectPropertyOverride({ { "mode", RuntimeScalarValue::String("false") } });
+    EXPECT_EQ(ChoiceAfterATick(*loaded), ChoiceShows {});
+}
+
+// The value underneath: a flag connected to a string is the string's truth, and
+// a condition still decides for itself.
+TEST(ChoiceProperty, AConnectedFlagIsTheChoicesTruthAndAConditionStillCompares) {
+    DynamicValue choice(std::string("1"));
+    EXPECT_TRUE(choice.getBool());
+
+    DynamicValue flag(false);
+    flag.connect(&choice);
+    EXPECT_TRUE(flag.getBool());
+    choice.update(std::string("0"));
+    EXPECT_FALSE(flag.getBool());
+    choice.update(std::string("true"));
+    EXPECT_TRUE(flag.getBool());
+
+    DynamicValue second(false);
+    second.attachCondition(ConditionInfo { .name = "mode", .condition = "2" });
+    second.connect(&choice);
+    EXPECT_FALSE(second.getBool());
+    choice.update(std::string("2"));
+    EXPECT_TRUE(second.getBool());
+    EXPECT_FALSE(flag.getBool());
+    // `1` is a true choice, but not the one this value waits for.
+    choice.update(std::string("1"));
+    EXPECT_FALSE(second.getBool());
+}
+
+// The reading itself. It is also what a script that returns a string is read with
+// on every tick, so it is a comparison in place.
+TEST(ChoiceProperty, AStringIsATrueFlagOnlyForTrueInAnyCaseOrOne) {
+    for (const std::string choice : std::vector<std::string> { "1", "true", "TRUE", "True", "tRuE" }) {
+        SCOPED_TRACE(choice);
+        EXPECT_TRUE(StringIsTrue(choice));
+        EXPECT_TRUE(RuntimeScalarValue::String(choice).asBool());
+        EXPECT_TRUE(DynamicValue(choice).getBool());
+    }
+    for (const std::string choice : std::vector<std::string> {
+             "", "0", "2", "01", "11", "-1", "1 ", " 1", "false", "yes", "tru", "truee", "true ",
+             " true", "t rue", "None", std::string("tru\0", 4), std::string("\xff" "rue") }) {
+        SCOPED_TRACE(choice);
+        EXPECT_FALSE(StringIsTrue(choice));
+        EXPECT_FALSE(RuntimeScalarValue::String(choice).asBool());
+        EXPECT_FALSE(DynamicValue(choice).getBool());
+    }
+}
+
+// A combo whose project.json value is a number reaches the scene as a number,
+// and a number is a flag by being other than zero. The choice the app sends is the
+// option's key, a string, which only `1` and `true` turn on. The two readings
+// differ for choices other than 0 and 1 (the bare layer is all this pins: how a
+// conditioned binding reads a number is not part of this rule).
+TEST(ChoiceProperty, ANumberDeclaredAsTheChoiceIsAFlagByBeingNonZero) {
+    struct Case {
+        RuntimeScalarValue choice;
+        bool               bare;
+    };
+    for (const auto& [choice, bare] : std::vector<Case> {
+             { RuntimeScalarValue::Float(0.0f), false },
+             { RuntimeScalarValue::Float(1.0f), true },
+             { RuntimeScalarValue::Float(2.0f), true },
+             { RuntimeScalarValue::String("0"), false },
+             { RuntimeScalarValue::String("1"), true },
+             { RuntimeScalarValue::String("2"), false },
+         }) {
+        SCOPED_TRACE(choice.asString() + "/" + std::to_string(choice.asFloat()));
+        const auto loaded = Load(kChoiceLayers, { { "mode", choice } }, nullptr);
+        ASSERT_NE(loaded, nullptr);
+        EXPECT_EQ(ChoiceAfterATick(*loaded).bare, bare);
+    }
+}
+
+// An effect a choice switches on is built when the scene loads, by the same
+// reading of the choice as a layer's visibility.
+TEST(ChoiceProperty, AnEffectBoundToAChoiceWithoutAConditionIsBuiltForATrueChoice) {
+    constexpr std::string_view layers = R"([
+      {"id":1,"name":"effects","image":"image.json","visible":true,
+       "effects":[
+         {"file":"effects/chosen/effect.json","id":10,
+          "visible":{"user":"mode","value":false}},
+         {"file":"effects/toggled/effect.json","id":11,
+          "visible":{"user":{"name":"mode","condition":"2"},"value":false}}
+       ]}
+    ])";
+    struct Case {
+        const char*              choice;
+        std::vector<std::string> built;
+    };
+    for (const auto& [choice, built] : std::vector<Case> {
+             { "1", Names({ "effects/chosen" }) },
+             { "true", Names({ "effects/chosen" }) },
+             { "TRUE", Names({ "effects/chosen" }) },
+             { "0", {} },
+             { "false", {} },
+             { "None", {} },
+             { "2", Names({ "effects/toggled" }) },
+         }) {
+        SCOPED_TRACE(choice);
+        const auto loaded = Load(layers, { { "mode", RuntimeScalarValue::String(choice) } },
+                                 nullptr, kLoadOnlyFiles);
+        ASSERT_NE(loaded, nullptr);
+        EXPECT_EQ(BuiltEffects(*loaded->scene), built);
+    }
+}
+
 // ---- The engine's own command ------------------------------------------------
 //
 // A document reaches a running scene as a property of the wallpaper, is parsed on

@@ -1,5 +1,6 @@
 #include "Runtime/DynamicValue.hpp"
 
+#include "Project/ProjectProperties.hpp"
 #include "Utils/Logging.h"
 
 #include <sstream>
@@ -232,7 +233,9 @@ void DynamicValue::update(const std::string& new_value)
     m_vec4   = Eigen::Vector4f::Zero();
     m_float  = 0.0f;
     m_int    = 0;
-    m_bool   = false;
+    // A flag bound to a choice without a condition reads the choice as a flag; one
+    // with a condition is whether the choice equals it, set below.
+    m_bool   = StringIsTrue(new_value);
     m_string = new_value;
     m_type   = UnderlyingType::String;
 

@@ -651,17 +651,18 @@ pointer mapping follows the position.
 `project_property_preview_test` (CPU only, in the check) pins what a property
 document means to a running scene: the project's declared defaults with exactly the
 given values over them, whatever the scene loaded with, which properties a
-scene reads only while it loads (a preview holds those at the loaded value), and
-that a sound layer's volume follows its slider. It also sends documents through the
-engine's `project_property_preview_json` command to a scene running on its render
-thread: the newest document of a burst wins at the cost of one queued command, a
-bad document or one with no scene yet changes nothing, and nothing is replayed to
-the next scene. `layer_texture_reference_test` pins the one graph rebuild a preview
-that reveals a hidden layer asks for, and `metal_scene_draw_smoke` the pixels: a
-preview draws what a fresh load with the same values draws and the empty document
-restores the first frame byte for byte; `unchanged_present_test` shows on a live
-surface that a previewed slider presents once and that an on-demand scene wakes for
-exactly one frame. See
+scene reads only while it loads (a preview holds those at the loaded value), that a
+sound layer's volume follows its slider, and that a flag bound to a string property
+(a combo's choice) without a condition reads the string as a flag. It also sends
+documents through the engine's `project_property_preview_json` command to a scene
+running on its render thread: the newest document of a burst wins at the cost of
+one queued command, a bad document or one with no scene yet changes nothing, and
+nothing is replayed to the next scene. `layer_texture_reference_test` pins the one
+graph rebuild a preview that reveals a hidden layer asks for, and
+`metal_scene_draw_smoke` the pixels: a preview draws what a fresh load with the same
+values draws and the empty document restores the first frame byte for byte;
+`unchanged_present_test` shows on a live surface that a previewed slider presents
+once and that an on-demand scene wakes for exactly one frame. See
 [scene regressions](scene-regressions.md#scene-scripts-and-property-bindings).
 
 `unchanged_present_test` exercises Compatibility frames that would repeat the
@@ -968,6 +969,16 @@ into private textures; the three that draw skip visibly without a Metal device.
   its own and has no composite-only mode (the 11 local scenes that use it hold layers of
   the canvas's size, where the two paths were not compared). `autosize` alone, which sizes a layer by its texture, and
   `solidlayer` are read and not applied.
+- **A string property bound to a setting without a condition.** A flag (a layer's
+  or effect's `visible`, and every other bool bound by name) reads the string as
+  `true` or `1` and is false for every other string, which covers a combo's
+  choice and also a text input, file, directory or texture property; a number
+  reads 0 whatever the string. A combo that `project.json` declares as a number is
+  a number until the app sends a choice (a string): on for any whole number but 0,
+  so `2` is on as the authored default and off once picked. Wallpaper Engine's
+  frame shows the flag only at the combo's default `1`, and nothing shows what it
+  does with another choice, with a text property or with a number, so those
+  readings are this engine's own.
 - **A lone `pixels_equal=false` on a large scene is not by itself a regression.**
   On an unmodified build a 4K scene's `frame-2` has been seen once to differ from
   its isolated twin by a few levels everywhere (no clock, label or single layer),

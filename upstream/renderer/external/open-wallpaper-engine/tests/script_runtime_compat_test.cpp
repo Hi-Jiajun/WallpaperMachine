@@ -25,8 +25,10 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <string>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 
 namespace wallpaper::audio {
 void SetAudioSpectrumSnapshotForTesting(const AudioSpectrumSnapshot&);
@@ -3022,6 +3024,52 @@ TEST(ScriptRuntimeCompat, VisibleOnlyBindingIgnoresObjectReturn) {
     runtime->Tick(1.0 / 60.0);
     EXPECT_FALSE(runtime->NodeVisible("probe"));
     EXPECT_FALSE(node->Visible());
+    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
+}
+
+// A flag reads a string as it reads a combo's choice: `true` in any case or `1` is
+// on, every other string is off. A script that returns the string is read the same
+// way on every tick it runs.
+TEST(ScriptRuntimeCompat, AVisibleScriptThatReturnsAStringIsReadAsAFlag) {
+    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
+    ASSERT_NE(runtime, nullptr);
+
+    struct Case {
+        const char* name;
+        const char* returned;
+        bool        visible;
+    };
+    const Case cases[] = {
+        { "one", "1", true },
+        { "lower", "true", true },
+        { "upper", "TRUE", true },
+        { "zero", "0", false },
+        { "word", "false", false },
+        { "other", "maybe", false },
+        { "empty", "", false },
+    };
+    std::vector<std::shared_ptr<SceneNode>> nodes;
+    for (const auto& item : cases) {
+        auto node = std::make_shared<SceneNode>();
+        runtime->RegisterNodeVisibility(
+            item.name,
+            node.get(),
+            ResolveBoolSetting(
+                *runtime,
+                nlohmann::json {
+                    { "script", std::string("export function update(value) { return '") +
+                                    item.returned + "'; }" },
+                    { "value", false },
+                },
+                item.name));
+        nodes.push_back(std::move(node));
+    }
+
+    runtime->Tick(1.0 / 60.0);
+    runtime->Tick(1.0 / 60.0);
+    for (const auto& item : cases) {
+        EXPECT_EQ(runtime->NodeVisible(item.name), item.visible) << "returned '" << item.returned << "'";
+    }
     EXPECT_EQ(runtime->scriptErrorCount(), 0u);
 }
 

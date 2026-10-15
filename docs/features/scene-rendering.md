@@ -633,6 +633,32 @@ as Wallpaper Engine draws it: an effect that is off builds no chain. A sound lay
 is live too: a slider bound to it sets the stream's volume when the slider moves,
 and nothing else does, so a volume a script set stays until its own slider moves.
 
+A flag bound to a string property reads the string as a flag. The case that
+matters is a layer or effect `visible` that names a combo property with no
+condition (`{"user": "mode", "value": true}`, which is what a toggle the author
+later turned into a combo leaves behind): it gets the choice as a string, and a
+string is a true flag when it is `true` in any case or `1`, the reading every
+string project property already has; any other choice is false. The rule belongs
+to the flag, not to the layer. Every bool a setting binds to a property by name
+reads a combo, text input, file, directory or texture property so (a layer's or
+effect's `visible`, a puppet animation layer's, the camera shake's and the
+load-only bloom and camera-parallax switches, a rope's `uvscrolling` and
+`uvsmoothing`, a text layer's outline, blur and shadow switches), so a bare flag
+bound to a text input whose text is `1` or `true` is on. A string a script returns
+for a flag is read the same way on every tick it runs, by a comparison in place
+that makes no copy. A binding that names a condition compares the choice with it
+instead, so `{"user": {"name": "mode", "condition": "2"}}` is on exactly when the
+choice is `2` and never by the rule above. Wallpaper Engine draws a layer bound
+this way at the combo's default `1`; what it does with another choice is not
+established, so those follow the rule. A number bound to a choice without a
+condition still reads 0, because nothing shows that Wallpaper Engine converts a
+choice to one.
+
+A combo whose `project.json` `value` is a number reaches the scene as a number, so
+a flag bound to it is on for any whole number but 0, `2` included, for as long as
+the combo keeps its authored value. A choice the app sends is the option's key, a
+string, and `2` is off then; the two differ only for choices other than 0 and 1.
+
 A running scene takes the document through the wallpaper property
 `project_property_preview_json`, one flat JSON object holding the whole state. The
 main looper parses it (anything that is not a JSON object is logged and changes

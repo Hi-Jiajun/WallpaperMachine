@@ -678,6 +678,36 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   property nothing reads and a live slider note nothing. One test builds the
   scene again with the new values to show the effect set and the slot texture
   differ, which is why a running scene cannot take them.
+- **A flag bound to a string property reads the string as a flag** —
+  `project_property_preview_test` (`ChoiceProperty.*`, CPU only) and
+  `script_runtime_compat_test`.
+  `DynamicValue::update(const std::string&)` set the flag to false for every string
+  unless a condition was attached, and a binding copies the property's flag, so a
+  `visible` of the form `{"user": "mode", "value": true}` on a property that is a
+  combo (a toggle the author later turned into a choice) never showed its layer,
+  whatever the choice. The flag of a string is now `StringIsTrue` (`true` in any
+  case, or `1`, the reading `RuntimeScalarValue::String` and `asBool` already had;
+  it compares in place and allocates nothing, because a script that returns a
+  string runs it on every tick), and a binding with a condition still compares the
+  choice with it. The rule belongs to the flag, so it holds for every bool bound to
+  a string property and for a string a script returns. The tests load three layers
+  bound to one combo (no condition, condition `1`, condition `2`) and check which
+  show for `1`, `true`, `TRUE`, `0`, `false`, an empty choice, `None` and `2`, both
+  as the scene loads and as `ApplyProjectPropertyOverride` moves the choice while
+  it runs; load an image layer's effects bound to the same combo and check which
+  are built; connect a flag and a conditioned value to a string `DynamicValue`;
+  pin the spellings (`true` in any case and `1` are on; `0`, `2`, `01`, `1 `,
+  ` true`, `truee`, `tru`, an embedded NUL and a high byte are not); show that a
+  combo `project.json` declares as a number stays a number, on for any whole
+  number but 0 where the string `2` is off; and, in `script_runtime_compat_test`
+  (`ScriptRuntimeCompat.AVisibleScriptThatReturnsAStringIsReadAsAFlag`), run
+  visibility scripts that return `'1'`, `'true'`, `'TRUE'`, `'0'`, `'false'`,
+  `'maybe'` and `''`. Wallpaper Engine draws a layer bound this way at the combo's
+  default `1`; its answer for another choice is not established, so what the tests
+  pin for any other string is this engine's own rule, and a numeric setting bound
+  to a choice without a condition is unchanged (it reads 0). A puppet animation
+  layer's flag and the other bool consumers share the one `DynamicValue` path and
+  are not exercised one by one.
 - **Sound layer volume follows its slider** — `project_property_preview_test`
   (`SoundLayerVolume.*`, CPU only, a fake sound stream and a null-backend sound
   manager, so no audio device is opened). `WPSoundParser::Parse` read a
