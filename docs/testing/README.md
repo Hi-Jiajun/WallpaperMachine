@@ -159,18 +159,15 @@ path. A test that passes alone but fails in the gate is the symptom; reproduce
 it with `python3 scripts/test.py --serial` and fix the shared state rather than
 the scheduling. UI runs are always serial: they drive one desktop.
 
-CI's `test` job runs `--serial` too. On hosted macOS runners, parallel runs
-intermittently fail one offscreen control-panel test with
-`InvalidTransition { phase: idle targetPhase: failed(deinit) }` — WebKit drops a
-`callAsyncJavaScript` call unanswered — while the same tests pass locally in
-parallel; on the runner, serial costs almost no wall clock. When it recurs, the
-panel fixture's error says whether the page reloaded meanwhile, and the
-`test-logs-<tag>` artifact carries the run's WebKit and jetsam reports.
+CI's `test` job runs `--serial` too: on hosted macOS runners serial costs almost
+no wall clock (the step's comment in `.github/workflows/build.yml` has the
+timings), and the `test-logs-<tag>` artifact carries the run's crash and jetsam
+reports when a run fails there and not locally.
 
 The per-test `UserDefaults` suite is not only a parallelism concern: the unit
 bundle runs inside the real app as its test host, so `UserDefaults.standard`
 *is* `app.wallpapermachine`, the preferences of the installed app. Any
-`WebPanelController` (or other store) built without `defaults:` writes there —
+`PanelController` (or other store) built without `defaults:` writes there —
 the first-run welcome's `welcomeSeen` flag, the learned drag-select hint, favorites — and
 silently changes what the app does at the next launch. Pass the test's own
 suite everywhere; `PanelFixture` does.
@@ -192,21 +189,23 @@ preference domain names follow the same override. The suite pins English and
 marks onboarding/launch announcements complete. Launch arguments pin Foundation's
 native language without changing the system domain. Teardown stops the test app,
 then removes the suite and support root, including when setup or a test fails.
-System-global readers (title-bar double-click behavior, system language and
-desktop-click preferences) keep their original domains.
+System-global readers (system language and desktop-click preferences) keep their
+original domains.
 
 The same rule covers a second shape: a test that measures a *wall-clock window*
 rather than shared state. It is still a race, it can lose alone as well as in
-the gate, and widening the sleep only moves the threshold. Two in
-`ControlPanelShellTests` were fixed rather than tolerated, and both fixes are
-the pattern to copy. One latched a snapshot count, submitted a form and read
-the count 50 ms later, so a push already in flight when the count was latched
-was indistinguishable from one the submit caused; it drains with
-`panel.quiet()` before the window. The other read `getBoundingClientRect`
-straight after `setFrameSize`, catching the layout before the page had
-reflowed; it waits for `window.innerWidth` to reach the new width. Measure
-"what did this action cause" from a settled state, and wait for a state the
-page can report rather than for a duration.
+the gate, and widening the sleep only moves the threshold. Measure "what did
+this action cause" from a settled state: await the task `controller.launch`
+returns instead of sleeping, drain what is already in flight before latching a
+count, drive timers with `ManualSleeper` (`Tests/Unit/Support/`), and wait for a
+state the model or view reports (`PanelFixture.waitUntil`) rather than for a
+duration. `waitUntil`'s two-second default is short for a loaded machine; a new
+panel test that waits on real work gives it a longer timeout.
+
+A failed assertion in the app-hosted bundle can take about two minutes to
+report while XCTest symbolicates the failing frame, so a failure inside a loop
+or a hosted panel can read as a hang or a timeout; look for the assertion in the
+log before raising a timeout.
 
 Before blaming your own change for a timing-shaped gate failure, confirm
 ownership: revert the change and run the gate again. A failure that survives
@@ -216,8 +215,8 @@ five times its usual wall clock is measuring contention.
 ## Verification tiers
 
 The full gate compiles the Debug app and test bundle and then runs well over a
-thousand native tests, several of which drive offscreen WebKit or a real PTY
-downloader; the test phase alone takes minutes, before any Release build. Match
+thousand native tests, several of which host the panel in offscreen windows,
+load web wallpapers in offscreen web views or drive a real PTY downloader; the test phase alone takes minutes, before any Release build. Match
 the effort to the change:
 
 | Change | While iterating | Before reporting |
@@ -266,7 +265,8 @@ they do not establish.
 
 1. **Pick the lowest layer that can observe the behavior.** Renderer semantics
    go to Rust or C++; bridge state goes to `wallpaper-bridge`; app services,
-   stores and panel bridging go to `Tests/Unit/<Domain>/`; developer-script
+   stores and the control panel's controller and view models go to
+   `Tests/Unit/<Domain>/` (`Panel/` for the panel); developer-script
    behavior goes to `scripts/tests/`. `Tests/UI/` is a last resort — it controls
    the desktop and therefore cannot be part of routine verification.
 2. **Keep it device-free.** No windows, no screenshots, no audio device, no

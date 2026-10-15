@@ -145,7 +145,7 @@ to see the raw stream as well, or open the log named in the failure line.
 | Mode | Use when | Requires |
 |---|---|---|
 | Full (no flag) | Renderer, bridge crate, or first build of a clean checkout. | All prerequisites. |
-| `--swift-only` | Only Swift, `WebUI/`, resources, or `project.yml` changed. | `upstream/renderer/target/release/libwallpaper_bridge.a` and `App/Bridge/Generated` must already exist from an earlier full build. |
+| `--swift-only` | Only Swift, resources, or `project.yml` changed. | `upstream/renderer/target/release/libwallpaper_bridge.a` and `App/Bridge/Generated` must already exist from an earlier full build. |
 | `--renderer-only` | Iterating on Rust/C++ or the uniffi interface without needing an app bundle. | Nothing further; it stops after regenerating bindings. |
 
 ## Packaging and installing

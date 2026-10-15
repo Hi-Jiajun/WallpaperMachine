@@ -60,9 +60,6 @@ targets:
         type: file
         buildPhase: resources
       - path: Shared
-      - path: WebUI
-        type: folder
-        buildPhase: resources
       - path: Resources/StarterWallpaper
         type: folder
         buildPhase: resources
@@ -185,6 +182,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.wallpapermachine.tests
         GENERATE_INFOPLIST_FILE: YES
+        # Tests/Unit/Support/TestBundle.swift: replaces the app's desktop actions before any test runs.
+        INFOPLIST_KEY_NSPrincipalClass: WallpaperMachineTestBundle
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/WallpaperMachine.app/Contents/MacOS/WallpaperMachine"
         BUNDLE_LOADER: "$(TEST_HOST)"
         SWIFT_INCLUDE_PATHS: "$(SRCROOT)/App/Bridge/Generated"

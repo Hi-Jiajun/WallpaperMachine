@@ -39,8 +39,8 @@ kernel's resource-coalition accounting (`CoalitionEnergySource`,
 `EnergyUsageMonitor` in `App/Services/Diagnostics/`):
 
 - **What is counted.** The app's own coalition, which macOS also charges for the
-  XPC services the app starts: the panel's WebKit processes, the video decoder
-  service's CPU work and the audio helper. The lock-screen extension runs in a
+  XPC services the app starts: the WebKit processes of web wallpapers and the
+  preview, the video decoder service's CPU work and the audio helper. The lock-screen extension runs in a
   coalition of its own and is added when a process from this bundle's
   `Contents/Extensions` is running.
 - **What is not.** WindowServer compositing the wallpaper, the hardware video
@@ -83,7 +83,7 @@ kernel's resource-coalition accounting (`CoalitionEnergySource`,
   from the pack voltage (a 99.6 Wh MacBook Pro reads about 98.5 Wh). A desktop Mac
   has no such entry and shows no line.
 - **Before and after.** A setting on Performance or Playback & Power that changes rendering work
-  (`WebPanelController.renderingSettings`: presets, frame-rate limit, render scale,
+  (`RenderingSetting` in `PanelController+Settings.swift`: presets, frame-rate limit, render scale,
   battery mode and quality, what to do in Low Power Mode, when the Mac is hot and when
   the battery is low, video backend, scene renderer and the scene and
   experimental switches) calls `EnergyUsageMonitor.settingChanged()` once the
@@ -99,13 +99,13 @@ kernel's resource-coalition accounting (`CoalitionEnergySource`,
   of it.
 - **Cost.** One sample is about 3 ms of kernel calls (every coalition on the Mac
   is read for the contention check), taken off the main thread. Sampling runs only
-  while the panel window is visible with Settings open; otherwise no timer exists.
-  Settings sections switch inside the page without telling native, so the other
-  Settings sections sample too. Readings reach the page through
-  `window.wallpaperUI.energy(reading)`, not the snapshot, so a two-second update
-  patches one row instead of re-rendering the panel. The object carries `level`,
-  `batteryPercentPerHour` and `comparison` (`beforeMilliwatts`, `afterMilliwatts`)
-  when they apply.
+  while the panel window is visible with Settings open (`PanelController`'s
+  visibility-gated work); otherwise no timer exists. The sampler does not know which
+  Settings section is open, so every section samples. Each reading bumps one counter
+  (`PanelStoreRevisions.energy`), and only the Energy use rows read it, so a two-second
+  update redraws those rows and nothing else. The rows show an `EnergyReadout`: the
+  figure, its grade, the battery share and the before-and-after comparison when they
+  apply.
 - **Unavailable.** The interfaces are private libsystem exports resolved with
   `dlsym`. If a macOS release removes one, the row reads **Unavailable on this
   Mac**.

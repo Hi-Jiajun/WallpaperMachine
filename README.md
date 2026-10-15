@@ -81,8 +81,8 @@ Rather build it yourself? It takes two commands: see
 ## The app
 
 One window with a sidebar: Steam Workshop and pixiv to browse, your library (all wallpapers,
-favorites and your collections) and Settings. The website runs that
-same interface on a demo library, so you can
+favorites and your collections) and Settings. The website has a demo of it on a
+sample library, so you can
 [try it in your browser](https://www.wallpapermachine.app/#app). Close the
 window and the app keeps running in the menu bar, where you can pause, resume, mute
 or go to the previous, next or a random wallpaper, on each display separately when you have more than one. When it launches at login, it starts there
@@ -142,7 +142,7 @@ without opening the window.
 
 | Layer | What it does |
 | --- | --- |
-| **Swift shell** | The AppKit app. Its control panel is HTML in `WKWebView` ([`WebUI/`](WebUI)), and [web wallpapers](docs/features/web-wallpapers.md) run in web views of their own. |
+| **Swift shell** | The AppKit app. Its control panel is native SwiftUI ([`App/Views/ControlPanel`](App/Views/ControlPanel)), and [web wallpapers](docs/features/web-wallpapers.md) run in web views of their own. |
 | **Rust core** | The vendored renderer ([`upstream/renderer`](upstream/renderer)): displays, wallpaper windows, video decode and audio capture, bridged to Swift with uniffi. |
 | **C++ scene engine** | Open Wallpaper Engine, statically linked into the Rust core, draws scene wallpapers. |
 | **Metal** | Scenes render natively on Metal, and a scene the native renderer cannot draw falls back to Vulkan on Metal through MoltenVK. AVFoundation video is opt-in under [Settings → Performance](docs/features/performance.md), where the scene renderer can also be set to Compatibility. |
@@ -320,7 +320,7 @@ Engine you own; the app bundles neither.
 <br>
 
 <p align="center">
-  <img src="WebUI/app-icons/day.png" width="72" alt="WallpaperMachine app icon">
+  <img src="App/Resources/Assets.xcassets/AppIconDay.imageset/day.png" width="72" alt="WallpaperMachine app icon">
 </p>
 
 <p align="center">

@@ -13,7 +13,6 @@ ROOT = Path(__file__).resolve().parents[2]
 APP = ROOT / "App"
 EXTENSION = ROOT / "Extension"
 SHARED = ROOT / "Shared"
-WEB_UI = ROOT / "WebUI"
 TESTS = ROOT / "Tests"
 
 # Swift bindings written by `uniffi-bindgen` during `scripts/build.py`.

@@ -21,11 +21,13 @@ was run.
       Settings from the sidebar, and through the eleven Settings sections: Quick
       Settings (the one Settings opens on), General, Appearance, Desktop & Lock Screen,
       Playback & Power, Performance, Displays, Keyboard shortcuts, Library & Steam,
-      Storage, About. The title bar names the place on show each time.
-- [ ] Narrow the window to 960px or less: the sidebar becomes a rail of glyphs under a
-      full-width title bar, Now Playing shrinks to its thumbnail with the controls
-      stacked, nothing overlaps the traffic lights, and widening the window restores
-      the sidebar.
+      Storage, About. The window title names the place on show each time, and on All
+      wallpapers, Favorites and a collection the subtitle counts it.
+- [ ] Narrow the window below 960 points: the inspector closes, the sidebar keeps its
+      labels and counts, nothing overlaps the traffic lights or the toolbar, and widening
+      the window opens the inspector again. Open it with the toolbar's **Wallpaper
+      details** button while the window is narrow: it stays open as the window grows and
+      shrinks, and so does a choice to close it in a wide window.
 - [ ] Command-comma reuses the existing window.
 - [ ] Move the panel to another Space (or a desktop with another app full screen) and
       choose Control Panel from the status menu: it appears on the Space you are on,
@@ -58,7 +60,7 @@ was run.
 ## Appearance
 
 - [ ] Choose Light and Dark, then System, and change the macOS appearance.
-- [ ] Check the title bar, sidebar, menus, controls, dialogs, inspector, Filters
+- [ ] Check the toolbar, sidebar, menus, controls, dialogs, inspector, Filters
       popover and download popover in each mode. The sidebar shows the system's
       translucent material (it dims in an inactive window and turns opaque under
       System Settings → Accessibility → Display → Reduce transparency).
@@ -87,7 +89,7 @@ was run.
       file is replaced (import it again with Replace if changed), only that
       tile's cover refreshes.
 - [ ] With a saved Steam sign-in, select an installed Workshop wallpaper and
-      choose **Reinstall from Workshop…** (the circular arrows beside Trash):
+      choose **Reinstall from Workshop…** in the inspector's **More actions** menu:
       a sheet asks first and Cancel changes nothing. Confirming shows the
       download in the queue and, when it completes, the wallpaper keeps its
       options and a display showing it loads the new files. Delete the entry file
@@ -113,10 +115,12 @@ was run.
 ## Layout and accessibility
 
 - [ ] Check Discover, pixiv and Installed at 1240×800, 960×640 and 760×560 in light and
-      dark mode. The inspector stays present; panes resize without losing the
-      target or the primary actions.
-- [ ] Command-F, grid arrows, Return/Space, text editing and VoiceOver names
-      stay correctly scoped.
+      dark mode, with the inspector open and closed. Panes resize without losing the
+      target menu or the primary actions, and nothing is cut off at the window's edge.
+- [ ] Command-F puts the keyboard in the page's search field (the Settings sidebar's on
+      Settings); grid arrows, Home and End, Return and Space, Delete, Escape (a name field,
+      then a popover, then selection mode), text editing and VoiceOver names stay
+      correctly scoped. With Reduce Motion on, no equalizer, spinner or preview animates.
 
 ## Discover, search and filters
 
@@ -175,7 +179,7 @@ was run.
       no dialog opens, the tile's ring fills with a percentage that matches the
       inspector's received/total bytes, and clicking the ring cancels.
 - [ ] With a saved sign-in, queue at least four Workshop items: three transfer
-      at once (the title bar's downloads button rings itself and its tooltip reads "3
+      at once (the toolbar's downloads button rings itself and its tooltip reads "3
       downloading" with a combined speed),
       the fourth waits for a free slot, and the app log records each start.
 - [ ] With no saved sign-in, queue several items: only the first prompts, the
@@ -278,10 +282,9 @@ reuse, or visual behavior, which is why these items are manual.
       line. **Apply changes** still reloads the desktop wallpaper from the saved options.
       Drag the slider and hold: the preview follows the thumb as it moves, not only after it
       stops, and stays where the thumb is while it is held; let go and nothing jumps, and a drag
-      back to where it began puts the preview back. Open the colour picker and move around in it:
-      note whether the preview follows the colour while the picker is open or only when it
-      closes (WebKit's picker may send its input events either way), and that choosing a colour
-      and closing it saves that colour. Press **Revert** or **Restore default** while the picker
+      back to where it began puts the preview back. Open the colour panel and move around in it:
+      the preview follows the colour while the panel is open, the colour is saved once you
+      stop moving for a moment, and closing the panel saves the colour on show. Press **Revert** or **Restore default** while the picker
       is open: the preview goes back and nothing stays on show.
 - [ ] Property edits on the desktop ([edits on the desktop](../features/wallpaper-properties.md#showing-edits-on-the-desktop)):
       with **Show property edits on the desktop as I make them** off, change a slider on a

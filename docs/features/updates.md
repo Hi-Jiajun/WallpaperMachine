@@ -130,7 +130,7 @@ downloaded, so Finder shows its drag-to-Applications window for a manual install
 ## Installing
 
 Installing is a second confirmation: **Restart and Install** in About (which asks
-**Restart and install this update?** natively first), **Restart to Update** in the
+**Restart and install this update?** in a confirmation sheet first), **Restart to Update** in the
 alert, or **Restart to Update to x.y.z** in the status menu, which installs at
 once. The install runs the *running* version's code, so a change to the installer
 reaches users only after the update that carries it. A failed install started from

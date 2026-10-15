@@ -629,8 +629,9 @@ Metal layer remains nonopaque so a missing drawable reveals the retained frame
 below it; that gives up the layer's opaque-compositing guarantee, and the
 WindowServer blending and energy cost has not been measured.
 
-Closing the control panel releases its web view and allows its WebKit helpers to
-exit, rather than keeping the whole page hidden. Reopening reloads the page; see
+Closing the control panel releases its window's controller and everything the panel
+held, rather than keeping a hidden panel alive, and a hidden or minimized panel does no
+work of its own. Reopening builds a fresh panel over the same stores; see
 [panel lifecycle](control-panel.md#pages-and-settings).
 
 The app records macOS memory-pressure events together with its process footprint and

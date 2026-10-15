@@ -1,6 +1,6 @@
 # Agent rules
 
-WallpaperMachine: macOS/arm64; AppKit/SwiftUI, WKWebView panel, Rust/C++ renderer,
+WallpaperMachine: macOS/arm64; AppKit shell, SwiftUI control panel, Rust/C++ renderer,
 sandboxed ExtensionKit lock screen. `CLAUDE.md` must stay a relative symlink to `AGENTS.md`.
 
 ## Read on demand
@@ -19,9 +19,13 @@ use `rg -u` only when those are the target.
 ## Ownership and invariants
 
 - `App/Services/<Domain>/`: domain logic/stores; `App/ViewModels/`: `BridgeStore`
-  renderer facade and editor drafts; `App/Views/ControlPanel/`: host, snapshots, actions.
-- `WebUI/`: bundled verbatim; ES modules, no npm/bundler. Preserve CSP, escaping and
-  message-origin checks; new files need `WebPanelAssets` allowlisting. Network work stays in Swift.
+  renderer facade and editor drafts; `App/Views/ControlPanel/`: the SwiftUI panel.
+- Panel: `Model/` holds `PanelController` and its typed `async throws` actions (views
+  call them through `launch`, never by string), `Shell/`, `Library/`, `Inspector/`,
+  `Discover/`, `Downloads/`, `Pixiv/`, `Settings/`, `Welcome/` the area views and their
+  view models, `Components/`, `Theme/`, `Localization/`, `Images/` the shared pieces.
+  Untrusted text is `Text(verbatim:)`, links go through `ExternalLink`; views do no
+  network, disk, per-frame or idle work ([conventions](docs/conventions.md#swiftui-control-panel)).
 - `Extension/`: sandboxed extension; `Shared/`: only code compiled by both targets,
   extension-API-safe. Tests: `Tests/Unit/<Domain>/` and opt-in `Tests/UI/`.
 - `scripts/`: Python CLI; reuse `scripts/lib/` (paths, glyphs, `xcode.py` quiet tool
@@ -44,13 +48,17 @@ use `rg -u` only when those are the target.
   per-frame CPU work, unbounded caches); if a real trade-off is unavoidable,
   stop and ask.
 - Every new user-facing string goes into every shipped catalog in the same change
-  (`App/Resources/*.xcstrings`, `Extension/Localizable.xcstrings`, `WebUI/locales/`);
+  (`App/Resources/*.xcstrings`, `Extension/Localizable.xcstrings`); a panel literal
+  (`Text("…")`, `L("…")`) must equal its catalog key or it renders English.
   `README.md` and `README.zh-CN.md` change together ([localization](docs/localization.md)).
 - Match surrounding conventions; reuse `ClientPaths`, `AppLog` and dependency injection.
   Unit tests run inside the real app, so `UserDefaults.standard` is the installed app's
   preferences: isolate with `WALLPAPER_MACHINE_HOME` and `TemporaryDefaults`, never a
-  plain suite name. Assert behavior, not wording/wiring. Migrate changed APIs
-  completely; preserve others' concurrent edits.
+  plain suite name. A test never reads or writes under `~/Documents` (this repository,
+  its worktrees, `artifacts/`: each rebuilt app triggers a privacy prompt) and never
+  reaches the desktop: opening, revealing and hiding go through `DesktopActions.current`.
+  Assert behavior, not wording/wiring. Migrate changed APIs completely; preserve others'
+  concurrent edits.
 - `artifacts/` (evidence) and `build/` (Xcode output) are disposable: never commit them
   or cite them as durable evidence, and keep secrets, private assets, screenshots and
   traces out of Git. Only `scripts/test.py` prunes its own output; everything else stays
@@ -100,7 +108,7 @@ use `rg -u` only when those are the target.
 - Release builds on request, not by default: build when the user asks to build, deliver,
   install or try it, or when a change cannot be verified any other way. Otherwise finish
   at the gate and say the app was not rebuilt. Build only after the gate passes:
-  `python3 scripts/build.py --swift-only --configuration Release` for Swift/WebUI/resources/config
+  `python3 scripts/build.py --swift-only --configuration Release` for Swift/resources/config
   with current renderer/bindings; `python3 scripts/build.py --configuration Release`
   for renderer/bridge changes or missing outputs.
 - Delivered app: `build/Build/Products/Release/WallpaperMachine.app`. Claim delivery

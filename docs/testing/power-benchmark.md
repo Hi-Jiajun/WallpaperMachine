@@ -106,7 +106,7 @@ actual power window. Neither the configured ceiling nor timer-wakeup counts
 provide elapsed time or displayed-frame counts.
 
 The app opens its control panel at launch, so each such run includes it, and
-animated GIF previews add WebContent and WindowServer work (Discover animates the
+animated previews add frame decoding in the app and WindowServer work (Discover animates the
 tiles on screen; Installed shows still covers and animates only the tile under
 the pointer or keyboard focus, see [control panel](../features/control-panel.md));
 say whether the panel was open and on which page. The saving from Installed's

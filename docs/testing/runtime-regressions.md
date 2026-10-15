@@ -789,8 +789,8 @@ engine to redo, and when.
   load and a quit during a load leaving no strike, only scenes that really open
   being recorded, Apply reaching the engine for an unchanged draft, a rotation leaving a hold alone, and a Try
   again or an Apply that fails leaving the wallpaper held, with a crash during an Apply counting a
-  third strike (`ControlPanelHeldWallpaperTests`
-  covers the banner and the action). Choosing a held wallpaper again must reach
+  third strike (`PanelLibraryActionsTests` and `ShellBannersTests`
+  cover the banner and the action). Choosing a held wallpaper again must reach
   the bridge even though its display still reads as showing it, while a
   rotation's or rule's activation of it stays a no-op
   (`WallpaperActivationRecoveryTests`). A real

@@ -10,7 +10,7 @@ live under `testing/`.
 | Document | Purpose |
 |---|---|
 | [../README.md](../README.md) | What the app is, feature tour, FAQ, build quickstart, sponsor list; follows the website |
-| [../README.zh-CN.md](../README.zh-CN.md) | README.md in 简体中文; changes with it, wording follows the app's zh-Hans catalogs and the website's /zh/ pages |
+| [../README.zh-CN.md](../README.zh-CN.md) | README.md in 简体中文; changes with it, wording follows the app's zh-Hans catalog and the website's /zh/ pages |
 | [../SPONSORS.md](../SPONSORS.md) | Supporter pricing and benefits for users; follows the website's pricing page, policy in LICENSING.md |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | Contributor working agreement and day-to-day loop |
 | [../CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md) | Conduct expected in issues, discussions, pull requests and reviews; how it is enforced |
@@ -21,9 +21,9 @@ live under `testing/`.
 
 | Document | Purpose |
 |---|---|
-| [architecture.md](architecture.md) | Runtime architecture and module boundaries |
+| [architecture.md](architecture.md) | Runtime architecture and module boundaries, including the SwiftUI control panel's controller, actions and window hosting |
 | [repository-layout.md](repository-layout.md) | Directory map and where new code goes |
-| [localization.md](localization.md) | Language resolution, native and panel catalogs, how to add a language |
+| [localization.md](localization.md) | Language resolution, the string catalogs and the panel's live language switch, how to add or remove a language |
 
 ## Process
 
@@ -67,8 +67,8 @@ file; pass `rg -u` to search them deliberately.
 
 | Document | Purpose |
 |---|---|
-| [features/control-panel.md](features/control-panel.md) | Panel layout and language, sidebar pages and Settings, selection versus apply, Now Playing, target display, filtering and local collections, recently used, deleting, downloads and import |
-| [features/first-run.md](features/first-run.md) | First-run guide, the one-time support prompt after the first downloaded wallpaper, the later star prompt and the performance data question |
+| [features/control-panel.md](features/control-panel.md) | The native window: language, sidebar, toolbar, grid and inspector, pages and Settings, selection versus apply, Now Playing, target display, filtering and local collections, recently used, deleting, downloads and import |
+| [features/first-run.md](features/first-run.md) | The first-run guide over the window and the one-time support prompt after the first downloaded wallpaper |
 | [features/wallpaper-properties.md](features/wallpaper-properties.md) | Inspector properties, live preview, property presets, image placement, the compatibility check and the black-bar check |
 | [features/backup-restore.md](features/backup-restore.md) | The Settings → Storage backup package (settings, allowlisted preferences, chosen user files) and restoring it |
 | [features/updates.md](features/updates.md) | In-app update checks, download and verification, installing, and the What's New window |
@@ -85,11 +85,10 @@ file; pass `rg -u` to search them deliberately.
 | [features/user-files.md](features/user-files.md) | Files and folders chosen for wallpaper properties: the managed copy, its lifetime and cleanup, lock-screen publication and the inspector |
 | [features/media-integration.md](features/media-integration.md) | Now-playing metadata and covers for scene and web wallpapers: the bundled MediaRemote adapter first, AppleScript as fallback |
 | [features/lock-screen.md](features/lock-screen.md) | Experimental animated lock screen and wallpaper-as-screen-saver |
-| [features/appearance.md](features/appearance.md) | Theme, accent and tone, the app icon, and brand asset generation |
+| [features/appearance.md](features/appearance.md) | Theme, accent and tone, the window's native materials, the app icon, and brand asset generation |
 | [features/performance.md](features/performance.md) | Energy readout and per-wallpaper ratings, quality and playback settings, video backend, experimental switches, and background work only while it has a consumer |
 | [features/scene-rendering.md](features/scene-rendering.md) | Scene renderer choice (Compatibility or Native Metal preferred), scene render optimisation, skipping frames that would repeat, renderer memory and repeated-work reduction |
 | [features/crash-recovery.md](features/crash-recovery.md) | The load journal (a wallpaper that was being opened when the app died twice in a row is held back at launch, how strikes, the settle window and release by Apply, the panel's Try again or an update work, the banner and menu line), SIGTERM and SIGHUP as a quit, broken pipes, the one-copy-per-library lock and what a second launch does, and the limits |
-| [features/telemetry.md](features/telemetry.md) | Send performance data: what a report holds (no free text, Workshop ids only), the daily upload, 60 s frame windows and their cost, local files, deletion when turned off, and the website endpoint |
 | [features/diagnostics.md](features/diagnostics.md) | Application log format, load tagging and the line each wallpaper activation leaves, detailed logging, retention, how the log says the previous session ended, and the diagnostics report users attach to bug reports |
 
 ## Maintaining these docs

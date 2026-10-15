@@ -1,5 +1,5 @@
-<!-- README.md in 简体中文: change both together. Wording follows the app's zh-Hans catalogs
-     (WebUI/locales/zh-Hans.js, App/Resources/Localizable.xcstrings) and the website's /zh/ pages. The Supporter list between the markers is written by scripts/update_sponsors.py, as in README.md. -->
+<!-- README.md in 简体中文: change both together. Wording follows the app's zh-Hans catalog
+     (App/Resources/Localizable.xcstrings) and the website's /zh/ pages. The Supporter list between the markers is written by scripts/update_sponsors.py, as in README.md. -->
 <p align="center"><sub><a href="README.md">English</a>&ensp;·&ensp;<b>简体中文</b></sub></p>
 
 <a href="https://www.wallpapermachine.app/zh/">
@@ -68,7 +68,7 @@
 
 ## 应用一览
 
-一个带侧边栏的窗口：浏览 Steam 创意工坊和 pixiv，查看你的壁纸库（全部壁纸、收藏和你的合集），以及设置。网站在一个演示壁纸库上运行着同一套界面，你可以[在浏览器中试用](https://www.wallpapermachine.app/zh/#app)。关闭窗口后，应用会继续在菜单栏中运行，你可以在那里暂停、恢复、静音，或切换到上一张、下一张或随机一张壁纸；有多台显示器时，每台显示器都可以单独操作。
+一个带侧边栏的窗口：浏览 Steam 创意工坊和 pixiv，查看你的壁纸库（全部壁纸、收藏和你的合集），以及设置。网站提供了它在一个示例壁纸库上的演示，你可以[在浏览器中试用](https://www.wallpapermachine.app/zh/#app)。关闭窗口后，应用会继续在菜单栏中运行，你可以在那里暂停、恢复、静音，或切换到上一张、下一张或随机一张壁纸；有多台显示器时，每台显示器都可以单独操作。
 
 | 功能 | 作用 |
 | --- | --- |
@@ -107,7 +107,7 @@
 
 | 层 | 作用 |
 | --- | --- |
-| **Swift 外壳** | AppKit 应用。控制面板是 `WKWebView` 中的 HTML（[`WebUI/`](WebUI)），[网页壁纸](docs/features/web-wallpapers.md)在各自的 web view 中运行。 |
+| **Swift 外壳** | AppKit 应用。控制面板是原生 SwiftUI 界面（[`App/Views/ControlPanel`](App/Views/ControlPanel)），[网页壁纸](docs/features/web-wallpapers.md)在各自的 web view 中运行。 |
 | **Rust 核心** | 内置的渲染器（[`upstream/renderer`](upstream/renderer)）：负责显示器、壁纸窗口、视频解码和音频捕获，通过 uniffi 桥接到 Swift。 |
 | **C++ 场景引擎** | Open Wallpaper Engine，静态链接进 Rust 核心，负责绘制场景壁纸。 |
 | **Metal** | 场景直接用原生 Metal 渲染，原生渲染器无法绘制的场景会回退为经由 MoltenVK 在 Metal 上运行的 Vulkan。AVFoundation 视频可在[设置 → 性能](docs/features/performance.md)中选择开启，场景渲染器也可在那里改为兼容模式。 |
@@ -239,7 +239,7 @@ python3 scripts/build.py --configuration Release   # 渲染器、绑定、Xcode 
 <br>
 
 <p align="center">
-  <img src="WebUI/app-icons/day.png" width="72" alt="WallpaperMachine 应用图标">
+  <img src="App/Resources/Assets.xcassets/AppIconDay.imageset/day.png" width="72" alt="WallpaperMachine 应用图标">
 </p>
 
 <p align="center">

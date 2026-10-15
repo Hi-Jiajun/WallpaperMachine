@@ -610,7 +610,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         pendingOpenedFiles = []
         let opensPanel = ControlPanelLaunch.opensPanel(
             launchEvent: launchEvent,
-            welcomeSeen: ClientPreferences.defaults.bool(forKey: WebPanelController.welcomeSeenKey),
+            welcomeSeen: PanelPreferences.welcomeSeen(),
             startupFailed: store == nil)
         if !opensPanel { AppLog.info("startup: launched at login; control panel stays closed") }
         DispatchQueue.main.async { [weak self] in
@@ -735,9 +735,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     /// The panel's favorites, which a playlist can rotate through.
     private static func favoriteWallpaperIDs() -> Set<String> {
-        guard let data = ClientPreferences.defaults.data(forKey: WebPanelController.favoriteKey),
-              let ids = try? JSONDecoder().decode([String].self, from: data) else { return [] }
-        return Set(ids)
+        PanelPreferences.favorites()
     }
 
     /// Rates each wallpaper's energy use from background samples while it plays alone.
@@ -1313,16 +1311,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         return ControlPanelWindow.clampedFrameSize(frameSize, for: sender)
     }
 
-    func windowDidEnterFullScreen(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow, window === controlPanelWindow else { return }
-        ControlPanelWindow.setFullScreenLayout(true, for: window)
-    }
-
-    func windowDidExitFullScreen(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow, window === controlPanelWindow else { return }
-        ControlPanelWindow.setFullScreenLayout(false, for: window)
-    }
-
     func windowDidBecomeKey(_ notification: Notification) {
         guard let window = notification.object as? NSWindow, window === controlPanelWindow else { return }
         retryHeldUpdatePrompt()
@@ -1340,7 +1328,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         guard window === controlPanelWindow else { return }
 
         controlPanelWindow = nil
-        // Closing releases the page and its WebKit processes; reopening builds a
+        // Closing releases the panel's controller and its observations; reopening builds a
         // fresh view around the existing stores and navigation.
         window.contentViewController = nil
         if whatsNewWindow == nil, previewWindow == nil { NSApp.setActivationPolicy(.accessory) }
@@ -1898,7 +1886,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         do {
             let history = try AppReleaseHistory()
             guard let announcement = whatsNewStore.announcement(
-                history: history, existingUser: ClientPreferences.defaults.bool(forKey: WebPanelController.welcomeSeenKey)
+                history: history, existingUser: PanelPreferences.welcomeSeen()
             ) else { return }
             let window = NSWindow(
                 contentRect: NSRect(origin: .zero, size: WhatsNewViewController.defaultContentSize),
@@ -1959,7 +1947,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
         // AppKit owns this resizable window's bounds; content must accept its proposal
         // instead of promoting a long label or a split pane's ideal width to a window minimum.
+        // The hosted view's `.toolbar` and `.navigationTitle` drive the window's own.
         controller.sizingOptions = []
+        controller.sceneBridgingOptions = [.toolbars, .title]
         let window = ControlPanelWindow.make(contentViewController: controller, delegate: self)
         let frameName = ControlPanelWindow.frameAutosaveName
         if !window.setFrameUsingName(frameName) { window.center() }

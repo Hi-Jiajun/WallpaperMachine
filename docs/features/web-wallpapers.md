@@ -177,8 +177,7 @@ and raises one `resize` event on the window, however many changes share a turn, 
 pages that rebuild their canvas or WebGL buffers on `resize` pick it up; the
 value a document starts with raises none. Changes are logged at debug level
 (`render scale <n>`). A page that assigns `devicePixelRatio` itself keeps its own
-value. The preview, the control panel and the native screen-saver surface are
-never scaled.
+value. The preview and the native screen-saver surface are never scaled.
 
 The page may call `wallpaperRegisterAudioListener`, the five
 `wallpaperRegisterMedia*Listener` functions (status, properties, thumbnail,
@@ -195,8 +194,7 @@ across the suspension and replayed in order.
 
 The wallpaper web view has exactly one `WKScriptMessageHandler`, named
 `mweWallpaper`, carrying listener registration and random-file requests; it is
-removed when the page stops. It is not the control panel's channel, which is a
-separate web view with its own handler (see [architecture](../architecture.md#control-panel-wkwebview-and-the-javascript-bridge)).
+removed when the page stops.
 
 ## Runtime shape
 
@@ -280,8 +278,8 @@ separate web view with its own handler (see [architecture](../architecture.md#co
   window-occlusion check; otherwise even a brief Space or Show Desktop transition
   can stop animation frames before the host's settling delay expires. If the
   selector is unavailable, the page keeps WebKit's default scheduling and the
-  limitation is logged. This does not change the control panel or native
-  screen-saver web surfaces.
+  limitation is logged. This does not change the native screen-saver web
+  surface.
 - **Frame rate.** The page is told the display's effective frame rate through
   `applyGeneralProperties({ fps })`, and many pages pace their own loop by it.
   WebKit draws a page near 60 fps even on a faster display, and it hands the page
@@ -467,9 +465,8 @@ never substitutes Pause for an unavailable mute.
 - The `fetch`/`XMLHttpRequest` fixes for project files reach the page and every frame
   it embeds, not web workers: a `fetch` made inside a worker still gets WebKit's
   status 0 and no `Content-Type` for a local file.
-- Inspection covers the desktop pages and the live preview only. The screen saver,
-  the lock-screen extension and the control panel are never attachable through this
-  setting, and an inspected page's JavaScript is open to anyone using this Mac's
+- Inspection covers the desktop pages and the live preview only. The screen saver
+  and the lock-screen extension are never attachable through this setting, and an inspected page's JavaScript is open to anyone using this Mac's
   Safari while it is on.
 - Nonzero WebAudio gain is not controlled by the native media-volume interface;
   whole-page Mute still applies where WebKit exposes it.

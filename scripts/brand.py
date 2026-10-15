@@ -15,8 +15,10 @@ The wordmark is Manrope ("Wallpaper" bold, "Machine" medium), embedded as outlin
 The app icon exports vector layers for Icon Composer. Website app-icon PNGs reuse the
 native Dock renders; website vectors share their geometry and appearances. Quick Look
 and sips render square web icons and tray assets. Dock choices use Icon Composer's
-macOS 26 renderer with a transparent outer margin. The disk-image background is drawn
-with CoreGraphics and CoreText at 1x and 2x from `lib/dmg.py`'s window geometry.
+macOS 26 renderer with a transparent outer margin and land in the AppIconMinimal, AppIconDay
+and AppIconNight image sets of `App/Resources/Assets.xcassets` (their Contents.json files are
+committed). The disk-image background is drawn with CoreGraphics and CoreText at 1x and 2x
+from `lib/dmg.py`'s window geometry.
 """
 from __future__ import annotations
 
@@ -38,8 +40,14 @@ from lib.wordmark import MACHINE_ADVANCE, MACHINE_PATH, WALLPAPER_ADVANCE, WALLP
 MARK = markers()
 APP_ICON = ROOT / "App/Resources/AppIcon.icon"
 TRAY_ICON_SET = ROOT / "App/Resources/Assets.xcassets/TrayIcon.imageset"
-DOCK_ICONS = ROOT / "WebUI/app-icons"
+DOCK_ICONS = ROOT / "App/Resources/Assets.xcassets"
 DMG_BACKGROUND = BACKGROUND
+
+
+def dock_icon(name: str) -> Path:
+    """The Dock render of one icon choice, in the asset catalog image set `AppThemePreferences.Icon` loads."""
+    return DOCK_ICONS / f"AppIcon{name.capitalize()}.imageset" / f"{name}.png"
+
 
 # The wallpaper panel runs cyan -> blue -> violet in both native and website icons.
 AURORA = ("#7cf0ff", "#3a86ff", "#8a3dff")
@@ -378,7 +386,6 @@ def write_dock_icons(work: Path) -> list[Path]:
         "fill-specializations": [{"value": {"solid": f"srgb:{blue},1"}}],
     }]
     (minimal / "icon.json").write_text(json.dumps(document, indent=2) + "\n")
-    DOCK_ICONS.mkdir(parents=True, exist_ok=True)
     paths = []
     for name, source, rendition in (("minimal", minimal, "Default"),
                                     ("day", APP_ICON, "Default"), ("night", APP_ICON, "Dark")):
@@ -387,7 +394,8 @@ def write_dock_icons(work: Path) -> list[Path]:
                         "--platform", "macOS", "--rendition", rendition,
                         "--width", str(ICON_INSET_BOX), "--height", str(ICON_INSET_BOX),
                         "--scale", "1", "--design-generation", "26"], check=True, capture_output=True)
-        paths.extend((image, DOCK_ICONS / f"{name}.png"))
+        dock_icon(name).parent.mkdir(parents=True, exist_ok=True)
+        paths.extend((image, dock_icon(name)))
     # Icon Composer exports a full-bleed tile. NSApplication's replacement image needs
     # the transparent margin normally added by actool, not Quick Look's white matte.
     subprocess.run(["swift", "-e", r'''
@@ -436,7 +444,7 @@ def write_website(site: Path, work: Path) -> list[Path]:
     images = []
     for appearance in ("minimal", "day", "night"):
         target = brand / f"app-icon-{appearance}.png"
-        shutil.copyfile(DOCK_ICONS / f"{appearance}.png", target)
+        shutil.copyfile(dock_icon(appearance), target)
         images.append(target)
     shutil.copyfile(brand / "app-icon-day.png", brand / "app-icon.png")
     # Crop only the native transparent margin; preserve the tile's transparent corners.

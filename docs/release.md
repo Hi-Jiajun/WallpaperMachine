@@ -131,9 +131,10 @@ notes without review: no energy, battery or power-saving claims, nothing called
 fully supported or fully compatible, and opt-in features (Native Metal, native
 video, content pacing, on-demand scene idle, the animated lock screen) keep their
 optional, experimental or off-by-default qualifier in both languages. Places in
-the app are named the way the panel names them (`Settings` / `设置`, and the
-same for General, Appearance, Performance, Playback, Library & Steam, Discover,
-Installed, About and Lock screen).
+the app are named the way the panel labels them, in English and in the zh-Hans
+catalog's words (`Settings` / `设置`); the prompt lists those names, so renaming a
+sidebar row or a Settings section changes the list in `scripts/release_notes.py` in
+the same commit.
 
 The model answers with JSON. `summary` is `{"english", "chinese"}`. Each of
 `breaking`, `new`, `improved` and `fixed` is a list of the same pair, one object

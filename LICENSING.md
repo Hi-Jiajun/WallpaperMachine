@@ -44,11 +44,11 @@ contributions so that the whole is under one license.
 What the root `LICENSE` does and does not do:
 
 - It states the terms under which this project's own code (`App/`, `Extension/`,
-  `Shared/`, `WebUI/`, `Tests/`, `scripts/`, `project.yml`, `Formula/`) is
+  `Shared/`, `Tests/`, `scripts/`, `project.yml`, `Formula/`) is
   offered, and it is the same license the vendored GPL code is already under.
 - It does not transfer, merge or relicense anyone's copyright. The
   bigsaltyfishes projects, the FFmpeg authors, the mediaremote-adapter authors,
-  Lucide, Phosphene and every other holder named in `upstream/provenance.json`
+  Phosphene and every other holder named in `upstream/provenance.json`
   and in the notices under `upstream/` keep their copyright and their own
   license terms. Third-party notices are retained where they were found and are
   bundled by `scripts/package.py` (see [Notice payload](#notice-payload)).
@@ -208,8 +208,7 @@ ones on that date, not pins.
 |---|---|---|---|
 | Renderer (`wallpaper-core`, `shader`, `wallpaper-bridge`) | `upstream/renderer`, revision in `provenance.json` | GPL-2.0-only | Same license |
 | Scene engine (open-wallpaper-engine) | `upstream/renderer/external/open-wallpaper-engine` | GPL-2.0-only (vendored under the renderer) | Same license |
-| Application shell, extension, Workshop browser, control panel, scripts | `App/`, `Extension/`, `Shared/`, `WebUI/`, `scripts/` | GPL-2.0-only (this project) | Same license |
-| Lucide icons | `WebUI/icons.js` | ISC | Compatible |
+| Application shell, extension, Workshop browser, control panel, scripts | `App/`, `Extension/`, `Shared/`, `scripts/` | GPL-2.0-only (this project) | Same license |
 | Phosphene ABI reference | notice in `Extension/Phosphene-LICENSE.txt` | MIT | Compatible |
 | ungive/mediaremote-adapter | `upstream/mediaremote-adapter` | BSD-3-Clause | Compatible; embedded as an unlinked framework |
 | miniaudio | `upstream/renderer/external/open-wallpaper-engine/third_party/miniaudio` | Public domain or MIT-0 (choice) | Compatible |
@@ -265,7 +264,7 @@ How this project follows FFmpeg's LGPL checklist (https://ffmpeg.org/legal.html)
 | Dynamic linking | Yes: the app links `libav*.dylib` and `scripts/package.py` relocates them into `Contents/Frameworks` |
 | Corresponding FFmpeg source with the exact configure line | Policy above: the formula records URL, checksum and configure arguments; the tarball is to be mirrored beside each signed download |
 | No GPL libraries such as libx264 | None are enabled; `scripts/package.py` refuses libraries whose embedded configuration shows a forbidden flag ([Tooling that enforces this record](#tooling-that-enforces-this-record)) |
-| Attribution in the program's about box | Not yet shown. Settings -> About names the renderer and links the GPLv2 text (`WebUI/settings.js`); an FFmpeg/LGPL line there is an open item and is not part of this record |
+| Attribution in the program's about box | Not yet shown. Settings -> About names the renderer and links the GPLv2 text (`App/Views/ControlPanel/Settings/Sections/AboutSettingsSection.swift`); an FFmpeg/LGPL line there is an open item and is not part of this record |
 | Do not rename the libraries to obscure names | They keep their upstream names |
 
 FFmpeg's page also notes that companies making money from products that use
@@ -408,9 +407,9 @@ prefix is `app.wallpapermachine`.
   under `upstream/mediaremote-adapter` with the `src/adapter/stream.m` changes
   recorded in `upstream/provenance.json`, and built as an embedded, unlinked
   framework.
-- The web control panel's icons are copied from [Lucide](https://lucide.dev)
-  (ISC License, Copyright (c) Lucide Icons and Contributors); the notice
-  travels in the header of `WebUI/icons.js`.
+- The control panel's icons are SF Symbols, drawn by macOS at run time; no
+  icon artwork is copied into the app or the repository, so no icon notice
+  ships.
 - FFmpeg comes from `Formula/mwe-ffmpeg.rb` via `python3
   scripts/install_ffmpeg.py`, replacing Homebrew's `ffmpeg@8`.
 

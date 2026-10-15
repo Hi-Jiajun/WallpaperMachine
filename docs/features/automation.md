@@ -113,10 +113,11 @@ wallpaper, on the target display) and **Open the control panel**.
 None is set until recorded, so the app never takes a combination another app
 expects. **Record…** takes the next key pressed in that row (Escape alone, or
 moving focus away, gives up); the key must be held with ⌘, ⌥ or ⌃, except F13
-to F20, which type nothing and may stand alone. The page sends the key's position
-(`KeyboardEvent.code`), which `GlobalHotKeys` maps to Carbon's virtual key code,
-so a shortcut stays on the same key whatever the keyboard layout. One combination
-serves one action.
+to F20, which type nothing and may stand alone. The recorder takes the key's
+position (`NSEvent.keyCode`, which is Carbon's virtual key code), which
+`GlobalHotKeys.hotKey(keyCode:modifierFlags:)` checks against the keys a shortcut
+may use, so a shortcut stays on the same key whatever the keyboard layout. One
+combination serves one action.
 
 `GlobalHotKeys` registers them with `RegisterEventHotKey`, which works whichever
 app is in front, needs no Accessibility permission and delivers only those
@@ -215,14 +216,16 @@ leaving the round alone, the pick made when the display's turn comes), waiting f
 reaching the caller (`AppAutomationTests`), hotkey preferences and the key-code and
 modifier mapping (`HotKeyPreferencesTests`, `GlobalHotKeysTests`), the mute preference and how it
 joins the audio suppression the bridge receives (`PlaybackPreferencesTests`,
-`PlaybackPolicyCompositionTests`; the Settings switch is in `WebPanelGeneralSettingsTests`), the planner, store and
+`PlaybackPolicyCompositionTests`; the Settings switch is in `PanelPerformanceSettingsTests`), the planner, store and
 scheduler (`WallpaperAutomationPlannerTests`, `WallpaperAutomationStoreTests`,
 `WallpaperAutomationSchedulerTests`: weekday rules, simultaneous events, appearance
 choices, DST, solar offsets crossing midnight, absent polar events, catch-up and retry
 against a fake clock and the real command queue, manual precedence including a rule
 giving way to a waiting or running manual command, Focus exit and
-interrupted recovery), native validation and queued manual playlist edits
-(`WebPanelPlaylistTests`), the offscreen rule editor (`ControlPanelAutomationTests`) and
+interrupted recovery), the panel's validation and queued manual playlist edits
+(`PanelPlaylistActionsTests`), the rule actions and editor (`PanelAutomationActionsTests`,
+`DisplaysSettingsModelTests`, `DisplaysSettingsDraftsTests`), the shortcut recorder
+(`PanelHotKeyActionsTests`, `ShortcutsRecorderModelTests`) and
 rule merging and rollback in backups (`WallpaperBackupTests`) each have their own suite;
 the Space tests are listed in [Spaces verification](spaces.md#storage-and-verification).
 The domain inventory is in [coverage](../testing/coverage.md).
