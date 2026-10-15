@@ -122,14 +122,25 @@ struct LineRun {
     float LayoutWidth() const { return bounds_right - bounds_left; }
 };
 
+// What a face gives the layout: the ascender and descender in whole pixels (the
+// descender as a distance below the baseline) and the pitch of one row.
+struct FaceLayoutMetrics {
+    float ascender { 0.0f };
+    float descender { 0.0f };
+    float pitch { 0.0f };
+};
+
 // A text block's box. `top` and `bottom` are heights above the first row's
 // baseline, y up; rows step down by `pitch`.
 struct TextBlock {
-    float min_x { 0.0f };
-    float max_x { 0.0f };
-    float top { 0.0f };
-    float bottom { 0.0f };
-    float pitch { 0.0f };
+    float    min_x { 0.0f };
+    float    max_x { 0.0f };
+    float    top { 0.0f };
+    float    bottom { 0.0f };
+    float    ascender { 0.0f };
+    float    descender { 0.0f };
+    float    pitch { 0.0f };
+    uint32_t rows { 0 };
 
     float Width() const { return max_x - min_x; }
     float Height() const { return top - bottom; }
@@ -756,12 +767,16 @@ std::vector<LineRun> BuildFreeTypeLines(const TextLayerState& state, FaceChain& 
 // ascender line, or the tallest ink above it, down to one line pitch below that
 // line for every row, or the lowest ink below it. The pitch is the face's line
 // height plus the layer's `spacing.y`.
-TextBlock MeasureTextBlock(const std::vector<LineRun>& lines, float ascender, float pitch) {
-    const auto rows = static_cast<float>(lines.size());
+TextBlock MeasureTextBlock(const std::vector<LineRun>& lines, const FaceLayoutMetrics& metrics) {
+    const auto rows  = static_cast<float>(lines.size());
+    const float pitch = metrics.pitch;
     TextBlock  block {
-         .top    = ascender,
-         .bottom = ascender - rows * pitch,
-         .pitch  = pitch,
+         .top       = metrics.ascender,
+         .bottom    = metrics.ascender - rows * pitch,
+         .ascender  = metrics.ascender,
+         .descender = metrics.descender,
+         .pitch     = pitch,
+         .rows      = static_cast<uint32_t>(lines.size()),
     };
     for (std::size_t index = 0; index < lines.size(); ++index) {
         const auto& line = lines[index];
@@ -792,16 +807,14 @@ float BlockTopY(const TextLayerState& state, float padding_y, uint32_t height, f
     return top;
 }
 
-struct FaceLayoutMetrics {
-    float ascender { 0.0f };
-    float pitch { 0.0f };
-};
-
+// Wallpaper Engine reads the size metrics FreeType has rounded (the ascender up, the
+// descender down, the height to the nearest) and cuts them to whole pixels.
 FaceLayoutMetrics FaceMetrics(const TextLayerState& state, FT_Face face) {
     const auto metrics = face->size->metrics;
     return {
-        .ascender = static_cast<float>(metrics.ascender) / 64.0f,
-        .pitch    = static_cast<float>(metrics.height >> 6) + LineSpacing(state),
+        .ascender  = static_cast<float>(metrics.ascender >> 6),
+        .descender = static_cast<float>(-(metrics.descender >> 6)),
+        .pitch     = static_cast<float>(metrics.height >> 6) + LineSpacing(state),
     };
 }
 
@@ -837,19 +850,36 @@ std::vector<LineRun> BuildFallbackLines(const TextLayerState& state) {
 
 FaceLayoutMetrics FallbackMetrics(const TextLayerState& state) {
     const float pixels = PointSizeToPixels(state.point_size);
-    return { .ascender = pixels * kFallbackAscent,
-             .pitch    = pixels * kFallbackLine + LineSpacing(state) };
+    return { .ascender  = pixels * kFallbackAscent,
+             .descender = pixels * (kFallbackLine - kFallbackAscent),
+             .pitch     = pixels * kFallbackLine + LineSpacing(state) };
 }
 
-// The card that holds a block: the block plus the padding on both sides, and
-// 2 by 2 plus the padding when there is no text to lay out.
-Eigen::Vector2f CardSizeForBlock(const TextLayerState& state, const TextBlock& block) {
+// The layout of a block: the block, the face it was set in, and the card that holds
+// it, which is the block plus the padding on both sides and 2 by 2 plus the padding
+// when there is no text to lay out (Wallpaper Engine has no layout then, and sizes
+// the card from 2 by 2).
+TextLayerLayout LayoutOfBlock(const TextLayerState& state, const TextBlock& block) {
     const auto padding = CardPadding(state);
+    TextLayerLayout layout {
+        .ascender  = block.ascender,
+        .descender = block.descender,
+        .pitch     = block.pitch,
+        .padding   = padding,
+    };
     if (state.text.empty()) {
-        return { std::max(1.0f, 2.0f + padding.x() * 2.0f), std::max(1.0f, 2.0f + padding.y() * 2.0f) };
+        layout.card = { std::max(1.0f, 2.0f + padding.x() * 2.0f),
+                        std::max(1.0f, 2.0f + padding.y() * 2.0f) };
+        return layout;
     }
-    return { std::max(1.0f, block.Width() + padding.x() * 2.0f),
-             std::max(1.0f, block.Height() + padding.y() * 2.0f) };
+    layout.min_x = block.min_x;
+    layout.max_x = block.max_x;
+    layout.top    = block.top;
+    layout.bottom = block.bottom;
+    layout.rows   = block.rows;
+    layout.card   = { std::max(1.0f, block.Width() + padding.x() * 2.0f),
+                      std::max(1.0f, block.Height() + padding.y() * 2.0f) };
+    return layout;
 }
 
 // ---------------------------------------------------------------------------
@@ -1109,10 +1139,9 @@ void ComposeStyledText(const StyleMetrics& style, const std::vector<uint8_t>& co
     }
 }
 
-Eigen::Vector2f MeasureFallbackText(const TextLayerState& state) {
-    const auto lines   = BuildFallbackLines(state);
-    const auto metrics = FallbackMetrics(state);
-    return CardSizeForBlock(state, MeasureTextBlock(lines, metrics.ascender, metrics.pitch));
+TextLayerLayout MeasureFallbackText(const TextLayerState& state) {
+    const auto lines = BuildFallbackLines(state);
+    return LayoutOfBlock(state, MeasureTextBlock(lines, FallbackMetrics(state)));
 }
 
 // Paints the fallback's boxes, calling `plot(x, y, coverage)` for each pixel.
@@ -1121,7 +1150,7 @@ void RasterizeFallbackText(const TextLayerState& state, uint32_t width, uint32_t
                            Plot&& plot) {
     const auto lines    = BuildFallbackLines(state);
     const auto metrics  = FallbackMetrics(state);
-    const auto block    = MeasureTextBlock(lines, metrics.ascender, metrics.pitch);
+    const auto block    = MeasureTextBlock(lines, metrics);
     const auto padding  = CardPadding(state) + Eigen::Vector2f::Constant(TextStyleMargin(state));
     const float glyph_height = std::max(1.0f, metrics.ascender);
     float baseline = BlockTopY(state, padding.y(), height, block.Height()) + block.top;
@@ -1157,7 +1186,7 @@ bool RasterizeFreeTypeText(const TextLayerState& state, uint32_t width, uint32_t
     const auto lines = BuildFreeTypeLines(state, faces);
 
     const auto metrics = FaceMetrics(state, faces.primary());
-    const auto block   = MeasureTextBlock(lines, metrics.ascender, metrics.pitch);
+    const auto block   = MeasureTextBlock(lines, metrics);
     // The style's margin is clear room around the card the text is laid out in.
     const auto padding = CardPadding(state) + Eigen::Vector2f::Constant(TextStyleMargin(state));
 
@@ -1206,13 +1235,13 @@ bool RasterizeFreeTypeText(const TextLayerState& state, uint32_t width, uint32_t
     return true;
 }
 
-std::optional<Eigen::Vector2f> MeasureFreeTypeText(const TextLayerState& state) {
+std::optional<TextLayerLayout> MeasureFreeTypeText(const TextLayerState& state) {
     FaceChain faces(state);
     if (faces.primary() == nullptr) return std::nullopt;
 
     const auto lines   = BuildFreeTypeLines(state, faces);
     const auto metrics = FaceMetrics(state, faces.primary());
-    return CardSizeForBlock(state, MeasureTextBlock(lines, metrics.ascender, metrics.pitch));
+    return LayoutOfBlock(state, MeasureTextBlock(lines, metrics));
 }
 
 std::size_t LineCount(std::string_view text) {
@@ -1234,19 +1263,12 @@ std::size_t LongestLineCodepoints(std::string_view text) {
     return std::max(longest, current);
 }
 
-bool HasExplicitTextLayerSize(const TextLayerState& state) {
-    return state.explicit_size.x() > 0.0f && state.explicit_size.y() > 0.0f;
-}
-
 } // namespace
 
-// The raster holds the card, which is the authored size where the text fits in
-// it, with the room its style reaches into on every side.
-Eigen::Vector2f TextLayerRasterSizeForMeasured(const TextLayerState& state,
-                                               const Eigen::Vector2f& measured) {
-    const Eigen::Vector2f card =
-        HasExplicitTextLayerSize(state) ? state.explicit_size.cwiseMax(measured) : measured;
-    return card + Eigen::Vector2f::Constant(2.0f * TextStyleMargin(state));
+// The raster holds the card with the room its style reaches into on every side.
+Eigen::Vector2f TextLayerRasterSizeForLayout(const TextLayerState& state,
+                                             const TextLayerLayout& layout) {
+    return layout.card + Eigen::Vector2f::Constant(2.0f * TextStyleMargin(state));
 }
 
 bool TextStyleActive(const TextStyle& style) { return style.outline || style.blur || style.drop_shadow; }
@@ -1307,11 +1329,11 @@ Eigen::Vector2f EstimateTextLayerSize(std::string_view text, float point_size, f
                            static_cast<float>(lines) * line_height + padding * 2.0f);
 }
 
-Eigen::Vector2f MeasureTextLayerSize(const TextLayerState& state) {
+TextLayerLayout MeasureTextLayerLayout(const TextLayerState& state) {
 #ifdef WESCENE_BUILD_TESTS
     ++g_measurement_count;
 #endif
-    std::optional<Eigen::Vector2f> measured;
+    std::optional<TextLayerLayout> measured;
     {
         const std::lock_guard lock { g_freetype_mutex };
         measured = MeasureFreeTypeText(state);
@@ -1322,15 +1344,12 @@ Eigen::Vector2f MeasureTextLayerSize(const TextLayerState& state) {
     return MeasureFallbackText(state);
 }
 
-Eigen::Vector2f TextLayerLayoutSize(const TextLayerState& state) {
-    if (HasExplicitTextLayerSize(state)) {
-        return state.explicit_size;
-    }
-    return MeasureTextLayerSize(state);
+Eigen::Vector2f MeasureTextLayerSize(const TextLayerState& state) {
+    return MeasureTextLayerLayout(state).card;
 }
 
 Eigen::Vector2f TextLayerRasterSize(const TextLayerState& state) {
-    return TextLayerRasterSizeForMeasured(state, MeasureTextLayerSize(state));
+    return TextLayerRasterSizeForLayout(state, MeasureTextLayerLayout(state));
 }
 
 TextScreenAnchor ParseTextScreenAnchor(std::string_view name) {
@@ -1371,49 +1390,17 @@ Eigen::Vector2f TextScreenAnchorOffset(TextScreenAnchor anchor, const PresentedM
 
 TextLayerRenderBounds TextLayerRenderBoundsForRasterSize(const TextLayerState& state,
                                                          Eigen::Vector2f raster_size) {
-    // The card is placed as the layout dictates; the room the style needs lies
+    // The card is centred on the layer's origin; the room the style needs lies
     // outside it on every side.
     const float margin = TextStyleMargin(state);
     raster_size        = (raster_size - Eigen::Vector2f::Constant(2.0f * margin)).cwiseMax(1.0f);
-    const Eigen::Vector2f layout_size =
-        HasExplicitTextLayerSize(state) ? state.explicit_size : raster_size;
 
-    TextLayerRenderBounds bounds {
-        .left   = raster_size.x() * -0.5f,
-        .right  = raster_size.x() * 0.5f,
-        .bottom = raster_size.y() * -0.5f,
-        .top    = raster_size.y() * 0.5f,
+    return {
+        .left   = raster_size.x() * -0.5f - margin,
+        .right  = raster_size.x() * 0.5f + margin,
+        .bottom = raster_size.y() * -0.5f - margin,
+        .top    = raster_size.y() * 0.5f + margin,
     };
-
-    switch (ParseTextHorizontalAlign(state.horizontal_align)) {
-    case TextHorizontalAlign::Left:
-        bounds.left  = layout_size.x() * -0.5f;
-        bounds.right = bounds.left + raster_size.x();
-        break;
-    case TextHorizontalAlign::Right:
-        bounds.right = layout_size.x() * 0.5f;
-        bounds.left  = bounds.right - raster_size.x();
-        break;
-    case TextHorizontalAlign::Center: break;
-    }
-
-    switch (ParseTextVerticalAlign(state.vertical_align)) {
-    case TextVerticalAlign::Bottom:
-        bounds.bottom = layout_size.y() * -0.5f;
-        bounds.top    = bounds.bottom + raster_size.y();
-        break;
-    case TextVerticalAlign::Top:
-        bounds.top    = layout_size.y() * 0.5f;
-        bounds.bottom = bounds.top - raster_size.y();
-        break;
-    case TextVerticalAlign::Center: break;
-    }
-
-    bounds.left -= margin;
-    bounds.right += margin;
-    bounds.bottom -= margin;
-    bounds.top += margin;
-    return bounds;
 }
 
 TextLayerRenderFrame TextLayerRenderFrameForRasterSize(const TextLayerState& state,
@@ -1445,6 +1432,13 @@ TextLayerRenderFrame TextLayerRenderFrameForTargetExtent(const TextLayerRenderFr
         },
         .size = target_extent,
         .center = frame.center,
+    };
+}
+
+std::array<int32_t, 2> TextCardTexelExtent(Eigen::Vector2f card) {
+    return {
+        std::max(4, static_cast<int32_t>(std::max(1.0f, card.x()))),
+        std::max(4, static_cast<int32_t>(std::max(1.0f, card.y()))),
     };
 }
 
@@ -1531,6 +1525,10 @@ void ResetTextLayerMeasurementCountForTests() {
     g_measurement_count.store(0);
 }
 
+TextLayerLayout TextLayerBoxLayoutForTests(const TextLayerState& state) {
+    return MeasureFallbackText(state);
+}
+
 uint64_t TextFontFilesOpenedForTests() {
     const std::lock_guard lock { g_freetype_mutex };
     return FaceCache::Get().FilesOpened();
@@ -1562,6 +1560,15 @@ TextLayer::TextLayer(TextLayerState state): m_state(std::move(state)) {
     if (m_state.resolved_font_kind.empty()) m_state.resolved_font_kind = "family";
     EnsureCacheIdentity();
     Relayout();
+    MarkCacheDirty();
+    m_state.dirty = false;
+}
+
+TextLayer::TextLayer(TextLayerState state, TextLayerLayout layout)
+    : m_state(std::move(state)), m_layout(std::move(layout)) {
+    if (m_state.resolved_font_identity.empty()) m_state.resolved_font_identity = m_state.font_key;
+    if (m_state.resolved_font_kind.empty()) m_state.resolved_font_kind = "family";
+    EnsureCacheIdentity();
     MarkCacheDirty();
     m_state.dirty = false;
 }
@@ -1609,12 +1616,10 @@ void TextLayer::SetAlignment(std::string horizontal, std::string vertical) {
     MarkCacheDirty();
 }
 
-bool TextLayer::ApplyPreparedLayout(uint64_t revision, Eigen::Vector2f layout_size,
-                                    Eigen::Vector2f raster_size) {
+bool TextLayer::ApplyPreparedLayout(uint64_t revision, TextLayerLayout layout) {
     if (revision <= m_prepared_revision || revision > m_state.cache_revision) return false;
-    m_prepared_revision   = revision;
-    m_state.layout_size   = layout_size;
-    m_state.raster_size   = raster_size;
+    m_prepared_revision    = revision;
+    m_layout               = std::move(layout);
     m_state.layout_pending = revision != m_state.cache_revision;
     return true;
 }
@@ -1625,16 +1630,16 @@ void TextLayer::ClearDirty() {
     m_state.full_dirty  = false;
 }
 
-Eigen::Vector2f TextLayer::rasterSize() const { return m_state.raster_size; }
+Eigen::Vector2f TextLayer::rasterSize() const {
+    return TextLayerRasterSizeForLayout(m_state, m_layout);
+}
 
 TextLayerRenderBounds TextLayer::renderBounds() const {
     return TextLayerRenderBoundsForRasterSize(m_state, rasterSize());
 }
 
 void TextLayer::Relayout() {
-    const auto measured_size = MeasureTextLayerSize(m_state);
-    m_state.layout_size = HasExplicitTextLayerSize(m_state) ? m_state.explicit_size : measured_size;
-    m_state.raster_size = TextLayerRasterSizeForMeasured(m_state, measured_size);
+    m_layout               = MeasureTextLayerLayout(m_state);
     m_state.layout_pending = false;
 }
 

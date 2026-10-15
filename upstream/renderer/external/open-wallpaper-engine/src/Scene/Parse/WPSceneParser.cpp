@@ -1813,13 +1813,12 @@ std::shared_ptr<SceneShader> BuildTextSceneShader(fs::VFS& vfs, std::string_view
 }
 
 void RegisterTextTexture(Scene& scene, const std::string& texture_name,
-                         const TextLayerState& state) {
+                         const TextLayerState& state, Eigen::Vector2f size) {
     if (scene.textures.contains(texture_name)) return;
 
     auto* runtime_images = dynamic_cast<RuntimeImageSource*>(scene.imageParser.get());
     if (runtime_images == nullptr) return;
 
-    const auto     size = TextLayerRasterSize(state);
     const uint32_t width =
         std::clamp(static_cast<uint32_t>(std::ceil(std::max(1.0f, size.x()))), 1u, 4096u);
     const uint32_t height =
@@ -1836,20 +1835,6 @@ void RegisterTextTexture(Scene& scene, const std::string& texture_name,
     texture.sample.minFilter     = TextureFilter::LINEAR;
     texture.sample.magFilter     = TextureFilter::LINEAR;
     scene.textures[texture_name] = std::move(texture);
-}
-
-std::array<int32_t, 2> ResolveTextRenderExtent(Eigen::Vector2f render_size,
-                                               const ParseContext& context) {
-    const auto width = std::max(
-        4,
-        static_cast<int32_t>(std::lround(std::max(1.0f, render_size.x()))));
-    const auto height = std::max(
-        4,
-        static_cast<int32_t>(std::lround(std::max(1.0f, render_size.y()))));
-    return {
-        width > 2 ? width : std::max(4, context.ortho_w),
-        height > 2 ? height : std::max(4, context.ortho_h),
-    };
 }
 
 Eigen::Vector2f ResolveTextEffectCapacity(const wpscene::WPTextObject& obj,
@@ -1923,7 +1908,7 @@ void RegisterTextComposite(ParseContext& context, const wpscene::WPTextObject& o
     auto& camera = RegisterLayerComposite(context,
                                           object.id,
                                           node,
-                                          ResolveTextRenderExtent(card.size, context),
+                                          TextCardTexelExtent(card.size),
                                           object.clampuvs,
                                           std::move(camera_node));
     camera.SetWidth(std::max(1.0f, card.size.x()));
@@ -2083,7 +2068,6 @@ Eigen::Vector2f ResolveTextCardPadding(const wpscene::WPTextObject& obj, bool sc
 
 TextLayerState ResolveTextLayerState(const wpscene::WPTextObject& obj, fs::VFS& vfs,
                                      std::string text, std::string font_key,
-                                     Eigen::Vector2f explicit_size,
                                      std::string layer_key, bool scene_fog) {
     TextLayerState state {
         .text             = std::move(text),
@@ -2092,7 +2076,6 @@ TextLayerState ResolveTextLayerState(const wpscene::WPTextObject& obj, fs::VFS& 
         .point_size       = obj.pointsize,
         .padding          = ResolveTextCardPadding(obj, scene_fog),
         .spacing          = Eigen::Vector2f(obj.spacing[0], obj.spacing[1]),
-        .explicit_size    = explicit_size,
         .color            = Eigen::Vector3f(obj.color.data()),
         .alpha            = obj.alpha,
         .brightness       = obj.brightness,
@@ -2253,7 +2236,6 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
                                             *context.vfs,
                                             text,
                                             font_key,
-                                            Eigen::Vector2f(obj.size[0], obj.size[1]),
                                             runtime_name,
                                             context.scene->fog_distance || context.scene->fog_height);
     // The node is shifted onto the edges the text is aligned to.
@@ -2264,11 +2246,12 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
     text_state.color = Eigen::Vector3f::Ones();
     text_state.alpha = 1.0f;
     text_state.brightness = 1.0f;
-    auto       layout_size         = TextLayerLayoutSize(text_state);
-    auto       raster_size         = TextLayerRasterSize(text_state);
+    // Measured once: the card, the texture and the layer's runtime state all start from it.
+    const auto layout              = MeasureTextLayerLayout(text_state);
+    const auto raster_size         = TextLayerRasterSizeForLayout(text_state, layout);
     auto       render_frame        = TextLayerRenderFrameForRasterSize(text_state, raster_size);
     auto       effect_target_size =
-        ResolveTextEffectCapacity(obj, context, layout_size.cwiseMax(raster_size),
+        ResolveTextEffectCapacity(obj, context, raster_size,
                                   std::any_of(obj.effects.begin(), obj.effects.end(),
                                               [&](const wpscene::WPImageEffect& effect) {
                                                   return EffectIsBuilt(effect) &&
@@ -2277,7 +2260,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
                                               }));
     auto       effect_target_frame =
         TextLayerRenderFrameForCapacity(text_state, raster_size, effect_target_size);
-    auto       effect_render_extent = ResolveTextRenderExtent(effect_target_frame.size, context);
+    auto       effect_render_extent = TextCardTexelExtent(effect_target_frame.size);
     effect_target_frame = TextLayerRenderFrameForTargetExtent(
         effect_target_frame,
         Eigen::Vector2f(static_cast<float>(effect_render_extent[0]),
@@ -2313,7 +2296,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
 
     if (context.scene->runtime != nullptr) {
         const auto texture_name = TextTextureName(runtime_name);
-        RegisterTextTexture(*context.scene, texture_name, text_state);
+        RegisterTextTexture(*context.scene, texture_name, text_state, raster_size);
         SceneMaterial material;
         material.name                = "text";
         material.textures            = { texture_name };
@@ -2350,7 +2333,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
                                                    : nlohmann::json(obj.visible),
                                runtime_name));
         node->SetVisibilitySettled(VisibilitySettledBy(obj.visible_setting));
-        context.scene->runtime->RegisterTextLayer(runtime_name, std::move(text_state));
+        context.scene->runtime->RegisterTextLayer(runtime_name, std::move(text_state), layout);
         RegisterLayerAlpha(context, runtime_name,
                            obj.field_bindings.contains("alpha") ? obj.field_bindings.at("alpha")
                                                                : nlohmann::json(obj.alpha),
@@ -2439,7 +2422,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
             RegisterTextComposite(context, obj, *node, card);
         }
     } else {
-        LoadAlignment(*node, anchor, layout_size);
+        LoadAlignment(*node, anchor, layout.card);
     }
 
     QueueSceneScriptIfNeeded(context, runtime_name, obj.visible_setting);

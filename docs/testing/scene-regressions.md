@@ -1188,7 +1188,11 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
     framed off the layer's origin. A relayout moves the composite camera with
     the card and resizes the target to keep one texel per unit, since a consumer
     may place the image by its size (`g_Texture1Resolution`); only a size change
-    in texels costs a new graph. A hidden sampled text is still laid out when
+    in texels costs a new graph. The target is the card's width and height with
+    the fraction cut off, as the scene loads and after every relayout alike (a
+    spacing of 0.2 per glyph gives the test cards of .6, where rounding and cutting
+    differ; after the first relayout the target was rounded, one texel too wide).
+    A hidden sampled text is still laid out when
     its text changes. Before, a text layer had no composite of its own: drawn
     through the scene camera into a screen-sized fallback it sat wherever it is
     on screen, and hidden it was never drawn, so a marquee of a hidden song
@@ -1688,6 +1692,38 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   not kept: their text is private, so nothing re-checks them. The other fixtures use
   a system font, so the tests state relations to the font's own metrics, not pixel
   counts, and the ground-truth tests skip where Arial is not installed.
+- **Layout record and the authored `size`** — `text_object_runtime_test`.
+  `TextObjectRuntime.LayoutRecordMatchesFreeType` reads the record of Helvetica at
+  32 pt against FreeType's own size metrics (the ascender and descender, cut to whole
+  pixels, and the height plus `spacing` y as the pitch), counts the rows of `H\nH`,
+  `H\n` (a break with nothing after it adds none) and `H\n\nH`, lets an A with a ring
+  raise the top of the block above the ascender and nothing else, and checks the
+  padded card and the empty text (no rows, a 2 by 2 card); the test fails, not skips,
+  if that font's ring no longer rises above its ascender.
+  `.BoxLayoutHasTheSameRecordAsAFace` gives the record of the boxes a text is laid out
+  in where no font opens (0.9 em of ascender, 0.3 of descender, a 1.2 em line), which a
+  machine with a font never reaches. `.AuthoredTextObjectSizeDoesNotSetTheCard` parses
+  a `size` of 320 by 120 beside the same text without one and requires the same
+  card, texture and quad for both, as the text grows and shrinks;
+  `.ACardShrinksWhenScriptedTextGetsShorter` a script that writes a shorter text under
+  that `size`, which kept the box's card before;
+  `SceneSchema.ATextLayerAScriptMakesIgnoresAnAuthoredSize` a `createLayer` with one.
+  `.ATextLayerIsMeasuredOnceAsItIsParsed` counts one measurement per layer where a
+  layer's card, texture and runtime state measured it four times,
+  `.ATextCardIsBuiltAtItsTruncatedSizeInTexels` requires the buffers of a card with a
+  fractional width (a colour blend, so they are the card's) to be that width cut
+  down, not rounded, `.ACardsTexelExtentIsItsSizeWithTheFractionCutOff` pins the one
+  rule every such buffer takes its size from (the scene's, an effect's and a
+  composite's, at parse and after a relayout), `.ACardThatGrowsWithinATexelKeepsItsBuffers`
+  requires a card whose width grows by a fraction that stays within the texel its
+  buffers already have to leave them and the graph alone (the pair of texts is found
+  by measuring, so it holds for any font; it rebuilt the buffers at twice the size
+  before), and `.PlainAlignedTextKeepsItsCardEdgeOnTheOrigin` pins what the
+  placement changes after it must keep: a plain text sits on its origin by its card's
+  left, right or middle edge and its top, along the layer's own scale. The scene
+  `size` appears in no other expectation; `.CenteredTextIsCenteredInItsCard` and the
+  clock parent test (`.Workshop3409533530ClockParentKeepsVisibleRuntimeTexture`) read
+  the card from the text.
 - **Alignment words and brightness** — `text_object_runtime_test`.
   `TextObjectRuntime.AlignmentKeysAreReadAsTheEnumRegistryReadsThem` parses a scene
   with every shape of the two keys (absent, each word, wrong case, empty, a longer

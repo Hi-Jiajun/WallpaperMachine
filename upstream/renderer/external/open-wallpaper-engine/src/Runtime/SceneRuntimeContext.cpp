@@ -87,11 +87,8 @@ bool SetRuntimeTextTexture(Scene& scene, const TextLayerState& state, uint32_t w
 
 RuntimePreparedTextLayerImage PrepareTextLayerImage(std::string name, uint64_t revision,
                                                     TextLayerState state) {
-    const auto measured_size = MeasureTextLayerSize(state);
-    const bool has_explicit_size =
-        state.explicit_size.x() > 0.0f && state.explicit_size.y() > 0.0f;
-    const Eigen::Vector2f layout_size = has_explicit_size ? state.explicit_size : measured_size;
-    const Eigen::Vector2f raster_size = TextLayerRasterSizeForMeasured(state, measured_size);
+    const auto layout = MeasureTextLayerLayout(state);
+    const Eigen::Vector2f raster_size = TextLayerRasterSizeForLayout(state, layout);
     const uint32_t width =
         std::clamp(static_cast<uint32_t>(std::ceil(std::max(1.0f, raster_size.x()))), 1u, 4096u);
     const uint32_t height =
@@ -104,8 +101,7 @@ RuntimePreparedTextLayerImage PrepareTextLayerImage(std::string name, uint64_t r
         .name        = std::move(name),
         .revision    = revision,
         .state       = std::move(state),
-        .layout_size = layout_size,
-        .raster_size = raster_size,
+        .layout      = layout,
         .render_frame = render_frame,
         .width       = width,
         .height      = height,
@@ -988,7 +984,6 @@ void SceneRuntimeContext::EnqueueTextLayerPreparation(std::string name, const Te
         // indefinitely outrank an older clock/date update.
         job->revision = state.cache_revision;
         job->state = state;
-        job->state.raster_size = layer.rasterSize();
         m_queued_text_revisions[name] = state.cache_revision;
     }
     m_text_worker_cv.notify_one();
@@ -1087,30 +1082,29 @@ bool SceneRuntimeContext::ApplyPreparedTextLayer(const RuntimePreparedTextLayerI
 
     auto& layer = iterator->second;
     if (layer.state().texture_cache_key != prepared.state.texture_cache_key) return false;
-    const bool raster_size_changed =
-        ! SizeNearlyEqual(layer.rasterSize(), prepared.raster_size, 1.0e-3f);
-    const bool layout_size_changed =
-        ! SizeNearlyEqual(layer.size(), prepared.layout_size, 1.0e-3f);
+    const Eigen::Vector2f raster_size = TextLayerRasterSizeForLayout(prepared.state, prepared.layout);
+    // The card is the text and its padding, and the raster the card and the style's
+    // margin, so the two change together.
+    const bool card_changed = ! SizeNearlyEqual(layer.rasterSize(), raster_size, 1.0e-3f) ||
+                              ! SizeNearlyEqual(layer.size(), prepared.layout.card, 1.0e-3f);
     // A continuously changing label can always be ahead of its worker. Publish
     // completed revisions monotonically, keeping the newer request pending.
-    if (! layer.ApplyPreparedLayout(prepared.revision, prepared.layout_size,
-                                    prepared.raster_size)) return false;
+    if (! layer.ApplyPreparedLayout(prepared.revision, prepared.layout)) return false;
 
-    if (raster_size_changed) {
+    if (card_changed) {
         const auto node_iterator = m_nodes.find(prepared.name);
         if (node_iterator != m_nodes.end() && node_iterator->second != nullptr &&
             node_iterator->second->Mesh() != nullptr) {
             auto* mesh = node_iterator->second->Mesh();
-            if (! SizeNearlyEqual(CardMeshSize(*mesh), prepared.raster_size, 1.0f)) {
+            if (! SizeNearlyEqual(CardMeshSize(*mesh), raster_size, 1.0f)) {
                 ResizeCardMesh(
-                    *mesh,
-                    TextLayerRenderBoundsForRasterSize(prepared.state, prepared.raster_size));
+                    *mesh, TextLayerRenderBoundsForRasterSize(prepared.state, raster_size));
                 if (! mesh->Dynamic()) m_scene_graph_mutated = true;
             }
         }
     }
 
-    if (raster_size_changed || layout_size_changed) {
+    if (card_changed) {
         // The card the layer shows: the text's own, or the chain's final card.
         TextLayerRenderFrame card = prepared.render_frame;
         if (const auto effect_iterator = m_node_effect_final.find(prepared.name);
@@ -1119,20 +1113,27 @@ bool SceneRuntimeContext::ApplyPreparedTextLayer(const RuntimePreparedTextLayerI
             effect_iterator->second.node->Mesh() != nullptr &&
             effect_iterator->second.layer != nullptr) {
             auto& target_frame = effect_iterator->second.target_frame;
-            const auto& bounds = prepared.render_frame.bounds;
+            // The buffers were built at their card's size with the fraction cut off, so
+            // what a card asks of them is its size in texels, as they were built: the
+            // part of a texel past them is cut off in these as in Wallpaper Engine's,
+            // and is no reason to build every buffer again.
+            const auto texels = TextCardTexelExtent(prepared.render_frame.size);
+            const auto needed = TextLayerRenderFrameForTargetExtent(
+                prepared.render_frame,
+                Eigen::Vector2f(static_cast<float>(texels[0]), static_cast<float>(texels[1])));
+            const auto& bounds = needed.bounds;
             if (bounds.left < target_frame.bounds.left ||
                 bounds.right > target_frame.bounds.right ||
                 bounds.bottom < target_frame.bounds.bottom ||
                 bounds.top > target_frame.bounds.top) {
                 Eigen::Vector2f capacity = target_frame.size;
                 for (int axis = 0; axis < 2; ++axis) {
-                    while (capacity[axis] < prepared.render_frame.size[axis] &&
-                           capacity[axis] < 4096.0f)
+                    while (capacity[axis] < needed.size[axis] && capacity[axis] < 4096.0f)
                         capacity[axis] = std::min(4096.0f, capacity[axis] * 2.0f);
                 }
                 const bool grew = ! SizeNearlyEqual(capacity, target_frame.size, 1.0f);
                 target_frame = TextLayerRenderFrameForCapacity(
-                    prepared.state, prepared.raster_size, capacity);
+                    prepared.state, raster_size, capacity);
                 auto& binding = effect_iterator->second;
                 auto camera = m_scene->cameras.at(binding.node->Camera());
                 camera->SetWidth(capacity.x());
@@ -1173,7 +1174,7 @@ bool SceneRuntimeContext::ApplyPreparedTextLayer(const RuntimePreparedTextLayerI
         }
     }
 
-    RegisterNodeSize(prepared.name, prepared.layout_size);
+    RegisterNodeSize(prepared.name, prepared.layout.card);
     ApplyNodeTransform(prepared.name);
 
     if (m_scene != nullptr) {
@@ -1196,15 +1197,14 @@ void SceneRuntimeContext::FitTextLayerComposite(SceneNode& node,
     camera->second->GetAttachedNode()->SetTranslate(
         Eigen::Vector3f(card.center.x(), card.center.y(), 0.0f));
     camera->second->Update();
-    // One texel per unit of the card, as at parse time: a consumer may place
-    // the image by its size (`g_Texture1Resolution`), so stretching a new card
-    // over the old target would show the text at another scale. Only a card
-    // whose size in texels changed costs a new graph.
+    // One texel per unit of the card with the fraction cut off, as at parse
+    // time: a consumer may place the image by its size (`g_Texture1Resolution`),
+    // so stretching a new card over the old target would show the text at
+    // another scale. Only a card whose size in texels changed costs a new graph.
     const auto found = m_scene->renderTargets.find(LayerCompositeTargetKey(node.ID()));
     if (found == m_scene->renderTargets.end()) return;
     auto&      target = found->second;
-    const auto width  = std::max(4, static_cast<int32_t>(std::lround(card.size.x())));
-    const auto height = std::max(4, static_cast<int32_t>(std::lround(card.size.y())));
+    const auto [width, height] = TextCardTexelExtent(card.size);
     const auto current_width  = target.authored_width > 0 ? target.authored_width : target.width;
     const auto current_height = target.authored_height > 0 ? target.authored_height : target.height;
     if (current_width == width && current_height == height) return;
@@ -1662,6 +1662,15 @@ void SceneRuntimeContext::RegisterTextLayer(std::string name, TextLayerState sta
     if (name.empty()) return;
     if (state.layer_key.empty()) state.layer_key = name;
     auto layer        = TextLayer(std::move(state));
+    RegisterNodeSize(name, layer.size());
+    m_text_layers.insert_or_assign(std::move(name), std::move(layer));
+}
+
+void SceneRuntimeContext::RegisterTextLayer(std::string name, TextLayerState state,
+                                            TextLayerLayout layout) {
+    if (name.empty()) return;
+    if (state.layer_key.empty()) state.layer_key = name;
+    auto layer        = TextLayer(std::move(state), std::move(layout));
     RegisterNodeSize(name, layer.size());
     m_text_layers.insert_or_assign(std::move(name), std::move(layer));
 }
@@ -2763,6 +2772,12 @@ std::optional<TextLayerState> SceneRuntimeContext::NodeTextState(std::string_vie
     const auto iterator = m_text_layers.find(std::string(name));
     if (iterator == m_text_layers.end()) return std::nullopt;
     return iterator->second.state();
+}
+
+std::optional<TextLayerLayout> SceneRuntimeContext::NodeTextLayout(std::string_view name) const {
+    const auto iterator = m_text_layers.find(std::string(name));
+    if (iterator == m_text_layers.end()) return std::nullopt;
+    return iterator->second.layout();
 }
 
 bool SceneRuntimeContext::SetNodeText(std::string_view name, std::string text) {

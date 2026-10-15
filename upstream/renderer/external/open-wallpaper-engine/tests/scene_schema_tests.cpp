@@ -8584,6 +8584,40 @@ TEST(SceneSchema, CreateLayerBuildsATextLayerThroughTheParsersOwnTextPath) {
     EXPECT_EQ(runtime.LayerNameAt(2), name) << "created layers follow the scene's own";
 }
 
+// createLayer({ text, size }) goes through the parser's text path, which ignores the
+// authored `size`: the card is the text plus its padding, as Wallpaper Engine sets it
+// from the layout every time the text is laid out.
+TEST(SceneSchema, ATextLayerAScriptMakesIgnoresAnAuthoredSize) {
+    fs::VFS vfs;
+    MountSceneFiles(vfs);
+    const auto scene = ParseScriptParityScene(vfs, ScriptParityScene(nlohmann::json::array({
+        { { "id", 1 }, { "name", "label" }, { "text", "hello" }, { "font", "Arial" }, { "pointsize", 24 } },
+        { { "id", 2 }, { "name", "owner" }, { "image", "image.json" },
+          { "visible",
+            { { "value", true },
+              { "script",
+                "export function init(value) {\n"
+                "  thisScene.createLayer({ text: 'hello', font: 'Arial', pointsize: 24,\n"
+                "    name: 'boxed', size: '640 400' });\n"
+                "  return value;\n"
+                "}\n"
+                "export function update(value) { return value; }\n" } } } },
+    })));
+    ASSERT_NE(scene, nullptr);
+    ASSERT_NE(scene->runtime, nullptr);
+    auto& runtime = *scene->runtime;
+    runtime.Tick(1.0 / 60.0);
+    for (const auto& error : runtime.scriptErrors()) ADD_FAILURE() << error;
+
+    const std::string name = runtime.ResolveLayerName("boxed");
+    ASSERT_TRUE(runtime.HasNodeNamed(name));
+    const auto card = runtime.NodeSize(name);
+    EXPECT_GT(card.x(), 0.0f);
+    EXPECT_LT(card.x(), 640.0f);
+    EXPECT_LT(card.y(), 400.0f);
+    EXPECT_TRUE(card.isApprox(runtime.NodeSize("label")));
+}
+
 // A text layer's style is changed by script through the parser's own font
 // resolution: a named system font resolves like the scene file's, a larger size
 // and a new alignment lay the text out again and keep the layer anchored.

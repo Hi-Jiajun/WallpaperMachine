@@ -951,18 +951,7 @@ into private textures; the three that draw skip visibly without a Metal device.
   this renderer treats as always on (see above). That the flag is the one
   `hdr` with `bloom` sets is read from the decompile, not seen on a text layer: no
   frame of Wallpaper Engine has been compared (the same flag's effect shows on an
-  image layer of one local HDR scene). **The authored
-  `size` of a text object is kept**: Wallpaper Engine ignores it and sets the card from
-  the layout every time the text is laid out (the text object's size function writes
-  the layout box plus twice the padding, and its guard byte only keeps it from
-  running while the object is still being built), so a scripted text that gets
-  shorter has a smaller card there. Here the authored size stays the layout box a
-  layer is aligned in and answers the cursor with, and the smallest the raster is, so
-  such text keeps the stale card and the card is `bounds + 2 * padding` only where the
-  authored size is not larger. The saved sizes of Arial text come out the same either
-  way, since Wallpaper Engine wrote them from the same layout; the difference is text
-  that changes. Changing it moves the placement of every text layer that has an
-  authored size and needs a picture comparison. The distance fog and height fog flags
+  image layer of one local HDR scene). The distance fog and height fog flags
   of a scene, which make Wallpaper Engine pad and composite every text layer, are
   modelled for the padding only: the composite itself and the `FOG_COMPUTED` combo
   change nothing a text layer draws here. A style key (`outline`, `blur`,

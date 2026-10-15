@@ -79,8 +79,7 @@ struct RuntimePreparedTextLayerImage {
     std::string     name;
     uint64_t        revision { 0 };
     TextLayerState  state;
-    Eigen::Vector2f layout_size { Eigen::Vector2f::Zero() };
-    Eigen::Vector2f raster_size { Eigen::Vector2f::Zero() };
+    TextLayerLayout layout;
     TextLayerRenderFrame render_frame {};
     uint32_t        width { 0 };
     uint32_t        height { 0 };
@@ -275,6 +274,9 @@ public:
                               std::unique_ptr<DynamicValue> value,
                               std::shared_ptr<const NodeVec3Animation> animation = {});
     void RegisterTextLayer(std::string name, TextLayerState state);
+    /// `layout` is `MeasureTextLayerLayout(state)`, which the caller has measured
+    /// already: the layer does not measure the text a second time.
+    void RegisterTextLayer(std::string name, TextLayerState state, TextLayerLayout layout);
     void RegisterTextValue(std::string name, std::unique_ptr<DynamicValue> value,
                            bool apply_current_value = true);
     void RegisterMaterialConstant(std::shared_ptr<SceneMaterial> material, std::string name,
@@ -456,6 +458,8 @@ public:
     std::string     NodeText(std::string_view name) const;
     bool            NodeTextDirty(std::string_view name) const;
     std::optional<TextLayerState> NodeTextState(std::string_view name) const;
+    /// How the layer's text lies in its card now (the card is `NodeSize`).
+    std::optional<TextLayerLayout> NodeTextLayout(std::string_view name) const;
     bool                          SetNodeText(std::string_view name, std::string text);
     /// Watches one run of a scripted value's script for the text it writes to the
     /// layer the value is the text property of. The script that decides a layer's

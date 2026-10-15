@@ -1272,104 +1272,123 @@ void main() {
 // the text wherever it sits on screen, and, hidden, it was never drawn at all.
 // Its card is laid out again whenever the text changes, so its composite moves
 // and resizes with it, one texel per unit as an image's is: a consumer may place
-// the image by its size.
+// the image by its size. Texels are the card's width and height with the fraction
+// cut off, as Wallpaper Engine builds a text card's buffers, as the scene loads
+// and again after every relayout. A spacing of 0.2 between glyphs gives both texts
+// below a fractional card with a fraction of .6, where cutting and rounding differ.
 TEST(LayerTextureReference, ASampledTextLayerIsItsCardInItsOwnComposite) {
     // With an effect the layer draws at an effect capacity larger than its
     // card, and what is sampled is still the card. Declared as a dependency the
     // reference is known before the text is parsed; named only in a material
     // file it is found while the consumer is parsed.
-    for (const bool with_effect : { false, true }) {
-        for (const bool declared : { true, false }) {
-            SCOPED_TRACE(std::string(with_effect ? "with an effect" : "plain") +
-                         (declared ? ", declared" : ", found in a material"));
-            auto files = CopyEffectFiles();
-            files["/linked_mat.json"] =
-                R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":["_rt_imageLayerComposite_416_a"]}]})";
-            // Left-aligned in a box narrower than the text, the card overflows to
-            // the right and is not centred on the layer's origin.
-            const std::string objects =
-                std::string(R"([
-                {"id":680,"name":"marquee","image":"linked.json")") +
-                (declared ? R"(,"dependencies":[416])" : "") + R"(},
-                {"id":416,"name":"title","text":"Wind","font":"Arial","pointsize":20,
-                 "padding":0,"size":[24,40],"horizontalalign":"left",
-                 "origin":[50,20,0],"visible":false)" +
-                (with_effect ? R"(,"effects":[{"file":"effects/copy/effect.json","visible":true}])"
-                             : "") +
-                "}]";
-            const ProjectProperties properties {};
-            fs::VFS                 vfs;
-            auto parsed = ParseScene(vfs, objects, files, &properties);
-            ASSERT_NE(parsed, nullptr);
-            ASSERT_NE(parsed->runtime, nullptr);
-            EXPECT_TRUE(parsed->layer_texture_error.empty()) << parsed->layer_texture_error;
-            AddScreenTarget(*parsed);
-            auto& runtime = *parsed->runtime;
+    for (const bool fractional : { false, true }) {
+        bool a_fraction_rounds_up = false;
+        for (const bool with_effect : { false, true }) {
+            for (const bool declared : { true, false }) {
+                SCOPED_TRACE(std::string(fractional ? "fractional card, " : "whole card, ") +
+                             (with_effect ? "with an effect" : "plain") +
+                             (declared ? ", declared" : ", found in a material"));
+                auto files = CopyEffectFiles();
+                files["/linked_mat.json"] =
+                    R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":["_rt_imageLayerComposite_416_a"]}]})";
+                const std::string objects =
+                    std::string(R"([
+                    {"id":680,"name":"marquee","image":"linked.json")") +
+                    (declared ? R"(,"dependencies":[416])" : "") + R"(},
+                    {"id":416,"name":"title","text":"Wind","font":"Arial","pointsize":20,
+                     "padding":0,"horizontalalign":"left",
+                     "origin":[50,20,0],"visible":false)" +
+                    (fractional ? R"(,"spacing":"0.2 0")" : "") +
+                    (with_effect ? R"(,"effects":[{"file":"effects/copy/effect.json","visible":true}])"
+                                 : "") +
+                    "}]";
+                const ProjectProperties properties {};
+                fs::VFS                 vfs;
+                auto parsed = ParseScene(vfs, objects, files, &properties);
+                ASSERT_NE(parsed, nullptr);
+                ASSERT_NE(parsed->runtime, nullptr);
+                EXPECT_TRUE(parsed->layer_texture_error.empty()) << parsed->layer_texture_error;
+                AddScreenTarget(*parsed);
+                auto& runtime = *parsed->runtime;
 
-            // The pass that draws the title into its composite, and the card it
-            // draws there.
-            struct Composite {
-                const vulkan::CustomShaderPass* pass { nullptr };
-                Eigen::Vector2d                 lower, upper;
-            };
-            const auto find_composite = [&](const rg::RenderGraph& graph) {
-                Composite found;
-                found.pass = FindPassByOutput(graph, LayerCompositeTargetKey(416));
-                if (found.pass == nullptr || found.pass->desc().node->Mesh() == nullptr)
+                // The pass that draws the title into its composite, and the card it
+                // draws there.
+                struct Composite {
+                    const vulkan::CustomShaderPass* pass { nullptr };
+                    Eigen::Vector2d                 lower, upper;
+                };
+                const auto find_composite = [&](const rg::RenderGraph& graph) {
+                    Composite found;
+                    found.pass = FindPassByOutput(graph, LayerCompositeTargetKey(416));
+                    if (found.pass == nullptr || found.pass->desc().node->Mesh() == nullptr)
+                        return found;
+                    std::tie(found.lower, found.upper) =
+                        CardCorners(*found.pass->desc().node->Mesh());
                     return found;
-                std::tie(found.lower, found.upper) =
-                    CardCorners(*found.pass->desc().node->Mesh());
-                return found;
-            };
-            const auto expect_composite_is_the_card = [&](const Composite& composite) {
-                ASSERT_NE(composite.pass, nullptr) << "the title was never drawn into a composite";
-                auto* owner = composite.pass->desc().visibility_node != nullptr
-                                        ? composite.pass->desc().visibility_node
-                                        : composite.pass->desc().node;
-                EXPECT_EQ(owner->Name(), "title");
-                EXPECT_TRUE(owner->MustProduce()) << "hidden, the title would never be drawn";
-                // The card the title shows on screen, whichever mesh draws it.
-                ASSERT_NE(owner->Mesh(), nullptr);
-                const auto [card_lower, card_upper] = CardCorners(*owner->Mesh());
-                EXPECT_NEAR(composite.lower.x(), card_lower.x(), 1e-3);
-                EXPECT_NEAR(composite.lower.y(), card_lower.y(), 1e-3);
-                EXPECT_NEAR(composite.upper.x(), card_upper.x(), 1e-3);
-                EXPECT_NEAR(composite.upper.y(), card_upper.y(), 1e-3);
-                ExpectCardFillsItsTarget(*parsed, *composite.pass, composite.lower, composite.upper);
-                const auto* target = parsed->FindRenderTarget(LayerCompositeTargetKey(416));
-                ASSERT_NE(target, nullptr);
-                EXPECT_EQ(target->width, std::lround(composite.upper.x() - composite.lower.x()));
-                EXPECT_EQ(target->height, std::lround(composite.upper.y() - composite.lower.y()));
-            };
+                };
+                const auto expect_composite_is_the_card = [&](const Composite& composite) {
+                    ASSERT_NE(composite.pass, nullptr) << "the title was never drawn into a composite";
+                    auto* owner = composite.pass->desc().visibility_node != nullptr
+                                            ? composite.pass->desc().visibility_node
+                                            : composite.pass->desc().node;
+                    EXPECT_EQ(owner->Name(), "title");
+                    EXPECT_TRUE(owner->MustProduce()) << "hidden, the title would never be drawn";
+                    // The card the title shows on screen, whichever mesh draws it. With an
+                    // effect the composite is the card the chain ends in, cut to the
+                    // buffers it is drawn into: short of the text's own by half the
+                    // fraction they cut off on each side.
+                    ASSERT_NE(owner->Mesh(), nullptr);
+                    const auto [card_lower, card_upper] = CardCorners(*owner->Mesh());
+                    const double slack = fractional && with_effect ? 0.5 : 1e-3;
+                    EXPECT_NEAR(composite.lower.x(), card_lower.x(), slack);
+                    EXPECT_NEAR(composite.lower.y(), card_lower.y(), slack);
+                    EXPECT_NEAR(composite.upper.x(), card_upper.x(), slack);
+                    EXPECT_NEAR(composite.upper.y(), card_upper.y(), slack);
+                    ExpectCardFillsItsTarget(*parsed, *composite.pass, composite.lower, composite.upper);
+                    const auto* target = parsed->FindRenderTarget(LayerCompositeTargetKey(416));
+                    ASSERT_NE(target, nullptr);
+                    // The card's size in texels: its width and height with the fraction
+                    // cut off.
+                    const auto card = runtime.NodeSize("title");
+                    EXPECT_EQ(target->width, std::max(4, static_cast<int32_t>(card.x())))
+                        << card.x();
+                    EXPECT_EQ(target->height, std::max(4, static_cast<int32_t>(card.y())))
+                        << card.y();
+                    a_fraction_rounds_up =
+                        a_fraction_rounds_up || card.x() - std::floor(card.x()) >= 0.5f;
+                };
 
-            auto graph = sceneToRenderGraph(*parsed);
-            ASSERT_NE(graph, nullptr);
-            const auto* marquee = FindPassByNode(*graph, "marquee");
-            ASSERT_NE(marquee, nullptr);
-            ASSERT_FALSE(marquee->desc().textures.empty());
-            EXPECT_EQ(marquee->desc().textures[0], GenLinkTex(416));
-            const auto* link = FindLinkCopy(*graph, GenLinkTex(416));
-            ASSERT_NE(link, nullptr) << "the marquee was given nothing to sample";
-            EXPECT_EQ(link->desc().src, LayerCompositeTargetKey(416));
+                auto graph = sceneToRenderGraph(*parsed);
+                ASSERT_NE(graph, nullptr);
+                const auto* marquee = FindPassByNode(*graph, "marquee");
+                ASSERT_NE(marquee, nullptr);
+                ASSERT_FALSE(marquee->desc().textures.empty());
+                EXPECT_EQ(marquee->desc().textures[0], GenLinkTex(416));
+                const auto* link = FindLinkCopy(*graph, GenLinkTex(416));
+                ASSERT_NE(link, nullptr) << "the marquee was given nothing to sample";
+                EXPECT_EQ(link->desc().src, LayerCompositeTargetKey(416));
 
-            const auto before = find_composite(*graph);
-            expect_composite_is_the_card(before);
-            ASSERT_NE(before.pass, nullptr);
-            ASSERT_GT(std::abs((before.lower.x() + before.upper.x()) * 0.5), 1.0)
-                << "the fixture's card must sit off the layer's origin";
+                const auto before = find_composite(*graph);
+                expect_composite_is_the_card(before);
+                ASSERT_NE(before.pass, nullptr);
 
-            // A longer title widens the card while the layer stays hidden.
-            ASSERT_TRUE(runtime.SetNodeText("title", "Wind over the river"));
-            ASSERT_TRUE(PumpTextLayout(runtime, "title"))
-                << "a hidden text layer another samples was never laid out again";
-            EXPECT_TRUE(runtime.ConsumeSceneGraphMutationFlag())
-                << "the composite outgrew its target and nothing asked for a new graph";
-            graph = sceneToRenderGraph(*parsed);
-            ASSERT_NE(graph, nullptr);
-            const auto after = find_composite(*graph);
-            expect_composite_is_the_card(after);
-            ASSERT_NE(after.pass, nullptr);
-            EXPECT_GT(after.upper.x() - after.lower.x(), before.upper.x() - before.lower.x());
+                // A longer title widens the card while the layer stays hidden.
+                ASSERT_TRUE(runtime.SetNodeText("title", "Wind over the river"));
+                ASSERT_TRUE(PumpTextLayout(runtime, "title"))
+                    << "a hidden text layer another samples was never laid out again";
+                EXPECT_TRUE(runtime.ConsumeSceneGraphMutationFlag())
+                    << "the composite outgrew its target and nothing asked for a new graph";
+                graph = sceneToRenderGraph(*parsed);
+                ASSERT_NE(graph, nullptr);
+                const auto after = find_composite(*graph);
+                expect_composite_is_the_card(after);
+                ASSERT_NE(after.pass, nullptr);
+                EXPECT_GT(after.upper.x() - after.lower.x(), before.upper.x() - before.lower.x());
+            }
+        }
+        if (fractional) {
+            EXPECT_TRUE(a_fraction_rounds_up)
+                << "no card had a fraction of .5 or more, so rounding and cutting agree";
         }
     }
 }

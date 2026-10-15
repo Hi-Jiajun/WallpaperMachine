@@ -2,6 +2,7 @@
 
 #include <Eigen/Dense>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -124,7 +125,6 @@ struct TextLayerState {
     // The authored `spacing`: pixels added to every glyph's advance (x) and to
     // the line pitch (y), at the rasterised size.
     Eigen::Vector2f      spacing { Eigen::Vector2f::Zero() };
-    Eigen::Vector2f      explicit_size { Eigen::Vector2f::Zero() };
     Eigen::Vector3f      color { Eigen::Vector3f::Ones() };
     float                alpha { 1.0f };
     float                brightness { 1.0f };
@@ -147,8 +147,38 @@ struct TextLayerState {
     uint64_t             cache_revision { 0 };
     std::string          texture_cache_key;
     std::string          render_backend { "runtime-rgba-texture" };
-    Eigen::Vector2f      layout_size { Eigen::Vector2f::Zero() };
-    Eigen::Vector2f      raster_size { Eigen::Vector2f::Zero() };
+};
+
+/// How a text layer's text lies in its card, as Wallpaper Engine lays it out, measured
+/// from the layer's own state and nothing else: the scene file's `size` is the editor's
+/// box and takes no part. Layout space has the pen origin at x = 0 and the first row's
+/// baseline at y = 0, y up; rows step down by `pitch`.
+struct TextLayerLayout {
+    // The ink and the pen at every glyph start, so `min_x <= 0 <= max_x`.
+    float min_x { 0.0f };
+    float max_x { 0.0f };
+    // The tallest of the face's ascender and the ink above the first baseline, and the
+    // lowest of the last row's line bottom and the ink below it. Zero with no text.
+    float top { 0.0f };
+    float bottom { 0.0f };
+    // The primary face's ascender and descender in whole pixels (the descender as a
+    // distance below the baseline, so not negative) and the line pitch, the face's line
+    // height plus the layer's `spacing` y: what the vertical alignment measures from.
+    float ascender { 0.0f };
+    float descender { 0.0f };
+    float pitch { 0.0f };
+    // Rows laid out: a line break with nothing after it adds none, an empty line
+    // between two adds one. Zero with no text, so the gaps between rows are
+    // `rows - 1` only where there is text (unsigned: it wraps from zero).
+    uint32_t rows { 0 };
+    // The margin kept clear around the block on each axis, already gated and capped
+    // (`TextLayerState::padding`).
+    Eigen::Vector2f padding { Eigen::Vector2f::Zero() };
+    // The block plus twice the padding, never under a pixel; 2 by 2 plus twice the
+    // padding with no text. This is the layer's size.
+    Eigen::Vector2f card { Eigen::Vector2f::Zero() };
+
+    Eigen::Vector2f BlockSize() const { return { max_x - min_x, top - bottom }; }
 };
 
 /// Wallpaper Engine's text `anchor`: pins the layer to an edge or corner of the
@@ -212,11 +242,17 @@ struct TextLayerTextureBounds {
 class TextLayer {
 public:
     explicit TextLayer(TextLayerState state);
+    /// A layer whose text the caller has laid out already: `layout` is
+    /// `MeasureTextLayerLayout(state)`, so the layer does not measure it again.
+    TextLayer(TextLayerState state, TextLayerLayout layout);
 
-    const TextLayerState& state() const { return m_state; }
-    const std::string&    text() const { return m_state.text; }
-    Eigen::Vector2f       size() const { return m_state.layout_size; }
-    Eigen::Vector2f       rasterSize() const;
+    const TextLayerState&  state() const { return m_state; }
+    const TextLayerLayout& layout() const { return m_layout; }
+    const std::string&     text() const { return m_state.text; }
+    /// The card the text is laid out in.
+    Eigen::Vector2f        size() const { return m_layout.card; }
+    /// The card and the room the style reaches on every side: the raster's size.
+    Eigen::Vector2f        rasterSize() const;
     TextLayerRenderBounds renderBounds() const;
     bool                  dirty() const { return m_state.dirty; }
     bool                  layoutPending() const { return m_state.layout_pending; }
@@ -229,8 +265,7 @@ public:
     void SetFont(std::string font_key, std::string kind, std::string identity, std::string path,
                  std::string face, SharedFontData data);
     void SetAlignment(std::string horizontal, std::string vertical);
-    bool ApplyPreparedLayout(uint64_t revision, Eigen::Vector2f layout_size,
-                             Eigen::Vector2f raster_size);
+    bool ApplyPreparedLayout(uint64_t revision, TextLayerLayout layout);
     void ClearDirty();
 
 private:
@@ -238,8 +273,9 @@ private:
     void EnsureCacheIdentity();
     void MarkCacheDirty();
 
-    TextLayerState m_state;
-    uint64_t m_prepared_revision { 0 };
+    TextLayerState  m_state;
+    TextLayerLayout m_layout;
+    uint64_t        m_prepared_revision { 0 };
 };
 
 /// How far the outline, blur and shadow reach past the text on each side, in
@@ -248,13 +284,15 @@ private:
 float TextStyleMargin(const TextLayerState& state);
 
 Eigen::Vector2f EstimateTextLayerSize(std::string_view text, float point_size, float padding);
+/// Lays the text out: the block of ink, the face's ascender, descender and pitch, and
+/// the card around them.
+TextLayerLayout MeasureTextLayerLayout(const TextLayerState& state);
+/// The card of `MeasureTextLayerLayout`.
 Eigen::Vector2f MeasureTextLayerSize(const TextLayerState& state);
-Eigen::Vector2f TextLayerLayoutSize(const TextLayerState& state);
+/// The raster of a laid-out text: its card and the room the style reaches on every side.
+Eigen::Vector2f TextLayerRasterSizeForLayout(const TextLayerState& state,
+                                             const TextLayerLayout& layout);
 Eigen::Vector2f TextLayerRasterSize(const TextLayerState& state);
-/// `TextLayerRasterSize` for a text already measured: the authored size where the
-/// text fits in it, else the text's card, and the room the style reaches on every side.
-Eigen::Vector2f TextLayerRasterSizeForMeasured(const TextLayerState& state,
-                                               const Eigen::Vector2f& measured);
 TextLayerRenderBounds TextLayerRenderBoundsForRasterSize(const TextLayerState& state,
                                                          Eigen::Vector2f raster_size);
 TextLayerRenderFrame TextLayerRenderFrameForRasterSize(const TextLayerState& state,
@@ -264,6 +302,11 @@ TextLayerRenderFrame TextLayerRenderFrameForCapacity(const TextLayerState& state
                                                      Eigen::Vector2f capacity_size);
 TextLayerRenderFrame TextLayerRenderFrameForTargetExtent(const TextLayerRenderFrame& frame,
                                                          Eigen::Vector2f target_extent);
+/// The texels of the buffers a text card is drawn into: Wallpaper Engine builds them as the
+/// card's width and height with the fraction cut off, and at least 4 each. Every buffer
+/// built for a card, as the scene loads and again when the card changes, takes its size
+/// from here, so that none rounds where another cuts.
+std::array<int32_t, 2> TextCardTexelExtent(Eigen::Vector2f card);
 TextLayerRenderFrame TextLayerRenderFrameClampedToTarget(const TextLayerRenderFrame& frame,
                                                          const TextLayerRenderFrame& target);
 TextLayerTextureBounds TextLayerTextureBoundsForRenderTarget(const TextLayerRenderFrame& frame,
@@ -275,6 +318,9 @@ void            RasterizeTextLayer(const TextLayerState& state, uint32_t width, 
 #ifdef WESCENE_BUILD_TESTS
 uint64_t        TextLayerMeasurementCountForTests();
 void            ResetTextLayerMeasurementCountForTests();
+/// The layout of the boxes a layer is laid out in where no font opens, which no machine
+/// with a font reaches: 0.9 em of ascender, 0.3 em of descender, 1.2 em of line.
+TextLayerLayout TextLayerBoxLayoutForTests(const TextLayerState& state);
 /// What the font faces have cost since `ResetTextFontCacheForTests`, which also drops
 /// every face the cache holds: font files opened (a face found in the cache is not
 /// one), glyph-fallback faces asked for (one per layout that lacks a glyph), and

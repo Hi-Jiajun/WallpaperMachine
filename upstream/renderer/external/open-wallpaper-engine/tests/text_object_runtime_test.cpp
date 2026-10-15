@@ -1360,9 +1360,9 @@ TEST(TextObjectRuntime, OversizedTextEffectClipsFinalMeshToBoundedTarget) {
     const auto effect_layer = camera->GetImgEffect();
     ASSERT_NE(effect_layer, nullptr);
 
-    const auto state = scene->runtime->NodeTextState("caption");
-    ASSERT_TRUE(state.has_value());
-    ASSERT_GT(state->raster_size.x(), 4096.0f);
+    const auto layout = scene->runtime->NodeTextLayout("caption");
+    ASSERT_TRUE(layout.has_value());
+    ASSERT_GT(layout->card.x(), 4096.0f);
     EXPECT_LE(camera->Width(), 4096.0);
     EXPECT_LE(camera->Height(), 4096.0);
 
@@ -1490,7 +1490,7 @@ TEST(TextObjectRuntime, SceneScriptTextEffectMutationKeepsFinalUvsInCapacity) {
     EXPECT_EQ(scene->runtime->scriptErrorCount(), 0u);
 }
 
-TEST(TextObjectRuntime, ExplicitAlignedTextEffectTracksMeasuredRenderFrameWhenRasterExpands) {
+TEST(TextObjectRuntime, AlignedTextEffectTracksMeasuredRenderFrameWhenRasterExpands) {
     fs::VFS vfs;
     MountAssets(vfs,
                 {
@@ -1539,7 +1539,7 @@ TEST(TextObjectRuntime, ExplicitAlignedTextEffectTracksMeasuredRenderFrameWhenRa
     WPSceneParser       parser;
     ProjectProperties   properties;
     SceneParseRequest   request {
-          .scene_id           = "explicit-text-effect-raster-camera",
+          .scene_id           = "aligned-text-effect-raster-camera",
           .project_properties = &properties,
     };
 
@@ -1556,7 +1556,6 @@ TEST(TextObjectRuntime, ExplicitAlignedTextEffectTracksMeasuredRenderFrameWhenRa
               "pointsize": 20,
               "padding": 0,
               "origin": "0 0 0",
-              "size": [120, 50],
               "horizontalalign": "right",
               "verticalalign": "bottom",
               "visible": true,
@@ -1587,18 +1586,18 @@ TEST(TextObjectRuntime, ExplicitAlignedTextEffectTracksMeasuredRenderFrameWhenRa
 
     EXPECT_EQ(scene->runtime->NodeText("caption"),
               "a much longer caption for explicit effects");
-    EXPECT_NEAR(text->Translate().x(), -60.0f, 1.0e-4f);
-    EXPECT_NEAR(text->Translate().y(), 25.0f, 1.0e-4f);
-    EXPECT_NEAR(text->Translate().x(), -60.0f, 1.0e-4f);
-    EXPECT_NEAR(text->Translate().y(), 25.0f, 1.0e-4f);
 
     const auto state = scene->runtime->NodeTextState("caption");
+    const auto layout = scene->runtime->NodeTextLayout("caption");
     ASSERT_TRUE(state.has_value());
-    const auto logical_size = scene->runtime->NodeSize("caption");
-    EXPECT_FLOAT_EQ(logical_size.x(), 120.0f);
-    EXPECT_FLOAT_EQ(logical_size.y(), 50.0f);
-    EXPECT_GT(state->raster_size.x(), logical_size.x());
-    const auto render_frame = TextLayerRenderFrameForRasterSize(*state, state->raster_size);
+    ASSERT_TRUE(layout.has_value());
+    // The card is the text the script wrote, and the layer is placed by the edges of it.
+    const auto card = scene->runtime->NodeSize("caption");
+    EXPECT_TRUE(card.isApprox(layout->card));
+    EXPECT_GT(card.x(), 400.0f);
+    EXPECT_NEAR(text->Translate().x(), -card.x() * 0.5f, 1.0e-3f);
+    EXPECT_NEAR(text->Translate().y(), card.y() * 0.5f, 1.0e-3f);
+    const auto render_frame = TextLayerRenderFrameForRasterSize(*state, layout->card);
 
     const auto text_mesh_size = MeshSize(*text->Mesh());
     EXPECT_NEAR(text_mesh_size.x(), render_frame.size.x(), 1.0f);
@@ -1649,7 +1648,7 @@ TEST(TextObjectRuntime, ExplicitAlignedTextEffectTracksMeasuredRenderFrameWhenRa
     EXPECT_FALSE(scene->runtime->ConsumeSceneGraphMutationFlag());
 }
 
-TEST(TextObjectRuntime, ExplicitAlignedTextEffectCoversMeasuredRasterWithoutScaling) {
+TEST(TextObjectRuntime, AlignedTextEffectCoversMeasuredRasterWithoutScaling) {
     fs::VFS vfs;
     MountAssets(vfs,
                 {
@@ -1698,7 +1697,7 @@ TEST(TextObjectRuntime, ExplicitAlignedTextEffectCoversMeasuredRasterWithoutScal
     WPSceneParser       parser;
     ProjectProperties   properties;
     SceneParseRequest   request {
-          .scene_id           = "explicit-text-effect-measured-raster",
+          .scene_id           = "aligned-text-effect-measured-raster",
           .project_properties = &properties,
     };
 
@@ -1712,7 +1711,6 @@ TEST(TextObjectRuntime, ExplicitAlignedTextEffectCoversMeasuredRasterWithoutScal
               "pointsize": 20,
               "padding": 0,
               "origin": "0 0 0",
-              "size": [120, 50],
               "horizontalalign": "right",
               "verticalalign": "bottom",
               "visible": true,
@@ -1739,26 +1737,25 @@ TEST(TextObjectRuntime, ExplicitAlignedTextEffectCoversMeasuredRasterWithoutScal
     const auto effect_layer = camera->GetImgEffect();
     ASSERT_NE(effect_layer, nullptr);
 
-    const auto state = scene->runtime->NodeTextState("caption");
-    ASSERT_TRUE(state.has_value());
-    const auto logical_size = scene->runtime->NodeSize("caption");
-    EXPECT_FLOAT_EQ(logical_size.x(), 120.0f);
-    EXPECT_FLOAT_EQ(logical_size.y(), 50.0f);
-    ASSERT_GT(state->raster_size.x(), logical_size.x());
+    const auto layout = scene->runtime->NodeTextLayout("caption");
+    ASSERT_TRUE(layout.has_value());
+    const auto card = scene->runtime->NodeSize("caption");
+    EXPECT_TRUE(card.isApprox(layout->card));
 
     const auto text_mesh_size = MeshSize(*text->Mesh());
-    EXPECT_NEAR(text_mesh_size.x(), state->raster_size.x(), 1.0f);
-    EXPECT_NEAR(text_mesh_size.y(), state->raster_size.y(), 1.0f);
+    EXPECT_NEAR(text_mesh_size.x(), card.x(), 1.0f);
+    EXPECT_NEAR(text_mesh_size.y(), card.y(), 1.0f);
+    // The card is centred on the layer, which is shifted onto the edges it is aligned to.
     const auto text_mesh_center = MeshCenter(*text->Mesh());
-    EXPECT_LT(text_mesh_center.x(), 0.0f);
-    EXPECT_GT(text_mesh_center.y(), 0.0f);
+    EXPECT_NEAR(text_mesh_center.x(), 0.0f, 1.0e-4f);
+    EXPECT_NEAR(text_mesh_center.y(), 0.0f, 1.0e-4f);
 
     auto* pingpong = scene->FindRenderTarget(effect_layer->FirstTarget());
     ASSERT_NE(pingpong, nullptr);
     auto* fbo = scene->FindRenderTarget(effect_layer->GetEffect(0)->nodes.front().output);
     ASSERT_NE(fbo, nullptr);
-    EXPECT_GE(pingpong->width, static_cast<int32_t>(std::ceil(state->raster_size.x())));
-    EXPECT_GE(pingpong->height, static_cast<int32_t>(std::ceil(state->raster_size.y())));
+    EXPECT_GE(pingpong->width, static_cast<int32_t>(std::ceil(card.x())));
+    EXPECT_GE(pingpong->height, static_cast<int32_t>(std::ceil(card.y())));
     EXPECT_EQ(static_cast<int32_t>(std::lround(camera->Width())), pingpong->width);
     EXPECT_EQ(static_cast<int32_t>(std::lround(camera->Height())), pingpong->height);
     EXPECT_NEAR(camera->GetPosition().x(), text_mesh_center.x(), 1.0e-4);
@@ -1769,8 +1766,8 @@ TEST(TextObjectRuntime, ExplicitAlignedTextEffectCoversMeasuredRasterWithoutScal
                                        effect_layer->FinalMesh(),
                                        pingpong->width,
                                        pingpong->height);
-    EXPECT_NEAR(final_mesh_size.x(), state->raster_size.x(), 1.0f);
-    EXPECT_NEAR(final_mesh_size.y(), state->raster_size.y(), 1.0f);
+    EXPECT_NEAR(final_mesh_size.x(), card.x(), 1.0f);
+    EXPECT_NEAR(final_mesh_size.y(), card.y(), 1.0f);
     EXPECT_NEAR(MeshCenter(effect_layer->FinalMesh()).x(), text_mesh_center.x(), 1.0e-4f);
     EXPECT_NEAR(MeshCenter(effect_layer->FinalMesh()).y(), text_mesh_center.y(), 1.0e-4f);
 
@@ -1780,13 +1777,13 @@ TEST(TextObjectRuntime, ExplicitAlignedTextEffectCoversMeasuredRasterWithoutScal
     ASSERT_NE(resolved_final, nullptr);
     ASSERT_NE(resolved_final->Mesh(), nullptr);
     const auto resolved_final_mesh_size = MeshSize(*resolved_final->Mesh());
-    EXPECT_NEAR(resolved_final_mesh_size.x(), state->raster_size.x(), 1.0f);
-    EXPECT_NEAR(resolved_final_mesh_size.y(), state->raster_size.y(), 1.0f);
+    EXPECT_NEAR(resolved_final_mesh_size.x(), card.x(), 1.0f);
+    EXPECT_NEAR(resolved_final_mesh_size.y(), card.y(), 1.0f);
     EXPECT_NEAR(MeshCenter(*resolved_final->Mesh()).x(), text_mesh_center.x(), 1.0e-4f);
     EXPECT_NEAR(MeshCenter(*resolved_final->Mesh()).y(), text_mesh_center.y(), 1.0e-4f);
 
-    EXPECT_NEAR(text->Translate().x(), -60.0f, 1.0e-4f);
-    EXPECT_NEAR(text->Translate().y(), 25.0f, 1.0e-4f);
+    EXPECT_NEAR(text->Translate().x(), -card.x() * 0.5f, 1.0e-3f);
+    EXPECT_NEAR(text->Translate().y(), card.y() * 0.5f, 1.0e-3f);
 }
 
 TEST(TextObjectRuntime, ParserStabilizesCascadingRustShaderDefaultTextureMetadata) {
@@ -1907,127 +1904,6 @@ TEST(TextObjectRuntime, ResourceFreeShaderUsesItsValidEmptyRustReflection) {
     EXPECT_TRUE(reflected.input_location_map.empty());
 }
 
-TEST(TextObjectRuntime, ExplicitTextObjectSizeIsMinimumRuntimeTextureDimensions) {
-    fs::VFS vfs;
-    MountAssets(vfs);
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-
-    ProjectProperties properties;
-    SceneParseRequest request {
-        .scene_id           = "text-explicit-size-texture",
-        .project_properties = &properties,
-    };
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"([
-          {
-            "id": 1,
-            "name": "clock",
-            "text": "12:34",
-            "font": "Arial",
-            "pointsize": 20,
-            "size": [320, 120],
-            "visible": true
-          }
-        ])"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-    auto* node = FindRootChild(*scene, "clock");
-    ASSERT_NE(node, nullptr);
-    ASSERT_NE(node->Mesh(), nullptr);
-    auto* material = node->Mesh()->MaterialForSlot(0);
-    ASSERT_NE(material, nullptr);
-    ASSERT_EQ(material->textures.size(), 1u);
-
-    auto image = scene->imageParser->Parse(material->textures.front());
-    ASSERT_NE(image, nullptr);
-    EXPECT_EQ(image->header.width, 320);
-    EXPECT_EQ(image->header.height, 120);
-
-    ASSERT_TRUE(scene->runtime->SetNodeText("clock", "12:34:56 PM UTC"));
-    PumpTextUntilClean(*scene->runtime);
-
-    auto updated = scene->imageParser->Parse(material->textures.front());
-    ASSERT_NE(updated, nullptr);
-    EXPECT_GT(updated->header.width, 320);
-    EXPECT_EQ(updated->header.height, 120);
-    const auto runtime_size = scene->runtime->NodeSize("clock");
-    EXPECT_FLOAT_EQ(runtime_size.x(), 320.0f);
-    EXPECT_FLOAT_EQ(runtime_size.y(), 120.0f);
-    const auto mesh_size = MeshSize(*node->Mesh());
-    EXPECT_GT(mesh_size.x(), runtime_size.x());
-    EXPECT_NEAR(mesh_size.y(), runtime_size.y(), 1.0f);
-}
-
-TEST(TextObjectRuntime, ExplicitTextObjectSizeRemainsLogicalFrameWhenRasterExpands) {
-    fs::VFS vfs;
-    MountAssets(vfs);
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-
-    ProjectProperties properties;
-    SceneParseRequest request {
-        .scene_id           = "text-explicit-layout-frame",
-        .project_properties = &properties,
-    };
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"([
-          {
-            "id": 1,
-            "name": "caption",
-            "text": "Saturday",
-            "font": "Arial",
-            "pointsize": 20,
-            "size": [180, 60],
-            "origin": [300, 100, 0],
-            "scale": [2, 3, 1],
-            "horizontalalign": "right",
-            "verticalalign": "bottom",
-            "visible": true
-          }
-        ])"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-    auto* node = FindRootChild(*scene, "caption");
-    ASSERT_NE(node, nullptr);
-    ASSERT_NE(node->Mesh(), nullptr);
-
-    const auto logical_size = scene->runtime->NodeSize("caption");
-    EXPECT_FLOAT_EQ(logical_size.x(), 180.0f);
-    EXPECT_FLOAT_EQ(logical_size.y(), 60.0f);
-    EXPECT_NEAR(node->Translate().x(), 300.0f - 180.0f, 1.0e-4f);
-    EXPECT_NEAR(node->Translate().y(), 100.0f + 90.0f, 1.0e-4f);
-
-    const auto initial_mesh_size = MeshSize(*node->Mesh());
-    EXPECT_GT(initial_mesh_size.x(), logical_size.x());
-    EXPECT_GT(initial_mesh_size.y(), logical_size.y());
-    const auto initial_mesh_bounds = MeshLocalBounds(*node->Mesh());
-    EXPECT_NEAR(initial_mesh_bounds.max_x, logical_size.x() * 0.5f, 1.0e-4f);
-    EXPECT_NEAR(initial_mesh_bounds.min_y, -logical_size.y() * 0.5f, 1.0e-4f);
-
-    ASSERT_TRUE(scene->runtime->SetNodeText("caption", "Saturday Saturday Saturday"));
-    PumpTextUntilClean(*scene->runtime);
-    const auto resized_logical_size = scene->runtime->NodeSize("caption");
-    EXPECT_FLOAT_EQ(resized_logical_size.x(), 180.0f);
-    EXPECT_FLOAT_EQ(resized_logical_size.y(), 60.0f);
-    EXPECT_NEAR(node->Translate().x(), 300.0f - 180.0f, 1.0e-4f);
-    EXPECT_NEAR(node->Translate().y(), 100.0f + 90.0f, 1.0e-4f);
-
-    const auto resized_mesh_size = MeshSize(*node->Mesh());
-    EXPECT_GT(resized_mesh_size.x(), initial_mesh_size.x());
-    EXPECT_NEAR(resized_mesh_size.y(), initial_mesh_size.y(), 1.0f);
-    const auto resized_mesh_bounds = MeshLocalBounds(*node->Mesh());
-    EXPECT_NEAR(resized_mesh_bounds.max_x, logical_size.x() * 0.5f, 1.0e-4f);
-    EXPECT_NEAR(resized_mesh_bounds.min_y, -logical_size.y() * 0.5f, 1.0e-4f);
-    EXPECT_FALSE(scene->runtime->ConsumeSceneGraphMutationFlag());
-}
-
 TEST(TextObjectRuntime, RasterizedTextUsesFontPixelSizeAndAntialiasesEdges) {
     TextLayerState state {
         .text                   = "Hg",
@@ -2074,7 +1950,6 @@ TEST(TextObjectRuntime, SansSerifAliasRasterizesClockDigits) {
         .resolved_font_path     = ResolveSystemFontPath("systemfont_sansserif"),
         .point_size             = 33.0f,
         .padding                = { 32.0f, 32.0f },
-        .explicit_size          = Eigen::Vector2f(342.0f, 156.0f),
         .color                  = Eigen::Vector3f(1.0f, 0.81176f, 0.87059f),
         .horizontal_align       = "center",
         .vertical_align         = "center",
@@ -2229,50 +2104,8 @@ TEST(TextObjectRuntime, FreeTypeEstimatedSizeContainsTallGlyphs) {
     EXPECT_TRUE(has_visible_alpha);
 }
 
-TEST(TextObjectRuntime, TextRasterExpandsBeyondExplicitBoxWhenNeeded) {
-    TextLayerState state {
-        .text                   = "Saturday",
-        .font_key               = "systemfont_Helvetica",
-        .resolved_font_kind     = "system",
-        .resolved_font_identity = "Helvetica",
-        .resolved_font_path     = ResolveSystemFontPath("systemfont_Helvetica"),
-        .point_size             = 20.0f,
-        .padding                = { 0.0f, 0.0f },
-        .explicit_size          = Eigen::Vector2f(180.0f, 60.0f),
-        .horizontal_align       = "left",
-        .vertical_align         = "top",
-    };
-#ifdef __APPLE__
-    ASSERT_FALSE(state.resolved_font_path.empty());
-#endif
-
-    const auto size = TextLayerRasterSize(state);
-    EXPECT_GT(size.x(), 220.0f);
-    EXPECT_GT(size.y(), 70.0f);
-
-    const uint32_t       width  = static_cast<uint32_t>(std::ceil(size.x()));
-    const uint32_t       height = static_cast<uint32_t>(std::ceil(size.y()));
-    std::vector<uint8_t> rgba(static_cast<std::size_t>(width) * height * 4u, 0u);
-    RasterizeTextLayer(state, width, height, rgba);
-
-    int min_x = static_cast<int>(width);
-    int max_x = -1;
-    for (uint32_t y = 0; y < height; ++y) {
-        for (uint32_t x = 0; x < width; ++x) {
-            const auto alpha = rgba[(static_cast<std::size_t>(y) * width + x) * 4u + 3u];
-            if (alpha == 0u) continue;
-            min_x = std::min(min_x, static_cast<int>(x));
-            max_x = std::max(max_x, static_cast<int>(x));
-        }
-    }
-
-    ASSERT_GE(max_x, min_x);
-    EXPECT_LT(min_x, 8);
-    EXPECT_GT(max_x, 220);
-    EXPECT_LT(max_x, static_cast<int>(width));
-}
-
-TEST(TextObjectRuntime, CenteredTextIsCenteredInsideWiderExplicitBox) {
+// A padded, centred row has its ink in the middle of the card, whatever the card's width.
+TEST(TextObjectRuntime, CenteredTextIsCenteredInItsCard) {
     TextLayerState state {
         .text                   = "Saturday",
         .font_key               = "systemfont_Helvetica",
@@ -2281,7 +2114,6 @@ TEST(TextObjectRuntime, CenteredTextIsCenteredInsideWiderExplicitBox) {
         .resolved_font_path     = ResolveSystemFontPath("systemfont_Helvetica"),
         .point_size             = 20.0f,
         .padding                = { 32.0f, 32.0f },
-        .explicit_size          = Eigen::Vector2f(1200.0f, 120.0f),
         .horizontal_align       = "center",
         .vertical_align         = "center",
     };
@@ -2289,10 +2121,8 @@ TEST(TextObjectRuntime, CenteredTextIsCenteredInsideWiderExplicitBox) {
     ASSERT_FALSE(state.resolved_font_path.empty());
 #endif
 
-    const auto measured = MeasureTextLayerSize(state);
-    ASSERT_LT(measured.x(), state.explicit_size.x() * 0.5f);
     const auto size = TextLayerRasterSize(state);
-    EXPECT_FLOAT_EQ(size.x(), 1200.0f);
+    EXPECT_TRUE(size.isApprox(MeasureTextLayerSize(state)));
 
     const uint32_t       width  = static_cast<uint32_t>(std::ceil(size.x()));
     const uint32_t       height = static_cast<uint32_t>(std::ceil(size.y()));
@@ -2313,7 +2143,8 @@ TEST(TextObjectRuntime, CenteredTextIsCenteredInsideWiderExplicitBox) {
     ASSERT_GE(max_x, min_x);
     const float ink_center = (static_cast<float>(min_x) + static_cast<float>(max_x)) * 0.5f;
     EXPECT_NEAR(ink_center, static_cast<float>(width) * 0.5f, 4.0f);
-    EXPECT_GT(min_x, 300);
+    EXPECT_GE(min_x, 32);
+    EXPECT_LE(max_x, static_cast<int>(width) - 32);
 }
 
 TEST(TextObjectRuntime, DynamicTextTransformSettingsUpdateRuntimeNode) {
@@ -3284,7 +3115,6 @@ TEST(TextObjectRuntime, UnchangedRuntimeTextMutationSkipsDirtyAndCacheRevision) 
                                    .font_key         = "systemfont_sansserif",
                                    .point_size       = 33.0f,
                                    .padding          = { 32.0f, 32.0f },
-                                   .explicit_size    = Eigen::Vector2f(342.0f, 156.0f),
                                    .horizontal_align = "center",
                                    .vertical_align   = "center",
                                });
@@ -3429,7 +3259,7 @@ TEST(TextObjectRuntime, Workshop3409533530ClockParentKeepsVisibleRuntimeTexture)
     EXPECT_EQ(clock->GetChildren().back()->Name(), "Dy");
 
     runtime->Tick(1.0 / 60.0);
-    runtime->PumpTextLayerCache();
+    PumpTextUntilClean(*runtime);
 
     EXPECT_TRUE(runtime->NodeVisible("Clock"));
     EXPECT_TRUE(clock->EffectiveVisible());
@@ -3455,8 +3285,11 @@ TEST(TextObjectRuntime, Workshop3409533530ClockParentKeepsVisibleRuntimeTexture)
     ASSERT_EQ(material->textures.size(), 1u);
     auto image = scene->imageParser->Parse(material->textures.front());
     ASSERT_NE(image, nullptr);
-    EXPECT_GT(image->header.width, 300);
-    EXPECT_GT(image->header.height, 140);
+    // The authored `size` is ignored: the texture is the card of the time it shows.
+    const auto card = MeasureTextLayerSize(*state);
+    EXPECT_EQ(image->header.width, static_cast<int>(std::ceil(card.x())));
+    EXPECT_EQ(image->header.height, static_cast<int>(std::ceil(card.y())));
+    EXPECT_GT(image->header.width, 100);
     EXPECT_GT(VisibleAlphaPixels(*image), 200);
 
     runtime->ClearNodeTextDirty("Clock");
@@ -3844,7 +3677,6 @@ TEST(TextObjectRuntime, RuntimeTextMutationDoesNotMeasureSynchronously) {
                                    .font_key      = "Arial",
                                    .point_size    = 20.0f,
                                    .padding       = { 32.0f, 32.0f },
-                                   .explicit_size = Eigen::Vector2f(264.0f, 109.0f),
                                });
     runtime->ClearNodeTextDirty("caption");
     ASSERT_FALSE(runtime->NodeTextDirty("caption"));
@@ -4456,6 +4288,102 @@ TEST(TextObjectRuntime, PointSizeIsRequestedFromTheFontAt300Dpi) {
     EXPECT_GT(line_height, 128.0f * 1.03f);
 }
 
+// The layout record is the face's numbers and the block of ink set in them, read against
+// FreeType's own: the face sized in points at 300 dpi, its size metrics cut to whole
+// pixels as Wallpaper Engine cuts them.
+TEST(TextObjectRuntime, LayoutRecordMatchesFreeType) {
+    auto state = HelveticaState("H", 32.0f);
+#ifdef __APPLE__
+    ASSERT_FALSE(state.resolved_font_path.empty());
+#endif
+    FT_Library library = nullptr;
+    ASSERT_EQ(FT_Init_FreeType(&library), 0);
+    FT_Face face = nullptr;
+    ASSERT_EQ(FT_New_Face(library, state.resolved_font_path.c_str(), 0, &face), 0);
+    ASSERT_EQ(FT_Set_Char_Size(face, 0, 32 * 64, 300, 300), 0);
+    const float ascender  = static_cast<float>(face->size->metrics.ascender >> 6);
+    const float descender = static_cast<float>(-(face->size->metrics.descender >> 6));
+    const float pitch     = static_cast<float>(face->size->metrics.height >> 6);
+    // The ring of an A with one sits above the ascender of Helvetica.
+    ASSERT_EQ(FT_Load_Char(face, 0xC5, FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL), 0);
+    const float ring_top = static_cast<float>(face->glyph->bitmap_top);
+    FT_Done_Face(face);
+    FT_Done_FreeType(library);
+    ASSERT_GT(descender, 0.0f);
+    ASSERT_GT(ring_top, ascender) << "this font's A with a ring no longer rises above its ascender";
+
+    const auto one = MeasureTextLayerLayout(state);
+    EXPECT_FLOAT_EQ(one.ascender, ascender);
+    EXPECT_FLOAT_EQ(one.descender, descender);
+    EXPECT_FLOAT_EQ(one.pitch, pitch);
+    EXPECT_EQ(one.rows, 1u);
+    // The block is the ascender line down to one pitch below it, which the ink of an H
+    // does not leave.
+    EXPECT_FLOAT_EQ(one.top, ascender);
+    EXPECT_FLOAT_EQ(one.bottom, ascender - pitch);
+    EXPECT_LE(one.min_x, 0.0f);
+    EXPECT_GT(one.max_x, 0.0f);
+    EXPECT_TRUE(one.card.isApprox(one.BlockSize()));
+    EXPECT_TRUE(one.padding.isZero());
+
+    // Rows step by the pitch. A line break with nothing after it adds none, a line
+    // with nothing in it between two others adds one.
+    EXPECT_EQ(MeasureTextLayerLayout(HelveticaState("H\nH", 32.0f)).rows, 2u);
+    EXPECT_EQ(MeasureTextLayerLayout(HelveticaState("H\n", 32.0f)).rows, 1u);
+    EXPECT_EQ(MeasureTextLayerLayout(HelveticaState("H\n\nH", 32.0f)).rows, 3u);
+    state.text      = "H\nH\nH";
+    state.spacing   = { 0.0f, 7.0f };
+    const auto rows = MeasureTextLayerLayout(state);
+    EXPECT_FLOAT_EQ(rows.pitch, pitch + 7.0f);
+    EXPECT_FLOAT_EQ(rows.bottom, ascender - 3.0f * (pitch + 7.0f));
+    EXPECT_FLOAT_EQ(rows.BlockSize().y(), 3.0f * (pitch + 7.0f));
+
+    // Ink taller than the ascender raises the top of the block, and nothing else.
+    const auto ringed = MeasureTextLayerLayout(HelveticaState("\xC3\x85", 32.0f));
+    EXPECT_FLOAT_EQ(ringed.top, ring_top);
+    EXPECT_FLOAT_EQ(ringed.ascender, ascender);
+    EXPECT_FLOAT_EQ(ringed.bottom, ascender - pitch);
+
+    // The card is the block and the padding on both sides, on each axis.
+    state.text    = "H";
+    state.spacing = Eigen::Vector2f::Zero();
+    state.padding = { 8.0f, 3.0f };
+    const auto padded = MeasureTextLayerLayout(state);
+    EXPECT_TRUE(padded.padding.isApprox(Eigen::Vector2f(8.0f, 3.0f)));
+    EXPECT_TRUE(padded.card.isApprox(one.BlockSize() + Eigen::Vector2f(16.0f, 6.0f)));
+    EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(padded.card));
+
+    // No text has no block and no rows, and a 2 by 2 card; the face's numbers stay.
+    state.text = "";
+    const auto empty = MeasureTextLayerLayout(state);
+    EXPECT_EQ(empty.rows, 0u);
+    EXPECT_TRUE(empty.BlockSize().isZero());
+    EXPECT_TRUE(empty.card.isApprox(Eigen::Vector2f(18.0f, 8.0f)));
+    EXPECT_FLOAT_EQ(empty.ascender, ascender);
+}
+
+// Where no font opens the text is laid out in boxes: 0.9 em of ascender, 0.3 em of
+// descender and a line of 1.2 em, a glyph 0.6 em wide and 0.45 em of ink.
+TEST(TextObjectRuntime, BoxLayoutHasTheSameRecordAsAFace) {
+    TextLayerState state {
+        .text       = "ab\ncd",
+        .point_size = 32.0f,
+        .padding    = { 4.0f, 2.0f },
+        .spacing    = { 0.0f, 5.0f },
+    };
+    const float em = 32.0f * 300.0f / 72.0f;
+    const auto layout = TextLayerBoxLayoutForTests(state);
+    EXPECT_NEAR(layout.ascender, 0.9f * em, 1.0e-3f);
+    EXPECT_NEAR(layout.descender, 0.3f * em, 1.0e-3f);
+    EXPECT_NEAR(layout.pitch, 1.2f * em + 5.0f, 1.0e-3f);
+    EXPECT_EQ(layout.rows, 2u);
+    EXPECT_FLOAT_EQ(layout.min_x, 0.0f);
+    EXPECT_NEAR(layout.max_x, 0.6f * em + 0.45f * em, 1.0e-3f);
+    EXPECT_NEAR(layout.top, 0.9f * em, 1.0e-3f);
+    EXPECT_NEAR(layout.bottom, 0.9f * em - 2.0f * (1.2f * em + 5.0f), 1.0e-3f);
+    EXPECT_TRUE(layout.card.isApprox(layout.BlockSize() + Eigen::Vector2f(8.0f, 4.0f)));
+}
+
 TEST(TextObjectRuntime, PointSizeIsClampedToTheRangeWallpaperEngineAccepts) {
     const auto size_at = [](float point_size) {
         return MeasureTextLayerSize(HelveticaState("Hg", point_size));
@@ -4501,7 +4429,6 @@ TEST(TextObjectRuntime, CardPaddingSizesTheCardAndNeverNarrowsTheWrap) {
 TEST(TextObjectRuntime, CardPaddingInsetsAlignedTextOnEachAxis) {
     auto state             = HelveticaState("Hg", 20.0f);
     state.padding          = { 24.0f, 10.0f };
-    state.explicit_size    = Eigen::Vector2f(400.0f, 200.0f);
     state.horizontal_align = "right";
     state.vertical_align   = "bottom";
     const auto bottom_right = RasterOf(state);
@@ -5577,7 +5504,6 @@ TEST(TextObjectRuntime, DropShadowFollowsItsOffsetAndOpacityAndOutlineWidth) {
 
 TEST(TextObjectRuntime, StyledTextCardGrowsOutwardAndKeepsTheLayoutBoxWhereItWas) {
     auto state             = HelveticaState("Hg", 30.0f);
-    state.explicit_size    = Eigen::Vector2f(400.0f, 120.0f);
     state.horizontal_align = "left";
     state.vertical_align   = "top";
     const auto plain_size   = TextLayerRasterSize(state);
@@ -5590,9 +5516,9 @@ TEST(TextObjectRuntime, StyledTextCardGrowsOutwardAndKeepsTheLayoutBoxWhereItWas
     ASSERT_GE(margin, 5.0f);
     const auto size = TextLayerRasterSize(state);
     EXPECT_TRUE(size.isApprox(plain_size + Eigen::Vector2f::Constant(2.0f * margin)));
-    // The layout box, which the layer is placed by, does not move: the card gains
+    // The layout card, which the layer is placed by, does not move: the raster gains
     // the margin on every side.
-    EXPECT_TRUE(TextLayerLayoutSize(state).isApprox(state.explicit_size));
+    EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(plain_size));
     const auto bounds = TextLayerRenderBoundsForRasterSize(state, size);
     EXPECT_FLOAT_EQ(bounds.left, plain_bounds.left - margin);
     EXPECT_FLOAT_EQ(bounds.right, plain_bounds.right + margin);
@@ -5772,6 +5698,284 @@ TEST(TextObjectRuntime, TextMeasuresToTheCardsWallpaperEngineSaved) {
         EXPECT_FLOAT_EQ(size.x(), card.width) << card.text;
         EXPECT_FLOAT_EQ(size.y(), card.height) << card.text;
     }
+}
+
+namespace
+{
+// The runtime texture a text layer's card shows: its size in texels, and the first and
+// last columns that hold ink.
+struct TextTexture {
+    int width { 0 };
+    int height { 0 };
+    int first_ink_column { -1 };
+    int last_ink_column { -1 };
+};
+
+TextTexture TextureOfTextLayer(Scene& scene, SceneNode& node) {
+    TextTexture out;
+    const auto* material = node.Mesh() != nullptr ? node.Mesh()->MaterialForSlot(0) : nullptr;
+    if (material == nullptr || material->textures.empty()) return out;
+    const auto image = scene.imageParser->Parse(material->textures.front());
+    if (image == nullptr || image->slots.empty() || image->slots[0].mipmaps.empty()) return out;
+    const auto& mip = image->slots[0].mipmaps[0];
+    out.width       = mip.width;
+    out.height      = mip.height;
+    for (int y = 0; y < mip.height; ++y) {
+        for (int x = 0; x < mip.width; ++x) {
+            if (mip.data.get()[(static_cast<std::size_t>(y) * mip.width + x) * 4u + 3u] == 0u) continue;
+            if (out.first_ink_column < 0) out.first_ink_column = x;
+            out.first_ink_column = std::min(out.first_ink_column, x);
+            out.last_ink_column  = std::max(out.last_ink_column, x);
+        }
+    }
+    return out;
+}
+
+// Where a text layer's card lies in the scene, y up: its quad with the node's translation
+// and scale applied.
+struct WorldCard {
+    float left { 0.0f };
+    float right { 0.0f };
+    float bottom { 0.0f };
+    float top { 0.0f };
+};
+
+WorldCard WorldCardOf(SceneNode& node) {
+    const auto bounds = MeshLocalBounds(*node.Mesh());
+    const auto at     = node.Translate();
+    const auto scale  = node.Scale();
+    return {
+        .left   = at.x() + scale.x() * bounds.min_x,
+        .right  = at.x() + scale.x() * bounds.max_x,
+        .bottom = at.y() + scale.y() * bounds.min_y,
+        .top    = at.y() + scale.y() * bounds.max_y,
+    };
+}
+} // namespace
+
+// The text object's `size` is the box the editor drew. Wallpaper Engine's size function
+// writes the laid-out block plus twice the padding every time the text is laid out, so
+// the box never sets the card: not at load, and not when the text later grows or shrinks.
+TEST(TextObjectRuntime, AuthoredTextObjectSizeDoesNotSetTheCard) {
+    TextSceneFixture fixture(R"([
+      {"id":1,"name":"clock","text":"12:34","font":"Arial","pointsize":20,"size":[320,120],
+       "visible":true},
+      {"id":2,"name":"bare","text":"12:34","font":"Arial","pointsize":20,"visible":true}
+    ])", "text-authored-size");
+    ASSERT_NE(fixture.scene, nullptr);
+    ASSERT_NE(fixture.scene->runtime, nullptr);
+    auto& runtime = *fixture.scene->runtime;
+    auto* node    = FindRootChild(*fixture.scene, "clock");
+    ASSERT_NE(node, nullptr);
+    ASSERT_NE(node->Mesh(), nullptr);
+
+    const auto check = [&](const char* when) {
+        SCOPED_TRACE(when);
+        const auto card = MeasureTextLayerSize(fixture.State("clock"));
+        EXPECT_TRUE(runtime.NodeSize("clock").isApprox(card));
+        const auto texture = TextureOfTextLayer(*fixture.scene, *node);
+        EXPECT_EQ(texture.width, static_cast<int>(std::ceil(card.x())));
+        EXPECT_EQ(texture.height, static_cast<int>(std::ceil(card.y())));
+        EXPECT_NEAR(MeshSize(*node->Mesh()).x(), card.x(), 1.0f);
+        EXPECT_NEAR(MeshSize(*node->Mesh()).y(), card.y(), 1.0f);
+        return card;
+    };
+
+    const auto first = check("as parsed");
+    // The box is larger than the text on both axes, so a layer that kept it would
+    // show it here.
+    ASSERT_LT(first.x(), 320.0f);
+    ASSERT_LT(first.y(), 120.0f);
+    EXPECT_TRUE(runtime.NodeSize("clock").isApprox(runtime.NodeSize("bare")));
+
+    ASSERT_TRUE(runtime.SetNodeText("clock", "12:34:56 PM UTC"));
+    PumpTextUntilClean(runtime);
+    const auto grown = check("longer text");
+    EXPECT_GT(grown.x(), first.x());
+
+    ASSERT_TRUE(runtime.SetNodeText("clock", "1"));
+    PumpTextUntilClean(runtime);
+    const auto shrunk = check("shorter text");
+    EXPECT_LT(shrunk.x(), first.x());
+}
+
+// A clock's script writes a shorter string than the text it started with: the card
+// follows it down, as it follows a longer one up.
+TEST(TextObjectRuntime, ACardShrinksWhenScriptedTextGetsShorter) {
+    TextSceneFixture fixture(R"([
+      {"id":1,"name":"clock","font":"Arial","pointsize":20,"size":[320,120],"visible":true,
+       "text":{"value":"12:34:56 PM UTC",
+               "script":"export function update(value) { return '1'; }"}}
+    ])", "text-scripted-shrink");
+    ASSERT_NE(fixture.scene, nullptr);
+    ASSERT_NE(fixture.scene->runtime, nullptr);
+    auto& runtime = *fixture.scene->runtime;
+    auto* node    = FindRootChild(*fixture.scene, "clock");
+    ASSERT_NE(node, nullptr);
+
+    const auto wide = runtime.NodeSize("clock");
+    runtime.Tick(1.0 / 60.0);
+    PumpTextUntilClean(runtime);
+    ASSERT_EQ(runtime.NodeText("clock"), "1");
+
+    const auto card = MeasureTextLayerSize(fixture.State("clock"));
+    EXPECT_LT(card.x(), wide.x());
+    EXPECT_LT(card.x(), 320.0f);
+    EXPECT_TRUE(runtime.NodeSize("clock").isApprox(card));
+    const auto texture = TextureOfTextLayer(*fixture.scene, *node);
+    EXPECT_EQ(texture.width, static_cast<int>(std::ceil(card.x())));
+    EXPECT_EQ(texture.height, static_cast<int>(std::ceil(card.y())));
+    EXPECT_NEAR(MeshSize(*node->Mesh()).x(), card.x(), 1.0f);
+}
+
+// A text layer is measured once as the scene loads, where its card, its texture and its
+// runtime state each asked for a measurement of their own.
+TEST(TextObjectRuntime, ATextLayerIsMeasuredOnceAsItIsParsed) {
+    ResetTextLayerMeasurementCountForTests();
+    TextSceneFixture fixture(R"([
+      {"id":1,"name":"plain","text":"hello","font":"Arial","pointsize":20,"visible":true},
+      {"id":2,"name":"blended","text":"hello","font":"Arial","pointsize":20,"colorBlendMode":12,
+       "visible":true}
+    ])", "text-measured-once", ColorBlendAssets());
+    ASSERT_NE(fixture.scene, nullptr);
+    EXPECT_EQ(TextLayerMeasurementCountForTests(), 2u);
+}
+
+// Wallpaper Engine builds the buffers of a text card at the card's size with the
+// fraction cut off, so a card 175.68 wide is drawn into 175 texels.
+TEST(TextObjectRuntime, ATextCardIsBuiltAtItsTruncatedSizeInTexels) {
+    TextSceneFixture fixture(R"([
+      {"id":1,"name":"caption","text":"hello","font":"Arial","pointsize":20,"padding":0,
+       "spacing":"-3.58 0","colorBlendMode":12,"visible":true}
+    ])", "text-card-truncation", ColorBlendAssets());
+    ASSERT_NE(fixture.scene, nullptr);
+    auto* node = FindRootChild(*fixture.scene, "caption");
+    ASSERT_NE(node, nullptr);
+    ASSERT_FALSE(node->Camera().empty());
+
+    const auto card = TextLayerRasterSize(fixture.State("caption"));
+    // A fraction of .5 or more: rounding and cutting it off differ.
+    ASSERT_NE(std::lround(card.x()), static_cast<long>(card.x())) << card.x();
+    const auto* ping_pong = fixture.scene->FindRenderTarget(
+        std::string(WE_EFFECT_PPONG_PREFIX_A.data()) + node->Camera());
+    ASSERT_NE(ping_pong, nullptr);
+    EXPECT_EQ(ping_pong->width, static_cast<int32_t>(card.x()));
+    EXPECT_EQ(ping_pong->height, static_cast<int32_t>(card.y()));
+}
+
+// Every buffer a card is drawn into takes its size from one rule, at parse and after
+// each relayout: the card's width and height with the fraction cut off, 4 at least.
+TEST(TextObjectRuntime, ACardsTexelExtentIsItsSizeWithTheFractionCutOff) {
+    EXPECT_EQ(TextCardTexelExtent({ 175.68f, 40.99f }), (std::array<int32_t, 2> { 175, 40 }));
+    EXPECT_EQ(TextCardTexelExtent({ 628.56f, 20.0f }), (std::array<int32_t, 2> { 628, 20 }));
+    EXPECT_EQ(TextCardTexelExtent({ 3.9f, 0.2f }), (std::array<int32_t, 2> { 4, 4 }));
+}
+
+// Buffers that hold a card with its fraction cut off hold a card that grows by less
+// than the texel they already have: the part past it was never in them, and drawing
+// the card into them cuts it as before. Nothing is rebuilt for it.
+TEST(TextObjectRuntime, ACardThatGrowsWithinATexelKeepsItsBuffers) {
+    const auto layer = [](std::string_view text) {
+        return R"([{"id":1,"name":"caption","text":")" + std::string(text) +
+               R"(","font":"Arial","pointsize":20,"padding":0,"spacing":"0.4 0",
+                  "colorBlendMode":12,"visible":true}])";
+    };
+    // Spacing adds 0.4 to each glyph, so of two texts whose glyphs advance alike in
+    // whole pixels, the one with more glyphs has the wider card by a fraction of a
+    // texel and the two share a texel count.
+    TextSceneFixture probe(layer("a"), "text-fraction-probe", ColorBlendAssets());
+    ASSERT_NE(probe.scene, nullptr);
+    auto                    state = probe.State("caption");
+    const std::string_view letters = "abcdefghijklmnopqrstuvwxyz";
+    const auto              measure = [&](const std::string& text) {
+        state.text = text;
+        return MeasureTextLayerSize(state);
+    };
+    const auto pair = [&]() -> std::optional<std::pair<std::string, std::string>> {
+        for (const char first : letters) {
+            const auto one = measure(std::string(1, first));
+            for (const char second : letters) {
+                for (const char third : letters) {
+                    const std::string two { second, third };
+                    const auto        wide = measure(two);
+                    if (static_cast<int>(wide.x()) == static_cast<int>(one.x()) &&
+                        wide.x() >= one.x() + 0.1f && wide.y() == one.y())
+                        return std::pair { std::string(1, first), two };
+                }
+            }
+        }
+        return std::nullopt;
+    }();
+    ASSERT_TRUE(pair.has_value()) << "no two texts share a texel and differ in their fraction";
+    const auto& [shorter, longer] = *pair;
+
+    TextSceneFixture fixture(layer(shorter), "text-fraction-growth", ColorBlendAssets());
+    ASSERT_NE(fixture.scene, nullptr);
+    ASSERT_NE(fixture.scene->runtime, nullptr);
+    auto& runtime = *fixture.scene->runtime;
+    auto* node    = FindRootChild(*fixture.scene, "caption");
+    ASSERT_NE(node, nullptr);
+    ASSERT_FALSE(node->Camera().empty());
+    const std::string buffer = std::string(WE_EFFECT_PPONG_PREFIX_A.data()) + node->Camera();
+    const auto        before = runtime.NodeSize("caption");
+    ASSERT_NE(fixture.scene->FindRenderTarget(buffer), nullptr);
+    const auto texels = fixture.scene->FindRenderTarget(buffer)->width;
+    ASSERT_EQ(texels, static_cast<int32_t>(before.x()));
+
+    auto graph = sceneToRenderGraph(*fixture.scene);
+    ASSERT_NE(graph, nullptr);
+    runtime.ConsumeSceneGraphMutationFlag();
+
+    ASSERT_TRUE(runtime.SetNodeText("caption", longer));
+    PumpTextUntilClean(runtime);
+    ASSERT_EQ(runtime.NodeText("caption"), longer);
+    EXPECT_GT(runtime.NodeSize("caption").x(), before.x());
+    ASSERT_NE(fixture.scene->FindRenderTarget(buffer), nullptr);
+    EXPECT_EQ(fixture.scene->FindRenderTarget(buffer)->width, texels);
+    EXPECT_FALSE(runtime.ConsumeSceneGraphMutationFlag())
+        << "a fraction of a texel rebuilt the buffers";
+}
+
+// A plain text layer sits on its origin by the edge it is aligned to: the card's left
+// edge for `left`, its right edge for `right` and its middle for `center`, along the
+// layer's own scale, and its top edge for `top`. Pinned across the changes to how a
+// card is placed.
+TEST(TextObjectRuntime, PlainAlignedTextKeepsItsCardEdgeOnTheOrigin) {
+    TextSceneFixture fixture(R"([
+      {"id":1,"name":"left","text":"HI","font":"Arial","pointsize":20,"origin":[300,100,0],
+       "scale":[2,3,1],"horizontalalign":"left","verticalalign":"top","visible":true},
+      {"id":2,"name":"right","text":"HI","font":"Arial","pointsize":20,"origin":[300,100,0],
+       "scale":[2,3,1],"horizontalalign":"right","verticalalign":"top","visible":true},
+      {"id":3,"name":"centre","text":"HI","font":"Arial","pointsize":20,"origin":[300,100,0],
+       "scale":[2,3,1],"horizontalalign":"center","verticalalign":"top","visible":true}
+    ])", "text-plain-alignment");
+    ASSERT_NE(fixture.scene, nullptr);
+    for (const char* name : { "left", "right", "centre" }) {
+        ASSERT_NE(FindRootChild(*fixture.scene, name), nullptr) << name;
+        ASSERT_NE(FindRootChild(*fixture.scene, name)->Mesh(), nullptr) << name;
+    }
+    const auto left   = WorldCardOf(*FindRootChild(*fixture.scene, "left"));
+    const auto right  = WorldCardOf(*FindRootChild(*fixture.scene, "right"));
+    const auto centre = WorldCardOf(*FindRootChild(*fixture.scene, "centre"));
+    EXPECT_NEAR(left.left, 300.0f, 1.0e-3f);
+    EXPECT_NEAR(right.right, 300.0f, 1.0e-3f);
+    EXPECT_NEAR((centre.left + centre.right) * 0.5f, 300.0f, 1.0e-3f);
+    for (const auto& card : { left, right, centre }) EXPECT_NEAR(card.top, 100.0f, 1.0e-3f);
+
+    // The ink is in the card at the edge it is aligned to: a left bearing's width
+    // from the left edge of `left`, and a texel from the right edge of `right`.
+    const auto texture_left  = TextureOfTextLayer(*fixture.scene, *FindRootChild(*fixture.scene, "left"));
+    const auto texture_right = TextureOfTextLayer(*fixture.scene, *FindRootChild(*fixture.scene, "right"));
+    ASSERT_GE(texture_left.first_ink_column, 0);
+    ASSERT_GE(texture_right.last_ink_column, 0);
+    const float texel_left  = (left.right - left.left) / static_cast<float>(texture_left.width);
+    const float texel_right = (right.right - right.left) / static_cast<float>(texture_right.width);
+    const float em_pixels   = 20.0f * 300.0f / 72.0f;
+    EXPECT_LE(texture_left.first_ink_column, static_cast<int>(0.15f * em_pixels));
+    EXPECT_NEAR(left.left + static_cast<float>(texture_left.first_ink_column) * texel_left, 300.0f,
+                0.15f * em_pixels * 2.0f);
+    EXPECT_NEAR(right.left + static_cast<float>(texture_right.last_ink_column + 1) * texel_right,
+                300.0f, 1.0f * 2.0f + 1.0e-3f);
 }
 
 TEST(TextObjectRuntime, PenAdvancesAreUnhintedWholePixelsKernedWithTheNextGlyph) {

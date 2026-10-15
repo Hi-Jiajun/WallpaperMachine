@@ -461,10 +461,17 @@ says.
 
 `padding` and `spacing` are two numbers, and `padding` is 32 on both axes where
 the scene leaves it out, each lane capped at 512 and not floored (a negative padding
-takes the card in around the text). A scene's authored `size` is not what sets the
-card as it is in Wallpaper Engine, which ignores it and sizes the card from the
-layout; here it stays the layout box and the smallest the card is (see the known
-limitations).
+takes the card in around the text). A scene's authored `size` is the editor's box and is
+ignored, as Wallpaper Engine ignores it: the card is laid out again with every change
+of the text, so a clock that gets shorter has a smaller card. The layout is one record,
+the ink of the rows and the face's ascender, descender and pitch (the block runs from
+the ascender, or the tallest ink above it, down one pitch per row), measured once as
+the layer is parsed.
+
+Every buffer of a card, an effect's or the composite another layer
+samples, is built at the card's width and height with the fraction cut off, at least 4
+texels, as the scene loads and again whenever a change of the text changes the card; a
+card that grows by less than the texel its buffers already have costs no new ones.
 
 `maxwidth` is the width a row may fill, as authored: padding is never
 taken from it, so a padded card can be wider than `maxwidth`. A row wraps before a
