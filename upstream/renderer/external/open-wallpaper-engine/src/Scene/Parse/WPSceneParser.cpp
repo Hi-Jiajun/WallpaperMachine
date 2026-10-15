@@ -1492,7 +1492,12 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
     const ProjectProperties* properties =
         pScene != nullptr && pScene->runtime != nullptr ? &pScene->runtime->projectProperties()
                                                         : nullptr;
-    ApplySystemUserTextures(base_textures, wpmat.usertextures, properties);
+    ApplySystemUserTextures(base_textures,
+                            wpmat.usertextures,
+                            properties,
+                            pScene != nullptr
+                                ? dynamic_cast<RuntimeImageSource*>(pScene->imageParser.get())
+                                : nullptr);
     // The slot is decided here and a built material is not rebuilt, so a running
     // scene holds the property at this value.
     if (pScene != nullptr && pScene->runtime != nullptr) {
@@ -5859,7 +5864,8 @@ std::string_view wallpaper::UserTexturePropertyName(const wpscene::WPUserTexture
 
 void wallpaper::ApplySystemUserTextures(std::vector<std::string>&                  textures,
                                         const std::vector<wpscene::WPUserTexture>& usertextures,
-                                        const ProjectProperties*                   properties) {
+                                        const ProjectProperties*                   properties,
+                                        RuntimeImageSource*                        covers) {
     // Anything neither the runtime nor the wallpaper's own properties supply is
     // left on the authored texture in that position rather than replaced by a
     // blank one.
@@ -5868,6 +5874,14 @@ void wallpaper::ApplySystemUserTextures(std::vector<std::string>&               
         std::string replacement;
         if (wpscene::IsSystemUserTexture(user_texture)) {
             replacement = user_texture.name;
+            // The authored texture stays in the slot until the runtime has a
+            // cover to put there: a cover layer shows its own art while nothing
+            // plays. A render target or another layer's composite is not a
+            // picture the source can hold, so such a slot samples the cover alone.
+            if (covers != nullptr && index < textures.size() && ! textures[index].empty() &&
+                ! IsSpecTex(textures[index])) {
+                replacement = covers->BindCoverSlot(replacement, textures[index]);
+            }
         } else if (properties != nullptr && ! UserTexturePropertyName(user_texture).empty()) {
             // The bare-string form names one of this wallpaper's properties. An
             // unset property is the author's own default, so the slot keeps it.

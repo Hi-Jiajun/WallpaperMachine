@@ -961,6 +961,24 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   `MountSceneSource` mounts the project folder under the package: packaged files
   still win, and the probes mount the same way. With only the package mounted
   those layers draw black and native Metal falls back.
+- **Cover slots keep their authored art** — `MetalSceneDraw.ACoverSlotShowsItsAuthoredTextureUntilACoverArrivesOnBothRenderers`
+  (idle, cover before start, cover while running, cover then clear, plain RGBA and
+  block-compressed art, a slot with nothing authored; both renderers),
+  `.ACoverIsSampledClampedWhateverItsAuthoredPictureAskedForOnBothRenderers` and
+  `.AnIdleCoverSlotUploadsItsPictureOnceAndACoverChangeCostsOneUploadPerFrameInFlight`
+  in `metal_scene_draw_smoke`; `CoverSlot.*` in `media_thumbnail_texture_smoke`. A
+  `usertextures` cover slot (`$mediaThumbnail`, `$mediaPreviousThumbnail`) is the
+  picture its author left in that position until a cover is published, and again
+  after the explicit clear; the previous-cover slot stays on its authored picture
+  until a track has a predecessor. Wallpaper Engine's own frame of a cover layer with
+  nothing playing shows that art, and a transparent texel there draws nothing. The
+  slot is one runtime image to both renderers (`BindCoverSlot`), so it costs the
+  version check a cover already had: no graph rebuild, an idle layer uploads its art
+  once per frame in flight and a cover change once per frame in flight again. The
+  picture is decoded when a renderer first asks, once, so the texture budget set after
+  the parse applies to it. Not substituted: a video, a sprite sheet, a render target
+  or composite, a mask or normal map (one or two channels), a missing file. A cover
+  keeps its own clamped sampler whatever the art's flags say.
 - **JPEG/EXIF orientation** — `tex_schema_tests`: all eight EXIF display
   transforms on asymmetric RGBA pixels, both TIFF byte orders, truncated
   JPEG/EXIF data, invalid IFD offsets.

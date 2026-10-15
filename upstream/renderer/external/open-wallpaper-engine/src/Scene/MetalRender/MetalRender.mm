@@ -295,6 +295,37 @@ bool ToMetalImageFormat(TextureFormat format, bool block_compression, MTLPixelFo
     return false;
 }
 
+/// Writes every level of `slot` into `texture`, as the pixels or the 4x4 blocks
+/// the image holds. A level with no data is skipped; false when a block-
+/// compressed level is shorter than its own block grid, which the copy would
+/// read past.
+bool UploadImageLevels(id<MTLTexture> texture, const Image::Slot& slot, uint32_t bytes_per_pixel,
+                       uint32_t block_bytes)
+{
+    for (std::size_t level = 0; level < slot.mipmaps.size(); ++level) {
+        const auto& mipmap = slot.mipmaps[level];
+        if (mipmap.data == nullptr || mipmap.width <= 0 || mipmap.height <= 0) continue;
+        MTLRegion region = MTLRegionMake2D(0, 0, (NSUInteger)mipmap.width,
+                                           (NSUInteger)mipmap.height);
+        NSUInteger bytes_per_row = (NSUInteger)mipmap.width * bytes_per_pixel;
+        if (block_bytes > 0) {
+            const NSUInteger blocks_wide = ((NSUInteger)mipmap.width + 3) / 4;
+            const NSUInteger blocks_high = ((NSUInteger)mipmap.height + 3) / 4;
+            bytes_per_row                = blocks_wide * block_bytes;
+            // A level shorter than its own block grid would be read past
+            // its end by the copy below.
+            if (mipmap.size < 0 || (NSUInteger)mipmap.size < bytes_per_row * blocks_high) {
+                return false;
+            }
+        }
+        [texture replaceRegion:region
+                   mipmapLevel:level
+                     withBytes:mipmap.data.get()
+                   bytesPerRow:bytes_per_row];
+    }
+    return true;
+}
+
 /// Reads the material texture slot out of a generated chroma-plane resource
 /// name. `std::nullopt` for anything else, including the material's own
 /// `g_TextureN` names, which have their own reader.
@@ -1431,6 +1462,11 @@ struct MetalRender::Impl
         uint32_t                    height { 0 };
         MTLPixelFormat              format { MTLPixelFormatRGBA8Unorm };
         uint32_t                    bytes_per_pixel { 4 };
+        /// Non-zero for a block-compressed image: a cover slot stands in for
+        /// its cover with the picture its author shipped, which is whatever
+        /// the file held, mip chain included.
+        uint32_t                    block_bytes { 0 };
+        uint32_t                    levels { 1 };
         TextureSample               sample {};
     };
     std::unordered_map<std::string, RuntimeImageRing> runtime_image_rings;
@@ -2097,20 +2133,22 @@ void MetalRender::Impl::refreshRuntimeImages(Scene& scene)
         const auto& mipmap = source.mipmaps.front();
         if (mipmap.data == nullptr || mipmap.width <= 0 || mipmap.height <= 0) continue;
 
-        // A runtime image is pixels the runtime rasterised, never blocks, so
-        // block compression is not offered here.
+        // Pixels the runtime rasterised are never blocks. The picture a cover
+        // slot shows while no cover exists is the author's own file, which may
+        // be block-compressed and carry a mip chain, so both are offered.
         MTLPixelFormat format {};
         uint32_t       bytes_per_pixel = 0;
         uint32_t       block_bytes     = 0;
-        if (! ToMetalImageFormat(parsed->header.format, false, format, bytes_per_pixel,
-                                 block_bytes)) {
+        if (! ToMetalImageFormat(parsed->header.format, device.supportsBCTextureCompression,
+                                 format, bytes_per_pixel, block_bytes)) {
             continue;
         }
 
         const auto width  = static_cast<uint32_t>(mipmap.width);
         const auto height = static_cast<uint32_t>(mipmap.height);
+        const auto levels = static_cast<uint32_t>(source.mipmaps.size());
         if (ring.slots.size() != kFramesInFlight || ring.width != width ||
-            ring.height != height || ring.format != format) {
+            ring.height != height || ring.format != format || ring.levels != levels) {
             // A new size or format needs new images. The ones being replaced
             // are released here and stay alive exactly as long as the command
             // buffers that reference them, which retain what they encode.
@@ -2121,7 +2159,8 @@ void MetalRender::Impl::refreshRuntimeImages(Scene& scene)
                     [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:format
                                                                        width:(NSUInteger)width
                                                                       height:(NSUInteger)height
-                                                                   mipmapped:NO];
+                                                                   mipmapped:levels > 1];
+                if (levels > 1) descriptor.mipmapLevelCount = levels;
                 descriptor.usage       = MTLTextureUsageShaderRead;
                 descriptor.storageMode = MTLStorageModeShared;
                 id<MTLTexture> texture = [device newTextureWithDescriptor:descriptor];
@@ -2135,16 +2174,18 @@ void MetalRender::Impl::refreshRuntimeImages(Scene& scene)
             ring.height          = height;
             ring.format          = format;
             ring.bytes_per_pixel = bytes_per_pixel;
+            ring.block_bytes     = block_bytes;
+            ring.levels          = levels;
         }
 
-        const auto found = scene.textures.find(key);
-        ring.sample = found != scene.textures.end() ? found->second.sample : parsed->header.sample;
+        // The sampler follows the image the name shows now, as the compatibility
+        // backend's does: a cover slot shows its author's picture, sampled as the
+        // file says, and then a track's cover, clamped and linear.
+        ring.sample = parsed->header.sample;
 
-        MTLRegion region = MTLRegionMake2D(0, 0, (NSUInteger)width, (NSUInteger)height);
-        [ring.slots[slot] replaceRegion:region
-                            mipmapLevel:0
-                              withBytes:mipmap.data.get()
-                            bytesPerRow:(NSUInteger)width * bytes_per_pixel];
+        // Into the texture the next frame owns, never one a queued command
+        // buffer is still reading. A level the image does not hold stays as it was.
+        if (! UploadImageLevels(ring.slots[slot], source, bytes_per_pixel, block_bytes)) continue;
         ring.slot_versions[slot] = version;
         ++runtime_image_uploads;
     }
@@ -2248,31 +2289,7 @@ id<MTLTexture> MetalRender::Impl::resolveTexture(Scene& scene, const std::string
 
         id<MTLTexture> texture = [device newTextureWithDescriptor:descriptor];
         if (texture == nil) break;
-        bool complete = true;
-        for (std::size_t level = 0; level < slot.mipmaps.size(); ++level) {
-            const auto& mipmap = slot.mipmaps[level];
-            if (mipmap.data == nullptr || mipmap.width <= 0 || mipmap.height <= 0) continue;
-            MTLRegion region = MTLRegionMake2D(0, 0, (NSUInteger)mipmap.width,
-                                               (NSUInteger)mipmap.height);
-            NSUInteger bytes_per_row = (NSUInteger)mipmap.width * bytes_per_pixel;
-            if (block_bytes > 0) {
-                const NSUInteger blocks_wide = ((NSUInteger)mipmap.width + 3) / 4;
-                const NSUInteger blocks_high = ((NSUInteger)mipmap.height + 3) / 4;
-                bytes_per_row                = blocks_wide * block_bytes;
-                // A level shorter than its own block grid would be read past
-                // its end by the copy below.
-                if (mipmap.size < 0 ||
-                    (NSUInteger)mipmap.size < bytes_per_row * blocks_high) {
-                    complete = false;
-                    break;
-                }
-            }
-            [texture replaceRegion:region
-                       mipmapLevel:level
-                         withBytes:mipmap.data.get()
-                       bytesPerRow:bytes_per_row];
-        }
-        if (! complete) break;
+        if (! UploadImageLevels(texture, slot, bytes_per_pixel, block_bytes)) break;
         slot_textures.push_back(texture);
     }
     if (slot_textures.empty()) return nil;

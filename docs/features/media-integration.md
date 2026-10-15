@@ -103,10 +103,14 @@ renderer notices the version move and swaps the texture on its next frame (Vulka
 from the pass's per-frame update, Metal from `refreshRuntimeImages`) without
 rebuilding the render graph, so a track change does not idle the GPU or reopen
 videos. Both names are 1×1 transparent before any track, so a layer that binds
-either always has an image. Publishing a cover byte-identical to the one showing
-does nothing, not even a frame request, which makes replays to new scenes free and
-stops a wallpaper cross-fading a cover into itself. A recreated renderer receives
-the current snapshot again.
+either always has an image. A slot whose author also left a texture in it (a cover
+layer's default art) shows that texture instead of the transparent texel until a
+cover is published, and again after the explicit clear, as Wallpaper Engine does;
+a slot with nothing authored in it stays transparent
+([scene rendering](scene-rendering.md)). Publishing a cover byte-identical to the
+one showing does nothing, not even a frame request, which makes replays to new
+scenes free and stops a wallpaper cross-fading a cover into itself. A recreated
+renderer receives the current snapshot again.
 
 The native artwork protocol represents absence as width 0, height 0 and an empty
 byte payload. This explicit clear survives bridge validation, pending scene creation

@@ -895,6 +895,20 @@ into private textures; the three that draw skip visibly without a Metal device.
   many spawns with a long start time in one frame costs that many times as much;
   spreading the work over frames is not done, because it would change what the
   instance looks like when it first appears.
+- **A cover slot's fallback is a picture, not a render target.** A slot bound to the
+  now-playing cover (`$mediaThumbnail`, `$mediaPreviousThumbnail`) shows its authored
+  texture until a cover arrives, but only when that is a colour picture. Where the
+  author left another layer's composite in it (a default cover drawn by a layer of its
+  own and sampled by the cover layer), the slot stays the transparent texel until a
+  cover arrives, where Wallpaper Engine's frame shows that composite; substituting it
+  needs a pass binding that moves between a render target and a runtime image in both
+  renderers' pass setup. The layer colour of a layer that binds a cover stays white
+  (`WPImageObject`), so the art, or the engine's own white placeholder a layer leaves
+  in the slot, draws untinted while nothing plays; whether Wallpaper Engine tints it
+  with the layer's colour is not established, and no local scene sets a colour on such
+  a layer. A cover layer that Wallpaper Engine hides while nothing plays through a
+  `mediaPlaybackChanged` script stays visible here until the host delivers an idle
+  playback state, so it now draws its art or placeholder in that state.
 - Unimplemented non-audio scene features, including some script outputs, can
   still affect wallpaper compatibility even when every renderer check passes.
 - No renderer check proves desktop presentation, AppKit behavior, live audio

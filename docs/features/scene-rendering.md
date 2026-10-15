@@ -325,6 +325,32 @@ pan adds room), the layer follows that edge, and a scene shown whole moves nothi
 A text object that leaves keys out has Wallpaper Engine's defaults: 32 points,
 `maxwidth` 500 and `maxrows` 1.
 
+A texture slot a material binds to the now-playing cover (a `usertextures` entry of
+type `system`, `$mediaThumbnail` or `$mediaPreviousThumbnail`, on an image layer or
+on one of its effect passes) keeps the picture its author left in that slot until
+the runtime has a cover to put there. Wallpaper Engine hands the cover over as the
+value of a property that only exists once a track brings one, so until then the slot
+is the material's own texture: a cover layer draws its default art while nothing
+plays, then the track's cover, then the art again once the cover is cleared, and a
+cross-fade's `$mediaPreviousThumbnail` slot stays on its authored picture until a
+track has a predecessor. `ApplySystemUserTextures` binds such a slot through
+`RuntimeImageSource::BindCoverSlot`, which hands back a runtime image name that
+resolves to the cover while one is published and to the authored picture while it is
+not, so both renderers swap it on a version change like any cover, with no graph
+rebuild and no per-frame work beyond the version check they already did. The picture
+is decoded the first time a renderer asks for it, after the texture budget is known,
+and stays resident so a clear costs no decode (one picture per cover name and
+authored texture, whatever the number of layers that share them). The native
+renderer uploads it as the file holds it, block-compressed and mipmapped, and both
+renderers sample it as the file says and a cover clamped, as before. Nothing is
+substituted, and the slot stays the transparent texel the cover starts as, when no
+texture is authored in it, or when the authored one is a video, a sprite sheet, a
+render target or another layer's composite, or a one- or two-channel picture (a mask
+or a normal map: the material's shader reads those through other channels than a
+cover's). The layer colour stays white on a layer that binds a cover, as it was, so
+the art is drawn untinted: whether Wallpaper Engine tints it with the layer's colour
+while nothing plays is not established.
+
 An image layer's own render targets, the pair its effects run through and the
 composite another layer reads, are point-sampled when the layer says
 `nointerpolation` or its primary texture's header does (read from the texture's

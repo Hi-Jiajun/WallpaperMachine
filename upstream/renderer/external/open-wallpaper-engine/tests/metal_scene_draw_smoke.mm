@@ -73,6 +73,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -329,9 +330,11 @@ struct RendererPicture
 /// renderer it creates, its per-frame `FrameBegin`, a graph rebuilt on every
 /// mutation -- and returns the last frame through the poster path both
 /// renderers share. Two calls on two parses of one scene, seeded and clocked
-/// alike, differ only by what the renderers did.
+/// alike, differ only by what the renderers did. `before_frame` runs ahead of
+/// each frame with its index, for a scene the world changes while it runs.
 RendererPicture DrawWithRenderer(Scene& scene, bool native, uint32_t width, uint32_t height,
-                                 int frames, double step)
+                                 int frames, double step,
+                                 const std::function<void(int)>& before_frame = {})
 {
     RendererPicture picture;
     @autoreleasepool {
@@ -403,6 +406,7 @@ RendererPicture DrawWithRenderer(Scene& scene, bool native, uint32_t width, uint
             scene.runtime->SetScreenResolution(Eigen::Vector2f(width, height));
         }
         for (int frame = 0; frame < frames && picture.error.empty(); ++frame) {
+            if (before_frame) before_frame(frame);
             scene.paritileSys->Emitt();
             if (scene.runtime != nullptr) {
                 scene.runtime->Tick(step);
@@ -5056,6 +5060,297 @@ TEST_F(MetalSceneDraw, ATexturePointSampledByItsHeaderPicksItsMipLevelByPointOnB
                 EXPECT_LE(level, 100) << "the ordinary texture lost the blend of its mip levels";
             }
         }
+    }
+}
+
+namespace
+{
+
+/// A `.tex` holding one `side` x `side` image of `format` (0 is RGBA8, 4 is
+/// DXT5) in a single mip level, `data` being that level's bytes as stored.
+void WriteSingleLevelTexture(const std::filesystem::path& path, uint32_t format, uint32_t side,
+                             const std::vector<uint8_t>& data)
+{
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream texture(path, std::ios::binary);
+    const auto u32 = [&](uint32_t value) {
+        const char bytes[] { char(value), char(value >> 8), char(value >> 16), char(value >> 24) };
+        texture.write(bytes, sizeof(bytes));
+    };
+    texture.write("TEXV0005", 9);
+    texture.write("TEXI0001", 9);
+    u32(format); u32(0);
+    for (int i = 0; i < 4; ++i) u32(side);
+    u32(0);
+    texture.write("TEXB0002", 9);
+    u32(1); // images
+    u32(1); // mip levels
+    u32(side); u32(side); u32(0); u32(0);
+    u32(static_cast<uint32_t>(data.size()));
+    texture.write(reinterpret_cast<const char*>(data.data()),
+                  static_cast<std::streamsize>(data.size()));
+}
+
+/// One image layer that samples a cover slot (`$mediaThumbnail`) in its only
+/// texture slot, with `authored` as the texture its author left there ("" for
+/// none). `red` is the same opaque red as a plain 4x4 RGBA image and, as
+/// `red_blocks`, as a single DXT5 block: the picture a cover layer ships is
+/// whatever the file held.
+std::filesystem::path WriteCoverSlotFixture(const std::filesystem::path& root,
+                                            std::string_view authored)
+{
+    const auto project = WriteFixture(root);
+    WriteSingleLevelTexture(root / "materials/red.tex", 0, 4,
+                            std::vector<uint8_t> { 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255,
+                                                   255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255,
+                                                   255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255,
+                                                   255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255,
+                                                   255, 0, 0, 255 });
+    WriteSingleLevelTexture(root / "materials/red_blocks.tex", 4, 4,
+                            std::vector<uint8_t> { 255, 255, 0, 0, 0, 0, 0, 0,
+                                                   0x00, 0xF8, 0x00, 0x00, 0, 0, 0, 0 });
+    nlohmann::json instance { { "id", 2 },
+                              { "usertextures",
+                                nlohmann::json::array({ { { "name", "$mediaThumbnail" },
+                                                          { "type", "system" } } }) } };
+    if (! authored.empty()) instance["textures"] = nlohmann::json::array({ authored });
+    const std::string vertex =
+        "uniform mat4 g_ModelViewProjectionMatrix;\n"
+        "attribute vec3 a_Position;\nattribute vec2 a_TexCoord;\n"
+        "varying vec2 v_TexCoord;\n"
+        "void main() {\n"
+        "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+        "  v_TexCoord = a_TexCoord;\n"
+        "}\n";
+    const std::string fragment =
+        "uniform sampler2D g_Texture0;\n"
+        "varying vec2 v_TexCoord;\n"
+        "void main() {\n"
+        "  gl_FragColor = texture(g_Texture0, v_TexCoord);\n"
+        "}\n";
+    std::ofstream(root / "shaders/cover_probe.vert") << vertex;
+    std::ofstream(root / "shaders/cover_probe.frag") << fragment;
+    std::ofstream(root / "models/cover.json")
+        << R"({"width":256,"height":192,"material":"materials/cover.json"})";
+    std::ofstream(root / "materials/cover.json")
+        << R"({"passes":[{"shader":"cover_probe","blending":"translucent","cullmode":"nocull",)"
+           R"("depthtest":"disabled","depthwrite":"disabled"}]})";
+    std::ofstream(root / "layout.json")
+        << R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+           R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0.0,0.0,0.0],)"
+           R"("cameraparallax":false,"orthogonalprojection":{"width":384,"height":256}},)"
+           R"("objects":[{"id":1,"name":"cover","image":"models/cover.json","origin":[192,128,0],)"
+           R"("scale":[1,1,1],"angles":[0,0,0],"visible":true,"instance":)"
+        << instance.dump() << "}]}";
+    return project;
+}
+} // namespace
+
+TEST_F(MetalSceneDraw, ACoverSlotShowsItsAuthoredTextureUntilACoverArrivesOnBothRenderers)
+{
+    // A cover layer ships its own art in the slot `$mediaThumbnail` is bound to.
+    // Wallpaper Engine shows that art while nothing plays, then the track's cover,
+    // then the art again once the cover is cleared; the slot is not blank before
+    // the first track. A slot with nothing authored in it has no art to show, and
+    // stays the transparent texel the cover starts as. Each case is drawn by both
+    // renderers, for a plain RGBA texture and a block-compressed one, with the
+    // cover published before the renderer starts or while it runs.
+    using Rgb = std::array<int, 3>;
+    constexpr Rgb kRed { 255, 0, 0 };
+    constexpr Rgb kGreen { 0, 255, 0 };
+    constexpr Rgb kBlack { 0, 0, 0 };
+    struct Case
+    {
+        const char*                       name;
+        const char*                       authored;
+        bool                              cover_first;
+        /// (frame, true publishes the green cover, false clears it)
+        std::vector<std::pair<int, bool>> live;
+        int                               frames;
+        Rgb                               expected;
+    };
+    const std::vector<Case> cases {
+        { "idle", "red", false, {}, 3, kRed },
+        { "idle-blocks", "red_blocks", false, {}, 3, kRed },
+        { "cover-before-start", "red", true, {}, 3, kGreen },
+        { "cover-before-start-blocks", "red_blocks", true, {}, 3, kGreen },
+        { "cover-while-running", "red", false, { { 1, true } }, 4, kGreen },
+        { "cover-while-running-blocks", "red_blocks", false, { { 1, true } }, 4, kGreen },
+        { "cover-then-clear", "red", false, { { 1, true }, { 3, false } }, 6, kRed },
+        { "cover-then-clear-blocks", "red_blocks", false, { { 1, true }, { 3, false } }, 6, kRed },
+        { "nothing-authored-idle", "", false, {}, 3, kBlack },
+        { "nothing-authored-cover", "", false, { { 1, true } }, 4, kGreen },
+    };
+    const std::vector<uint8_t> green = [] {
+        std::vector<uint8_t> rgba(4 * 4 * 4);
+        for (std::size_t i = 0; i < rgba.size(); i += 4) {
+            rgba[i + 1] = 255;
+            rgba[i + 3] = 255;
+        }
+        return rgba;
+    }();
+
+    for (const auto& c : cases) {
+        SCOPED_TRACE(c.name);
+        std::map<bool, RendererPicture> pictures;
+        for (const bool native : { false, true }) {
+            const std::string name = std::string("cover-slot-") + c.name + (native ? "-n" : "-c");
+            const auto        project = WriteCoverSlotFixture(root_ / name, c.authored);
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            if (native) {
+                const auto selection = SelectSceneBackend(*loaded.scene);
+                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            }
+            auto* images = dynamic_cast<RuntimeImageSource*>(loaded.scene->imageParser.get());
+            ASSERT_NE(images, nullptr);
+            if (c.cover_first) {
+                ASSERT_TRUE(PublishSystemMediaArtwork(*images, 4, 4, green.data(), green.size()));
+            }
+            pictures[native] = DrawWithRenderer(
+                *loaded.scene, native, 384, 256, c.frames, 1.0 / 60.0, [&](int frame) {
+                    for (const auto& [at, publish] : c.live) {
+                        if (at != frame) continue;
+                        if (publish) {
+                            PublishSystemMediaArtwork(*images, 4, 4, green.data(), green.size());
+                        } else {
+                            PublishSystemMediaArtwork(*images, 0, 0, nullptr, 0);
+                        }
+                    }
+                });
+            ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+            ASSERT_EQ(pictures[native].rgb.size(), 384u * 256u * 3u);
+        }
+        for (const bool native : { false, true }) {
+            SCOPED_TRACE(native ? "native" : "compatibility");
+            const auto&       rgb = pictures[native].rgb;
+            const std::size_t at  = (std::size_t(128) * 384 + 192) * 3;
+            for (std::size_t channel = 0; channel < 3; ++channel) {
+                EXPECT_NEAR(int(rgb[at + channel]), c.expected[channel], 8)
+                    << "channel " << channel << " of the cover layer's centre";
+            }
+        }
+    }
+}
+
+TEST_F(MetalSceneDraw, ACoverIsSampledClampedWhateverItsAuthoredPictureAskedForOnBothRenderers)
+{
+    // The art a cover slot shows while nothing plays is sampled as its file says
+    // (a texture that does not set `clampuvs` repeats), but a track's cover is
+    // what it always was: clamped to its edge. Wrapping it would blend its
+    // opposite edge into the first half texel of the layer, a coloured seam.
+    // The cover's left column is blue and the rest green, so a repeating
+    // sampler shows a green-blue mix a couple of pixels inside the layer's left
+    // edge, where a clamped one is pure blue.
+    const std::vector<uint8_t> cover = [] {
+        std::vector<uint8_t> rgba(4 * 4 * 4);
+        for (std::size_t texel = 0; texel < 16; ++texel) {
+            const bool left = texel % 4 == 0;
+            rgba[texel * 4 + 1] = left ? 0 : 255;
+            rgba[texel * 4 + 2] = left ? 255 : 0;
+            rgba[texel * 4 + 3] = 255;
+        }
+        return rgba;
+    }();
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        const std::string name    = std::string("cover-sampler") + (native ? "-n" : "-c");
+        const auto        project = WriteCoverSlotFixture(root_ / name, "red");
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+        auto* images = dynamic_cast<RuntimeImageSource*>(loaded.scene->imageParser.get());
+        ASSERT_NE(images, nullptr);
+        ASSERT_TRUE(PublishSystemMediaArtwork(*images, 4, 4, cover.data(), cover.size()));
+        const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+        ASSERT_TRUE(picture.error.empty()) << picture.error;
+        ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+        // The layer spans x 64..320; two pixels in is under half a cover texel.
+        const std::size_t seam = (std::size_t(128) * 384 + 66) * 3;
+        EXPECT_NEAR(int(picture.rgb[seam + 0]), 0, 8);
+        EXPECT_NEAR(int(picture.rgb[seam + 1]), 0, 8) << "the opposite edge was blended in";
+        EXPECT_NEAR(int(picture.rgb[seam + 2]), 255, 8);
+    }
+}
+
+TEST_F(MetalSceneDraw, AnIdleCoverSlotUploadsItsPictureOnceAndACoverChangeCostsOneUploadPerFrameInFlight)
+{
+    // The slot's whole cost is the integer version check the cover already had:
+    // an idle layer draws its art without uploading it again, a cover published
+    // while the scene runs is one upload per frame in flight (two) and not a
+    // render graph rebuilt, and quiet again once those have landed. Counted on
+    // the renderer's own upload total, which is what a per-frame copy would move.
+    const auto  project = WriteCoverSlotFixture(root_ / "cover-cost", "red_blocks");
+    LoadedScene loaded;
+    std::string error;
+    ASSERT_TRUE(LoadScene(project, root_ / "cover-cost-cache", loaded, error)) << error;
+    ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal);
+    auto* images = dynamic_cast<RuntimeImageSource*>(loaded.scene->imageParser.get());
+    ASSERT_NE(images, nullptr);
+    const std::vector<uint8_t> green = [] {
+        std::vector<uint8_t> rgba(4 * 4 * 4);
+        for (std::size_t i = 0; i < rgba.size(); i += 4) {
+            rgba[i + 1] = 255;
+            rgba[i + 3] = 255;
+        }
+        return rgba;
+    }();
+
+    @autoreleasepool {
+        CAMetalLayer* layer   = [CAMetalLayer layer];
+        layer.device          = MTLCreateSystemDefaultDevice();
+        layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+        layer.drawableSize    = CGSizeMake(384, 256);
+        layer.framebufferOnly = NO;
+
+        MetalRender render;
+        ASSERT_TRUE(render.init(MetalRenderInitInfo { .metal_layer = (__bridge void*)layer,
+                                                      .width = 384, .height = 256,
+                                                      .render_width = 384, .render_height = 256,
+                                                      .display_scale_factor = 1.0 }))
+            << render.lastError();
+        auto graph = sceneToRenderGraph(*loaded.scene);
+        ASSERT_NE(graph, nullptr);
+        ASSERT_TRUE(render.compileRenderGraph(*loaded.scene, *graph)) << render.lastError();
+        render.UpdateCameraFillMode(*loaded.scene, FillMode::ASPECTFIT);
+
+        const auto centre_of = [&](const std::vector<uint8_t>& rgba) {
+            const std::size_t at = (std::size_t(128) * 384 + 192) * 4;
+            return std::array<int, 3> { rgba[at], rgba[at + 1], rgba[at + 2] };
+        };
+
+        for (int frame = 0; frame < 6; ++frame) AdvanceSceneFrame(render, *loaded.scene);
+        const auto idle_uploads = render.RuntimeImageUploadsForTests();
+        EXPECT_GE(idle_uploads, 1u) << "the art was never uploaded";
+        EXPECT_LE(idle_uploads, 2u) << "more uploads than frames in flight to show one picture";
+        EXPECT_NEAR(centre_of(ReadOutput(render, *loaded.scene))[0], 255, 8);
+        for (int frame = 0; frame < 12; ++frame) AdvanceSceneFrame(render, *loaded.scene);
+        EXPECT_EQ(render.RuntimeImageUploadsForTests(), idle_uploads)
+            << "an idle cover slot uploaded its art again";
+
+        ASSERT_TRUE(PublishSystemMediaArtwork(*images, 4, 4, green.data(), green.size()));
+        for (int frame = 0; frame < 4; ++frame) AdvanceSceneFrame(render, *loaded.scene);
+        const auto cover_uploads = render.RuntimeImageUploadsForTests();
+        EXPECT_GT(cover_uploads, idle_uploads);
+        EXPECT_LE(cover_uploads - idle_uploads, 2u) << "a cover change cost more than a frame in flight each";
+        {
+            const auto centre = centre_of(ReadOutput(render, *loaded.scene));
+            EXPECT_NEAR(centre[0], 0, 8);
+            EXPECT_NEAR(centre[1], 255, 8);
+        }
+        for (int frame = 0; frame < 12; ++frame) AdvanceSceneFrame(render, *loaded.scene);
+        EXPECT_EQ(render.RuntimeImageUploadsForTests(), cover_uploads) << "a settled cover kept uploading";
+
+        ASSERT_TRUE(PublishSystemMediaArtwork(*images, 0, 0, nullptr, 0));
+        for (int frame = 0; frame < 4; ++frame) AdvanceSceneFrame(render, *loaded.scene);
+        const auto cleared_uploads = render.RuntimeImageUploadsForTests();
+        EXPECT_LE(cleared_uploads - cover_uploads, 2u);
+        EXPECT_NEAR(centre_of(ReadOutput(render, *loaded.scene))[0], 255, 8)
+            << "the art did not come back when the cover was cleared";
+        for (int frame = 0; frame < 12; ++frame) AdvanceSceneFrame(render, *loaded.scene);
+        EXPECT_EQ(render.RuntimeImageUploadsForTests(), cleared_uploads);
+        render.destroy();
     }
 }
 
