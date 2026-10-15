@@ -1800,7 +1800,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在下载 %lld%"
+            "value" : "正在下载 %lld%%"
           }
         },
         "zh-Hant" : {
@@ -1945,7 +1945,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在下载 %@ — %lld%"
+            "value" : "正在下载 %@ — %lld%%"
           }
         },
         "zh-Hant" : {
