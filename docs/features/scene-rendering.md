@@ -116,6 +116,28 @@ transform answers its own placement. The other layer transform calls
 (`getChildren`, `setParent`, `rotateObjectSpace`, `lookAt`, `lookAtYaw` and
 `getAttachment*`) do not exist yet: a script that calls one stops at that line.
 
+A layer's `origin`, `scale` and `angles`, and an image layer's `color`, can be keyed on
+a timeline (`animation`: curves `c0` to `c2` and `options`), and all four play the
+same way. Absolute keys are the value; `relative` keys offset the authored one (before
+the first key of a relative curve the offset is zero), and a curve the author did not
+key keeps the authored value. `loop` wraps the timeline's one clock, which a short
+curve holds its last key until, unless the timeline sets `wraploop`: then every curve
+is cut at the timeline's `length` and closed there on its first key's value, so a loop
+returns to where it began instead of holding and jumping back (this holds for every
+animated setting, shader constants and light intensity included); `single` stops at the last key and then stops asking
+for frames, so a scene whose only motion it was can go idle. A timeline with
+`startpaused` shows its first frame from the first frame of the scene, not the
+authored value, until a script plays it, and `getAnimation(name)` finds it by its
+`name`. Settings the editor keyed together (`options.parent`: an origin and the angles
+that turn with it) are one animation on the first one's clock, so playing or holding
+it moves them all. A script or a property bound to the same setting is its only
+writer. A colour timeline tints the layer's own material and each of its effect passes
+and keeps the layer's alpha; in a scene that renders HDR the layer's brightness
+multiplies the timeline's colour as it does the authored or bound one. Not followed: the `mirror` play mode (it plays as
+`single`), a timeline on `alpha` being on its parent's clock (it keeps a
+clock of its own), and the colour timeline of a text layer or a light
+([known limitations](../testing/renderer.md#known-limitations)).
+
 A scene starts as a desktop with no player. On its first tick, after every script has
 started and before anything is drawn, its scripts are told `mediaPropertiesChanged`
 with no track and `mediaPlaybackChanged` with `PLAYBACK_STOPPED`, once, whether or not

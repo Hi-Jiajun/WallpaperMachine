@@ -225,8 +225,6 @@ public:
     std::array<float, 2>     parallaxDepth { 1.0f, 1.0f };
     bool                     visible { true };
     bool                     dynamic_origin { false };
-    bool                     dynamic_scale { false };
-    bool                     dynamic_angles { false };
     bool                     dynamic_visible { false };
     nlohmann::json           origin_setting;
     nlohmann::json           scale_setting;

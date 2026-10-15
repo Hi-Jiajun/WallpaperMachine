@@ -1782,6 +1782,41 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   cards follow the existing transform path, and orthographic shots keep their
   shared origin/zoom clock. Static origins add no tick binding, and held
   animation frames do not re-evaluate curves.
+- **`wraploop`** — `ScriptRuntimeCompat.WrapLoopClosesACurveOnItsFirstKeyAtTheTimelinesLength`
+  (the curve is cut at the length and closed there on its first key's value, keys past
+  the length go but never below two, a flag-less loop still holds its last key),
+  `.WrapLoopSeamMirrorsTheFirstKeysHandle` and
+  `SceneSchema.WrapLoopTimelinesReturnToTheirFirstKeyOnEveryAnimatedSetting` (scale
+  and origin on a layer). `ResolveScalarAnimation` does it once, so origin, alpha,
+  scale, angles, colour, light intensity and shader constants all follow.
+- **`scale.animation`, `angles.animation` and `color.animation`** —
+  `SceneSchema.ScaleAndAnglesTimelinesPlayLikeOriginTimelines` (absolute and
+  relative keys, unkeyed axes, a single play ending and releasing animation demand,
+  replay by name), `.ScaleAndAnglesTimelinesStartingPausedHoldTheirFirstPoseUntilPlayed`
+  (the frame-0 pose from the first frame, found by `FindAnimationByName` as
+  `getAnimation` does), `.ScaleTimelineLoopsOnOneClockAndKeepsUnkeyedAxes`,
+  `.LinkedOriginScaleAndAnglesTimelinesShareTheirParentsClock` (a paused parent holds
+  the origin, angles and scale keyed under it, through a two-link `options.parent`
+  chain), `.ScaleAndAnglesTimelinesDoNotOverrideAScriptOrUserProperty`,
+  `.ScaleTimelineKeepsAnAnchoredLayersEdgeOnItsScaledSize`,
+  `.ScaleTimelineScalesAParentsChildren` (a group and a drawn parent),
+  `.ScaleAndAnglesTimelinesPlayOnTextParticleLightAndModelObjects` (the other
+  registration sites of `RegisterNodeTransformSettings`, and a text parent whose child
+  stays under it),
+  `.ImageColourTimelineTintsEveryLayerMaterialAsItPlays` (the layer's material and
+  its effect pass, alpha kept, start-paused colour held),
+  `.ImageColourSourcesKeepTheirPrecedenceAndTheHdrBrightnessMultipliesEach` (script,
+  user property and timeline on one colour: a binding is the only writer and registers
+  no clock, the timeline plays where there is none, and the HDR brightness multiplies
+  whichever applies on the layer's material and its effect pass), and in pixels on both
+  renderers `MetalSceneDraw.AnAnimatedScaleAndAnglesTimelineMoveALayerOnBothRenderers`
+  (the card's edge before, during and after a growth and a quarter turn of pi/2 radians, the unit of angles) and
+  `.AnAnimatedLayerColourTintsTheLayerOnBothRenderers` (the colour drawn at the
+  playhead's frame, direct and through an effect chain). The origin, scale and
+  angles of one layer go through `RegisterNodeTransformSettings`; one
+  `NodeVec3Animation` (three curves on one playback) serves all four properties, and a
+  colour reaches its materials through `RegisterMaterialColorAnimation`. A static
+  setting still allocates no binding.
 - **Puppet attachments and poses** — puppet attachments use the animated bone
   affine each frame while preserving the child layer's authored/script
   transform. Character-sheet reference poses are decoded separately from cut-up

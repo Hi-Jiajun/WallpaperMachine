@@ -35,13 +35,10 @@ inline bool HasDynamicMiscSetting(const nlohmann::json& value) {
 inline void ReadMiscVec3Setting(const nlohmann::json& json, const char* key,
                                 std::array<float, 3>* destination,
                                 nlohmann::json* setting, bool* dynamic) {
-    if (! json.contains(key) || destination == nullptr || setting == nullptr ||
-        dynamic == nullptr) {
-        return;
-    }
+    if (! json.contains(key) || destination == nullptr || setting == nullptr) return;
 
     *setting = json.at(key);
-    *dynamic = HasDynamicMiscSetting(*setting);
+    if (dynamic != nullptr) *dynamic = HasDynamicMiscSetting(*setting);
 
     const auto& source = UnwrapMiscSettingValue(*setting);
     if (source.is_array() && source.size() >= 3) {
@@ -100,8 +97,6 @@ struct WPMiscObjectBase {
     bool                 muteineditor { false };
     bool                 nointerpolation { false };
     bool                 dynamic_origin { false };
-    bool                 dynamic_scale { false };
-    bool                 dynamic_angles { false };
     bool                 dynamic_visible { false };
     std::vector<int32_t> dependencies;
     nlohmann::json       instance;
@@ -115,8 +110,8 @@ struct WPMiscObjectBase {
         GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
         GET_JSON_NAME_VALUE_NOWARN(json, "name", name);
         ReadMiscVec3Setting(json, "origin", &origin, &origin_setting, &dynamic_origin);
-        ReadMiscVec3Setting(json, "scale", &scale, &scale_setting, &dynamic_scale);
-        ReadMiscVec3Setting(json, "angles", &angles, &angles_setting, &dynamic_angles);
+        ReadMiscVec3Setting(json, "scale", &scale, &scale_setting, nullptr);
+        ReadMiscVec3Setting(json, "angles", &angles, &angles_setting, nullptr);
         GET_JSON_NAME_VALUE_NOWARN(json, "parallaxDepth", parallaxDepth);
         GET_JSON_NAME_VALUE_NOWARN(json, "visible", visible);
         if (json.contains("visible")) {

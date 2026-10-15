@@ -2771,6 +2771,79 @@ TEST(ScriptRuntimeCompat, ScalarTimelineUsesBezierTimeHandlesAndExactInitialKey)
     EXPECT_FLOAT_EQ(animation->Evaluate(1.0), 1.0f);
 }
 
+// `wraploop` makes a looping curve come back to where it started: it is cut at
+// the timeline's length and closed there with the first key's value. Without it
+// the curve holds its last key to the end of the length and jumps back.
+TEST(ScriptRuntimeCompat, WrapLoopClosesACurveOnItsFirstKeyAtTheTimelinesLength) {
+    const auto resolve = [](bool wrap, const char* keys) {
+        return ResolveScalarAnimation(nlohmann::json::parse(
+            std::string(R"({"value":0,"animation":{"options":{"fps":10,"length":10,"mode":"loop",)") +
+            (wrap ? R"("wraploop":true,)" : R"("wraploop":false,)") + R"("name":"sway"},"c0":)" +
+            keys + "}}"));
+    };
+    const char* const keys = R"([{"frame":0,"value":0},{"frame":5,"value":1}])";
+
+    const auto held = resolve(false, keys);
+    ASSERT_TRUE(held.has_value());
+    EXPECT_FLOAT_EQ(held->Evaluate(0.75), 1.0f);
+    EXPECT_EQ(held->keyframes.size(), 2u);
+
+    const auto closed = resolve(true, keys);
+    ASSERT_TRUE(closed.has_value());
+    ASSERT_EQ(closed->keyframes.size(), 3u);
+    EXPECT_DOUBLE_EQ(closed->keyframes.back().frame, 10.0);
+    EXPECT_FLOAT_EQ(closed->keyframes.back().value, 0.0f);
+    EXPECT_FLOAT_EQ(closed->Evaluate(0.5), 1.0f);
+    EXPECT_FLOAT_EQ(closed->Evaluate(0.75), 0.5f);
+    EXPECT_FLOAT_EQ(closed->Evaluate(0.99), 0.02f);
+    // The lap after the first one starts from the same value it ended on.
+    EXPECT_FLOAT_EQ(closed->Evaluate(1.0), 0.0f);
+    EXPECT_FLOAT_EQ(closed->Evaluate(1.25), 0.5f);
+
+    // A last key on the length gives its value back too; keys past the length
+    // are cut, but never down to fewer than two.
+    const auto landed = resolve(true, R"([{"frame":0,"value":2},{"frame":10,"value":9}])");
+    ASSERT_TRUE(landed.has_value());
+    ASSERT_EQ(landed->keyframes.size(), 2u);
+    EXPECT_FLOAT_EQ(landed->keyframes.back().value, 2.0f);
+    const auto cut = resolve(true, R"([{"frame":0,"value":2},{"frame":5,"value":4},{"frame":12,"value":9}])");
+    ASSERT_TRUE(cut.has_value());
+    ASSERT_EQ(cut->keyframes.size(), 3u);
+    EXPECT_FLOAT_EQ(cut->keyframes.back().value, 2.0f);
+    EXPECT_FLOAT_EQ(cut->Evaluate(0.75), 3.0f);
+    const auto single = resolve(true, R"([{"frame":0,"value":2}])");
+    ASSERT_TRUE(single.has_value());
+    EXPECT_EQ(single->keyframes.size(), 1u);
+}
+
+// The seam is as smooth as the start of the curve: the closing key's incoming
+// handle mirrors the first key's outgoing one.
+TEST(ScriptRuntimeCompat, WrapLoopSeamMirrorsTheFirstKeysHandle) {
+    const auto animation = ResolveScalarAnimation(nlohmann::json::parse(R"({
+        "value":0,"animation":{
+            "options":{"fps":10,"length":10,"mode":"loop","wraploop":true},
+            "c0":[
+                {"frame":0,"value":0,"front":{"enabled":true,"x":2,"y":1}},
+                {"frame":5,"value":3}
+            ]
+        }
+    })"));
+    ASSERT_TRUE(animation.has_value());
+    ASSERT_EQ(animation->keyframes.size(), 3u);
+    const auto& closing = animation->keyframes.back();
+    EXPECT_TRUE(closing.back.enabled);
+    EXPECT_DOUBLE_EQ(closing.back.x, -2.0);
+    EXPECT_DOUBLE_EQ(closing.back.y, -1.0);
+    const auto plain = ResolveScalarAnimation(nlohmann::json::parse(R"({
+        "value":0,"animation":{
+            "options":{"fps":10,"length":10,"mode":"loop","wraploop":true},
+            "c0":[{"frame":0,"value":0},{"frame":5,"value":3}]
+        }
+    })"));
+    ASSERT_TRUE(plain.has_value());
+    EXPECT_FALSE(plain->keyframes.back().back.enabled);
+}
+
 TEST(ScriptRuntimeCompat, AuthoredColorPropertiesStayVectorsAcrossTicksAndPropertyChanges) {
     auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {
         .project_properties = {{"tint", RuntimeScalarValue::String("0.2 0.4 0.8")}},

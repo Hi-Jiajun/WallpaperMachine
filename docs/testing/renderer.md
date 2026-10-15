@@ -789,14 +789,23 @@ into private textures; the three that draw skip visibly without a Metal device.
   `general` fog keys bound to user properties keep the value the scene loaded
   with. Wallpaper Engine's user-level post-processing quality (off, LDR, HDR,
   display HDR) is fixed at its highest SDR level.
-- **A layer's `scale` and `angles` timelines are not followed, and neither is an `origin`
-  timeline on an origin that also has a script or a user property.** The layer keeps the
-  value the scene file stores (`ResolveVec3Setting` has no animation path;
-  `RegisterNodeOriginSetting` registers only the script or property). A relative,
-  start-paused timeline whose first frame moves or shrinks a layer therefore shows its
-  rest value from the first frame. Whether Wallpaper Engine applies the first frame of
-  such a paused timeline before anything plays has not been established, so no rule is
-  implemented.
+- **Some timeline options are not followed.** A layer's `origin`, `scale` and `angles`
+  and an image layer's `color` play their `animation` (loop, single, relative,
+  start-paused with the first frame applied, named for `getAnimation`, keyed together
+  through `options.parent` on one clock); the rest of the option set is not read. The
+  `mirror` play mode plays as `single`, for every timeline (the local scenes use it on
+  origin, alpha, light intensity, shader constants and bloom strength). A timeline on `alpha` keeps a clock of its own even when it is keyed
+  under another setting, so a paused parent does not hold it. A text layer's or a light's
+  `color` timeline holds the authored colour, and a timeline on a setting that also has
+  a script or a user property is dropped (the script or property is its only writer),
+  even when the script is only an event handler that calls `getAnimation().play()`: that
+  start-paused timeline is neither shown at its first frame nor played, because the
+  script's no-name `getAnimation()` resolves the layer's unnamed alpha clock, not the
+  setting's (it needs a `getAnimation` scoped to the property).
+  That a start-paused timeline shows its first frame before anything plays follows the
+  origin and shader-constant timelines here and the editor's start-paused flag being a
+  play state beside the curves; no frame of Wallpaper Engine showing a paused scale or
+  angles timeline has been compared.
 - **The `perspective` flag of an image or text layer is not applied.** `WPTextObject`
   and `WPModelObject` read it, `WPImageObject` does not, and only models use it: image
   and text layers always draw through the orthographic camera, so a layer at a depth

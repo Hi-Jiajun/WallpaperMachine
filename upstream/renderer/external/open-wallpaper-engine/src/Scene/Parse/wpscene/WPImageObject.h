@@ -111,8 +111,6 @@ public:
     bool                       projectlayer { false };
     bool                       solidlayer { false };
     bool                       dynamic_origin { false };
-    bool                       dynamic_scale { false };
-    bool                       dynamic_angles { false };
     bool                       dynamic_visible { false };
     bool                       dynamic_alpha { false };
     std::string                image;

@@ -1764,6 +1764,148 @@ TEST_F(MetalSceneDraw, AnAnimatedCurtainRevealsTheWholeCanvasAndStaysOpen)
     }
 }
 
+TEST_F(MetalSceneDraw, AnAnimatedScaleAndAnglesTimelineMoveALayerOnBothRenderers)
+{
+    // A black 192x256 card centred on a 384x256 canvas over a blue-grey clear
+    // colour. Its scale grows to twice its width over half a second; its
+    // angles (radians, as scene files keep them) turn it a quarter turn in the
+    // same time. Each is sampled at the pixels the card's edge passes: the
+    // start, a point in between where it is clear, and the end.
+    struct Probe { int x, y; };
+    struct Step
+    {
+        int                frames;
+        std::array<bool, 2> covered;
+    };
+    struct Case
+    {
+        const char*       property;
+        std::array<Probe, 2> probes;
+        std::vector<Step> steps;
+    };
+    const std::vector<Case> cases {
+        { "scale", { Probe { 60, 128 }, Probe { 20, 128 } },
+          { { 1, { false, false } }, { 15, { true, false } }, { 60, { true, true } } } },
+        { "angles", { Probe { 80, 128 }, Probe { 192, 10 } },
+          { { 1, { false, true } }, { 60, { true, false } } } },
+    };
+    for (const auto& item : cases) {
+        for (const bool native : { false, true }) {
+            SCOPED_TRACE(std::string(item.property) + (native ? " native" : " compatibility"));
+            for (const auto& step : item.steps) {
+                SCOPED_TRACE(step.frames);
+                const std::string name = std::string("animated-") + item.property +
+                                         (native ? "-native-" : "-compat-") +
+                                         std::to_string(step.frames);
+                const auto directory = root_ / name;
+                const auto project = WriteFixture(directory);
+                std::ofstream(directory / "models/tile.json") <<
+                    R"({"width":192,"height":256,"material":"materials/tile.json"})";
+                std::ofstream(directory / "shaders/metal_probe.frag") <<
+                    "void main() {\n gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);\n}\n";
+                auto layout = nlohmann::json::parse(std::ifstream(directory / "layout.json"));
+                layout["general"]["clearcolor"] = { 0.2, 0.4, 0.6 };
+                const bool scale = std::string_view(item.property) == "scale";
+                layout["objects"][0][item.property] = nlohmann::json {
+                    { "value", scale ? nlohmann::json::array({ 1, 1, 1 })
+                                     : nlohmann::json::array({ 0, 0, 0 }) },
+                    { "animation", {
+                        { "relative", true },
+                        { "options", { { "fps", 60 }, { "length", 30 }, { "mode", "single" } } },
+                        { scale ? "c0" : "c2", nlohmann::json::array({
+                            { { "frame", 0 }, { "value", 0 } },
+                            { { "frame", 30 }, { "value", scale ? 1.0 : 1.5707964 } } }) } } }
+                };
+                std::ofstream(directory / "layout.json") << layout;
+                LoadedScene loaded;
+                std::string error;
+                ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+                const auto picture =
+                    DrawWithRenderer(*loaded.scene, native, 384, 256, step.frames, 1.0 / 60.0);
+                ASSERT_TRUE(picture.error.empty()) << picture.error;
+                ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+                for (std::size_t index = 0; index < item.probes.size(); ++index) {
+                    const auto& probe = item.probes[index];
+                    const std::size_t offset =
+                        (static_cast<std::size_t>(probe.y) * 384u + probe.x) * 3u;
+                    for (std::size_t channel = 0; channel < 3; ++channel) {
+                        EXPECT_NEAR(picture.rgb[offset + channel],
+                                    step.covered[index] ? 0 : 51 * (channel + 1), 2)
+                            << "probe " << probe.x << "," << probe.y << " channel " << channel;
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST_F(MetalSceneDraw, AnAnimatedLayerColourTintsTheLayerOnBothRenderers)
+{
+    // The card draws its layer colour (`g_Color4`). A colour keyed from
+    // (0.2, 0.4, 0.6) to (1, 0, 0.6) over half a second is the colour drawn
+    // at the frame the playhead is on, with and without an effect chain.
+    for (const bool effect : { false, true }) {
+        for (const bool native : { false, true }) {
+            SCOPED_TRACE(std::string(effect ? "effect chain" : "direct layer") +
+                         (native ? " native" : " compatibility"));
+            for (const int frames : { 1, 15, 60 }) {
+                SCOPED_TRACE(frames);
+                const std::string name = std::string("animated-colour-") +
+                                         (effect ? "effect-" : "direct-") +
+                                         (native ? "native-" : "compat-") +
+                                         std::to_string(frames);
+                const auto directory = root_ / name;
+                const auto project = WriteFixture(directory);
+                std::ofstream(directory / "shaders/metal_probe.frag") <<
+                    "uniform vec4 g_Color4;\nvoid main() {\n"
+                    " gl_FragColor = vec4(g_Color4.rgb, 1.0);\n}\n";
+                auto layout = nlohmann::json::parse(std::ifstream(directory / "layout.json"));
+                auto& card = layout["objects"][0];
+                const auto keys = [](double first, double last) {
+                    return nlohmann::json::array({ { { "frame", 0 }, { "value", first } },
+                                                   { { "frame", 30 }, { "value", last } } });
+                };
+                card["color"] = nlohmann::json {
+                    { "value", "1 1 1" },
+                    { "animation", {
+                        { "options", { { "fps", 60 }, { "length", 30 }, { "mode", "single" } } },
+                        { "c0", keys(0.2, 1.0) }, { "c1", keys(0.4, 0.0) }, { "c2", keys(0.6, 0.6) } } }
+                };
+                if (effect) {
+                    std::filesystem::create_directories(directory / "effects");
+                    std::ofstream(directory / "effects/copy.json") <<
+                        R"({"name":"copy","passes":[{"material":"materials/copy.json"}]})";
+                    std::ofstream(directory / "materials/copy.json") <<
+                        R"({"passes":[{"shader":"copy","textures":[null],"blending":"normal","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled"}]})";
+                    std::filesystem::copy_file(directory / "shaders/metal_probe.vert",
+                                               directory / "shaders/copy.vert");
+                    std::ofstream(directory / "shaders/copy.frag") <<
+                        "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\n"
+                        "void main() {\n gl_FragColor = texture(g_Texture0, v_TexCoord);\n}\n";
+                    card["effects"] = nlohmann::json::array({ { { "file", "effects/copy.json" } } });
+                }
+                std::ofstream(directory / "layout.json") << layout;
+                LoadedScene loaded;
+                std::string error;
+                ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+                const auto picture =
+                    DrawWithRenderer(*loaded.scene, native, 384, 256, frames, 1.0 / 60.0);
+                ASSERT_TRUE(picture.error.empty()) << picture.error;
+                ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+                const double progress = std::min(frames / 30.0, 1.0);
+                const std::array<double, 3> expected {
+                    255.0 * (0.2 + 0.8 * progress), 255.0 * (0.4 - 0.4 * progress), 255.0 * 0.6
+                };
+                const std::size_t centre = (128u * 384u + 192u) * 3u;
+                for (std::size_t channel = 0; channel < 3; ++channel) {
+                    EXPECT_NEAR(picture.rgb[centre + channel], expected[channel], 3.0)
+                        << "channel " << channel;
+                }
+            }
+        }
+    }
+}
+
 TEST_F(MetalSceneDraw, PuppetEffectsApplyLightingOnceAfterAssembly)
 {
     // Original one-bone card and shaders exercise the real model parser and

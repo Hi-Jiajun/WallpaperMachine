@@ -19,11 +19,22 @@ namespace wallpaper
 class SceneRuntimeContext;
 class SceneNode;
 
-// Binds scripts/properties as before, or an authored absolute/relative origin
-// timeline. Static settings allocate no per-tick binding.
-void RegisterNodeOriginSetting(SceneRuntimeContext& context, SceneNode* node,
-                               std::string_view layer_name, const nlohmann::json& setting,
-                               bool animate = true);
+// Binds a layer's origin, scale and angles as each setting asks: a script or a
+// user property writes it, else its authored absolute/relative timeline plays
+// it, else it stays the scene file's value and allocates no per-tick binding.
+// Settings the editor keyed together (`options.parent`) are one animation and
+// share the clock of the first, so holding or playing it moves them all.
+// `animate` false leaves timelines to the object that owns them.
+void RegisterNodeTransformSettings(SceneRuntimeContext& context, SceneNode* node,
+                                   std::string_view layer_name, const nlohmann::json& origin,
+                                   const nlohmann::json& scale, const nlohmann::json& angles,
+                                   bool animate = true);
+
+// A vec3 setting's own timeline on a clock of its own, for a setting that is
+// not part of a transform (an image layer's colour); null when it has none.
+std::shared_ptr<const NodeVec3Animation>
+ResolveVec3Animation(SceneRuntimeContext& context, std::string_view layer_name,
+                     const nlohmann::json& setting);
 
 enum class Vec3SettingSemantic
 {

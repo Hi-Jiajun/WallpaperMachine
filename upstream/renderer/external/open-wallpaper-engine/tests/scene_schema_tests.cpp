@@ -3008,14 +3008,9 @@ TEST(SceneSchema, LayerTransformMatrixOfAnAnchoredLayerIsTheCentreOfItsQuad) {
     for (const auto& error : runtime.scriptErrors()) ADD_FAILURE() << error;
 }
 
-// A layer colour bound to a user property is the property's value: a preset
-// or a saved choice replaces the scene file's default. It has to reach the
-// layer's own material and every effect pass, keep the layer's alpha, and
-// follow the property when it changes. A scripted colour is the script's value
-// from its first tick on (`ScriptedImageColour*` below), whatever the scene
-// file's `value` says.
-TEST(SceneSchema, UserBoundImageColourTintsEveryLayerMaterialAndFollowsTheProperty) {
-    fs::VFS vfs;
+// An image with an effect that draws it through, both reading the layer colour
+// from `g_Color4`: what a layer colour has to reach.
+void MountTintableImageFiles(fs::VFS& vfs, bool hdr_bloom = false) {
     auto files = std::map<std::string, std::string> {
         { "/image.json", R"({"width":64,"height":32,"material":"mat.json"})" },
         { "/mat.json",
@@ -3043,7 +3038,37 @@ void main() {
 )" },
         { "/materials/a.tex.tex", "" },
     };
+    if (hdr_bloom) AddHdrBloomFixtureFiles(files);
     EXPECT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+}
+
+// The materials a layer draws with: its own and each effect pass's.
+std::vector<SceneMaterial*> LayerMaterials(const Scene& scene, std::string_view name) {
+    std::vector<SceneMaterial*> materials;
+    auto node = FindRootChildByName(scene, name);
+    if (node == nullptr || node->Mesh() == nullptr) return materials;
+    materials.push_back(node->Mesh()->Material());
+    if (const auto camera = scene.cameras.find(node->Camera());
+        camera != scene.cameras.end() && camera->second->HasImgEffect()) {
+        auto& layer = *camera->second->GetImgEffect();
+        for (std::size_t index = 0; index < layer.EffectCount(); ++index) {
+            for (auto& effect_node : layer.GetEffect(index)->nodes) {
+                materials.push_back(effect_node.sceneNode->Mesh()->Material());
+            }
+        }
+    }
+    return materials;
+}
+
+// A layer colour bound to a user property is the property's value: a preset
+// or a saved choice replaces the scene file's default. It has to reach the
+// layer's own material and every effect pass, keep the layer's alpha, and
+// follow the property when it changes. A scripted colour is the script's value
+// from its first tick on (`ScriptedImageColour*` below), whatever the scene
+// file's `value` says.
+TEST(SceneSchema, UserBoundImageColourTintsEveryLayerMaterialAndFollowsTheProperty) {
+    fs::VFS vfs;
+    MountTintableImageFiles(vfs);
     audio::SoundManager sound_manager(audio::SoundManager::OutputBackend::Null);
     ProjectProperties   properties { { "tint", RuntimeScalarValue::String("0 0 1") } };
     const std::string   scene = R"({
@@ -3080,26 +3105,10 @@ void main() {
     ASSERT_NE(parsed, nullptr);
     ASSERT_NE(parsed->runtime, nullptr);
 
-    const auto materials_of = [&parsed](std::string_view name) {
-        std::vector<SceneMaterial*> materials;
-        auto node = FindRootChildByName(*parsed, name);
-        if (node == nullptr || node->Mesh() == nullptr) return materials;
-        materials.push_back(node->Mesh()->Material());
-        if (const auto camera = parsed->cameras.find(node->Camera());
-            camera != parsed->cameras.end() && camera->second->HasImgEffect()) {
-            auto& layer = *camera->second->GetImgEffect();
-            for (std::size_t index = 0; index < layer.EffectCount(); ++index) {
-                for (auto& effect_node : layer.GetEffect(index)->nodes) {
-                    materials.push_back(effect_node.sceneNode->Mesh()->Material());
-                }
-            }
-        }
-        return materials;
-    };
     const auto expect_colour = [&](std::string_view name, std::array<float, 3> rgb,
                                    std::size_t expected_materials) {
         SCOPED_TRACE(std::string(name));
-        const auto materials = materials_of(name);
+        const auto materials = LayerMaterials(*parsed, name);
         ASSERT_EQ(materials.size(), expected_materials);
         for (const auto* material : materials) {
             const auto& values = material->customShader.constValues;
@@ -4511,6 +4520,636 @@ TEST(SceneSchema, OriginTimelineDoesNotOverrideAScriptOrUserProperty) {
         EXPECT_EQ(runtime.FindScalarAnimation("bound card", "unused"), nullptr);
         EXPECT_EQ(runtime.scriptErrorCount(), 0u);
     }
+}
+
+// A layer's scale and angles are keyed on a timeline like its origin: the
+// editor writes `{value, animation:{c0..c2, options, relative}}` for each. The
+// pose they describe at frame 0 is the layer's pose from the first frame, a
+// single play ends where its last key leaves it, a timeline named in the scene
+// can be played again by a script, and a relative curve is an offset from the
+// authored value.
+TEST(SceneSchema, ScaleAndAnglesTimelinesPlayLikeOriginTimelines) {
+    struct Property {
+        const char*          key;
+        std::array<float, 3> base;
+    };
+    for (const auto& [key, base] : { Property { "scale", { 2, 3, 4 } },
+                                     Property { "angles", { 10, 20, 30 } } }) {
+        for (bool relative : { false, true }) {
+            SCOPED_TRACE(std::string(key) + (relative ? " relative" : " absolute"));
+            fs::VFS vfs;
+            MountSceneFiles(vfs);
+            audio::SoundManager sound;
+            nlohmann::json object = {
+                { "id", 21 }, { "name", "keyed card" }, { "image", "image.json" },
+                { key, {
+                    { "value", base },
+                    { "animation", {
+                        { "relative", relative },
+                        { "options", { { "fps", 20 }, { "length", 20 },
+                                         { "mode", "single" }, { "name", "pose" } } },
+                        { "c0", nlohmann::json::array({
+                            { { "frame", 0 }, { "value", 0 } },
+                            { { "frame", 20 }, { "value", 1 } } }) }
+                    } }
+                } }
+            };
+            auto scene = ParseOrthoShotScene(vfs, sound, object.dump());
+            ASSERT_NE(scene, nullptr);
+            auto& runtime = *scene->runtime;
+            auto node = FindRootChildByName(*scene, "keyed card");
+            ASSERT_NE(node, nullptr);
+            const auto pose = [&] {
+                return std::string_view(key) == "scale" ? node->Scale() : node->Rotation();
+            };
+            // The curve describes x; y and z, which it does not key, keep the
+            // authored value.
+            const float start = relative ? base[0] : 0.0f;
+            const auto  expect_pose = [&](float x) {
+                EXPECT_FLOAT_EQ(pose().x(), x);
+                EXPECT_FLOAT_EQ(pose().y(), base[1]);
+                EXPECT_FLOAT_EQ(pose().z(), base[2]);
+            };
+            expect_pose(start);
+            EXPECT_NE(runtime.DescribeTimeAdvancingWork() & SceneDemandReason::Animation, 0u);
+            runtime.Tick(0.5);
+            expect_pose(start + 0.5f);
+            runtime.Tick(0.5);
+            expect_pose(start + 1.0f);
+            EXPECT_EQ(runtime.DescribeTimeAdvancingWork() & SceneDemandReason::Animation, 0u);
+            runtime.Tick(10.0);
+            expect_pose(start + 1.0f); // no accumulated relative displacement
+            auto* clock = runtime.FindScalarAnimation("keyed card", "pose");
+            ASSERT_NE(clock, nullptr);
+            clock->Play();
+            runtime.Tick(0.25);
+            expect_pose(start + 0.25f);
+            EXPECT_EQ(runtime.scriptErrorCount(), 0u);
+        }
+    }
+}
+
+// A timeline that starts paused is held at its first pose, not at the authored
+// value, until something plays it: an intro keyed to start off the layer's
+// resting place shows there from the first frame. A script finds it by name.
+TEST(SceneSchema, ScaleAndAnglesTimelinesStartingPausedHoldTheirFirstPoseUntilPlayed) {
+    for (const auto* key : { "scale", "angles" }) {
+        SCOPED_TRACE(key);
+        fs::VFS vfs;
+        MountSceneFiles(vfs);
+        audio::SoundManager sound;
+        nlohmann::json object = {
+            { "id", 21 }, { "name", "intro card" }, { "image", "image.json" },
+            { key, {
+                { "value", { 1, 1, 1 } },
+                { "animation", {
+                    { "relative", true },
+                    { "options", { { "fps", 10 }, { "length", 10 }, { "mode", "single" },
+                                     { "name", "intro" }, { "startpaused", true } } },
+                    { "c1", nlohmann::json::array({
+                        { { "frame", 0 }, { "value", -0.5 } },
+                        { { "frame", 10 }, { "value", 0.5 } } }) }
+                } }
+            } }
+        };
+        auto scene = ParseOrthoShotScene(vfs, sound, object.dump());
+        ASSERT_NE(scene, nullptr);
+        auto& runtime = *scene->runtime;
+        auto node = FindRootChildByName(*scene, "intro card");
+        ASSERT_NE(node, nullptr);
+        const auto pose_y = [&] {
+            return std::string_view(key) == "scale" ? node->Scale().y() : node->Rotation().y();
+        };
+        EXPECT_FLOAT_EQ(pose_y(), 0.5f);
+        EXPECT_EQ(runtime.DescribeTimeAdvancingWork() & SceneDemandReason::Animation, 0u)
+            << "a paused timeline needs no frames";
+        runtime.Tick(5.0);
+        EXPECT_FLOAT_EQ(pose_y(), 0.5f);
+        auto* clock = runtime.FindAnimationByName("intro");
+        ASSERT_NE(clock, nullptr);
+        clock->Play();
+        runtime.Tick(0.5);
+        EXPECT_FLOAT_EQ(pose_y(), 1.0f);
+        runtime.Tick(0.5);
+        EXPECT_FLOAT_EQ(pose_y(), 1.5f);
+    }
+}
+
+// A loop wraps the shared clock, and short component curves hold their last key
+// until it does, as origin components do.
+TEST(SceneSchema, ScaleTimelineLoopsOnOneClockAndKeepsUnkeyedAxes) {
+    fs::VFS vfs;
+    MountSceneFiles(vfs);
+    audio::SoundManager sound;
+    auto scene = ParseOrthoShotScene(vfs, sound, R"({
+        "id":21,"name":"pulsing card","image":"image.json",
+        "scale":{"value":[1,2,3],"animation":{
+            "relative":true,
+            "options":{"fps":10,"mode":"loop","name":"pulse"},
+            "c0":[{"frame":0,"value":0},{"frame":5,"value":1}],
+            "c1":[{"frame":0,"value":0},{"frame":10,"value":4}]
+        }}
+    })");
+    ASSERT_NE(scene, nullptr);
+    auto& runtime = *scene->runtime;
+    const auto expect_scale = [&](float x, float y) {
+        const auto scale = runtime.NodeScale("pulsing card");
+        EXPECT_NEAR(scale.x(), x, 1e-5);
+        EXPECT_NEAR(scale.y(), y, 1e-5);
+        EXPECT_FLOAT_EQ(scale.z(), 3.0f);
+    };
+    expect_scale(1, 2);
+    runtime.Tick(0.5);
+    expect_scale(2, 4);
+    runtime.Tick(0.3);
+    expect_scale(2, 5.2f); // the short x curve holds its last key
+    runtime.Tick(0.4);
+    expect_scale(1.4f, 2.8f); // the longest curve sets the clock's length: 12 frames is 2
+    EXPECT_NE(runtime.DescribeTimeAdvancingWork() & SceneDemandReason::Animation, 0u);
+    EXPECT_EQ(runtime.scriptErrorCount(), 0u);
+}
+
+// The editor links the properties it keys on one timeline: the first is the
+// parent, the others name it in `options.parent` and carry none of the play
+// state of their own. They are one animation, so a script that holds or plays
+// the parent holds or plays them all.
+TEST(SceneSchema, LinkedOriginScaleAndAnglesTimelinesShareTheirParentsClock) {
+    fs::VFS vfs;
+    MountSceneFiles(vfs);
+    audio::SoundManager sound;
+    auto scene = ParseOrthoShotScene(vfs, sound, R"({
+        "id":21,"name":"linked card","image":"image.json",
+        "origin":{"value":[10,20,0],"animation":{
+            "relative":true,
+            "options":{"fps":10,"length":10,"mode":"single","name":"rise","startpaused":true,
+                       "children":[{"key":"angles"}]},
+            "c0":[{"frame":0,"value":0},{"frame":10,"value":40}]
+        }},
+        "angles":{"value":[0,0,0],"animation":{
+            "relative":true,
+            "options":{"fps":10,"length":10,"mode":"single","parent":{"key":"origin"},
+                       "children":[{"key":"scale"}]},
+            "c2":[{"frame":0,"value":0},{"frame":10,"value":90}]
+        }},
+        "scale":{"value":[1,1,1],"animation":{
+            "relative":true,
+            "options":{"fps":10,"length":10,"mode":"single","parent":{"key":"angles"}},
+            "c0":[{"frame":0,"value":0},{"frame":10,"value":1}]
+        }}
+    })");
+    ASSERT_NE(scene, nullptr);
+    auto& runtime = *scene->runtime;
+    const auto expect_pose = [&](float x, float turn, float width) {
+        EXPECT_FLOAT_EQ(runtime.NodeTranslate("linked card").x(), x);
+        EXPECT_FLOAT_EQ(runtime.NodeRotation("linked card").z(), turn);
+        EXPECT_FLOAT_EQ(runtime.NodeScale("linked card").x(), width);
+    };
+    expect_pose(10, 0, 1);
+    runtime.Tick(5.0);
+    expect_pose(10, 0, 1); // the parent is paused, so are the properties linked to it
+    EXPECT_EQ(runtime.DescribeTimeAdvancingWork() & SceneDemandReason::Animation, 0u);
+    auto* clock = runtime.FindScalarAnimation("linked card", "rise");
+    ASSERT_NE(clock, nullptr);
+    clock->Play();
+    runtime.Tick(0.5);
+    expect_pose(30, 45, 1.5f);
+    runtime.Tick(0.5);
+    expect_pose(50, 90, 2);
+    EXPECT_EQ(runtime.DescribeTimeAdvancingWork() & SceneDemandReason::Animation, 0u);
+    EXPECT_EQ(runtime.scriptErrorCount(), 0u);
+}
+
+// A scale or angles a script or a wallpaper property writes has one writer: its
+// authored timeline does not become a second one, and registers no clock.
+TEST(SceneSchema, ScaleAndAnglesTimelinesDoNotOverrideAScriptOrUserProperty) {
+    for (const auto* key : { "scale", "angles" }) {
+        for (bool scripted : { false, true }) {
+            // A script returns an angle in its own units, which is not what this checks.
+            if (scripted && std::string_view(key) == "angles") continue;
+            SCOPED_TRACE(std::string(key) + (scripted ? " scripted" : " user property"));
+            fs::VFS vfs;
+            MountSceneFiles(vfs);
+            audio::SoundManager sound;
+            nlohmann::json object = nlohmann::json::parse(R"({
+                "id":21,"name":"bound card","image":"image.json"
+            })");
+            object[key] = nlohmann::json::parse(R"({"value":[1,2,3],"animation":{
+                "options":{"fps":10,"length":10,"mode":"single","name":"unused"},
+                "c0":[{"frame":0,"value":999}]
+            }})");
+            if (scripted) object[key]["script"] =
+                "export function update() { return new Vec3(7, 8, 9); }";
+            else object[key]["user"] = "pose";
+            auto scene = ParseOrthoShotScene(vfs, sound, object.dump(), {
+                { "pose", RuntimeScalarValue::String("7 8 9") }
+            });
+            ASSERT_NE(scene, nullptr);
+            auto& runtime = *scene->runtime;
+            runtime.Tick(1.0);
+            const auto pose = std::string_view(key) == "scale" ? runtime.NodeScale("bound card")
+                                                              : runtime.NodeRotation("bound card");
+            EXPECT_EQ(pose, Eigen::Vector3f(7, 8, 9));
+            EXPECT_EQ(runtime.FindScalarAnimation("bound card", "unused"), nullptr);
+            EXPECT_EQ(runtime.scriptErrorCount(), 0u);
+        }
+    }
+}
+
+// Every kind of object that sits in the scene takes its scale and angles
+// from the one registration helper: text, a particle system, a light and a
+// model, not only the image layer and the group the tests above use. A timeline
+// the editor keyed on one plays there like it does on a card.
+TEST(SceneSchema, ScaleAndAnglesTimelinesPlayOnTextParticleLightAndModelObjects) {
+    const auto keyed = [](const char* key, std::array<float, 3> base) {
+        return nlohmann::json {
+            { "value", base },
+            { "animation", {
+                { "relative", true },
+                { "options", { { "fps", 10 }, { "length", 10 }, { "mode", "single" } } },
+                { "c0", nlohmann::json::array({
+                    { { "frame", 0 }, { "value", 0 } }, { { "frame", 10 }, { "value", 1 } } }) }
+            } }
+        };
+    };
+    nlohmann::json animated_pose = {
+        { "scale", keyed("scale", { 1, 2, 3 }) }, { "angles", keyed("angles", { 0.25f, 0.5f, 0.75f }) } };
+    const auto expect_pose = [](const SceneNode& node, float shift, const char* label) {
+        SCOPED_TRACE(label);
+        EXPECT_NEAR(node.Scale().x(), 1.0f + shift, 1e-5);
+        EXPECT_NEAR(node.Scale().y(), 2.0f, 1e-5);
+        EXPECT_NEAR(node.Scale().z(), 3.0f, 1e-5);
+        EXPECT_NEAR(node.Rotation().x(), 0.25f + shift, 1e-5);
+        EXPECT_NEAR(node.Rotation().y(), 0.5f, 1e-5);
+    };
+    const auto object = [&](nlohmann::json base) {
+        for (auto& [key, value] : animated_pose.items()) base[key] = value;
+        return base.dump();
+    };
+
+    {
+        fs::VFS vfs;
+        MountSceneFiles(vfs);
+        audio::SoundManager sound;
+        auto scene = ParseOrthoShotScene(
+            vfs, sound,
+            object({ { "id", 21 }, { "name", "label" }, { "text", "hello" }, { "font", "Arial" },
+                     { "visible", true } }) + "," +
+            object({ { "id", 22 }, { "name", "sparks" }, { "particle", "particle.json" },
+                     { "visible", true } }) + "," +
+            object({ { "id", 23 }, { "name", "bulb" }, { "light", "point" }, { "radius", 100 },
+                     { "intensity", 1 }, { "color", { 1, 1, 1 } }, { "visible", true } }));
+        ASSERT_NE(scene, nullptr);
+        auto& runtime = *scene->runtime;
+        const auto text = FindRootChildByName(*scene, "label");
+        ASSERT_NE(text, nullptr);
+        const auto particles = FindRootChildByName(*scene, "sparks");
+        ASSERT_NE(particles, nullptr);
+        ASSERT_EQ(scene->lights.size(), 1u);
+        ASSERT_NE(scene->lights[0]->node(), nullptr);
+        const SceneNode* light = scene->lights[0]->node();
+        expect_pose(*text, 0.0f, "text start");
+        expect_pose(*particles, 0.0f, "particles start");
+        expect_pose(*light, 0.0f, "light start");
+        runtime.Tick(0.5);
+        expect_pose(*text, 0.5f, "text mid");
+        expect_pose(*particles, 0.5f, "particles mid");
+        expect_pose(*light, 0.5f, "light mid");
+        runtime.Tick(0.5);
+        expect_pose(*text, 1.0f, "text end");
+        expect_pose(*particles, 1.0f, "particles end");
+        expect_pose(*light, 1.0f, "light end");
+    }
+
+    // A text or model object with children is first met as a group the
+    // children hang from, then built as itself: its timeline plays once, on the
+    // node the children stay under.
+    {
+        fs::VFS vfs;
+        MountSceneFiles(vfs);
+        audio::SoundManager sound;
+        auto scene = ParseOrthoShotScene(
+            vfs, sound,
+            R"({"id":31,"name":"caption","text":"hello","font":"Arial","visible":true,
+                "scale":{"value":[1,1,1],"animation":{"relative":true,
+                  "options":{"fps":10,"length":10,"mode":"single"},
+                  "c0":[{"frame":0,"value":0},{"frame":10,"value":1}]}}},
+               {"id":32,"name":"underline","image":"image.json","parent":31,"origin":[5,6,0]})");
+        ASSERT_NE(scene, nullptr);
+        const auto caption = FindRootChildByName(*scene, "caption");
+        ASSERT_NE(caption, nullptr);
+        ASSERT_FALSE(caption->GetChildren().empty());
+        auto* underline = caption->GetChildren().front().get();
+        scene->runtime->Tick(0.5);
+        EXPECT_NEAR(caption->Scale().x(), 1.5f, 1e-5);
+        underline->UpdateTrans();
+        EXPECT_NEAR(underline->ModelTrans()(0, 3) - caption->Translate().x(), 5.0f * 1.5f, 1e-4);
+    }
+
+    {
+        auto files = std::map<std::string, std::string> {};
+        AddLeafModelSceneFiles(files);
+        fs::VFS vfs;
+        EXPECT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+        audio::SoundManager sound;
+        ProjectProperties   properties;
+        auto scene = WPSceneParser().Parse(
+            SceneParseRequest { .scene_id = "model-timeline", .project_properties = &properties },
+            PerspectiveSceneJson("[" + object({ { "id", 7 }, { "name", "planet" },
+                                                { "model", "planet.mdl" },
+                                                { "perspective", true }, { "visible", true } }) +
+                                 "]"),
+            vfs, sound);
+        ASSERT_NE(scene, nullptr);
+        const auto model = FindRootChildByName(*scene, "planet");
+        ASSERT_NE(model, nullptr);
+        expect_pose(*model, 0.0f, "model start");
+        scene->runtime->Tick(1.0);
+        expect_pose(*model, 1.0f, "model end");
+    }
+}
+
+// A looping timeline with `wraploop` (the editor's default for a loop) comes back
+// to its first key by the end of the timeline's length: after its last key the
+// value runs back, where without the flag it would hold the last key to the end
+// and then jump. The same on origin and alpha, which share the curve reader.
+TEST(SceneSchema, WrapLoopTimelinesReturnToTheirFirstKeyOnEveryAnimatedSetting) {
+    for (const bool wrap : { false, true }) {
+        SCOPED_TRACE(wrap ? "wraploop" : "plain loop");
+        fs::VFS vfs;
+        MountSceneFiles(vfs);
+        audio::SoundManager sound;
+        const auto timeline = [&](const char* base) {
+            return std::string(R"({"value":)") + base + R"(,"animation":{"relative":false,
+                "options":{"fps":10,"length":10,"mode":"loop","wraploop":)" +
+                   (wrap ? "true" : "false") + R"(},
+                "c0":[{"frame":0,"value":0},{"frame":5,"value":1}]}})";
+        };
+        auto scene = ParseOrthoShotScene(
+            vfs, sound,
+            R"({"id":21,"name":"sway","image":"image.json","scale":)" + timeline("[0,1,1]") +
+                R"(,"origin":)" + timeline("[0,0,0]") + R"(})");
+        ASSERT_NE(scene, nullptr);
+        auto node = FindRootChildByName(*scene, "sway");
+        ASSERT_NE(node, nullptr);
+        auto& runtime = *scene->runtime;
+        runtime.Tick(0.5);
+        EXPECT_FLOAT_EQ(node->Scale().x(), 1.0f);
+        runtime.Tick(0.25);
+        // Frame 7.5 of 10: half way back, or still on the last key.
+        EXPECT_FLOAT_EQ(node->Scale().x(), wrap ? 0.5f : 1.0f);
+        EXPECT_FLOAT_EQ(node->Translate().x(), wrap ? 0.5f : 1.0f);
+        runtime.Tick(0.25);
+        EXPECT_FLOAT_EQ(node->Scale().x(), 0.0f);
+    }
+}
+
+// The edge a layer is anchored to sits on its scaled size, so a scale that
+// moves keeps the anchored edge where it is.
+TEST(SceneSchema, ScaleTimelineKeepsAnAnchoredLayersEdgeOnItsScaledSize) {
+    fs::VFS vfs;
+    MountSceneFiles(vfs);
+    audio::SoundManager sound;
+    auto scene = ParseOrthoShotScene(vfs, sound, R"({
+        "id":21,"name":"anchored card","image":"image.json","alignment":"left",
+        "origin":[10,0,0],
+        "scale":{"value":[1,1,1],"animation":{
+            "options":{"fps":10,"length":10,"mode":"single"},
+            "c0":[{"frame":0,"value":1},{"frame":10,"value":3}],
+            "c1":[{"frame":0,"value":1},{"frame":10,"value":3}]
+        }}
+    })");
+    ASSERT_NE(scene, nullptr);
+    auto& runtime = *scene->runtime;
+    auto node = FindRootChildByName(*scene, "anchored card");
+    ASSERT_NE(node, nullptr);
+    const float width = runtime.NodeSize("anchored card").x();
+    EXPECT_FLOAT_EQ(node->Scale().x(), 1.0f);
+    EXPECT_FLOAT_EQ(node->Translate().x(), 10.0f + width * 1.0f * 0.5f);
+    runtime.Tick(1.0);
+    EXPECT_FLOAT_EQ(node->Scale().x(), 3.0f);
+    EXPECT_FLOAT_EQ(node->Translate().x(), 10.0f + width * 3.0f * 0.5f);
+}
+
+// A group's scale scales what it holds, and so does a drawn layer's that has
+// children.
+TEST(SceneSchema, ScaleTimelineScalesAParentsChildren) {
+    for (bool group : { true, false }) {
+        SCOPED_TRACE(group ? "group" : "image layer");
+        fs::VFS vfs;
+        MountSceneFiles(vfs);
+        audio::SoundManager sound;
+        auto parent = nlohmann::json::parse(R"({
+            "id":21,"name":"growing parent",
+            "scale":{"value":[1,1,1],"animation":{
+                "relative":true,
+                "options":{"fps":10,"length":10,"mode":"single"},
+                "c0":[{"frame":0,"value":0},{"frame":10,"value":1}],
+                "c1":[{"frame":0,"value":0},{"frame":10,"value":1}]
+            }}
+        })");
+        if (!group) parent["image"] = "image.json";
+        auto scene = ParseOrthoShotScene(vfs, sound, parent.dump() + R"(,
+            {"id":22,"name":"child card","image":"image.json","parent":21,"origin":[5,6,0]}
+        )");
+        ASSERT_NE(scene, nullptr);
+        auto& runtime = *scene->runtime;
+        auto node = FindRootChildByName(*scene, "growing parent");
+        ASSERT_NE(node, nullptr);
+        ASSERT_EQ(node->GetChildren().size(), 1u);
+        runtime.Tick(0.5);
+        EXPECT_FLOAT_EQ(node->Scale().x(), 1.5f);
+        node->GetChildren().front()->UpdateTrans();
+        EXPECT_NEAR(node->GetChildren().front()->ModelTrans()(0, 3), 5.0f * 1.5f, 1e-4);
+        runtime.Tick(0.5);
+        EXPECT_FLOAT_EQ(node->Scale().x(), 2.0f);
+        EXPECT_EQ(runtime.DescribeTimeAdvancingWork() & SceneDemandReason::Animation, 0u);
+    }
+}
+
+// A layer colour keyed on a timeline tints the layer's own material and every
+// effect pass as the playhead moves, and keeps the layer's alpha. Like any
+// timeline it can start paused at its first colour and be played by name.
+TEST(SceneSchema, ImageColourTimelineTintsEveryLayerMaterialAsItPlays) {
+    fs::VFS vfs;
+    MountTintableImageFiles(vfs);
+    audio::SoundManager sound_manager(audio::SoundManager::OutputBackend::Null);
+    ProjectProperties   properties;
+    const auto keys = [](double first, double last) {
+        return nlohmann::json::array({ { { "frame", 0 }, { "value", first } },
+                                       { { "frame", 10 }, { "value", last } } });
+    };
+    const auto colour = [&](bool paused) {
+        return nlohmann::json {
+            { "value", "1 1 1" },
+            { "animation", {
+                { "options", { { "fps", 10 }, { "length", 10 }, { "mode", "single" },
+                                 { "name", "tint" }, { "startpaused", paused } } },
+                { "c0", keys(0.2, 1.0) }, { "c1", keys(0.4, 0.0) }, { "c2", keys(0.6, 0.6) }
+            } }
+        };
+    };
+    nlohmann::json scene_json = {
+        { "camera", { { "center", { 0, 0, 0 } }, { "eye", { 0, 0, 1 } }, { "up", { 0, 1, 0 } } } },
+        { "general", { { "ambientcolor", { 0.2, 0.2, 0.2 } }, { "skylightcolor", { 0.3, 0.3, 0.3 } },
+                       { "clearcolor", { 0, 0, 0 } }, { "cameraparallax", false },
+                       { "cameraparallaxamount", 0 }, { "cameraparallaxdelay", 0 },
+                       { "cameraparallaxmouseinfluence", 0 },
+                       { "orthogonalprojection", { { "width", 640 }, { "height", 360 } } } } },
+        { "objects", nlohmann::json::array({
+            { { "id", 1 }, { "name", "plain" }, { "image", "image.json" }, { "alpha", 0.5 },
+              { "color", colour(false) }, { "visible", true } },
+            { { "id", 2 }, { "name", "with effect" }, { "image", "image.json" }, { "alpha", 0.5 },
+              { "color", colour(false) }, { "visible", true },
+              { "effects", nlohmann::json::array({
+                  { { "file", "effects/copy/effect.json" }, { "id", 3 }, { "visible", true } } }) } },
+            { { "id", 4 }, { "name", "held" }, { "image", "image.json" }, { "alpha", 0.5 },
+              { "color", colour(true) }, { "visible", true } } }) }
+    };
+    auto parsed = WPSceneParser().Parse(SceneParseRequest {
+                                            .scene_id           = "image-colour-timeline",
+                                            .project_properties = &properties,
+                                        },
+                                        scene_json.dump(),
+                                        vfs,
+                                        sound_manager);
+    ASSERT_NE(parsed, nullptr);
+    ASSERT_NE(parsed->runtime, nullptr);
+    auto& runtime = *parsed->runtime;
+
+    const auto expect_colour = [&](std::string_view name, std::array<float, 3> rgb,
+                                   std::size_t expected_materials) {
+        SCOPED_TRACE(std::string(name));
+        const auto materials = LayerMaterials(*parsed, name);
+        ASSERT_EQ(materials.size(), expected_materials);
+        for (const auto* material : materials) {
+            const auto& values = material->customShader.constValues;
+            ASSERT_TRUE(values.contains("g_Color4"));
+            ASSERT_TRUE(values.contains("g_Color"));
+            for (std::size_t index = 0; index < 3; ++index) {
+                EXPECT_FLOAT_EQ(values.at("g_Color4")[index], rgb[index]);
+                EXPECT_FLOAT_EQ(values.at("g_Color")[index], rgb[index]);
+            }
+            EXPECT_FLOAT_EQ(values.at("g_Color4")[3], 0.5f);
+        }
+    };
+
+    // The first colour is the layer's colour from the first frame.
+    expect_colour("plain", { 0.2f, 0.4f, 0.6f }, 1u);
+    expect_colour("with effect", { 0.2f, 0.4f, 0.6f }, 2u);
+    expect_colour("held", { 0.2f, 0.4f, 0.6f }, 1u);
+    EXPECT_NE(runtime.DescribeTimeAdvancingWork() & SceneDemandReason::Animation, 0u);
+
+    runtime.Tick(0.5);
+    expect_colour("plain", { 0.6f, 0.2f, 0.6f }, 1u);
+    expect_colour("with effect", { 0.6f, 0.2f, 0.6f }, 2u);
+    expect_colour("held", { 0.2f, 0.4f, 0.6f }, 1u);
+    runtime.Tick(0.5);
+    expect_colour("plain", { 1.0f, 0.0f, 0.6f }, 1u);
+    expect_colour("with effect", { 1.0f, 0.0f, 0.6f }, 2u);
+    expect_colour("held", { 0.2f, 0.4f, 0.6f }, 1u);
+
+    auto* clock = runtime.FindScalarAnimation("held", "tint");
+    ASSERT_NE(clock, nullptr);
+    clock->Play();
+    runtime.Tick(0.5);
+    expect_colour("held", { 0.6f, 0.2f, 0.6f }, 1u);
+    runtime.Tick(0.5);
+    expect_colour("held", { 1.0f, 0.0f, 0.6f }, 1u);
+    EXPECT_EQ(runtime.DescribeTimeAdvancingWork() & SceneDemandReason::Animation, 0u);
+    EXPECT_EQ(runtime.scriptErrorCount(), 0u);
+}
+
+// The three sources of an image layer's colour agree on one rule: a script or
+// a user property is the colour's only writer, a timeline plays where there is
+// neither, and wherever the scene renders HDR the layer's brightness multiplies
+// whichever colour applies into `g_Color4` of every material (the `g_Color` a
+// shader reads for the plain colour stays the colour).
+TEST(SceneSchema, ImageColourSourcesKeepTheirPrecedenceAndTheHdrBrightnessMultipliesEach) {
+    fs::VFS vfs;
+    MountTintableImageFiles(vfs, true);
+    audio::SoundManager sound_manager(audio::SoundManager::OutputBackend::Null);
+    ProjectProperties   properties { { "tint", RuntimeScalarValue::String("0 0 1") } };
+    const auto timeline = [](const char* name) {
+        return nlohmann::json {
+            { "options", { { "fps", 10 }, { "length", 10 }, { "mode", "single" }, { "name", name } } },
+            { "c0", nlohmann::json::array({ { { "frame", 0 }, { "value", 0.2 } },
+                                            { { "frame", 10 }, { "value", 1.0 } } }) },
+            { "c1", nlohmann::json::array({ { { "frame", 0 }, { "value", 0.4 } },
+                                            { { "frame", 10 }, { "value", 0.0 } } }) },
+            { "c2", nlohmann::json::array({ { { "frame", 0 }, { "value", 0.6 } },
+                                            { { "frame", 10 }, { "value", 0.6 } } }) }
+        };
+    };
+    const auto layer = [&](int id, const char* name, nlohmann::json colour, bool effect) {
+        nlohmann::json object = {
+            { "id", id }, { "name", name }, { "image", "image.json" }, { "alpha", 0.5 },
+            { "brightness", 0.5 }, { "color", std::move(colour) }, { "visible", true } };
+        if (effect) object["effects"] = nlohmann::json::array(
+            { { { "file", "effects/copy/effect.json" }, { "id", id + 100 }, { "visible", true } } });
+        return object;
+    };
+    const auto keyed = [&](const char* name) {
+        return nlohmann::json { { "value", "1 1 1" }, { "animation", timeline(name) } };
+    };
+    auto scripted = keyed("script clock");
+    scripted["script"] = "export function update(value) { return new Vec3(0, 1, 0); }";
+    auto bound = keyed("property clock");
+    bound["user"] = "tint";
+    nlohmann::json scene_json = {
+        { "camera", { { "center", { 0, 0, 0 } }, { "eye", { 0, 0, 1 } }, { "up", { 0, 1, 0 } } } },
+        { "general", { { "ambientcolor", { 0.2, 0.2, 0.2 } }, { "skylightcolor", { 0.3, 0.3, 0.3 } },
+                       { "clearcolor", { 0, 0, 0 } }, { "cameraparallax", false },
+                       { "cameraparallaxamount", 0 }, { "cameraparallaxdelay", 0 },
+                       { "cameraparallaxmouseinfluence", 0 }, { "hdr", true }, { "bloom", true },
+                       { "orthogonalprojection", { { "width", 640 }, { "height", 360 } } } } },
+        { "objects", nlohmann::json::array({
+            layer(1, "keyed", keyed("keyed clock"), true),
+            layer(2, "scripted", scripted, true),
+            layer(3, "bound", bound, true) }) }
+    };
+    auto parsed = WPSceneParser().Parse(SceneParseRequest {
+                                            .scene_id           = "image-colour-sources",
+                                            .project_properties = &properties,
+                                        },
+                                        scene_json.dump(),
+                                        vfs,
+                                        sound_manager);
+    ASSERT_NE(parsed, nullptr);
+    ASSERT_NE(parsed->runtime, nullptr);
+    ASSERT_TRUE(parsed->hdr);
+    auto& runtime = *parsed->runtime;
+
+    const auto expect_colour = [&](std::string_view name, std::array<float, 3> rgb) {
+        SCOPED_TRACE(std::string(name));
+        const auto materials = LayerMaterials(*parsed, name);
+        ASSERT_EQ(materials.size(), 2u);
+        for (const auto* material : materials) {
+            const auto& values = material->customShader.constValues;
+            for (std::size_t index = 0; index < 3; ++index) {
+                EXPECT_FLOAT_EQ(values.at("g_Color4")[index], rgb[index] * 0.5f);
+                EXPECT_FLOAT_EQ(values.at("g_Color")[index], rgb[index]);
+            }
+            EXPECT_FLOAT_EQ(values.at("g_Color4")[3], 0.5f);
+        }
+    };
+
+    expect_colour("keyed", { 0.2f, 0.4f, 0.6f });
+    expect_colour("bound", { 0.0f, 0.0f, 1.0f });
+    runtime.Tick(0.5);
+    // The timeline plays on the layer that has no binding, brightness applied
+    // to each frame's colour; a script or a property has no clock beside it.
+    expect_colour("keyed", { 0.6f, 0.2f, 0.6f });
+    expect_colour("scripted", { 0.0f, 1.0f, 0.0f });
+    expect_colour("bound", { 0.0f, 0.0f, 1.0f });
+    EXPECT_NE(runtime.FindScalarAnimation("keyed", "keyed clock"), nullptr);
+    EXPECT_EQ(runtime.FindScalarAnimation("scripted", "script clock"), nullptr);
+    EXPECT_EQ(runtime.FindScalarAnimation("bound", "property clock"), nullptr);
+
+    runtime.ApplyProjectPropertyOverride({ { "tint", RuntimeScalarValue::String("0.25 0.5 0.75") } });
+    runtime.Tick(0.5);
+    expect_colour("keyed", { 1.0f, 0.0f, 0.6f });
+    expect_colour("bound", { 0.25f, 0.5f, 0.75f });
+    EXPECT_EQ(runtime.scriptErrorCount(), 0u);
 }
 
 TEST(SceneSchema, ImageAlignmentAnchorSurvivesScriptedOriginAndScale) {

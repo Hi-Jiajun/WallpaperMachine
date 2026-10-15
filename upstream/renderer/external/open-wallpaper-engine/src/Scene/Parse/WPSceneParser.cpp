@@ -306,8 +306,6 @@ struct RawLayerObject {
     std::array<float, 3> angles { 0.0f, 0.0f, 0.0f };
     bool                 visible { true };
     bool                 dynamic_origin { false };
-    bool                 dynamic_scale { false };
-    bool                 dynamic_angles { false };
     bool                 dynamic_visible { false };
     bool                 schema_placeholder { false };
     nlohmann::json       origin_setting;
@@ -380,11 +378,10 @@ bool HasRuntimeTextValueBinding(const nlohmann::json& value) {
 
 void ReadVec3Setting(const nlohmann::json& json, const char* key, std::array<float, 3>* destination,
                      nlohmann::json* setting, bool* dynamic) {
-    if (! json.contains(key) || destination == nullptr || setting == nullptr || dynamic == nullptr)
-        return;
+    if (! json.contains(key) || destination == nullptr || setting == nullptr) return;
 
-    *setting           = json.at(key);
-    *dynamic           = HasDynamicSetting(*setting);
+    *setting = json.at(key);
+    if (dynamic != nullptr) *dynamic = HasDynamicSetting(*setting);
     const auto& source = UnwrapSettingValue(*setting);
 
     if (source.is_array() && source.size() >= 3) {
@@ -582,8 +579,8 @@ bool ParseLayerObject(const nlohmann::json& json, const nlohmann::json& objects,
     GET_JSON_NAME_VALUE_NOWARN(json, "parent", layer.parent_id);
     GET_JSON_NAME_VALUE_NOWARN(json, "name", layer.name);
     ReadVec3Setting(json, "origin", &layer.origin, &layer.origin_setting, &layer.dynamic_origin);
-    ReadVec3Setting(json, "scale", &layer.scale, &layer.scale_setting, &layer.dynamic_scale);
-    ReadVec3Setting(json, "angles", &layer.angles, &layer.angles_setting, &layer.dynamic_angles);
+    ReadVec3Setting(json, "scale", &layer.scale, &layer.scale_setting, nullptr);
+    ReadVec3Setting(json, "angles", &layer.angles, &layer.angles_setting, nullptr);
     GET_JSON_NAME_VALUE_NOWARN(json, "visible", layer.visible);
     if (json.contains("visible")) {
         layer.visible_setting = json.at("visible");
@@ -629,26 +626,9 @@ void ParseLayerNodes(ParseContext& context, const nlohmann::json& objects) {
             node->SetVisibilitySettled(VisibilitySettledBy(layer.visible_setting));
             // Typed parents get their timeline when their real object is
             // parsed; registering it on the placeholder creates a second clock.
-            RegisterNodeOriginSetting(*context.scene->runtime, node.get(), runtime_name,
-                                      layer.origin_setting, !layer.schema_placeholder);
-            if (layer.dynamic_scale) {
-                context.scene->runtime->RegisterNodeScale(
-                    runtime_name,
-                    node.get(),
-                    ResolveVec3Setting(*context.scene->runtime,
-                                       layer.scale_setting,
-                                       runtime_name,
-                                       Vec3SettingSemantic::Generic));
-            }
-            if (layer.dynamic_angles) {
-                context.scene->runtime->RegisterNodeRotation(
-                    runtime_name,
-                    node.get(),
-                    ResolveVec3Setting(*context.scene->runtime,
-                                       layer.angles_setting,
-                                       runtime_name,
-                                       Vec3SettingSemantic::AnglesDegrees));
-            }
+            RegisterNodeTransformSettings(*context.scene->runtime, node.get(), runtime_name,
+                                          layer.origin_setting, layer.scale_setting,
+                                          layer.angles_setting, !layer.schema_placeholder);
         } else {
             node->SetVisible(layer.visible);
         }
@@ -2382,26 +2362,8 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         // the canvas; the runtime moves it as the presentation changes.
         context.scene->runtime->SetNodeScreenAnchor(runtime_name,
                                                     ParseTextScreenAnchor(obj.anchor));
-        RegisterNodeOriginSetting(*context.scene->runtime, node.get(), runtime_name,
-                                  obj.origin_setting);
-        if (obj.dynamic_scale) {
-            context.scene->runtime->RegisterNodeScale(
-                runtime_name,
-                node.get(),
-                ResolveVec3Setting(*context.scene->runtime,
-                                   obj.scale_setting,
-                                   runtime_name,
-                                   Vec3SettingSemantic::Generic));
-        }
-        if (obj.dynamic_angles) {
-            context.scene->runtime->RegisterNodeRotation(
-                runtime_name,
-                node.get(),
-                ResolveVec3Setting(*context.scene->runtime,
-                                   obj.angles_setting,
-                                   runtime_name,
-                                   Vec3SettingSemantic::AnglesDegrees));
-        }
+        RegisterNodeTransformSettings(*context.scene->runtime, node.get(), runtime_name,
+                                      obj.origin_setting, obj.scale_setting, obj.angles_setting);
         if (through_effects) {
             AttachEffectsToNode(context,
                                 *node,
@@ -4213,21 +4175,27 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     auto registerImageNode = [&context, &wpimgobj, &spImgNode]() {
         context.layer_parent_ids[wpimgobj.id] = wpimgobj.parent_id;
     };
-    // A colour bound to a user property or a script, and the materials it has
-    // to reach: every one that takes the layer's `g_Color4`, as its alpha does.
-    // The brightness multiplies that colour where the scene renders HDR, and is
-    // followed the same way when a property or a script drives it.
+    // A colour bound to a user property or a script, or keyed on a timeline, and
+    // the materials it has to reach: every one that takes the layer's `g_Color4`,
+    // as its alpha does. The brightness multiplies that colour where the scene
+    // renders HDR, and is followed the same way when a property or a script
+    // drives it. A binding is the colour's only writer; a timeline plays only
+    // where there is none.
     std::unique_ptr<DynamicValue>               bound_color;
     std::vector<std::shared_ptr<SceneMaterial>> bound_color_materials;
+    std::shared_ptr<const NodeVec3Animation>    color_animation;
+    std::vector<std::shared_ptr<SceneMaterial>> color_animation_materials;
     std::unique_ptr<DynamicValue>               bound_brightness;
     std::vector<std::shared_ptr<SceneMaterial>> bound_brightness_materials;
     float                                       tint_brightness = 1.0f;
-    const auto tintLayerMaterial = [&wpimgobj, &bound_color, &bound_color_materials, &bound_brightness,
+    const auto tintLayerMaterial = [&wpimgobj, &bound_color, &bound_color_materials, &color_animation,
+                                    &color_animation_materials, &bound_brightness,
                                     &bound_brightness_materials,
                                     &tint_brightness](const std::shared_ptr<SceneMaterial>& material) {
         if (material == nullptr) return;
         material->tint = SceneMaterialTint { wpimgobj.color, tint_brightness };
         if (bound_color != nullptr) bound_color_materials.push_back(material);
+        if (color_animation != nullptr) color_animation_materials.push_back(material);
         if (bound_brightness != nullptr) bound_brightness_materials.push_back(material);
     };
     const auto registerImageLayerMaterial = [&context, &wpimgobj, &runtime_name,
@@ -4266,26 +4234,9 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                                                         : nlohmann::json(wpimgobj.visible),
                                runtime_name));
         spImgNode->SetVisibilitySettled(VisibilitySettledBy(wpimgobj.visible_setting));
-        RegisterNodeOriginSetting(*context.scene->runtime, spImgNode.get(), runtime_name,
-                                  wpimgobj.origin_setting);
-        if (wpimgobj.dynamic_scale) {
-            context.scene->runtime->RegisterNodeScale(
-                runtime_name,
-                spImgNode.get(),
-                ResolveVec3Setting(*context.scene->runtime,
-                                   wpimgobj.scale_setting,
-                                   runtime_name,
-                                   Vec3SettingSemantic::Generic));
-        }
-        if (wpimgobj.dynamic_angles) {
-            context.scene->runtime->RegisterNodeRotation(
-                runtime_name,
-                spImgNode.get(),
-                ResolveVec3Setting(*context.scene->runtime,
-                                   wpimgobj.angles_setting,
-                                   runtime_name,
-                                   Vec3SettingSemantic::AnglesDegrees));
-        }
+        RegisterNodeTransformSettings(*context.scene->runtime, spImgNode.get(), runtime_name,
+                                      wpimgobj.origin_setting, wpimgobj.scale_setting,
+                                      wpimgobj.angles_setting);
     }
     QueueSceneScriptIfNeeded(context, runtime_name, wpimgobj.visible_setting);
     QueueSceneScriptIfNeeded(context, runtime_name, wpimgobj.origin_setting);
@@ -4325,13 +4276,20 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     // The scene file's colour is only the property's default: a preset or the
     // user's own choice replaces it, so the layer is built with that value. A
     // script's value replaces it from the first tick on, as it does on a text
-    // layer, and until then the layer holds the scene file's.
+    // layer, and until then the layer holds the scene file's. With neither, a
+    // colour keyed on a timeline is built with its first colour and follows the
+    // clock from there.
     if (context.scene->runtime != nullptr) {
         if (const auto setting = wpimgobj.field_bindings.find("color");
-            setting != wpimgobj.field_bindings.end() && HasDynamicSetting(*setting)) {
-            bound_color = ResolveVec3Setting(*context.scene->runtime, *setting, runtime_name);
-            const auto color = bound_color->getVec3();
-            wpimgobj.color   = { color.x(), color.y(), color.z() };
+            setting != wpimgobj.field_bindings.end()) {
+            if (HasDynamicSetting(*setting)) {
+                bound_color = ResolveVec3Setting(*context.scene->runtime, *setting, runtime_name);
+                const auto color = bound_color->getVec3();
+                wpimgobj.color   = { color.x(), color.y(), color.z() };
+            } else if ((color_animation = ResolveVec3Animation(*context.scene->runtime,
+                                                                runtime_name, *setting))) {
+                wpimgobj.color = color_animation->Value();
+            }
         }
     }
     // Likewise the brightness: a property's value replaces the scene file's, and
@@ -4748,6 +4706,9 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             context.scene->runtime->BindMaterialColor(runtime_name,
                                                       std::move(bound_color_materials),
                                                       std::move(bound_color));
+        } else if (color_animation != nullptr) {
+            context.scene->runtime->RegisterMaterialColorAnimation(
+                std::move(color_animation_materials), std::move(color_animation));
         }
         if (bound_brightness != nullptr) {
             context.scene->runtime->BindMaterialBrightness(std::move(bound_brightness_materials),
@@ -4990,26 +4951,9 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
                                                              : nlohmann::json(wppartobj.visible),
                                    runtime_name));
             spNode->SetVisibilitySettled(VisibilitySettledBy(wppartobj.visible_setting));
-            RegisterNodeOriginSetting(*context.scene->runtime, spNode.get(), runtime_name,
-                                      wppartobj.origin_setting);
-            if (wppartobj.dynamic_scale) {
-                context.scene->runtime->RegisterNodeScale(
-                    runtime_name,
-                    spNode.get(),
-                    ResolveVec3Setting(*context.scene->runtime,
-                                       wppartobj.scale_setting,
-                                       runtime_name,
-                                       Vec3SettingSemantic::Generic));
-            }
-            if (wppartobj.dynamic_angles) {
-                context.scene->runtime->RegisterNodeRotation(
-                    runtime_name,
-                    spNode.get(),
-                    ResolveVec3Setting(*context.scene->runtime,
-                                       wppartobj.angles_setting,
-                                       runtime_name,
-                                       Vec3SettingSemantic::AnglesDegrees));
-            }
+            RegisterNodeTransformSettings(*context.scene->runtime, spNode.get(), runtime_name,
+                                          wppartobj.origin_setting, wppartobj.scale_setting,
+                                          wppartobj.angles_setting);
         }
         QueueSceneScriptIfNeeded(context, runtime_name, wppartobj.visible_setting);
         QueueSceneScriptIfNeeded(context, runtime_name, wppartobj.origin_setting);
@@ -5415,7 +5359,7 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
 void RegisterCommonNodeBindings(ParseContext& context, SceneNode& node, std::string_view runtime_name,
                                 const wpscene::WPMiscObjectBase& obj,
                                 const std::string& previous_runtime_name,
-                                bool animate_origin = true) {
+                                bool animate_timelines = true) {
     if (context.scene->runtime == nullptr) return;
     if (! previous_runtime_name.empty() && previous_runtime_name != runtime_name) {
         context.scene->runtime->UnregisterNode(previous_runtime_name);
@@ -5428,26 +5372,9 @@ void RegisterCommonNodeBindings(ParseContext& context, SceneNode& node, std::str
                            obj.dynamic_visible ? obj.visible_setting : nlohmann::json(obj.visible),
                            std::string(runtime_name)));
     node.SetVisibilitySettled(VisibilitySettledBy(obj.visible_setting));
-    RegisterNodeOriginSetting(*context.scene->runtime, &node, runtime_name,
-                              obj.origin_setting, animate_origin);
-    if (obj.dynamic_scale) {
-        context.scene->runtime->RegisterNodeScale(
-            std::string(runtime_name),
-            &node,
-            ResolveVec3Setting(*context.scene->runtime,
-                               obj.scale_setting,
-                               std::string(runtime_name),
-                               Vec3SettingSemantic::Generic));
-    }
-    if (obj.dynamic_angles) {
-        context.scene->runtime->RegisterNodeRotation(
-            std::string(runtime_name),
-            &node,
-            ResolveVec3Setting(*context.scene->runtime,
-                               obj.angles_setting,
-                               std::string(runtime_name),
-                               Vec3SettingSemantic::AnglesDegrees));
-    }
+    RegisterNodeTransformSettings(*context.scene->runtime, &node, runtime_name,
+                                  obj.origin_setting, obj.scale_setting,
+                                  obj.angles_setting, animate_timelines);
 }
 
 std::shared_ptr<SceneNode> ReuseOrCreateLayerNode(ParseContext& context, int32_t id) {
@@ -5741,23 +5668,9 @@ void ParseLightObj(ParseContext& context, wpscene::WPLightObject& light_obj) {
                                light_obj.dynamic_visible ? light_obj.visible_setting
                                                          : nlohmann::json(light_obj.visible),
                                runtime_name));
-        RegisterNodeOriginSetting(runtime, node.get(), runtime_name, light_obj.origin_setting);
-        if (light_obj.dynamic_scale) {
-            runtime.RegisterNodeScale(runtime_name,
-                                      node.get(),
-                                      ResolveVec3Setting(runtime,
-                                                         light_obj.scale_setting,
-                                                         runtime_name,
-                                                         Vec3SettingSemantic::Generic));
-        }
-        if (light_obj.dynamic_angles) {
-            runtime.RegisterNodeRotation(runtime_name,
-                                         node.get(),
-                                         ResolveVec3Setting(runtime,
-                                                            light_obj.angles_setting,
-                                                            runtime_name,
-                                                            Vec3SettingSemantic::AnglesDegrees));
-        }
+        RegisterNodeTransformSettings(runtime, node.get(), runtime_name,
+                                      light_obj.origin_setting, light_obj.scale_setting,
+                                      light_obj.angles_setting);
         if (auto animation = ResolveScalarAnimation(light_obj.intensity_setting)) {
             light->setIntensityAnimation(
                 runtime.RegisterScalarAnimation(runtime_name, std::move(*animation)));

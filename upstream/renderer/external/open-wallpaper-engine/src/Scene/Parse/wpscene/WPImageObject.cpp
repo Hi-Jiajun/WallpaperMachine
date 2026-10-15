@@ -52,10 +52,10 @@ void read_vec3_setting(
     nlohmann::json*        setting,
     bool*                  dynamic)
 {
-    if (!json.contains(key) || destination == nullptr || setting == nullptr || dynamic == nullptr) return;
+    if (!json.contains(key) || destination == nullptr || setting == nullptr) return;
 
     *setting = json.at(key);
-    *dynamic = has_dynamic_setting(*setting);
+    if (dynamic != nullptr) *dynamic = has_dynamic_setting(*setting);
 
     const auto& source = unwrap_setting(*setting);
     if (source.is_array() && source.size() >= 3) {
@@ -246,8 +246,8 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
     GET_JSON_NAME_VALUE_NOWARN(json, "solid", solid);
     GET_JSON_NAME_VALUE_NOWARN(json, "disablepropagation", disablepropagation);
     read_vec3_setting(json, "origin", &origin, &origin_setting, &dynamic_origin);
-    read_vec3_setting(json, "scale", &scale, &scale_setting, &dynamic_scale);
-    read_vec3_setting(json, "angles", &angles, &angles_setting, &dynamic_angles);
+    read_vec3_setting(json, "scale", &scale, &scale_setting, nullptr);
+    read_vec3_setting(json, "angles", &angles, &angles_setting, nullptr);
 	if(!fullscreen) {
 		GET_JSON_NAME_VALUE_NOWARN(json, "parallaxDepth", parallaxDepth);
 		if(jImage.contains("width")) {

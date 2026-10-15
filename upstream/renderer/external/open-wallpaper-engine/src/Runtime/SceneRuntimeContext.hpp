@@ -264,12 +264,16 @@ public:
     /// effects that run and rebuilds the render graph before the next frame.
     void          RegisterEffectVisibility(std::shared_ptr<SceneImageEffect> effect,
                                            std::unique_ptr<DynamicValue> value);
+    // A node's origin, scale or angles. `animation` is the authored timeline
+    // that plays the value when no script or property writes it.
     void          RegisterNodeTranslate(std::string name, SceneNode* node,
                                         std::unique_ptr<DynamicValue> value,
-                                        std::shared_ptr<const NodeOriginAnimation> animation = {});
-    void RegisterNodeScale(std::string name, SceneNode* node, std::unique_ptr<DynamicValue> value);
+                                        std::shared_ptr<const NodeVec3Animation> animation = {});
+    void RegisterNodeScale(std::string name, SceneNode* node, std::unique_ptr<DynamicValue> value,
+                           std::shared_ptr<const NodeVec3Animation> animation = {});
     void RegisterNodeRotation(std::string name, SceneNode* node,
-                              std::unique_ptr<DynamicValue> value);
+                              std::unique_ptr<DynamicValue> value,
+                              std::shared_ptr<const NodeVec3Animation> animation = {});
     void RegisterTextLayer(std::string name, TextLayerState state);
     void RegisterTextValue(std::string name, std::unique_ptr<DynamicValue> value,
                            bool apply_current_value = true);
@@ -332,6 +336,10 @@ public:
     // given the value is kept for its script alone.
     void BindMaterialBrightness(std::vector<std::shared_ptr<SceneMaterial>> materials,
                                 std::unique_ptr<DynamicValue> value);
+    // An image `color` keyed on a timeline tints the same materials, keeping
+    // their alpha, from the clock's frame.
+    void RegisterMaterialColorAnimation(std::vector<std::shared_ptr<SceneMaterial>> materials,
+                                        std::shared_ptr<const NodeVec3Animation> animation);
     std::shared_ptr<ScalarAnimationPlayback> RegisterScalarAnimation(std::string_view layer_name,
                                                                    ScalarAnimation animation);
     ScalarAnimationPlayback* FindScalarAnimation(std::string_view layer_name,
@@ -623,10 +631,10 @@ private:
         SceneNode* transform_node { nullptr };
         NodeAlignmentBinding* alignment { nullptr };
         const Eigen::Vector2f* size { nullptr };
-        std::shared_ptr<const NodeOriginAnimation> animation;
+        std::shared_ptr<const NodeVec3Animation> animation;
         double sampled_animation_frame { std::numeric_limits<double>::quiet_NaN() };
     };
-    static void ApplyNodeOriginAnimation(NodeVec3Binding& binding);
+    static void ApplyNodeVec3Animation(NodeVec3Binding& binding);
     /// Called when a layer has just become visible: if that shows one the
     /// render graph left out (`Scene::render_excluded_nodes`), the graph is
     /// marked mutated so the next frame builds one that draws it.
@@ -640,6 +648,12 @@ private:
         std::weak_ptr<SceneMaterial> material;
         std::shared_ptr<ScalarAnimationPlayback> animation;
     };
+    struct MaterialColorBinding {
+        std::vector<std::weak_ptr<SceneMaterial>> materials;
+        std::shared_ptr<const NodeVec3Animation>  animation;
+        double sampled_animation_frame { std::numeric_limits<double>::quiet_NaN() };
+    };
+    static void ApplyMaterialColorAnimation(MaterialColorBinding& binding);
     struct MaterialConstantBinding {
         std::weak_ptr<SceneMaterial> material;
         std::string                  name;
@@ -685,6 +699,7 @@ public:
         std::size_t material_constants_size { 0 };
         std::size_t dynamic_value_listeners_size { 0 };
         std::size_t material_alpha_size { 0 };
+        std::size_t material_colors_size { 0 };
         std::size_t scalar_animations_size { 0 };
     };
 
@@ -812,6 +827,7 @@ private:
     std::unordered_map<std::string, NodeVec3Binding>               m_node_rotation;
     std::unordered_map<std::string, NodeEffectFinalBinding>        m_node_effect_final;
     std::vector<MaterialAlphaBinding>                              m_material_alpha;
+    std::vector<MaterialColorBinding>                              m_material_colors;
     struct CameraShake {
         bool  registered { false };
         bool  enabled { false };

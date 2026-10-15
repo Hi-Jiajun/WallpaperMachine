@@ -618,7 +618,7 @@ void SceneRuntimeContext::Tick(double frame_time) {
         (void)name;
         if (binding.node == nullptr || binding.value == nullptr ||
             binding.transform_node == nullptr || binding.alignment == nullptr) continue;
-        ApplyNodeOriginAnimation(binding);
+        ApplyNodeVec3Animation(binding);
         auto& alignment = *binding.alignment;
         const auto& value = binding.value->getVec3();
         if (! (alignment.origin.array() == value.array()).all()) {
@@ -631,6 +631,7 @@ void SceneRuntimeContext::Tick(double frame_time) {
     for (auto& [name, binding] : m_node_scale) {
         (void)name;
         if (binding.node == nullptr || binding.value == nullptr || binding.alignment == nullptr) continue;
+        ApplyNodeVec3Animation(binding);
         auto& alignment = *binding.alignment;
         const auto& value = binding.value->getVec3();
         if (! (alignment.scale.array() == value.array()).all()) {
@@ -647,6 +648,7 @@ void SceneRuntimeContext::Tick(double frame_time) {
     for (auto& [name, binding] : m_node_rotation) {
         (void)name;
         if (binding.node == nullptr || binding.value == nullptr) continue;
+        ApplyNodeVec3Animation(binding);
         binding.node->SetRotation(binding.value->getVec3());
         // Turning an anchored layer moves its centre, so the translate written
         // above from the previous rotation is re-derived.
@@ -685,6 +687,7 @@ void SceneRuntimeContext::Tick(double frame_time) {
         if (material == nullptr) continue;
         ApplyMaterialAlpha(*material, binding.animation->Value());
     }
+    for (auto& binding : m_material_colors) ApplyMaterialColorAnimation(binding);
     for (auto& binding : m_material_constants) ApplyMaterialConstantBinding(binding);
 }
 
@@ -1324,6 +1327,7 @@ void SceneRuntimeContext::RollbackNodeRegistration(
 
     m_material_constants.resize(previous->material_constants_size);
     m_material_alpha.resize(previous->material_alpha_size);
+    m_material_colors.resize(previous->material_colors_size);
     m_scalar_animations.resize(previous->scalar_animations_size);
     for (std::size_t index = previous->dynamic_value_listeners_size;
          index < m_dynamic_value_listeners.size(); ++index) {
@@ -1446,6 +1450,7 @@ SceneRuntimeContext::CaptureNodeRegistration(std::string_view name) const {
     snapshot->material_constants_size = m_material_constants.size();
     snapshot->dynamic_value_listeners_size = m_dynamic_value_listeners.size();
     snapshot->material_alpha_size = m_material_alpha.size();
+    snapshot->material_colors_size = m_material_colors.size();
     snapshot->scalar_animations_size = m_scalar_animations.size();
 
     return snapshot;
@@ -1574,23 +1579,30 @@ void SceneRuntimeContext::RegisterEffectVisibility(std::shared_ptr<SceneImageEff
     });
 }
 
-void SceneRuntimeContext::ApplyNodeOriginAnimation(NodeVec3Binding& binding) {
+void SceneRuntimeContext::ApplyNodeVec3Animation(NodeVec3Binding& binding) {
     if (binding.animation == nullptr || binding.animation->playback == nullptr) return;
-    const auto& animation = *binding.animation;
-    const double frame = animation.playback->frame;
+    const double frame = binding.animation->playback->frame;
     if (frame == binding.sampled_animation_frame) return;
-    Eigen::Vector3f origin;
-    for (std::size_t i = 0; i < animation.components.size(); ++i) {
-        const auto& curve = animation.components[i];
-        origin[i] = animation.offset[i] + curve.Evaluate(curve.fps > 0.0 ? frame / curve.fps : 0.0);
+    const auto value = binding.animation->Value();
+    binding.value->update(Eigen::Vector3f(value[0], value[1], value[2]));
+    binding.sampled_animation_frame = frame;
+}
+
+void SceneRuntimeContext::ApplyMaterialColorAnimation(MaterialColorBinding& binding) {
+    if (binding.animation == nullptr || binding.animation->playback == nullptr) return;
+    const double frame = binding.animation->playback->frame;
+    if (frame == binding.sampled_animation_frame) return;
+    const auto value = binding.animation->Value();
+    const Eigen::Vector3f color(value[0], value[1], value[2]);
+    for (const auto& weak : binding.materials) {
+        if (const auto material = weak.lock()) ApplyMaterialColor(*material, color);
     }
-    binding.value->update(origin);
     binding.sampled_animation_frame = frame;
 }
 
 void SceneRuntimeContext::RegisterNodeTranslate(std::string name, SceneNode* node,
                                                 std::unique_ptr<DynamicValue> value,
-                                                std::shared_ptr<const NodeOriginAnimation> animation) {
+                                                std::shared_ptr<const NodeVec3Animation> animation) {
     if (node == nullptr || value == nullptr) return;
 
     RegisterNode(name, node);
@@ -1602,38 +1614,46 @@ void SceneRuntimeContext::RegisterNodeTranslate(std::string name, SceneNode* nod
         .value = raw,
         .animation = std::move(animation),
     };
-    ApplyNodeOriginAnimation(binding);
+    ApplyNodeVec3Animation(binding);
     SetNodeTranslate(name, raw->getVec3());
     RefreshNodeTransformBindings(name);
 }
 
 void SceneRuntimeContext::RegisterNodeScale(std::string name, SceneNode* node,
-                                            std::unique_ptr<DynamicValue> value) {
+                                            std::unique_ptr<DynamicValue> value,
+                                            std::shared_ptr<const NodeVec3Animation> animation) {
     if (node == nullptr || value == nullptr) return;
 
     RegisterNode(name, node);
-    SetNodeScale(name, value->getVec3());
     auto* raw = value.get();
     m_owned_values.push_back(std::move(value));
-    m_node_scale[name] = NodeVec3Binding {
+    auto& binding = m_node_scale[name];
+    binding = NodeVec3Binding {
         .node  = node,
         .value = raw,
+        .animation = std::move(animation),
     };
+    ApplyNodeVec3Animation(binding);
+    SetNodeScale(name, raw->getVec3());
     RefreshNodeTransformBindings(name);
 }
 
 void SceneRuntimeContext::RegisterNodeRotation(std::string name, SceneNode* node,
-                                               std::unique_ptr<DynamicValue> value) {
+                                               std::unique_ptr<DynamicValue> value,
+                                               std::shared_ptr<const NodeVec3Animation> animation) {
     if (node == nullptr || value == nullptr) return;
 
     RegisterNode(name, node);
-    node->SetRotation(value->getVec3());
     auto* raw = value.get();
     m_owned_values.push_back(std::move(value));
-    m_node_rotation[name] = NodeVec3Binding {
+    auto& binding = m_node_rotation[name];
+    binding = NodeVec3Binding {
         .node  = node,
         .value = raw,
+        .animation = std::move(animation),
     };
+    ApplyNodeVec3Animation(binding);
+    node->SetRotation(raw->getVec3());
     RefreshNodeTransformBindings(name);
     ApplyAnchoredNodeTransform(name);
 }
@@ -1949,6 +1969,19 @@ void SceneRuntimeContext::BindMaterialBrightness(
                 if (material != nullptr) ApplyMaterialBrightness(*material, brightness);
             }
         });
+}
+
+void SceneRuntimeContext::RegisterMaterialColorAnimation(
+    std::vector<std::shared_ptr<SceneMaterial>> materials,
+    std::shared_ptr<const NodeVec3Animation> animation) {
+    if (materials.empty() || animation == nullptr) return;
+    MaterialColorBinding binding;
+    for (const auto& material : materials) {
+        if (material != nullptr) binding.materials.push_back(material);
+    }
+    binding.animation = std::move(animation);
+    ApplyMaterialColorAnimation(binding);
+    m_material_colors.push_back(std::move(binding));
 }
 
 std::shared_ptr<ScalarAnimationPlayback> SceneRuntimeContext::RegisterScalarAnimation(
