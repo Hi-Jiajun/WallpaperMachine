@@ -40,6 +40,8 @@ struct FilterGroup<Content: View>: View {
   @Binding var isExpanded: Bool
   private let content: Content
 
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
   init(
     _ title: LocalizedStringKey, count: Int = 0, isExpanded: Binding<Bool>,
     @ViewBuilder content: () -> Content
@@ -51,7 +53,10 @@ struct FilterGroup<Content: View>: View {
   }
 
   var body: some View {
-    DisclosureGroup(isExpanded: $isExpanded) {
+    // The pages hand in plain get/set bindings, which would snap the group open and shut; the
+    // animation rides on the binding so the chevron turns and the rows slide in with it.
+    let animation: Animation? = reduceMotion ? nil : .snappy(duration: 0.25)
+    DisclosureGroup(isExpanded: $isExpanded.animation(animation)) {
       VStack(alignment: .leading, spacing: 6) { content }
         .padding(.vertical, 6)
     } label: {

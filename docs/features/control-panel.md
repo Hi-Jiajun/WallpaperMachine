@@ -589,6 +589,7 @@ reflowing it. It closes with the Filter button, `Escape`, a click outside it or 
 change of page, and only one of the panel's popovers is open at a time. It is page
 state only: nothing is stored, and closing never changes the search or the
 filters. Each page's groups are listed below; Tags render as chips.
+Groups fold open and shut with a short animation (none under Reduce Motion).
 Collapsed groups retain their state and show their own active count:
 Show only counts selected tags, and exclude groups count visible boxes that differ
 from that page's defaults. **Clear** restores those defaults; hidden or unknown
