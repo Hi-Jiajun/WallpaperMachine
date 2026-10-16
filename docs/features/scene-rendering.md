@@ -763,7 +763,18 @@ the scene displaced by the layer's own offset. A fullscreen layer
 (`fullscreen` in its model) is laid over the whole screen whichever group it sits in:
 the group decides whether it shows, never where, how large or how turned, so its
 effects, its result and camera parallax all treat it as the outermost layer of its own
-tree. A `shape` object, the quad the editor's light-shaft effect is drawn on, is a quad
+tree. The layers saved below it are another matter: they are placed from the transform
+the scene saved for the fullscreen layer (none saved, none added, so a post-processing
+layer with no origin holds its children at canvas coordinates), under the groups it sits
+in, and not from the screen centre it is drawn at; and a fullscreen layer with effects
+holds those children in its own picture and runs its effects over them and over the
+screen behind, as a composition layer does over its children. The children are then drawn
+into the layer's screen-sized target in place of onto the scene; that cost was not
+measured, and it falls only on a fullscreen layer that has both effects and children (two
+local scenes have one). They are drawn there through the scene camera, as they would be
+drawn on screen: a composition layer frames its children with a camera of its own, but a
+fullscreen layer has none, so its children are zoomed, shaken and framed by camera shots
+with the rest of the scene. A `shape` object, the quad the editor's light-shaft effect is drawn on, is a quad
 as tall as the canvas on both axes, or the one `point0` to `point3` of its first effect
 make; it has no texture, and its last effect, with `DIRECTDRAW` forced on, is drawn additively
 straight onto the scene as the layer's own geometry, so it keeps a layer's transform,

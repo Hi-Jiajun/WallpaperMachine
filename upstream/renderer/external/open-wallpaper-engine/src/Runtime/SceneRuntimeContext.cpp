@@ -271,6 +271,7 @@ std::shared_ptr<SceneNode> CloneNodeShallow(SceneNode& node, std::string name,
     clone->SetVisible(node.Visible());
     clone->SetSkipRenderPass(node.SkipRenderPass());
     clone->SetIgnoreParentTransform(node.IgnoresParentTransform());
+    clone->CopyChildFrame(node);
     clone->SetCamera(node.Camera());
     clone->ID() = node.ID();
     if (node.HasRenderTransformOverride()) {

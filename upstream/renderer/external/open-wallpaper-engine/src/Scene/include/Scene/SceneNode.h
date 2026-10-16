@@ -45,6 +45,9 @@ public:
                sub->MarkTransDirty();
     }
     Eigen::Matrix4d GetLocalTrans() const;
+    static Eigen::Matrix4d LocalTransOf(const Eigen::Vector3f& translate,
+                                        const Eigen::Vector3f& scale,
+                                        const Eigen::Vector3f& rotation);
 
     const auto& Translate() const { return m_translate; }
     const auto& Scale() const { return m_scale; }
@@ -122,6 +125,25 @@ public:
         MarkTransDirty();
     }
 
+    /// Where the node's children are placed from, for a node drawn by something
+    /// other than its own transform. A fullscreen layer covers the screen
+    /// whatever its origin, scale or angles, but the layers below it are placed
+    /// from the transform the scene saved for it (none saved, none added), under
+    /// whatever groups it sits in. Without one a child is placed from the node's
+    /// own `ModelTrans`.
+    void SetChildFrame(const Eigen::Vector3f& translate, const Eigen::Vector3f& scale,
+                       const Eigen::Vector3f& rotation) {
+        m_childLocal = LocalTransOf(translate, scale, rotation);
+        MarkTransDirty();
+    }
+    bool HasChildFrame() const { return m_childLocal.has_value(); }
+    /// Takes over another node's child frame, as a copy of the node does.
+    void CopyChildFrame(const SceneNode& node) {
+        if (m_childLocal == node.m_childLocal) return;
+        m_childLocal = node.m_childLocal;
+        MarkTransDirty();
+    }
+
     void SetAttachmentTransform(const Eigen::Matrix4d& transform) {
         if (m_attachmentTransform && m_attachmentTransform->isApprox(transform, 1.0e-10)) return;
         m_attachmentTransform = transform;
@@ -158,6 +180,8 @@ public:
     // update self modle trans (will update parent before)
     void            UpdateTrans();
     Eigen::Matrix4d ModelTrans() const { return m_trans; };
+    /// The matrix the children's own are composed on (after `UpdateTrans`).
+    Eigen::Matrix4d ChildTrans() const { return m_childTrans; }
 
     SceneMesh* Mesh() { return m_mesh.get(); }
     bool       HasMaterial() const { return m_mesh && m_mesh->Material() != nullptr; };
@@ -187,7 +211,9 @@ private:
     std::optional<double> m_textureAnimationFrame;
 
     bool            m_dirty;
-    Eigen::Matrix4d m_trans;
+    Eigen::Matrix4d m_trans { Eigen::Matrix4d::Identity() };
+    Eigen::Matrix4d m_childTrans { Eigen::Matrix4d::Identity() };
+    std::optional<Eigen::Matrix4d> m_childLocal;
 
     Eigen::Vector3f m_translate { 0.0f, 0.0f, 0.0f };
     Eigen::Vector3f m_scale { 1.0f, 1.0f, 1.0f };

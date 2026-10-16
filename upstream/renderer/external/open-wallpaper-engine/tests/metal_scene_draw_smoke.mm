@@ -4281,6 +4281,441 @@ TEST_F(MetalSceneDraw, AFullscreenLayerCoversTheScreenWhereverItsGroupSitsOnBoth
         << "the renderers draw the fullscreen layer differently";
 }
 
+TEST_F(MetalSceneDraw, TheChildrenOfAFullscreenLayerAreSavedAgainstItsOwnTransformOnBothRenderers)
+{
+    // A fullscreen layer is drawn over the whole screen whatever its own origin,
+    // but the layers below it are placed from the transform the scene saved for
+    // it: none saved, none added. A post-processing layer with no origin holds
+    // its children at canvas coordinates, so a picture saved at the middle of
+    // the canvas is drawn at the middle; placed from the screen centre the layer
+    // was drawn at, it was drawn a whole canvas away, with only a quarter of it
+    // on screen. The same backdrop is saved against each shape of the tree and
+    // must come out as the backdrop alone.
+    struct Tree {
+        const char* name;
+        // The fullscreen layer, its own fields (origin and the like), and the
+        // objects below it; `P` stands for the fullscreen layer's id.
+        const char* fullscreen_fields;
+        bool        identity_effect;
+        const char* children;
+        const char* group;
+    };
+    const std::array<Tree, 7> trees { {
+        { "no origin", "", false,
+          R"({"id":4,"name":"picture","parent":2,"image":"models/backdrop.json","origin":[192,128,0],"visible":true})",
+          "" },
+        { "no origin, with an effect", "", true,
+          R"({"id":4,"name":"picture","parent":2,"image":"models/backdrop.json","origin":[192,128,0],"visible":true})",
+          "" },
+        { "an origin saved", R"("origin":[40,-30,0],)", true,
+          R"({"id":4,"name":"picture","parent":2,"image":"models/backdrop.json","origin":[152,158,0],"visible":true})",
+          "" },
+        { "a scale and a turn saved", R"("origin":[40,-30,0],"scale":[2,2,1],"angles":[0,0,0.5],)", true,
+          // Placed from the saved transform M = T(40,-30) R(0.5) S(2): the
+          // picture is saved as M's inverse takes the canvas middle.
+          R"({"id":4,"name":"picture","parent":2,"image":"models/backdrop.json","origin":[104.57089,32.89268,0],"scale":[0.5,0.5,1],"angles":[0,0,-0.5],"visible":true})",
+          "" },
+        { "nested", "", true,
+          R"({"id":5,"name":"inner","parent":2,"origin":[-50,20,0],"visible":true},)"
+          R"({"id":4,"name":"picture","parent":5,"image":"models/backdrop.json","origin":[242,108,0],"visible":true})",
+          "" },
+        { "under a moved group", "", true,
+          R"({"id":4,"name":"picture","parent":2,"image":"models/backdrop.json","origin":[92,68,0],"visible":true})",
+          R"({"id":9,"name":"group","origin":[100,60,0],"visible":true},)" },
+        { "under a scaled and turned group", "", false,
+          // Group: T(100,60) R(0.3) S(1.5); the picture is saved as its inverse.
+          R"({"id":4,"name":"picture","parent":2,"image":"models/backdrop.json","origin":[0,0,0],"scale":[0.66666667,0.66666667,1],"angles":[0,0,-0.3],"visible":true})",
+          R"({"id":9,"name":"group","origin":[192,128,0],"scale":[1.5,1.5,1],"angles":[0,0,0.3],"visible":true},)" },
+    } };
+    std::map<std::string, RendererPicture> pictures;
+    for (const bool native : { false, true }) {
+        for (std::size_t variant = 0; variant <= trees.size(); ++variant) {
+            const bool        plain = variant == trees.size();
+            const std::string label = plain ? "plain" : trees[variant].name;
+            const std::string name  = std::string("fullscreen-children-") + (native ? "native-" : "compat-") +
+                                     std::to_string(variant);
+            const auto project = WriteFixture(root_ / name);
+            const auto file    = [&](const std::string& path, const std::string& text) {
+                std::filesystem::create_directories((root_ / name / path).parent_path());
+                std::ofstream(root_ / name / path) << text;
+            };
+            const std::string vertex =
+                "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\n"
+                "attribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+                "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+                "  v_TexCoord = a_TexCoord;\n}\n";
+            file("shaders/quadrants.vert", vertex);
+            file("shaders/quadrants.frag",
+                 "varying vec2 v_TexCoord;\nvoid main() {\n"
+                 "  vec3 low = v_TexCoord.x < 0.5 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);\n"
+                 "  vec3 high = v_TexCoord.x < 0.5 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 1.0, 0.0);\n"
+                 "  gl_FragColor = vec4(v_TexCoord.y < 0.5 ? low : high, 1.0);\n}\n");
+            file("shaders/through.vert", vertex);
+            file("shaders/through.frag",
+                 "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\n"
+                 "void main() {\n  gl_FragColor = texture2D(g_Texture0, v_TexCoord);\n}\n");
+            const std::string pass =
+                R"("cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled")";
+            file("materials/quadrants.json",
+                 R"({"passes":[{"shader":"quadrants","blending":"translucent",)" + pass + "}]}");
+            file("materials/screen.json",
+                 R"({"passes":[{"shader":"through","blending":"translucent",)" + pass +
+                     R"(,"textures":["_rt_FullFrameBuffer"]}]})");
+            file("materials/through.json",
+                 R"({"passes":[{"shader":"through","blending":"normal",)" + pass +
+                     R"(,"textures":[null]}]})");
+            file("effects/identity/effect.json",
+                 R"({"name":"identity","passes":[{"material":"materials/through.json"}]})");
+            file("models/backdrop.json",
+                 R"({"width":384,"height":256,"material":"materials/quadrants.json"})");
+            file("models/post.json",
+                 R"({"fullscreen":true,"passthrough":true,"material":"materials/screen.json"})");
+            std::string objects;
+            if (plain) {
+                objects = R"({"id":4,"name":"picture","image":"models/backdrop.json","origin":[192,128,0],)"
+                          R"("scale":[1,1,1],"angles":[0,0,0],"visible":true})";
+            } else {
+                const auto& tree = trees[variant];
+                const std::string group  = tree.group;
+                const std::string parent = group.empty() ? "" : R"("parent":9,)";
+                objects = group + R"({"id":2,"name":"post",)" + parent + tree.fullscreen_fields +
+                          R"("image":"models/post.json","visible":true)" +
+                          (tree.identity_effect
+                               ? R"(,"effects":[{"file":"effects/identity/effect.json","id":3,"visible":true}])"
+                               : "") +
+                          "}," + tree.children;
+            }
+            file("layout.json",
+                 R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+                 R"("general":{"clearcolor":[0,0,0],"bloom":false,"cameraparallax":false,)"
+                 R"("orthogonalprojection":{"width":384,"height":256}},"objects":[)" +
+                     objects + "]}");
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << label << ": " << error;
+            if (native) {
+                const auto selection = SelectSceneBackend(*loaded.scene);
+                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            }
+            auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << label << ": " << picture.error;
+            ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+            pictures[(native ? "native " : "compat ") + label] = std::move(picture);
+        }
+    }
+    for (const bool native : { false, true }) {
+        const std::string prefix = native ? "native " : "compat ";
+        const auto&       plain  = pictures.at(prefix + "plain").rgb;
+        // Four colours at four places: a quarter of the picture, or the picture
+        // a canvas away, cannot match by chance.
+        const auto at = [&plain](int x, int y) {
+            const std::size_t i = (static_cast<std::size_t>(y) * 384u + static_cast<std::size_t>(x)) * 3u;
+            return std::array<int, 3> { plain[i], plain[i + 1], plain[i + 2] };
+        };
+        ASSERT_NE(at(30, 30), at(350, 30));
+        ASSERT_NE(at(30, 30), at(30, 220));
+        ASSERT_NE(at(350, 220), at(350, 30));
+        for (const auto& tree : trees) {
+            const auto& rgb = pictures.at(prefix + tree.name).rgb;
+            std::size_t different = 0;
+            for (std::size_t i = 0; i < rgb.size(); ++i) {
+                if (std::abs(int(rgb[i]) - int(plain[i])) > 3) ++different;
+            }
+            EXPECT_EQ(different, 0u)
+                << (native ? "native" : "compatibility") << " renderer, children saved " << tree.name
+                << ": " << different << " of " << rgb.size()
+                << " channel values differ from the backdrop drawn alone";
+        }
+    }
+}
+
+TEST_F(MetalSceneDraw, TheEffectsOfAFullscreenLayerReachItsChildrenOnBothRenderers)
+{
+    // A post-processing layer holds the layers saved below it in its own picture
+    // and runs its effects over all of it, so an effect that keeps only the red
+    // of the picture leaves no green or blue of a child. Drawn after the layer,
+    // the child kept its own colours.
+    std::map<bool, RendererPicture> pictures;
+    for (const bool native : { false, true }) {
+        const std::string name    = native ? "fullscreen-effects-native" : "fullscreen-effects-compat";
+        const auto        project = WriteFixture(root_ / name);
+        const auto        file    = [&](const std::string& path, const std::string& text) {
+            std::filesystem::create_directories((root_ / name / path).parent_path());
+            std::ofstream(root_ / name / path) << text;
+        };
+        const std::string vertex =
+            "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\n"
+            "attribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+            "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+            "  v_TexCoord = a_TexCoord;\n}\n";
+        file("shaders/quadrants.vert", vertex);
+        file("shaders/quadrants.frag",
+             "varying vec2 v_TexCoord;\nvoid main() {\n"
+             "  vec3 low = v_TexCoord.x < 0.5 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);\n"
+             "  vec3 high = v_TexCoord.x < 0.5 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 1.0, 0.0);\n"
+             "  gl_FragColor = vec4(v_TexCoord.y < 0.5 ? low : high, 1.0);\n}\n");
+        file("shaders/redonly.vert", vertex);
+        file("shaders/redonly.frag",
+             "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\n"
+             "void main() {\n  vec4 c = texture2D(g_Texture0, v_TexCoord);\n"
+             "  gl_FragColor = vec4(c.r, 0.0, 0.0, 1.0);\n}\n");
+        const std::string pass =
+            R"("cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled")";
+        file("materials/quadrants.json",
+             R"({"passes":[{"shader":"quadrants","blending":"translucent",)" + pass + "}]}");
+        file("materials/screen.json",
+             R"({"passes":[{"shader":"redonly","blending":"translucent",)" + pass +
+                 R"(,"textures":["_rt_FullFrameBuffer"]}]})");
+        file("materials/redonly.json",
+             R"({"passes":[{"shader":"redonly","blending":"normal",)" + pass + R"(,"textures":[null]}]})");
+        file("effects/redonly/effect.json",
+             R"({"name":"redonly","passes":[{"material":"materials/redonly.json"}]})");
+        file("models/backdrop.json", R"({"width":384,"height":256,"material":"materials/quadrants.json"})");
+        file("models/post.json",
+             R"({"fullscreen":true,"passthrough":true,"material":"materials/screen.json"})");
+        file("layout.json",
+             R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+             R"("general":{"clearcolor":[0,0,0],"bloom":false,"cameraparallax":false,)"
+             R"("orthogonalprojection":{"width":384,"height":256}},"objects":[)"
+             R"({"id":2,"name":"post","image":"models/post.json","visible":true,)"
+             R"("effects":[{"file":"effects/redonly/effect.json","id":3,"visible":true}]},)"
+             R"({"id":4,"name":"picture","parent":2,"image":"models/backdrop.json","origin":[192,128,0],)"
+             R"("visible":true}]})");
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+        if (native) {
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+        }
+        pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+        ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+        const auto& rgb = pictures[native].rgb;
+        ASSERT_EQ(rgb.size(), 384u * 256u * 3u);
+        // The picture's four quadrants, through the layer's effect: only red.
+        for (const auto& [x, y] : std::array<std::pair<int, int>, 4> { { { 60, 60 }, { 330, 60 }, { 60, 200 }, { 330, 200 } } }) {
+            const std::size_t i = (static_cast<std::size_t>(y) * 384u + static_cast<std::size_t>(x)) * 3u;
+            EXPECT_EQ(rgb[i + 1], 0) << (native ? "native" : "compatibility") << " green at " << x << "," << y;
+            EXPECT_EQ(rgb[i + 2], 0) << (native ? "native" : "compatibility") << " blue at " << x << "," << y;
+        }
+    }
+    EXPECT_EQ(pictures[true].rgb, pictures[false].rgb);
+}
+
+namespace
+{
+/// A scene of four-coloured cards under a fullscreen layer that passes the screen
+/// on, for comparing a tree with the same cards drawn plain. `general` is added to
+/// the scene's general settings, `objects` is the whole object list; the
+/// fullscreen layer is `models/post.json` and its one effect, when it has one,
+/// `effects/identity/effect.json`.
+std::filesystem::path WriteFullscreenTreeFixture(const std::filesystem::path& root,
+                                                 const std::string&           general,
+                                                 const std::string&           objects)
+{
+    const auto project = WriteFixture(root);
+    const auto file    = [&](const std::string& path, const std::string& text) {
+        std::filesystem::create_directories((root / path).parent_path());
+        std::ofstream(root / path) << text;
+    };
+    const std::string vertex =
+        "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\n"
+        "attribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+        "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+        "  v_TexCoord = a_TexCoord;\n}\n";
+    file("shaders/quadrants.vert", vertex);
+    file("shaders/quadrants.frag",
+         "varying vec2 v_TexCoord;\nvoid main() {\n"
+         "  vec3 low = v_TexCoord.x < 0.5 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);\n"
+         "  vec3 high = v_TexCoord.x < 0.5 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 1.0, 0.0);\n"
+         "  gl_FragColor = vec4(v_TexCoord.y < 0.5 ? low : high, 1.0);\n}\n");
+    file("shaders/through.vert", vertex);
+    file("shaders/through.frag",
+         "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\n"
+         "void main() {\n  gl_FragColor = texture2D(g_Texture0, v_TexCoord);\n}\n");
+    const std::string pass = R"("cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled")";
+    file("materials/quadrants.json",
+         R"({"passes":[{"shader":"quadrants","blending":"translucent",)" + pass + "}]}");
+    file("materials/screen.json",
+         R"({"passes":[{"shader":"through","blending":"translucent",)" + pass +
+             R"(,"textures":["_rt_FullFrameBuffer"]}]})");
+    file("materials/through.json",
+         R"({"passes":[{"shader":"through","blending":"normal",)" + pass + R"(,"textures":[null]}]})");
+    file("effects/identity/effect.json",
+         R"({"name":"identity","passes":[{"material":"materials/through.json"}]})");
+    file("models/backdrop.json", R"({"width":384,"height":256,"material":"materials/quadrants.json"})");
+    file("models/card.json", R"({"width":64,"height":64,"material":"materials/quadrants.json"})");
+    file("models/post.json",
+         R"({"fullscreen":true,"passthrough":true,"material":"materials/screen.json"})");
+    file("layout.json",
+         R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+         R"("general":{"clearcolor":[0,0,0],"bloom":false,)" +
+             general + R"("orthogonalprojection":{"width":384,"height":256}},"objects":[)" + objects +
+             "]}");
+    return project;
+}
+
+/// The channel values of `rgb` more than 3 away from `reference`'s.
+std::size_t ChannelsApart(const std::vector<uint8_t>& rgb, const std::vector<uint8_t>& reference)
+{
+    std::size_t different = 0;
+    for (std::size_t i = 0; i < rgb.size() && i < reference.size(); ++i) {
+        if (std::abs(int(rgb[i]) - int(reference[i])) > 3) ++different;
+    }
+    return different;
+}
+} // namespace
+
+TEST_F(MetalSceneDraw, TheChildrenOfAFullscreenLayerFollowTheSceneCameraOnBothRenderers)
+{
+    // Wallpaper Engine frames a composition layer's children with a camera of
+    // the layer's own, but a fullscreen layer keeps the scene camera: the layers
+    // below it are drawn through it, zoom, shake and shots alike, and land where
+    // they would without the fullscreen layer. Drawn into the layer's picture
+    // through a fixed camera over the canvas, a card under a fullscreen layer
+    // with an effect stayed unzoomed and still while the rest of the scene was
+    // zoomed and shook.
+    struct Camera {
+        const char* name;
+        const char* general;
+        int         frames;
+    };
+    const std::array<Camera, 3> cameras { {
+        { "zoomed", R"("cameraparallax":false,"zoom":2,)", 3 },
+        { "shaking", R"("cameraparallax":false,"camerashake":true,"camerashakeamplitude":5,)"
+                     R"("camerashakespeed":3,"camerashakeroughness":0,)", 30 },
+        { "zoomed and shaking", R"("cameraparallax":false,"zoom":2,"camerashake":true,)"
+                                R"("camerashakeamplitude":5,"camerashakespeed":3,"camerashakeroughness":0,)", 30 },
+    } };
+    const std::string card =
+        R"({"id":4,"name":"card","image":"models/card.json","origin":[120,90,0],"visible":true)";
+    const auto post = [](bool effect) {
+        return std::string(R"({"id":2,"name":"post","image":"models/post.json","visible":true)") +
+               (effect ? R"(,"effects":[{"file":"effects/identity/effect.json","id":3,"visible":true}])" : "") +
+               "},";
+    };
+    struct Tree {
+        const char* name;
+        std::string objects;
+    };
+    const std::array<Tree, 3> trees { {
+        { "plain", card + "}" },
+        { "under a fullscreen layer", post(false) + card + R"(,"parent":2})" },
+        { "under a fullscreen layer with an effect", post(true) + card + R"(,"parent":2})" },
+    } };
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        const auto draw = [&](const std::string& general, const Tree& tree, int frames,
+                              const std::string& key) {
+            const std::string name = std::string("fullscreen-camera-") + (native ? "native-" : "compat-") + key;
+            const auto project = WriteFullscreenTreeFixture(root_ / name, general, tree.objects);
+            LoadedScene loaded;
+            std::string error;
+            EXPECT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            if (loaded.scene == nullptr) return RendererPicture {};
+            if (native) {
+                const auto selection = SelectSceneBackend(*loaded.scene);
+                EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            }
+            auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, frames, 1.0 / 60.0);
+            EXPECT_TRUE(picture.error.empty()) << tree.name << ": " << picture.error;
+            EXPECT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+            return picture;
+        };
+        const auto still = draw(R"("cameraparallax":false,)", trees[0], 3, "still");
+        for (std::size_t c = 0; c < cameras.size(); ++c) {
+            const auto& camera = cameras[c];
+            SCOPED_TRACE(camera.name);
+            const auto plain = draw(camera.general, trees[0], camera.frames, std::to_string(c) + "-plain");
+            if (still.rgb.empty() || plain.rgb.size() != still.rgb.size()) return;
+            // The camera moves the card, or the comparison below says nothing.
+            ASSERT_GT(ChannelsApart(plain.rgb, still.rgb), 1000u);
+            for (std::size_t t = 1; t < trees.size(); ++t) {
+                const auto picture =
+                    draw(camera.general, trees[t], camera.frames, std::to_string(c) + "-" + std::to_string(t));
+                if (picture.rgb.size() != plain.rgb.size()) continue;
+                const auto different = ChannelsApart(picture.rgb, plain.rgb);
+                EXPECT_EQ(different, 0u) << "the card " << trees[t].name << ": " << different << " of "
+                                         << picture.rgb.size()
+                                         << " channel values differ from the card drawn plain";
+            }
+        }
+    }
+}
+
+TEST_F(MetalSceneDraw, ParallaxMovesTheChildrenOfAFullscreenLayerWithTheirTreeOnBothRenderers)
+{
+    // Camera parallax moves a whole tree by its outermost layer's distance from
+    // the middle of the view. A fullscreen layer is drawn over the screen
+    // wherever it is saved, but the layers below it belong to the tree it sits
+    // in: under a group, the group is the outermost layer, and a top-level
+    // fullscreen layer moves its children from the place saved for it, as a
+    // group saved there would. With the cursor centred, a group 20 right of and
+    // 10 above the middle of the view at depth 2 and an amount of 0.5 moves its
+    // children 20 right and 10 up. Measured from the fullscreen layer, which is
+    // drawn at the middle of the view, the children were not moved at all.
+    const std::string general =
+        R"("cameraparallax":true,"cameraparallaxamount":0.5,"cameraparallaxdelay":0,)"
+        R"("cameraparallaxmouseinfluence":1,)";
+    const std::string picture =
+        R"({"id":4,"name":"picture","image":"models/backdrop.json","origin":[-20,-10,0],"visible":true,)";
+    const auto post = [](const std::string& fields, bool effect) {
+        return std::string(R"({"id":2,"name":"post","image":"models/post.json","visible":true,)") + fields +
+               (effect ? R"("effects":[{"file":"effects/identity/effect.json","id":3,"visible":true}],)" : "") +
+               R"("parallaxDepth":[2,2]},)";
+    };
+    const std::string group = R"({"id":9,"name":"group","origin":[212,138,0],"parallaxDepth":[2,2],"visible":true},)";
+    struct Tree {
+        const char* name;
+        std::string objects;
+    };
+    const std::array<Tree, 5> trees { {
+        { "a group over the picture", group + picture + R"("parent":9})" },
+        { "a group over a fullscreen layer", group + post(R"("parent":9,)", false) + picture + R"("parent":2})" },
+        { "a group over a fullscreen layer with an effect",
+          group + post(R"("parent":9,)", true) + picture + R"("parent":2})" },
+        { "a fullscreen layer saved where the group is",
+          post(R"("origin":[212,138,0],)", false) + picture + R"("parent":2})" },
+        { "a fullscreen layer with an effect saved where the group is",
+          post(R"("origin":[212,138,0],)", true) + picture + R"("parent":2})" },
+    } };
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        std::vector<RendererPicture> pictures;
+        for (std::size_t t = 0; t < trees.size(); ++t) {
+            const std::string name =
+                std::string("fullscreen-parallax-") + (native ? "native-" : "compat-") + std::to_string(t);
+            const auto project = WriteFullscreenTreeFixture(root_ / name, general, trees[t].objects);
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << trees[t].name << ": " << error;
+            if (native) {
+                const auto selection = SelectSceneBackend(*loaded.scene);
+                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            }
+            loaded.scene->shaderValueUpdater->MouseInput(0.5, 0.5);
+            auto drawn = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+            ASSERT_TRUE(drawn.error.empty()) << trees[t].name << ": " << drawn.error;
+            ASSERT_EQ(drawn.rgb.size(), 384u * 256u * 3u);
+            pictures.push_back(std::move(drawn));
+        }
+        // The group moves the picture: its left column and bottom rows are the
+        // clear colour, and the picture's corner colour starts 20 to the right.
+        const auto& reference = pictures.front().rgb;
+        const auto  at        = [&reference](int x, int y) {
+            const std::size_t i = (static_cast<std::size_t>(y) * 384u + static_cast<std::size_t>(x)) * 3u;
+            return std::array<int, 3> { reference[i], reference[i + 1], reference[i + 2] };
+        };
+        ASSERT_EQ(at(10, 128), (std::array<int, 3> { 0, 0, 0 }));
+        ASSERT_NE(at(30, 128), (std::array<int, 3> { 0, 0, 0 }));
+        for (std::size_t t = 1; t < trees.size(); ++t) {
+            const auto different = ChannelsApart(pictures[t].rgb, reference);
+            EXPECT_EQ(different, 0u) << trees[t].name << ": " << different << " of " << reference.size()
+                                     << " channel values differ from the picture under a group alone";
+        }
+    }
+}
+
 TEST_F(MetalSceneDraw, AVertexShaderThatWritesItsInputsStillReadsTheMeshOnBothRenderers)
 {
     // Wallpaper Engine's HLSL lets a vertex shader assign to its inputs (a

@@ -593,12 +593,19 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, uint32_t material_sl
                                                 ? nodeData->parallax_layer
                                                 : pNode;
                     // A layer placed by its own transform alone (a fullscreen
-                    // layer) is the outermost of its own tree.
-                    while (root->Parent() != nullptr &&
-                           root->Parent() != m_scene->sceneGraph.get() &&
-                           ! root->IgnoresParentTransform())
-                        root = root->Parent();
-                    offset += root->ModelTrans().block<2, 1>(0, 3).cast<float>() -
+                    // layer) is the outermost of its own tree; the layers below
+                    // it belong to the tree it sits in, and are placed from the
+                    // transform the scene saved for it.
+                    const SceneNode* const start = root;
+                    if (! root->IgnoresParentTransform()) {
+                        while (root->Parent() != nullptr &&
+                               root->Parent() != m_scene->sceneGraph.get())
+                            root = root->Parent();
+                    }
+                    const Matrix4d root_model = root != start && root->HasChildFrame()
+                                                    ? root->ChildTrans()
+                                                    : root->ModelTrans();
+                    offset += root_model.block<2, 1>(0, 3).cast<float>() -
                               matrix_camera->GetPosition().cast<float>().head<2>();
                 }
                 if (! m_parallax.canvas_scene) {

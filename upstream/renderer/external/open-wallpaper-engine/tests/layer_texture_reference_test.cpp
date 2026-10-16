@@ -1998,6 +1998,55 @@ TEST(CameraFraming, AGroupStillDecidesWhetherAFullscreenLayerShows) {
     ExpectCardFillsItsTarget(*parsed, *post, { 32.0, 16.0 });
 }
 
+// A fullscreen layer is drawn over the whole screen whatever its own transform,
+// but the layers below it are placed from the transform the scene saved for it
+// (none saved, none added) under the groups it sits in. Placed from the screen
+// centre the layer is drawn at, a picture saved at the middle of the canvas was
+// drawn a whole canvas away.
+TEST(CameraFraming, TheChildrenOfAFullscreenLayerAreSavedAgainstItsSavedTransform) {
+    struct Case {
+        const char* name;
+        const char* post_fields;
+        const char* group;
+        Eigen::Vector3d expected;  // the child's world position
+    };
+    const std::array<Case, 4> cases { {
+        { "no origin", "", "", { 7.0, 9.0, 0.0 } },
+        { "an origin saved", R"("origin":[5,3,0],)", "", { 12.0, 12.0, 0.0 } },
+        { "a scale saved", R"("origin":[5,3,0],"scale":[2,2,1],)", "", { 19.0, 21.0, 0.0 } },
+        { "under a moved group", "", R"("parent":3,)", { 27.0, 19.0, 0.0 } },
+    } };
+    for (const auto& item : cases) {
+        SCOPED_TRACE(item.name);
+        fs::VFS vfs;
+        auto    extra = CopyEffectFiles();
+        extra["/post.json"] = R"({"fullscreen":true,"passthrough":true,"material":"mat.json"})";
+        const ProjectProperties properties;
+        auto parsed = ParseScene(vfs,
+                                 std::string(R"([
+            {"id":3,"name":"group","origin":[20,10,0]},
+            {"id":2,"name":"post",)") + item.post_fields +
+                                     item.group + R"("image":"post.json",
+             "effects":[{"file":"effects/copy/effect.json","visible":true}]},
+            {"id":4,"name":"picture","parent":2,"origin":[7,9,0]}
+          ])",
+                                 std::move(extra), &properties);
+        ASSERT_NE(parsed, nullptr);
+        ASSERT_NE(parsed->runtime, nullptr);
+        for (int tick = 0; tick < 2; ++tick) parsed->runtime->Tick(1.0 / 60.0);
+        const Eigen::Matrix4d picture = parsed->runtime->NodeTransformMatrix("picture");
+        EXPECT_NEAR(picture(0, 3), item.expected.x(), 1.0e-4);
+        EXPECT_NEAR(picture(1, 3), item.expected.y(), 1.0e-4);
+        // The layer itself still covers the screen, whatever was saved for it.
+        AddScreenTarget(*parsed);
+        const auto graph = sceneToRenderGraph(*parsed);
+        ASSERT_NE(graph, nullptr);
+        const auto* post = FindPassByOutput(*graph, SpecTex_Default);
+        ASSERT_NE(post, nullptr);
+        ExpectCardFillsItsTarget(*parsed, *post, { 32.0, 16.0 });
+    }
+}
+
 // The camera perspective layers of a 2D scene draw through keeps the lens the
 // scene authored and follows the canvas plane: whatever frames the canvas -- a
 // fill mode, a camera layer's zoom and pan -- puts its eye (visible height / 2) /

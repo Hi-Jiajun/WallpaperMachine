@@ -230,6 +230,47 @@ Playback, backend, host and startup areas are in
     draws a four-quadrant backdrop through a pass-through fullscreen layer alone and
     under a moved, scaled and turned group, and requires every picture to equal the
     backdrop alone on both renderers.
+  - The layers below a fullscreen layer are placed from its saved transform
+    (`SceneNode::SetChildFrame`, set by `ParseImageObj` from the origin, scale and angles
+    the scene saved, which default to none; `SceneNode::ChildTrans` is what children
+    compose on, so the groups above still carry them). The layer is drawn at the screen
+    centre with scale 1; its children were placed from that centre too, a canvas away
+    from where they were saved (the "Post-processing Layer" of 3804689861, with a
+    3840 x 2160 picture saved at the canvas centre, drew a quarter of it). A fullscreen
+    layer with effects and children renders as a composition layer does
+    (`fullscreen_holds_children` in `ParseImageObj`), so its effects reach the children.
+    The children are drawn into that target through the scene camera, not the layer's
+    compose camera (`SceneCamera::ChildrenUseSceneCamera`, which
+    `ResolveNearestComposeTarget` reads to leave the draw's camera alone), so zoom,
+    camera shake and camera shots reach them as they reach the screen copy behind them;
+    through the compose camera, a fixed view of the canvas, they stayed unzoomed and still
+    while the scene shook (3743578252's foreground fish). Parallax walks past the
+    fullscreen layer to the group it sits in for the layers below it, and for a top-level
+    fullscreen layer measures them from its saved origin (its `ChildTrans`).
+    `CameraFraming.TheChildrenOfAFullscreenLayerAreSavedAgainstItsSavedTransform`
+    (no origin, an origin, a scale, under a moved group; the layer still fills its target)
+    in `layer_texture_reference_test`;
+    `MetalSceneDraw.TheChildrenOfAFullscreenLayerAreSavedAgainstItsOwnTransformOnBothRenderers`
+    saves one backdrop against seven shapes of tree (no origin, with an effect, an origin,
+    a scale and a turn, nested, under a moved group, under a scaled and turned group) and
+    requires each to equal the backdrop alone, and
+    `.TheEffectsOfAFullscreenLayerReachItsChildrenOnBothRenderers` requires an effect that
+    keeps only red to leave no green or blue of a child, on both renderers.
+    `.TheChildrenOfAFullscreenLayerFollowTheSceneCameraOnBothRenderers` draws a 64 x 64
+    card under a fullscreen layer with and without an effect, zoomed 2x, shaking, and
+    both, and requires each to equal the card drawn plain under the same camera.
+    `.ParallaxMovesTheChildrenOfAFullscreenLayerWithTheirTreeOnBothRenderers` (amount 0.5,
+    cursor centred) requires a picture under group -> fullscreen layer (with and without
+    an effect) and under a top-level fullscreen layer saved where the group is (children
+    inheriting its depth 2) to equal the picture under the group alone.
+    Established from the 2.8.42 decompile (the layer's own draw ignores its model matrix;
+    children are drawn through its composite) and from two local scenes, not from a
+    Wallpaper Engine frame of a scene that has the layer: 3804689861's author preview
+    fills the frame with the picture, and 3743578252 animates the groups its fullscreen
+    layers sit in so that their fish swim, which needs the groups to carry the children.
+    Not compared pixel for pixel: the previews are a close-up and an edited loop. 3743578252
+    now draws its large dark foreground fish at scale 3.7 across the frame early in its
+    timeline, which a Wallpaper Engine frame at the same time would settle.
 - **One cursor mapping, owned by the presentation** —
   `SceneRuntimeContext::SetCursorInput` maps window-normalized input through the
   cursor viewport the renderer publishes (`origin + (x, 1 - y) * size`) and writes

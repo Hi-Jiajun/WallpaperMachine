@@ -150,6 +150,8 @@ static bool HiddenUntilReload(const SceneNode* node)
 struct ComposeTarget
 {
     std::string target;
+    /// The camera the layers below draw through; empty for the one they would
+    /// draw through on screen.
     std::string camera;
 };
 
@@ -162,7 +164,8 @@ static ComposeTarget ResolveNearestComposeTarget(Scene& scene, SceneNode* node)
         if (!IsComposeEffectCamera(scene, camera_iterator->second, current)) continue;
         return {
             .target = camera_iterator->second->GetImgEffect()->FirstTarget(),
-            .camera = current->Camera(),
+            .camera = camera_iterator->second->ChildrenUseSceneCamera() ? std::string {}
+                                                                        : current->Camera(),
         };
     }
     return {};

@@ -4323,8 +4323,14 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     }
     const bool has_child_content =
         context.object_list != nullptr && HasChildObject(*context.object_list, wpimgobj.id);
+    // A post-processing layer holds the layers saved below it in its own picture
+    // and runs its effects over all of it, as a composition layer does over its
+    // children, but over the whole screen.
+    const bool fullscreen_holds_children =
+        wpimgobj.fullscreen && wpimgobj.config.passthrough && has_child_content && count_eff > 0;
     const bool render_as_compose =
-        isCompose && has_child_content && (! wpimgobj.copybackground || count_eff > 0);
+        (isCompose && has_child_content && (! wpimgobj.copybackground || count_eff > 0)) ||
+        fullscreen_holds_children;
     bool hasEffect = count_eff > 0 || render_as_compose || (isCompose && ! wpimgobj.copybackground);
 
     bool hasPuppet = ! wpimgobj.puppet.empty();
@@ -4355,11 +4361,18 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         }
     }
 
+    // What the scene saved for a fullscreen layer places its children; the layer
+    // itself is drawn over the whole screen, whatever that is.
+    const Vector3f fullscreen_saved_origin(wpimgobj.origin.data());
+    const Vector3f fullscreen_saved_scale(wpimgobj.scale.data());
+    const Vector3f fullscreen_saved_angles(wpimgobj.angles.data());
     if (wpimgobj.fullscreen) {
         wpimgobj.size[0]   = static_cast<float>(context.ortho_w);
         wpimgobj.size[1]   = static_cast<float>(context.ortho_h);
         wpimgobj.origin[0] = static_cast<float>(context.ortho_w) * 0.5f;
         wpimgobj.origin[1] = static_cast<float>(context.ortho_h) * 0.5f;
+        wpimgobj.scale  = { 1.0f, 1.0f, 1.0f };
+        wpimgobj.angles = { 0.0f, 0.0f, 0.0f };
     } else if (wpimgobj.autosize && wpimgobj.projectlayer) {
         // A project layer is as large as the scene's canvas, whatever size the
         // scene file saved for it; where it sits is the scene file's.
@@ -4377,6 +4390,14 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     // Wallpaper Engine lays a fullscreen layer over the whole screen, whichever
     // group it sits in: the group decides whether it shows, never where.
     spImgNode->SetIgnoreParentTransform(wpimgobj.fullscreen);
+    // The layers below it are placed from the transform saved for the layer
+    // (none saved, none added), under the groups it sits in: a picture saved at
+    // the middle of the canvas under a post-processing layer with no origin is
+    // at the middle of the canvas, not a whole canvas away.
+    if (wpimgobj.fullscreen) {
+        spImgNode->SetChildFrame(fullscreen_saved_origin, fullscreen_saved_scale,
+                                 fullscreen_saved_angles);
+    }
     RuntimeNodeRegistrationRollback runtime_node_registration(
         context.scene->runtime.get(),
         runtime_name,
@@ -4707,6 +4728,10 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             scene.cameras[nodeAddr] = std::make_shared<SceneCamera>(
                 render_extent[0], render_extent[1], -1.0f, 1.0f);
             scene.cameras.at(nodeAddr)->SetComposeLayer(true);
+            // A fullscreen layer keeps the scene camera: Wallpaper Engine frames
+            // a composition layer's children with a camera of the layer's own
+            // only when the layer is not fullscreen.
+            scene.cameras.at(nodeAddr)->SetChildrenUseSceneCamera(wpimgobj.fullscreen);
             scene.cameras.at(nodeAddr)->AttatchNode(spImgNode);
         } else {
             // applly scale to crop

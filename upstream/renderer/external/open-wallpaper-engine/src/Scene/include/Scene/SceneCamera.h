@@ -76,6 +76,13 @@ public:
     /// This is what another layer samples as `_rt_imageLayerComposite_<id>`.
     void  SetLayerLocal(bool layer_local) { m_layerLocal = layer_local; }
     bool  IsLayerLocal() const { return m_layerLocal; }
+    /// A compose layer whose children are drawn through the scene's camera
+    /// rather than this one: a fullscreen layer, which Wallpaper Engine gives no
+    /// camera of its own, so the layers below it are zoomed, shaken and framed
+    /// with the rest of the scene and land in its picture where they would land
+    /// on screen.
+    void  SetChildrenUseSceneCamera(bool scene) { m_childrenUseSceneCamera = scene; }
+    bool  ChildrenUseSceneCamera() const { return m_childrenUseSceneCamera; }
 
     Eigen::Vector3d GetPosition() const;
     Eigen::Vector3d GetDirection() const;
@@ -117,6 +124,7 @@ public:
         m_zoom        = cam.m_zoom;
         m_isComposeLayer = cam.m_isComposeLayer;
         m_layerLocal     = cam.m_layerLocal;
+        m_childrenUseSceneCamera = cam.m_childrenUseSceneCamera;
     }
 
 private:
@@ -145,6 +153,7 @@ private:
     std::shared_ptr<SceneImageEffectLayer> m_imgEffect { nullptr };
     bool                                   m_isComposeLayer { false };
     bool                                   m_layerLocal { false };
+    bool                                   m_childrenUseSceneCamera { false };
 };
 
 /// Seats the perspective camera of a 2D scene -- the one particles, models and
