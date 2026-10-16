@@ -66,6 +66,9 @@ final class ShellModel {
   /// library page to the next, showing that page's filters, and waits out Settings, which has none.
   /// It starts closed and is not stored.
   private(set) var isFiltersChoice = false
+  /// The inspector column's width, which dragging its edge changes within `InspectorColumn.widths`.
+  /// Window memory only, as the system column's was.
+  var inspectorWidth: CGFloat = InspectorColumn<EmptyView>.idealWidth
   /// The welcome guide was asked for again, from Settings. The guide also opens by itself, and for
   /// good, until the first-run flag is set.
   var isWelcomeRequested = false
@@ -125,8 +128,7 @@ final class ShellModel {
   /// Settings has no inspector, and the choice waits for the next page that has one.
   var isInspectorShown: Bool {
     get { inspectorChoice ?? !isCompact }
-    // The split view writes the value it is showing back when it presents or collapses the column,
-    // which is not a choice: only a change of what is on show is.
+    // Only a change of what is on show is a choice: writing back the value on show is not.
     set { if newValue != isInspectorShown { inspectorChoice = newValue } }
   }
 

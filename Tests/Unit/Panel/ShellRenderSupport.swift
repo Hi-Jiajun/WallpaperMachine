@@ -91,12 +91,16 @@ final class ShellHost {
     return changed
   }
 
-  /// The scroll view of the page: the widest in the window, wider than the sidebar's list.
+  /// The scroll view of the page's grid: the widest in the window that holds no other scroll view,
+  /// which leaves out the full-width host the page and the inspector sit in (`PageScrollHost`).
   var pageScrollView: NSScrollView? {
     var widest: NSScrollView?
+    func holdsScrollView(_ view: NSView) -> Bool {
+      view.subviews.contains { $0 is NSScrollView || holdsScrollView($0) }
+    }
     func walk(_ view: NSView) {
       if let scrollView = view as? NSScrollView,
-        scrollView.frame.width > (widest?.frame.width ?? 0)
+        scrollView.frame.width > (widest?.frame.width ?? 0), !holdsScrollView(scrollView)
       {
         widest = scrollView
       }

@@ -25,6 +25,15 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-16 — Tabs in the title bar, Now Playing bar and one-colour title bar on top of the Filters sidebar
+
+- Rebased onto main's Filters sidebar (69955b77, cf9f5ebe): my own filters panel was dropped; the sidebar now slides from the window's leading edge, and Installed's has the Collections group at its top.
+- Window: no window sidebar; Library, Steam Workshop, pixiv and Settings are tabs centred in the title bar (symbols only under 960 points) with the mark, name and version leading; Library has All wallpapers and Favorites chips; Now Playing is a bottom bar whose wallpaper part opens a details popover; Settings searches above its own section list.
+- Title bar: macOS 26 draws a band per window column (opaque grey over a page without a top scroll view, its own dark band over the system inspector). The inspector is now an in-page InspectorColumn (260-420, drag to resize) and the Filters sidebar, page and inspector sit in one full-width scroll host, so the bar is one colour.
+- Real window (desktop control allowed by the user): Library with Filters sidebar and inspector open, and Settings, sampled 29,29,31 across the whole bar in dark; inspector edge drag resized it.
+- Gate: python3 scripts/test.py passed, 3826 passed, 0 failed, 45 skipped. Targeted shell, root, welcome, installed, inspector, pixiv and workshop classes: 160 passed.
+- Not run: desktop UI tests (Tests/UI updated, not executed); light appearance not checked on the real window.
+
 ## 2026-10-16 — Filters sidebar replaces the Filters popover
 
 - Change: Installed, Workshop and pixiv filters moved from a popover into one shell-level Filters sidebar (FilterSidebar in PanelDetail) that slides out from under the window sidebar; Filter buttons and the sidebar's own top-right button toggle it.
@@ -119,12 +128,3 @@ Headless only: no desktop, no audio, no app launch, no Release build.
 - Release: `python3 scripts/build.py --swift-only --configuration Release` from the final tree; delivered to build/Build/Products/Release/WallpaperMachine.app (no WebUI resources, signature verified).
 - Not checked (no desktop authorization): the real window — sidebar material, toolbar, full screen and Split View, hover/focus rings, VoiceOver and live drags were seen only in offscreen renders; `python3 scripts/test.py --ui` (updated for the native window) was not run.
 - Known noise: ~455 AppKit runtime warnings per run, all toolbar-title constraint conflicts in squeezed test windows.
-
-## 2026-10-14 — Settings drawn like System Settings, with its own solid glyphs
-
-Settings restyled after a Claude Design mock-up: centred page cards, translucent grouped boxes, borderless pop-ups, small switches, the ⓘ beside each title, flattened Advanced, and a hand-drawn solid glyph set (WebUI/settings-glyphs.js) for sections and Quick Settings tiles. Layout bugs fixed on the way, plus search hiding an open disclosure whose title missed.
-
-- `python3 scripts/test.py` — exit 0; 2704 tests: 2659 passed, 0 failed, 45 skipped
-- `python3 scripts/test.py --only ControlPanelShellTests/testQuickSettingsSearchAndExplanationsWithoutWindow` — passes with the search fix; with only that hunk reverted the new assertion fails (seen as the panel harness's 2-minute timeout, which is how a failed assertion inside `withPanel` surfaces)
-- Visual review: a temporary offscreen WebKit capture test (deleted) rendered all 11 sections in light and dark at 1100 and 780 px, plus search and an opened ⓘ; glyphs checked on a `qlmanage`-rendered contact sheet at 15, 18 and 34 px
-- Not checked: the real window's vibrancy sidebar and hover states of the borderless pop-ups (offscreen snapshots draw neither); no desktop run

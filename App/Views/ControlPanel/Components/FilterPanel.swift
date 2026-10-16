@@ -33,8 +33,8 @@ struct FilterPanel<Content: View>: View {
   }
 }
 
-/// The sidebar's own button, at its top trailing corner where the navigation sidebar has its
-/// toggle, with the same glyph: it closes the sidebar.
+/// The sidebar's own button, at its top trailing corner where a system sidebar has its toggle,
+/// with the same glyph: it closes the sidebar.
 private struct FilterSidebarToggle: View {
   @Environment(PanelController.self) private var controller
 
@@ -53,7 +53,7 @@ private struct FilterSidebarToggle: View {
   }
 }
 
-/// The navigation sidebar's toggle is a round glass button from macOS 26; before that a plain
+/// A system sidebar's toggle is a round glass button from macOS 26; before that a plain
 /// toolbar glyph.
 private struct SidebarToggleStyle: ViewModifier {
   func body(content: Content) -> some View {

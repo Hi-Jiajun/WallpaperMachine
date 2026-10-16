@@ -8,7 +8,7 @@ struct PanelDetail: View {
   @Environment(\.panelTheme) private var theme
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-  /// The slide of the Filters sidebar, close to the navigation sidebar's own.
+  /// The slide of the Filters sidebar, close to a system sidebar's own.
   private static let filtersAnimation = Animation.smooth(duration: 0.32)
 
   var body: some View {
@@ -21,30 +21,33 @@ struct PanelDetail: View {
       selection: selection, scope: controller.library.scope, counts: counts,
       settingsSection: controller.settings.selectedSection, searchQuery: controller.settings.query,
       workshopSubtitle: selection == .workshop ? controller.workshopTitleSubtitle : nil)
-    HStack(spacing: 0) {
-      if shell.areFiltersShown {
-        // It slides out from the window's leading edge.
-        FilterSidebar(selection: selection)
-          .transition(
-            reduceMotion ? .opacity : .move(edge: .leading).combined(with: .opacity))
+    // One full-width host holds the Filters sidebar, the page and the inspector column, so the title
+    // bar has one section and one band across the window (`PageScrollHost`).
+    PageScrollHost {
+      HStack(spacing: 0) {
+        if shell.areFiltersShown {
+          // It slides out from the window's leading edge.
+          FilterSidebar(selection: selection)
+            .transition(
+              reduceMotion ? .opacity : .move(edge: .leading).combined(with: .opacity))
+        }
+        page(for: selection)
+          // One search bar at the top of every page, kept in place across them.
+          .safeAreaInset(edge: .top, spacing: 0) { PageSearchBar(selection: selection) }
+          .safeAreaInset(edge: .top, spacing: 0) { PanelBanners() }
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Open by the person's choice, or by the window's width while they have not chosen, on the
+        // pages that have an inspector; closed on Settings, and the choice is kept for when they
+        // come back.
+        if shell.hasInspector && shell.isInspectorShown {
+          InspectorColumn { inspector(for: selection) }
+        }
       }
-      page(for: selection)
-        // One search bar at the top of every page, kept in place across them.
-        .safeAreaInset(edge: .top, spacing: 0) { PageSearchBar(selection: selection) }
-        .safeAreaInset(edge: .top, spacing: 0) { PanelBanners() }
+      .animation(
+        reduceMotion ? .easeOut(duration: 0.15) : Self.filtersAnimation,
+        value: shell.areFiltersShown)
     }
-    .animation(
-      reduceMotion ? .easeOut(duration: 0.15) : Self.filtersAnimation,
-      value: shell.areFiltersShown)
     .background { theme.surface.background.color.ignoresSafeArea() }
-    // The inspector stays attached on every page and is only closed on Settings, so moving
-    // between Settings and the library never adds or removes the split view's own toolbar items.
-    //
-    // The page has no minimum width of its own: the inspector asks for 260 points at least, and a
-    // page minimum on top of that makes the split view wider than the 760-point window.
-    .inspector(isPresented: inspectorBinding(shell, selection)) {
-      inspector(for: selection).inspectorColumnWidth(min: 260, ideal: 300, max: 420)
-    }
     // Under the first-run guide the bare title bar names nothing: the guide is what is on show.
     // The title names the window (the Window menu, Mission Control) but is not drawn in the
     // title bar, where the tabs already say which page is on show.
@@ -52,16 +55,6 @@ struct PanelDetail: View {
     .navigationSubtitle(shell.isWelcomeOpen ? "" : title.subtitle ?? "")
     .toolbar { PanelToolbarContent(controller: controller) }
     .toolbar(removing: .title)
-  }
-
-  /// Open or closed by the person's choice, or by the window's width while they have not chosen, on
-  /// the pages that have an inspector; closed on the pages that have none, and the choice is kept for
-  /// when they come back.
-  private func inspectorBinding(_ shell: ShellModel, _ selection: SidebarSelection) -> Binding<Bool>
-  {
-    Binding(
-      get: { shell.hasInspector && shell.isInspectorShown },
-      set: { if shell.hasInspector { shell.isInspectorShown = $0 } })
   }
 
   @ViewBuilder
@@ -81,6 +74,32 @@ struct PanelDetail: View {
     case .workshop: WorkshopInspector()
     case .pixiv: PixivInspector()
     case .wallpaper: InstalledInspector()
+    }
+  }
+}
+
+/// The page, and the inspector beside it, inside one full-width scroll view that never scrolls.
+///
+/// macOS 26 draws a band under the see-through title bar for each column of a window, and draws it
+/// differently by what the column holds: an opaque grey over a column whose top is not a scroll
+/// view, a light wash over one that is, and its own dark band over the system inspector column.
+/// The system inspector (`.inspector`) made the window two columns and the bar two shades. One
+/// scroll view spanning the window makes it one column, whose band is the page's colour under the
+/// same light wash from the traffic lights to the window's edge. Nothing scrolls here: the pages
+/// scroll their own grids.
+private struct PageScrollHost<Content: View>: View {
+  @ViewBuilder var content: Content
+
+  var body: some View {
+    // The host offers its content the size it was given and asks for none of its own, as the pages
+    // do: a minimum here would make the window's content wider than the smallest window.
+    GeometryReader { proxy in
+      ScrollView(.vertical) {
+        content.frame(width: proxy.size.width, height: proxy.size.height)
+      }
+      .scrollDisabled(true)
+      .scrollIndicators(.never)
+      .scrollBounceBehavior(.basedOnSize)
     }
   }
 }

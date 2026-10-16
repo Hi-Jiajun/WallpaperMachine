@@ -130,20 +130,21 @@ final class PanelRootRenderTests: PanelTestCase {
     try await settle()
     XCTAssertEqual(harness.window.title, "All wallpapers")
     XCTAssertEqual(
-      harness.contentToolbarItems.count, 3,
-      "A library page offers the tabs, the target display menu and the inspector toggle")
+      harness.contentToolbarItems.count, 4,
+      "A library page offers the app's name, the tabs, the target display menu and the inspector toggle")
 
     harness.navigation.selection = .settings
     try await settle()
     XCTAssertEqual(harness.window.title, "Quick Settings")
     XCTAssertEqual(
-      harness.contentToolbarItems.count, 1, "Settings has the tabs, but neither a target nor an inspector")
+      harness.contentToolbarItems.count, 2,
+      "Settings has the app's name and the tabs, but neither a target nor an inspector")
 
     harness.navigation.revealSettingsSection(.about)
     harness.navigation.selection = .pixiv
     try await settle()
     XCTAssertEqual(harness.window.title, "pixiv")
-    XCTAssertEqual(harness.contentToolbarItems.count, 3)
+    XCTAssertEqual(harness.contentToolbarItems.count, 4)
     await harness.close()
   }
 

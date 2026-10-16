@@ -40,21 +40,24 @@ language: [Localization](../localization.md).
 
 ## Layout
 
-The window has no sidebar: the pages are tabs in the middle of the title bar, the page
-fills the window under them and, on the library pages, an inspector column sits on the
-right. A Now Playing bar runs along the bottom of the window.
+The window has no sidebar: the app's name leads the title bar, the pages are tabs in its
+middle, the page fills the window under them and, on the library pages, an inspector
+column sits on the right. A Now Playing bar runs along the bottom of the window. The
+title bar is one colour across the whole window, the page's, inspector included
+([Window material](appearance.md#window-material)).
 
 | Region | Contents |
 | --- | --- |
+| Name | Beside the traffic lights: the app's mark, **WallpaperMachine** and the version, as the web panel had them. Under 960 points only the mark stays, with the name and version as its tooltip; VoiceOver reads "WallpaperMachine" and the version |
 | Tabs | In the middle of the title bar: **Library** (Installed), **Steam Workshop**, **pixiv** and **Settings**, each as wide as its name; in a window under 960 points they show their symbols alone, with the names as tooltips and VoiceOver labels, so the toolbar's tools keep their places. The page on show is tinted with the accent; VoiceOver reads them as buttons, that one as selected, in a group named **Main navigation** ([Pages and Settings](#pages-and-settings)) |
 | Toolbar | The window title, not drawn in the title bar (the tabs stand for it) but used by the Window menu and Mission Control, names the place on show: **All wallpapers**, **Favorites**, the collection's name, **Steam Workshop**, **pixiv**, or the Settings section's name (**Search results** while searching Settings). The subtitle counts All wallpapers (with the number of updates), Favorites and a collection, and says nothing while the library loads. On the right: activity pills while there is something to report (an import in progress or a result not yet looked at, which opens Import; SteamCMD setup in progress; pixiv saves, which lead to the pixiv page), the target-display menu (named by the screen alone; its items, tooltip and VoiceOver value keep the renderer's full title, and two screens of one name keep it on the button too), the downloads button and **Wallpaper details**, which shows and hides the inspector; Settings shows neither the menu nor **Wallpaper details**. The downloads button appears once there is download activity, rings itself with the batch's mean progress while anything transfers, and carries the batch summary (status, percent, network speed, time left, **needs attention**) as its label and tooltip. |
-| Page | Every page opens with one full-width search bar at the top (Command-F puts the keyboard in it), which stays in place when moving between them; VoiceOver names it for what it searches (**Search installed wallpapers**, **Search Steam Workshop**, **Search pixiv by tag**, **Search settings**). **Installed**: a row of view chips, **All wallpapers** (its count, and an accent dot while Workshop updates exist, whose tooltip and VoiceOver value say how many) and **Favorites** (its count; it is Installed's own Favorite filter), lit for the view on show, plus the shown collection's chip, which puts the collection away ([Local collections](#local-collections)); then a header row (**Filter** with its count, the sort menu and its direction, then **Select**, **Refresh** and **Import**; in a narrow column the controls keep their places and drop their words, which stay as tooltips and VoiceOver names), the tile grid and a footer (how many a search or filter leaves, **Update N wallpapers**, the selection tools, the drag-select tip, or *Loading your library…*; with none of these it is not shown, since the subtitle counts the view). **Steam Workshop** (the Discover page): a header with its lists (**Wallpapers**, **Collections**, **Your subscriptions**; one menu in the narrowest column), Filter, sort and Refresh (it searches from the page's search bar, which an author's or a collection's list leaves out); then the grid and a footer with the result summary and the pager (Previous, an editable page number with the number of pages, Next). A Workshop page is one Steam page of 30 tiles, at most 1,000 pages. **pixiv**: see [pixiv](pixiv.md#browsing) |
+| Page | Installed, Steam Workshop and pixiv open with one full-width search bar at the top (Command-F puts the keyboard in it), which stays in place when moving between them; VoiceOver names it for what it searches (**Search installed wallpapers**, **Search Steam Workshop**, **Search pixiv by tag**). Settings' search field heads its section list instead. **Installed**: a row of view chips, **All wallpapers** (its count, and an accent dot while Workshop updates exist, whose tooltip and VoiceOver value say how many) and **Favorites** (its count; it is Installed's own Favorite filter), lit for the view on show, plus the shown collection's chip, which puts the collection away ([Local collections](#local-collections)); then a header row (**Filter** with its count, the sort menu and its direction, then **Select**, **Refresh** and **Import**; in a narrow column the controls keep their places and drop their words, which stay as tooltips and VoiceOver names), the tile grid and a footer (how many a search or filter leaves, **Update N wallpapers**, the selection tools, the drag-select tip, or *Loading your library…*; with none of these it is not shown, since the subtitle counts the view). **Steam Workshop** (the Discover page): a header with its lists (**Wallpapers**, **Collections**, **Your subscriptions**; one menu in the narrowest column), Filter, sort and Refresh (it searches from the page's search bar, which an author's or a collection's list leaves out); then the grid and a footer with the result summary and the pager (Previous, an editable page number with the number of pages, Next). A Workshop page is one Steam page of 30 tiles, at most 1,000 pages. **pixiv**: see [pixiv](pixiv.md#browsing) |
 | Filters sidebar | A floating panel at the page's leading edge, opened from the page's **Filter** button on Installed, Discover and pixiv ([Filtering](#filtering)) |
-| Inspector | The system inspector column: preview, title, facts, actions, tags, and the selected wallpaper's options and properties ([wallpaper properties](wallpaper-properties.md)). 300 points wide, resizable from 260 to 420. It starts open in a window 960 points wide or more and closed in a narrower one, and follows the width once a resize has settled, until the person opens or closes it with **Wallpaper details**: that choice then holds whatever the width, also across a visit to Settings, which has none. Nothing is stored. The top of an installed wallpaper's inspector is washed with a blurred copy of its still (never the animation); the sections below are collapsible cards |
+| Inspector | A column of the page along its trailing edge (not the system's inspector column, which gave the title bar a second shade): preview, title, facts, actions, tags, and the selected wallpaper's options and properties ([wallpaper properties](wallpaper-properties.md)). 300 points wide; dragging its leading edge resizes it from 260 to 420. It starts open in a window 960 points wide or more and closed in a narrower one, and follows the width once a resize has settled, until the person opens or closes it with **Wallpaper details**: that choice then holds whatever the width, also across a visit to Settings, which has none. Nothing is stored. The top of an installed wallpaper's inspector is washed with a blurred copy of its still (never the animation); the sections below are collapsible cards |
 | Now Playing | The bar along the bottom of the window, on every page: the target display's wallpaper, which opens its details, and the playback controls ([Now Playing](#now-playing)) |
 
-Full screen and Split View need nothing of the panel's own: the inspector column, the
-toolbar and the traffic lights are the system's, and the layout is the same in a full-screen
+Full screen and Split View need nothing of the panel's own: the toolbar and the traffic
+lights are the system's, and the layout is the same in a full-screen
 Space or either Split View tile.
 
 The visual direction combines Wallpaper Engine's image-first gallery, filtering
@@ -118,7 +121,7 @@ controller resets `contentMinSize` once it attaches.
 Arrow keys, `Home` and `End` move focus across a grid, and `Return` or `Space` on a
 focused tile acts as a click. `Escape` cancels a collection's name field, then closes an
 open popover, then leaves selection mode. `Command-F` puts the keyboard in the page's
-search bar, Settings' included. Errors show in a banner at the top of the page
+search field (on Settings, the one above its sections). Errors show in a banner at the top of the page
 with their original details, which can be selected and copied, and **Dismiss**; VoiceOver
 announces them.
 
@@ -146,8 +149,8 @@ The tabs open the pages:
 - **Settings** replaces the page with a sectioned settings view, described
   below.
 
-Settings lists its sections down the page's leading edge, a 220-point column under
-the search bar, each with a System Settings-style tile: a white SF Symbol on a coloured rounded
+Settings lists its sections down the page's leading edge, a 220-point column headed by
+its search field (**Search settings**), each with a System Settings-style tile: a white SF Symbol on a coloured rounded
 square. Settings opens on **Quick Settings** in every window; a section the app asks
 for (**Check for Updates…**, an update notice) is shown once, even when the window
 opens afterwards. The sections, in order, are Quick Settings, General, Appearance,
@@ -586,9 +589,9 @@ Installed, Discover and pixiv share one **Filters sidebar**. The page's **Filter
 button opens and closes it: a funnel symbol, the label "Filter" and, when filters are
 active, their count in a badge; the button is tinted with the accent while any filter
 applies or the sidebar is open, and VoiceOver reads the count and whether it is open.
-The sidebar is a 260-point column at the page's leading edge, beside the window
-sidebar and drawn like it (floating glass from macOS 26), with the search bar and
-grid narrowing beside it. It slides out from under the window sidebar and back
+The sidebar is a 260-point column at the page's leading edge, a floating panel (glass
+from macOS 26), with the search bar and grid narrowing beside it. It slides out from
+the window's leading edge and back
 (a fade under Reduce Motion). Its header holds **Filters**, the count, **Clear** and,
 at its top-right corner, the sidebar button that closes it. One sidebar serves the
 window: it stays open from one library page to the next, showing that page's
@@ -643,7 +646,7 @@ keep their own states; a refresh can leave existing results visible.
 
 ### Local collections
 
-The **Collections** group at the top of Installed's filters panel lists named local
+The **Collections** group at the top of Installed's Filters sidebar lists named local
 collections with their sizes, separate from Steam's Workshop collections and the
 author's tags; choosing one shows it on Installed (its chip joins the view chips and
 the Filter count includes it), choosing it again or pressing its chip shows every

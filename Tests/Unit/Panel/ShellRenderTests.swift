@@ -101,10 +101,11 @@ final class ShellRenderTests: PanelTestCase {
       host.layout(at: NSSize(width: 1240, height: 800))
       try await host.settle(400)
       XCTAssertEqual(
-        host.contentToolbarItems.count, 3, "the tabs, the target display menu and the toggle")
+        host.contentToolbarItems.count, 4,
+        "the app's name, the tabs, the target display menu and the toggle")
       host.navigation.selection = .settings
       try await host.settle(400)
-      XCTAssertEqual(host.contentToolbarItems.count, 1, "the tabs")
+      XCTAssertEqual(host.contentToolbarItems.count, 2, "the app's name and the tabs")
     }
   }
 
@@ -213,7 +214,8 @@ final class ShellRenderTests: PanelTestCase {
         let note = "\(Int(size.width))"
         let items = host.contentToolbarItems
         XCTAssertEqual(
-          items.count, 4, "\(note): the tabs, the target display menu, Downloads and the toggle")
+          items.count, 5,
+          "\(note): the app's name, the tabs, the target display menu, Downloads and the toggle")
         let visible = Set((host.window.toolbar?.visibleItems ?? []).map(ObjectIdentifier.init))
         for item in items {
           XCTAssertTrue(

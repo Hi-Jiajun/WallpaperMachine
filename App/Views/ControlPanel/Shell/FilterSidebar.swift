@@ -1,12 +1,12 @@
 import SwiftUI
 
-/// The Filters sidebar: a column at the leading edge of the page, beside the navigation sidebar and
-/// drawn like it, holding the filters of the page on show. `PanelDetail` slides it out from under
-/// the navigation sidebar and back; the page beside it narrows to make room.
+/// The Filters sidebar: a floating column at the leading edge of the page, holding the filters of
+/// the page on show. `PanelDetail` slides it out from the window's leading edge and back; the page
+/// beside it narrows to make room.
 struct FilterSidebar: View {
   /// The column's width: room for the groups' rows and a few tag chips to a line.
   static let width: CGFloat = 260
-  /// The gap around it, the one the navigation sidebar floats in.
+  /// The gap it floats in.
   static let inset: CGFloat = 8
 
   let selection: SidebarSelection
@@ -39,7 +39,7 @@ struct FilterSidebar: View {
   }
 }
 
-/// The navigation sidebar's look: a floating glass panel from macOS 26, a material panel before.
+/// A system sidebar's look: a floating glass panel from macOS 26, a material panel before.
 private struct FloatingSidebarBackground: ViewModifier {
   private static let cornerRadius: CGFloat = 16
 

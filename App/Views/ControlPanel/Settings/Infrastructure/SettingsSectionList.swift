@@ -1,17 +1,38 @@
 import SwiftUI
 
-/// The list of Settings sections along the Settings page's leading edge, each with its coloured
-/// tile. While a search is typed in the page's search bar the rows show how many matches each
-/// section has, sections without one fade, and none is highlighted.
+/// The Settings page's leading column: the search field, and under it the list of sections, each
+/// with its coloured tile. While a search is typed the rows show how many matches each section
+/// has, sections without one fade, and none is highlighted.
+///
+/// The field is the pages' own search field (`PageSearchFieldView`), so Command-F finds it. The
+/// column paints the page's background: a sidebar-style list would otherwise draw its own material,
+/// which shows lighter than the page and reaches up under the title bar.
 struct SettingsSectionList: View {
   /// The list's width in the page.
   static let width: CGFloat = 220
 
   @Environment(PanelController.self) private var controller
+  @Environment(\.panelTheme) private var theme
 
   var body: some View {
     let settings = controller.settings
     let search = settings.search
+    VStack(spacing: 0) {
+      PageSearchFieldView(
+        field: .init(
+          text: Binding(get: { settings.query }, set: { settings.query = $0 }),
+          prompt: L("Search settings"), name: L("Search settings"), submit: {})
+      )
+      .padding(.horizontal, 12)
+      .padding(.top, 12)
+      .padding(.bottom, 4)
+      list(settings, search)
+    }
+    .frame(width: Self.width)
+    .background(theme.surface.background.color)
+  }
+
+  private func list(_ settings: SettingsModel, _ search: SettingsSearch) -> some View {
     List(selection: selection(settings, search)) {
       ForEach(Self.clusters, id: \.first) { cluster in
         Section {
@@ -26,7 +47,6 @@ struct SettingsSectionList: View {
     }
     .listStyle(.sidebar)
     .scrollContentBackground(.hidden)
-    .frame(width: Self.width)
     .accessibilityLabel(Text(verbatim: L("Settings categories")))
   }
 

@@ -9,6 +9,15 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-14 — Settings drawn like System Settings, with its own solid glyphs
+
+Settings restyled after a Claude Design mock-up: centred page cards, translucent grouped boxes, borderless pop-ups, small switches, the ⓘ beside each title, flattened Advanced, and a hand-drawn solid glyph set (WebUI/settings-glyphs.js) for sections and Quick Settings tiles. Layout bugs fixed on the way, plus search hiding an open disclosure whose title missed.
+
+- `python3 scripts/test.py` — exit 0; 2704 tests: 2659 passed, 0 failed, 45 skipped
+- `python3 scripts/test.py --only ControlPanelShellTests/testQuickSettingsSearchAndExplanationsWithoutWindow` — passes with the search fix; with only that hunk reverted the new assertion fails (seen as the panel harness's 2-minute timeout, which is how a failed assertion inside `withPanel` surfaces)
+- Visual review: a temporary offscreen WebKit capture test (deleted) rendered all 11 sections in light and dark at 1100 and 780 px, plus search and an opened ⓘ; glyphs checked on a `qlmanage`-rendered contact sheet at 15, 18 and 34 px
+- Not checked: the real window's vibrancy sidebar and hover states of the borderless pop-ups (offscreen snapshots draw neither); no desktop run
+
 ## 2026-10-14 — Control panel redesign: macOS sidebar, System Settings-style Settings
 
 The control panel became a native-looking macOS window: a floating sidebar over the system sidebar material, a title bar naming the place on show, Now Playing in place of the activity bar, a Filters popover, and Settings reorganised into searchable System Settings-style sections with Quick Settings. New native action: nextWallpaper.

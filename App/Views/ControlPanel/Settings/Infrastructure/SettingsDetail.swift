@@ -59,7 +59,8 @@ struct SettingsPages: View {
       PageIdentity(
         section: settings.selectedSection, epoch: settings.scrollEpoch, query: search.query)
     )
-    .background(theme.surface.surface.color)
+    // Not under the title bar, which keeps the page's colour across the window.
+    .background(theme.surface.surface.color, ignoresSafeAreaEdges: [])
   }
 
   private struct PageIdentity: Hashable {

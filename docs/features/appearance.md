@@ -24,9 +24,17 @@ macOS resolved and never sets one itself; `AppDelegate` is the only writer of
 
 ## Window material
 
-The window's materials are the system's own. The window has a full-size content view, so
-the page scrolls under the title bar and its tabs; the inspector is the system's
-inspector column, and the toolbar is the window's own. The page column paints the
+The window's materials are the system's own. The window has a full-size content view
+and the toolbar is the window's own. macOS 26 draws a band under the see-through title
+bar for each column of a window, and draws it by what the column holds: opaque grey over
+a column that does not start with a scroll view, a light wash over one that does, its own
+dark band over the system inspector column. So the window has one column: the page and
+the inspector beside it sit in one full-width scroll view that never scrolls
+(`PageScrollHost` in `PanelDetail.swift`), and the bar is the page's colour under one wash
+from the traffic lights to the window's edge. The inspector is a column of the page
+(`InspectorColumn`), not `.inspector`. Laying a colour over the band from SwiftUI does not
+reach it, and `NSWindow.titlebarAppearsTransparent` sends a narrow window whose scroll
+bars take room into an endless constraint pass. The page column paints the
 tone's background (`SurfacePalette`), so the material never shows through content. The
 panel adds no visual-effect view, backdrop or toolbar of its own. macOS decides how the
 materials look: opaque under **Reduce Transparency**, dimmed in an inactive window.

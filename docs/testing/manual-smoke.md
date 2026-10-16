@@ -74,7 +74,9 @@ was run.
 ## Appearance
 
 - [ ] Choose Light and Dark, then System, and change the macOS appearance.
-- [ ] Check the toolbar and its tabs, the Now Playing bar and its details, menus,
+- [ ] Check the title bar (the name and version, the tabs, one colour from the traffic
+      lights to over the inspector), the inspector's edge resizing it, the Now Playing bar
+      and its details, menus,
       controls, dialogs, inspector, filters panel and download popover in each mode.
 - [ ] Set an accent and a surface tone; relaunch and confirm both persist.
 - [ ] Try white and black accents, then Reset appearance. Wallpapers and
@@ -143,7 +145,7 @@ was run.
 - [ ] Open the Filters sidebar from the page's Filter button and select tags across
       the resolution, ultrawide/portrait, genre, age-rating and category groups:
       results contain only items matching every selected tag, the sidebar slides out
-      from under the window sidebar while the grid narrows, and Clear filters restores
+      from the window's leading edge while the grid narrows, and Clear filters restores
       the unfiltered query. The Filter button and the sidebar's own button close it
       with the same slide; it stays open on the next library page.
 - [ ] Filter changes never activate wallpapers.
