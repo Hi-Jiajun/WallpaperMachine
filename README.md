@@ -48,11 +48,11 @@
      changes, upload the new one there and update the alt text and caption below, here and in
      README.zh-CN.md. -->
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/1284cc37-34eb-4618-b4b1-efe7c2ce8127" width="100%" alt="WallpaperMachine’s window on the Installed tab: filters for collections, type, age rating and tags on the left, a grid of Steam Workshop wallpapers in the middle, and the selected wallpaper’s preview, compatibility check and options in the inspector on the right.">
+  <img src="https://github.com/user-attachments/assets/05389596-04fb-434a-8533-ba1865f92617" width="100%" alt="WallpaperMachine’s window: a sidebar with Steam Workshop, pixiv, the library and the Now Playing card on the left, a grid of installed wallpapers in the middle, and the selected wallpaper’s preview, compatibility check and options in the inspector on the right.">
 </p>
 
 <p align="center">
-  <sub>Filters on the left, your library in the middle, the selected wallpaper’s options on the right. Press play and it becomes your desktop.</sub>
+  <sub>Browse and your library in the sidebar, your wallpapers in the middle, the selected wallpaper’s options on the right. Apply wallpaper and it becomes your desktop.</sub>
 </p>
 
 <p align="center">
@@ -90,7 +90,7 @@ without opening the window.
 
 | Feature | What it does |
 | --- | --- |
-| [**Apply**](docs/features/control-panel.md#selection-versus-apply) | Scene, video or [web](docs/features/web-wallpapers.md): press play and it becomes your desktop. Choosing a wallpaper only selects it. |
+| [**Apply**](docs/features/control-panel.md#selection-versus-apply) | Scene, video or [web](docs/features/web-wallpapers.md): Apply wallpaper and it becomes your desktop. Choosing a wallpaper only selects it. |
 | [**Preview**](docs/features/wallpaper-properties.md#live-preview) | Try an installed scene, video or web wallpaper in its own window, with the current options and separate playback controls, before changing the desktop. Sliders, colours and switches show in it as you change them. |
 | [**Workshop**](docs/features/workshop-downloads.md) | The live Steam Workshop, no sign-in to browse, with [collections, each author's wallpapers and your subscriptions](docs/features/workshop-downloads.md#collections-authors-and-subscriptions). Downloads run in the app, several at once, with a Steam account that owns Wallpaper Engine. [Updates](docs/features/workshop-downloads.md#updates) to the wallpapers you have are found once a day and installed in one click. |
 | [**pixiv**](docs/features/pixiv.md) | pixiv's illustration rankings and tag search. Save any page of a work as a still wallpaper; sign in to pixiv for members-only works and, if your account allows them, R-18. |
