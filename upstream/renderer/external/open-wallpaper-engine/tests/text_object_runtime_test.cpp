@@ -2191,6 +2191,77 @@ TEST(TextObjectRuntime, RasterizedTextUsesFontPixelSizeAndAntialiasesEdges) {
     EXPECT_TRUE(has_partial_alpha_edge);
 }
 
+// A card's texture is drawn as straight alpha with linear filtering, and a layer scaled up
+// samples it between texels. An edge sample is then a mix of a glyph texel and a clear one, and
+// it is the text's colour only if the clear texel holds the colour too: left black, it dims the
+// colour of every edge toward black on top of the alpha that already fades it.
+TEST(TextObjectRuntime, EveryTexelOfRasterizedTextCarriesTheTextsColourWhateverItsCoverage) {
+    TextLayerState state {
+        .text                   = "Hg",
+        .font_key               = "systemfont_Helvetica",
+        .resolved_font_kind     = "system",
+        .resolved_font_identity = "Helvetica",
+        .resolved_font_path     = ResolveInstalledFamily("Helvetica").path,
+        .point_size             = 40.0f,
+        .padding                = { 4.0f, 4.0f },
+        .color                  = Eigen::Vector3f(1.0f, 0.5f, 0.25f),
+    };
+#ifdef __APPLE__
+    ASSERT_FALSE(state.resolved_font_path.empty());
+#endif
+
+    constexpr uint32_t   width  = 420;
+    constexpr uint32_t   height = 220;
+    std::vector<uint8_t> rgba(static_cast<std::size_t>(width) * height * 4u, 0u);
+    RasterizeTextLayer(state, width, height, rgba);
+
+    std::size_t clear = 0, partial = 0, solid = 0, off_colour = 0;
+    for (std::size_t offset = 0; offset < rgba.size(); offset += 4u) {
+        if (rgba[offset] != 255u || rgba[offset + 1u] != 128u || rgba[offset + 2u] != 64u) {
+            ++off_colour;
+        }
+        const auto alpha = rgba[offset + 3u];
+        (alpha == 0u ? clear : alpha == 255u ? solid : partial) += 1u;
+    }
+    EXPECT_GT(clear, 0u);
+    EXPECT_GT(partial, 0u);
+    EXPECT_GT(solid, 0u);
+    EXPECT_EQ(off_colour, 0u) << "a texel is not the text's colour";
+}
+
+// The styled text's channels are coverage masks, not a colour: a clear texel is no mask in all
+// three, or an outline or a shadow would fill the whole card.
+TEST(TextObjectRuntime, StyledTextLeavesEveryTexelOutsideItsMasksClear) {
+    TextLayerState state {
+        .text                   = "H",
+        .font_key               = "systemfont_Helvetica",
+        .resolved_font_kind     = "system",
+        .resolved_font_identity = "Helvetica",
+        .resolved_font_path     = ResolveInstalledFamily("Helvetica").path,
+        .point_size             = 40.0f,
+        .padding                = { 4.0f, 4.0f },
+        .color                  = Eigen::Vector3f(1.0f, 0.5f, 0.25f),
+    };
+    state.style.outline = true;
+#ifdef __APPLE__
+    ASSERT_FALSE(state.resolved_font_path.empty());
+#endif
+
+    constexpr uint32_t   width  = 220;
+    constexpr uint32_t   height = 220;
+    std::vector<uint8_t> rgba(static_cast<std::size_t>(width) * height * 4u, 0u);
+    RasterizeTextLayer(state, width, height, rgba);
+
+    std::size_t clear = 0, coloured_clear = 0;
+    for (std::size_t offset = 0; offset < rgba.size(); offset += 4u) {
+        if (rgba[offset + 3u] != 0u) continue;
+        ++clear;
+        if (rgba[offset] != 0u || rgba[offset + 1u] != 0u || rgba[offset + 2u] != 0u) ++coloured_clear;
+    }
+    EXPECT_GT(clear, 0u);
+    EXPECT_EQ(coloured_clear, 0u);
+}
+
 TEST(TextObjectRuntime, SansSerifAliasRasterizesClockDigits) {
     TextLayerState state {
         .text                   = "12:34",

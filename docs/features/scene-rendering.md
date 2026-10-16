@@ -589,6 +589,28 @@ a paragraph, a row a line break ended, a row the row limit cut and a row with no
 space are left alone. A text layer's colour blend mode works as an image layer's
 does, through the passthrough pass or, for mode 31, additively onto the scene while no
 effect of the layer is running (with one running the layer is a composite, above).
+The glyphs' colour is in every texel of the card's texture, the clear ones included, with
+the coverage as the alpha, as Wallpaper Engine draws its glyphs in one colour at their
+coverage: a layer scaled up past its raster, a small pixel font enlarged, samples the
+texture between texels, and an edge then fades from the text's colour to the scene by
+alpha alone. A clear texel left black would dim the colour toward black as the alpha
+falls, and draw a dark ring round every stroke. (The masks of a styled layer, below, are
+coverage and not colour, and are clear outside the glyph.) Two colour blends look at no
+alpha: the shipped `ApplyBlending` makes Darker Color (5) and Lighter Color (10) the
+per-channel min and max of the screen and the card's colour. If Wallpaper Engine draws
+a text through its effects, the colour blend's passthrough among them, from a composite
+seeded with the scene (inferred, not checked against its frames), the card is the screen
+where no glyph is drawn and the blend leaves it alone. The card here is written without
+that seed, so for those two modes its shader mixes the colour it writes with white (5)
+or black (10) by the alpha (the layer's included, as the reference's glyph pass writes
+it), which is what min and max pass the screen by. A card that wrote the text's colour
+there, as the clear texels of the raster hold it, drew a solid box of that colour over
+the whole card in mode 10 and a dark box in mode 5. The other modes mix by alpha and
+need nothing. An edge of those two is therefore the glyph's colour weighed by its alpha
+toward white or black before the min or max, where a seeded composite would weigh it
+toward the screen: at a layer alpha of 1 the stems match a seeded composite, while a
+layer alpha below 1 makes Darker Color text fade out faster (orange at 0.5 over navy
+leaves the scene unchanged) and Lighter Color text slightly darker than one.
 `outline`, `blur` and `dropshadow` give the glyphs Wallpaper Engine's signed-distance
 look: sizes, offsets and the shadow's softness are pixels of the finished text,
 capped as the shader's glyph atlas caps them, the outline and shadow keep their own

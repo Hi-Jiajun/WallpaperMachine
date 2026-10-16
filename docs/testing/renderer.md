@@ -969,7 +969,18 @@ into private textures; the three that draw skip visibly without a Metal device.
   and its line metrics are not. It draws one quad per glyph from a distance-field atlas, so the outline of
   a glyph that overlaps its neighbour's fill is drawn over it there, and the outline,
   blur and shadow are made here from the union of the glyphs, at their reach but not
-  clipped to the atlas margin. `msdf` alone is read and draws nothing. An `opaquebackground`
+  clipped to the atlas margin. `msdf` alone is read and draws nothing. Text enlarged past
+  its raster (a small pixel font drawn three pixels to the texel) takes the reference's
+  edge colour, with no dark ring, but its edge ramp stays softer than the reference's
+  distance field gives: the ramp is bilinear and a raster texel wide, so a row across a
+  stroke edge of 3195212886 reads 179 185 192 198 199 here against 179 192 199 there, and
+  the darkest pixel of its text windows is 158 to 161 here, within a level of the
+  reference's 158 to 160. Text with the colour blend Darker Color (5) or Lighter Color (10),
+  which weigh nothing by alpha, is written over white or black instead of a seed of the
+  scene (that the reference seeds it is inferred, not seen in a frame): at layer alpha 1
+  its stems match a seeded composite, while below 1 Darker Color text fades out faster
+  and Lighter Color text is slightly darker than one (scene-rendering.md, text
+  paragraph). An `opaquebackground`
   is the card's rectangle in `backgroundcolor` times `backgroundbrightness` at the layer's
   alpha, with the glyphs over it in one pass: for the colour blend "add" that is the glyph
   over the fill and then added, where the reference adds the two quads separately, which

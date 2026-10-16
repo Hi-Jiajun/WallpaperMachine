@@ -2066,6 +2066,40 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   the user's value, noted load-only and held by a preview. Sizes are pixels of the
   finished text, capped in the shader's atlas units (outline 5.1, blur and shadow 6),
   and the tests state them as distances from the unstyled glyph box.
+- **Text edges take the glyph's colour** —
+  `TextObjectRuntime.EveryTexelOfRasterizedTextCarriesTheTextsColourWhateverItsCoverage`,
+  `.StyledTextLeavesEveryTexelOutsideItsMasksClear` and
+  `MetalSceneDraw.AMagnifiedTextsEdgesFadeToItsColourNotToBlackOnBothRenderers`.
+  The card's texture is straight alpha sampled linearly, so a layer scaled up past
+  its raster (a small pixel font enlarged) reads edges between a glyph texel and a clear
+  one; the clear texels hold the text's colour (white in the runtime's neutral cache),
+  not black, or the colour dims toward black along with the alpha and a dark ring runs
+  round every stroke. The first test requires the colour in every texel of a plain
+  raster whatever its alpha; the second requires a styled raster, whose channels are
+  coverage masks, to keep its texels outside the masks fully clear. The Metal test draws
+  red text over white at three pixels a texel, plain and through an effect chain, on both
+  renderers: every pixel is red mixed with white, so its red channel must stay full, and
+  the plain card draws over a thousand pixels darker than that without the colour in the
+  clear texels. It also requires an edge ramp three pixels wide or more along a row, which
+  text drawn at the size of its raster does not have, so the test cannot pass by not
+  magnifying the text. Through the chain the card is drawn into a composite of about its own
+  size and the scene behind seeds it, so that variant guards the composite and was never
+  dark. A text with a colour blend writes the card without blending, and the passthrough's
+  Darker Color (5) and Lighter Color (10) take the min and max of the screen and the card's
+  colour with no alpha, so the colour in the clear texels reaches the screen there:
+  `MetalSceneDraw.ATextLayersColourBlendModesDrawItsTextAndNoBoxOnBothRenderers` draws
+  orange text on navy through modes 10, 5, 2, 0 and 6 on both renderers, with the fixture's
+  passthrough written as `ApplyBlending` is for 5 and 10, and
+  `.ATextLayersColourBlendModesDrawItsTextAndNoBoxThroughTheShippedPassthrough` does the
+  same through Wallpaper Engine's own `effectpassthrough` (skipped without the shipped
+  assets). Every mode must draw its glyphs in the blended colour and change no more pixels
+  than the unblended text does (a box over the card changed 40592 against 5029 before the
+  card's rest colour), and text enlarged three to one in modes 10 and 5 must fade over the
+  edge pixels without going past the scene or the text. The other paths that sample the
+  card between texels or write it without blending (a chain whose buffer differs from the
+  raster, the direct draw while every effect is off) have no test of their own; every
+  blend there weighs the card by its alpha, so the colour of a clear texel does not reach
+  the screen.
 - **Cache metadata and corruption** — `render_target_lifetime_test`,
   `text_object_runtime_test` and `shader_cache_metadata_test` cover clock/text
   corruption, persistent shader-cache metadata, cache invalidation after include

@@ -1583,14 +1583,26 @@ void RasterizeTextLayer(const TextLayerState& state, uint32_t width, uint32_t he
 
     const auto  color       = TextColorBytes(state);
     const float alpha_scale = static_cast<float>(color[3]) / 255.0f;
+    // The texture is straight alpha, sampled with linear filtering past its raster when the
+    // layer is scaled up. An edge sample then mixes a glyph texel with a clear one, and it is
+    // the text's colour at part of its alpha only if the clear texel holds the colour too: left
+    // black it dims the colour of every edge toward black, on top of the alpha that already
+    // fades it, and a dark ring runs round each stroke. Wallpaper Engine draws its glyphs in
+    // one colour at the coverage as alpha, so every texel takes the colour.
+    // A blend that looks at no alpha (colour blend 5 or 10) would show that colour in a clear
+    // texel; the card's shader weighs it by the alpha for those (`BuildTextSceneShader`).
+    const std::size_t texels = std::min(rgba.size() / 4u, static_cast<std::size_t>(width) * height);
+    for (std::size_t texel = 0; texel < texels; ++texel) {
+        rgba[texel * 4u + 0u] = color[0];
+        rgba[texel * 4u + 1u] = color[1];
+        rgba[texel * 4u + 2u] = color[2];
+    }
+    // The colour is already in every texel; the glyphs only raise the alpha.
     paint([&](int x, int y, uint8_t coverage) {
         const auto alpha =
             static_cast<uint8_t>(std::lround(static_cast<float>(coverage) * alpha_scale));
         const std::size_t offset =
             (static_cast<std::size_t>(y) * width + static_cast<std::size_t>(x)) * 4u;
-        rgba[offset + 0u] = color[0];
-        rgba[offset + 1u] = color[1];
-        rgba[offset + 2u] = color[2];
         rgba[offset + 3u] = std::max(rgba[offset + 3u], alpha);
     });
 }

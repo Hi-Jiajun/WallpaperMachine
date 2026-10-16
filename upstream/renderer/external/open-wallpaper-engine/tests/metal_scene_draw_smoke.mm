@@ -2892,7 +2892,9 @@ TEST_F(MetalSceneDraw, ALayerLitByScenePointAndDirectionalLightsIsTheSameOnBothR
 /// cleared to green 0.25, with `object_fields` added to the card. The
 /// `effectpassthrough` material stands in for Wallpaper Engine's: its
 /// `genericimage3` takes the layer times `g_Color4` and, for a colour blend
-/// mode, mixes it over the screen it samples by the layer's alpha.
+/// mode, mixes it over the screen it samples by the layer's alpha, except
+/// that modes 5 and 10 take the min and the max of the two as the shipped
+/// `ApplyBlending` does.
 std::filesystem::path WriteColorBlendFixture(const std::filesystem::path& root,
                                              std::string_view            object_fields)
 {
@@ -2932,7 +2934,18 @@ std::filesystem::path WriteColorBlendFixture(const std::filesystem::path& root,
            "#if BLENDMODE\n"
            "  vec2 screenUV = (v_ScreenPos.xy / v_ScreenPos.z) * 0.5 + 0.5;\n"
            "  vec4 screen = texSample2D(g_Texture4, screenUV);\n"
+           // Wallpaper Engine's `ApplyBlending` (common_blending.h) weighs every mode by the
+           // layer's alpha but two: 5 (Darker Color) and 10 (Lighter Color) are the per-channel
+           // min and max of the screen and the layer and look at no alpha.
+           "#if BLENDMODE == 10\n"
+           "  gl_FragColor.rgb = max(screen.rgb, color.rgb);\n"
+           "#else\n"
+           "#if BLENDMODE == 5\n"
+           "  gl_FragColor.rgb = min(screen.rgb, color.rgb);\n"
+           "#else\n"
            "  gl_FragColor.rgb = mix(screen.rgb, color.rgb, color.a);\n"
+           "#endif\n"
+           "#endif\n"
            "  gl_FragColor.a = screen.a;\n"
            "#endif\n"
            "}\n";
@@ -7957,18 +7970,24 @@ TEST_F(MetalSceneDraw, ATextLayerIsParsedTranslatedAndDrawnByTheNativeBackend)
 
 namespace
 {
-/// A text layer over a scene cleared to green 0.25, with the colour blend passthrough
-/// of `WriteColorBlendFixture` and `object_fields` on the layer.
+/// A text layer of `text` at `point_size` over a scene cleared to `clear_color` (green 0.25
+/// unless given), with the colour blend passthrough of `WriteColorBlendFixture` and
+/// `object_fields` on the layer.
 std::filesystem::path WriteTextColorBlendFixture(const std::filesystem::path& root,
-                                                 std::string_view            object_fields)
+                                                 std::string_view            object_fields,
+                                                 std::string_view            clear_color = "0,0.25,0",
+                                                 std::string_view            text        = "I",
+                                                 int                         point_size  = 60)
 {
     const auto project = WriteColorBlendFixture(root, "");
     std::ofstream(root / "layout.json")
         << R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
-           R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0,0.25,0],)"
-           R"("cameraparallax":false,"orthogonalprojection":{"width":384,"height":256}},)"
-           R"("objects":[{"id":1,"name":"caption","text":"I","font":"Arial","pointsize":60,)"
-           R"("origin":[192,128,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true,)"
+           R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[)"
+        << clear_color
+        << R"(],"bloom":false,"cameraparallax":false,"orthogonalprojection":{"width":384,"height":256}},)"
+           R"("objects":[{"id":1,"name":"caption","text":")"
+        << text << R"(","font":"Arial","pointsize":)" << point_size
+        << R"(,"origin":[192,128,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true,)"
         << object_fields << "}]}";
     return project;
 }
@@ -8025,6 +8044,181 @@ TEST_F(MetalSceneDraw, ATextLayersColourBlendModeAppliesItsColourAndAlphaOnceOnB
         EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
             << "the native renderer blended the text differently from the compatibility renderer";
     }
+}
+
+namespace
+{
+std::filesystem::path LocalSceneAssetsRoot();
+
+/// Draws orange text on navy through each colour blend mode on both renderers, with the
+/// passthrough of `WriteColorBlendFixture`, or, given `shipped_assets`, Wallpaper Engine's own
+/// `effectpassthrough` material and `common_blending.h` from that directory.
+void ExpectTextColourBlendModesDrawTheirTextAndNoBox(const std::filesystem::path& root,
+                                                     const std::filesystem::path& shipped_assets)
+{
+    const bool shipped = ! shipped_assets.empty();
+    // Orange text over navy, through each colour blend mode. Wallpaper Engine's passthrough
+    // weighs every mode by the card's alpha but two: Darker Color (5) and Lighter Color (10)
+    // are the min and the max of the screen and the card's colour and look at no alpha, so a
+    // texel the glyphs do not cover must hold a colour that min or max leaves the screen
+    // alone by. A card whose clear texels held the text's colour drew a solid box of it over
+    // the whole card in mode 10 and a dark box in mode 5, and the text was lost in them.
+    // Normal (0), Multiply (2) and Lighten (6) take the alpha and never drew a box; the
+    // fixture's passthrough mixes the modes it does not know by alpha alone.
+    constexpr uint32_t kWidth = 384, kHeight = 256;
+    struct Mode {
+        int                mode;
+        std::array<int, 3> stem;    // inside the glyph: orange (255, 128, 0) through the mode
+        std::array<int, 3> shipped; // the same through Wallpaper Engine's own blend functions
+    };
+    const std::array<int, 3> navy { 26, 26, 102 };
+    const std::vector<Mode>  modes {
+        { 10, { 255, 128, 102 }, { 255, 128, 102 } }, // the per-channel maximum
+        { 5, { 26, 26, 0 }, { 26, 26, 0 } },          // the per-channel minimum
+        { 2, { 255, 128, 0 }, { 26, 13, 0 } },        // the fixture mixes by alpha; Multiply
+        { 0, { 255, 128, 0 }, { 255, 128, 0 } },      // no blend: the text over the scene
+        { 6, { 255, 128, 0 }, { 255, 128, 102 } },    // the fixture mixes by alpha; Lighten
+    };
+    const auto stem_of = [&](const Mode& mode) { return shipped ? mode.shipped : mode.stem; };
+    // The scene, parsed over the stand-in passthrough of the fixture or, for the shipped
+    // variant, over Wallpaper Engine's assets with the stand-ins taken away.
+    const auto load = [&](const std::filesystem::path& project, const std::filesystem::path& cache,
+                          LoadedScene& loaded, std::string& error) {
+        if (! shipped) return LoadScene(project, cache, loaded, error);
+        const auto directory = project.parent_path();
+        std::filesystem::remove(directory / "materials/util/effectpassthrough.json");
+        std::filesystem::remove(directory / "shaders/blend_probe.vert");
+        std::filesystem::remove(directory / "shaders/blend_probe.frag");
+        if (! loaded.vfs.Mount("/assets", fs::CreatePhysicalFs(shipped_assets.string()), "assets") ||
+            ! loaded.vfs.Mount("/assets", fs::CreatePhysicalFs(directory.string()), "scene") ||
+            ! loaded.vfs.Mount("/cache", fs::CreatePhysicalFs(cache.string(), true), "cache")) {
+            error = "mount failed";
+            return false;
+        }
+        InstallVirtualAssets(loaded.vfs);
+        if (! ParseProjectProperties(project.string(), &loaded.properties, &error)) return false;
+        auto source = loaded.vfs.Open("/assets/layout.json");
+        if (source == nullptr) {
+            error = "scene source missing";
+            return false;
+        }
+        WPSceneParser parser;
+        loaded.scene = parser.Parse(SceneParseRequest {
+                                        .scene_id           = "metal-draw-smoke",
+                                        .project_path       = project.string(),
+                                        .project_properties = &loaded.properties,
+                                    },
+                                    source->ReadAllStr(), loaded.vfs, loaded.sound);
+        if (loaded.scene == nullptr) error = "scene parse failed";
+        return loaded.scene != nullptr;
+    };
+    std::map<int, std::size_t> changed; // pixels that are not the scene, per mode
+    std::map<int, std::map<bool, RendererPicture>> pictures;
+    for (const auto& mode : modes) {
+        SCOPED_TRACE("colorBlendMode " + std::to_string(mode.mode));
+        for (const bool native : { false, true }) {
+            const std::string name = std::string("text-blend-box-") + (shipped ? "shipped-" : "") + std::to_string(mode.mode) +
+                                     (native ? "-native" : "-compat");
+            const auto project = WriteTextColorBlendFixture(
+                root / name,
+                R"("color":"1 0.5 0","colorBlendMode":)" + std::to_string(mode.mode),
+                "0.1,0.1,0.4", "H", 40);
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(load(project, root / (name + "-cache"), loaded, error)) << error;
+            if (native) {
+                const auto selection = SelectSceneBackend(*loaded.scene);
+                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            }
+            pictures[mode.mode][native] =
+                DrawWithRenderer(*loaded.scene, native, kWidth, kHeight, 3, 1.0 / 60.0);
+            ASSERT_TRUE(pictures[mode.mode][native].error.empty()) << pictures[mode.mode][native].error;
+            ASSERT_EQ(pictures[mode.mode][native].rgb.size(), std::size_t { kWidth } * kHeight * 3u);
+        }
+        const auto& rgb = pictures[mode.mode][true].rgb;
+        ASSERT_EQ(rgb.size(), std::size_t { kWidth } * kHeight * 3u);
+        EXPECT_NEAR(rgb[0], navy[0], 1) << "the scene's corner is not the clear colour";
+        EXPECT_GT(PixelsNear(rgb, stem_of(mode), 3), 100u) << "the glyphs are not drawn in the blended colour";
+        for (std::size_t i = 0; i + 2 < rgb.size(); i += 3) {
+            if (std::abs(rgb[i] - navy[0]) > 2 || std::abs(rgb[i + 1] - navy[1]) > 2 ||
+                std::abs(rgb[i + 2] - navy[2]) > 2) {
+                ++changed[mode.mode];
+            }
+        }
+        EXPECT_EQ(pictures[mode.mode][true].rgb, pictures[mode.mode][false].rgb)
+            << "the native renderer drew the text differently from the compatibility renderer";
+    }
+    // The text over the scene without a blend marks the pixels the text can reach. No blend
+    // mode draws over many more than that; a box over the card is several times larger.
+    for (const auto& mode : modes) {
+        EXPECT_GT(changed[mode.mode], 0u) << "colorBlendMode " << mode.mode << " drew nothing";
+        EXPECT_LE(changed[mode.mode], changed[0] + changed[0] / 4)
+            << "colorBlendMode " << mode.mode << " changed " << changed[mode.mode]
+            << " pixels, where the text itself changes " << changed[0] << ": a box over the card";
+    }
+
+    // Enlarged three to one, the same two modes fade from the scene to the text over the
+    // pixels of an edge, as the alpha-weighted ones do, and never past the colour of the
+    // text or the scene: the min and the max of a ramp stay between the two.
+    for (const auto& mode : { modes[0], modes[1] }) {
+        SCOPED_TRACE("enlarged, colorBlendMode " + std::to_string(mode.mode));
+        for (const bool native : { false, true }) {
+            const std::string name = std::string("text-blend-ramp-") + (shipped ? "shipped-" : "") + std::to_string(mode.mode) +
+                                     (native ? "-native" : "-compat");
+            const auto project = WriteTextColorBlendFixture(
+                root / name,
+                R"("color":"1 0.5 0","scale":[3,3,1],"colorBlendMode":)" + std::to_string(mode.mode),
+                "0.1,0.1,0.4", "H", 12);
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(load(project, root / (name + "-cache"), loaded, error)) << error;
+            if (native) {
+                const auto selection = SelectSceneBackend(*loaded.scene);
+                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            }
+            const auto picture = DrawWithRenderer(*loaded.scene, native, kWidth, kHeight, 3, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
+            ASSERT_EQ(picture.rgb.size(), std::size_t { kWidth } * kHeight * 3u);
+            // How far each pixel is along the way from the scene to the glyph's blended colour.
+            double span = 0.0;
+            for (int c = 0; c < 3; ++c) span += std::pow(stem_of(mode)[c] - navy[c], 2);
+            span = std::sqrt(span);
+            std::size_t solid = 0, partial = 0, beyond = 0;
+            for (std::size_t i = 0; i + 2 < picture.rgb.size(); i += 3) {
+                double along = 0.0;
+                for (int c = 0; c < 3; ++c) {
+                    along += (picture.rgb[i + c] - navy[c]) * (stem_of(mode)[c] - navy[c]);
+                }
+                along /= span * span;
+                if (along > 0.85 && along < 1.15) ++solid;
+                if (along >= 0.15 && along <= 0.85) ++partial;
+                if (along < -0.15 || along > 1.15) ++beyond;
+            }
+            EXPECT_GT(solid, 150u) << "the glyphs are not drawn in the blended colour";
+            EXPECT_GT(partial, 100u) << "the edges do not fade from the scene to the text";
+            EXPECT_EQ(beyond, 0u) << "an edge went past both the scene and the text";
+        }
+    }
+}
+} // namespace
+
+TEST_F(MetalSceneDraw, ATextLayersColourBlendModesDrawItsTextAndNoBoxOnBothRenderers)
+{
+    ExpectTextColourBlendModesDrawTheirTextAndNoBox(root_, {});
+}
+
+TEST_F(MetalSceneDraw, ATextLayersColourBlendModesDrawItsTextAndNoBoxThroughTheShippedPassthrough)
+{
+    // The same through Wallpaper Engine's own `effectpassthrough` material (the `genericimage3`
+    // shader and `ApplyBlending`), which is what the fixture's stand-in is written to do.
+    const auto assets = LocalSceneAssetsRoot();
+    if (assets.empty() || ! std::filesystem::is_regular_file(assets / "materials/util/effectpassthrough.json") ||
+        ! std::filesystem::is_regular_file(assets / "shaders/genericimage3.frag") ||
+        ! std::filesystem::is_regular_file(assets / "shaders/common_blending.h")) {
+        GTEST_SKIP() << "Wallpaper Engine's shipped passthrough is not installed here; text through "
+                        "its colour blends was not drawn";
+    }
+    ExpectTextColourBlendModesDrawTheirTextAndNoBox(root_, assets);
 }
 
 namespace
@@ -8671,6 +8865,77 @@ TEST_F(MetalSceneDraw, StyledTextWithoutAnOutlineKeepsTheLayersColourAtItsEdgesO
             EXPECT_GT(solid, 300u) << "the glyphs were not drawn in the layer's colour";
             EXPECT_GT(partial, 100u) << "no partly covered pixels to look at";
             EXPECT_EQ(dark_red, 0u) << "an edge was darkened by a colour the layer never asked for";
+        }
+    }
+}
+
+TEST_F(MetalSceneDraw, AMagnifiedTextsEdgesFadeToItsColourNotToBlackOnBothRenderers)
+{
+    // A card's texture holds the glyphs' colour at their coverage and nothing in the texels
+    // between. Magnified past its raster and sampled with linear filtering, an edge is a mix of
+    // a glyph texel and a clear one; if the clear texel's colour is black, the sample is the
+    // text's colour dimmed by the weight toward black and then drawn at that weight as alpha, so
+    // the edge dips below both the text and the scene behind it, in a ring around every stroke.
+    // Red text over white is red mixed with white at every pixel, whatever the coverage, so its
+    // red channel is full where it is drawn; a dip there is that fringe. The same text through
+    // an effect chain reaches the scene by way of a composite card.
+    constexpr uint32_t kWidth = 384, kHeight = 256;
+    struct Variant {
+        const char* name;
+        bool        effect;
+    };
+    for (const auto& variant : { Variant { "plain", false }, Variant { "effect", true } }) {
+        SCOPED_TRACE(variant.name);
+        std::map<bool, RendererPicture> pictures;
+        for (const bool native : { false, true }) {
+            const std::string name = std::string("text-fringe-") + variant.name +
+                                     (native ? "-native" : "-compat");
+            // Each raster texel is three pixels of the scene.
+            const auto project = WriteTextFixture(
+                root_ / name, "HI", variant.effect, {},
+                R"(,"color":"1 0 0","pointsize":12,"scale":[3,3,1])", "1.0,1.0,1.0");
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            if (native) {
+                const auto selection = SelectSceneBackend(*loaded.scene);
+                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            }
+            pictures[native] = DrawWithRenderer(*loaded.scene, native, kWidth, kHeight, 3, 1.0 / 60.0);
+            ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+            ASSERT_EQ(pictures[native].rgb.size(), std::size_t { kWidth } * kHeight * 3u);
+        }
+        for (const bool native : { false, true }) {
+            SCOPED_TRACE(native ? "native" : "compatibility");
+            const auto& rgb = pictures[native].rgb;
+            std::size_t solid = 0, partial = 0, dark_red = 0, longest_ramp = 0;
+            // The widest run of partly covered pixels along a row that goes from the scene to the
+            // glyph or back. A run with the glyph on both sides, along the edge of a crossbar,
+            // is no ramp across an edge and does not count.
+            std::size_t ramp   = 0;
+            int         before = 0;  // the last whole pixel of the row: 1 the scene, 2 the glyph
+            for (std::size_t i = 0; i + 2 < rgb.size(); i += 3) {
+                if (rgb[i] < 250) ++dark_red;
+                if ((i / 3) % kWidth == 0) ramp = 0, before = 0;
+                if (rgb[i + 1] >= 40 && rgb[i + 1] <= 215) {
+                    ++partial;
+                    ++ramp;
+                    continue;
+                }
+                const int kind = rgb[i + 1] < 40 ? 2 : 1;
+                if (kind == 2) ++solid;
+                if (ramp > 0 && before != 0 && before != kind) longest_ramp = std::max(longest_ramp, ramp);
+                ramp   = 0;
+                before = kind;
+            }
+            EXPECT_GT(solid, 300u) << "the glyphs were not drawn in the layer's colour";
+            EXPECT_GT(partial, 100u) << "no partly covered pixels to look at";
+            // An edge drawn a pixel to the texel has one partly covered pixel between the scene
+            // and the glyph along a row (two at most, if it is smoothed); the ramp between a glyph
+            // texel and a clear one, magnified three to one, has three or more. That is the width
+            // the fringe shows in, so a test that drew the text small would not see it.
+            EXPECT_GE(longest_ramp, 3u) << "the text is not drawn larger than its raster";
+            EXPECT_EQ(dark_red, 0u) << "a magnified edge was darkened toward black";
         }
     }
 }

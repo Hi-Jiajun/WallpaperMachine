@@ -1707,9 +1707,20 @@ std::string TextRuntimeName(const ParseContext& context, const wpscene::WPTextOb
 /// outside the rectangle, on each side) the glyph over the fill as the two quads one after the
 /// other would leave the scene -- straight "over", colour and alpha -- or, for a composite, the
 /// glyph blended into the cleared card.
+///
+/// `colour_blend_mode` is the layer's colour blend when its passthrough pass follows the card.
+/// Wallpaper Engine's `ApplyBlending` weighs every mode by the card's alpha but two: Darker
+/// Color (5) and Lighter Color (10) are the per-channel min and max of the screen and the
+/// card's colour, and look at no alpha. There the card's colour must by itself leave the
+/// screen alone wherever the glyphs do not cover it, which Wallpaper Engine gets from a
+/// composite seeded with the scene. The card here is written without one, so it holds the
+/// colour that min or max passes the screen by (white for 5, black for 10) at no coverage and
+/// the glyph's colour at full coverage, the colour mixed with it by the alpha in between: a
+/// card that kept the glyph's colour where nothing is drawn paints a box of it over the card.
 std::shared_ptr<SceneShader> BuildTextSceneShader(fs::VFS& vfs, std::string_view scene_id,
                                                   const std::string& texture_key, bool styled,
-                                                  bool outlined, bool composite, bool filled) {
+                                                  bool outlined, bool composite, bool filled,
+                                                  int colour_blend_mode = 0) {
     std::string vertex_src =
         "layout(binding = 1) uniform mat4 g_ModelViewProjectionMatrix;\n"
         "in vec3 a_Position;\n"
@@ -1789,6 +1800,13 @@ std::shared_ptr<SceneShader> BuildTextSceneShader(fs::VFS& vfs, std::string_view
         direct = "over";
     }
     std::string finish = "  gl_FragColor = " + direct + ";\n";
+    // The colour a card without coverage holds when the passthrough's blend ignores the alpha.
+    const bool colour_blend_ignores_alpha = colour_blend_mode == 5 || colour_blend_mode == 10;
+    if (colour_blend_ignores_alpha && ! composite) {
+        finish = "  vec4 drawn = " + direct + ";\n"
+                 "  gl_FragColor = vec4(mix(vec3(" + std::string(colour_blend_mode == 5 ? "1.0" : "0.0") +
+                 "), drawn.rgb, drawn.a), drawn.a);\n";
+    }
     if (composite) {
         uniforms += "uniform sampler2D g_Texture1;\n"
                     "uniform float g_Composite;\n";
@@ -1810,6 +1828,9 @@ std::shared_ptr<SceneShader> BuildTextSceneShader(fs::VFS& vfs, std::string_view
     std::string shader_name = composite ? "text_composite" : "text";
     if (styled) shader_name += outlined ? "_styled_outline" : "_styled";
     if (filled) shader_name += "_filled";
+    if (colour_blend_ignores_alpha && ! composite) {
+        shader_name += colour_blend_mode == 5 ? "_over_white" : "_over_black";
+    }
 
     WPShaderInfo                 shader_info;
     std::vector<WPShaderTexInfo> tex_infos(composite ? 2 : 1);
@@ -2285,7 +2306,9 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         });
     // Such a text is drawn through a composite of its own, whose glyph pass blends over the
     // scene behind the card (`BuildTextSceneShader`). A layer with a colour blend keeps
-    // drawing as it did: how the blend's passthrough treats a seeded card is not known.
+    // drawing as it did, a card without that seed: how the blend's passthrough treats a seeded
+    // card is not known. Modes 5 and 10 look at no alpha, so their card holds the colour the
+    // blend passes the screen by wherever nothing is drawn (`BuildTextSceneShader`).
     const bool composites_over_scene = through_effects && ! color_blend_effect.has_value();
     const bool scene_fog = context.scene->fog_distance || context.scene->fog_height;
     auto       text         = JsonStringOrObjectValue(obj.text, "text");
@@ -2367,7 +2390,8 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         const bool filled = obj.opaquebackground;
         material.customShader.shader = BuildTextSceneShader(
             *context.vfs, context.scene->scene_id, texture_name, styled, outlined,
-            composites_over_scene, filled);
+            composites_over_scene, filled,
+            color_blend_effect.has_value() ? obj.colorBlendMode : 0);
         material.customShader.constValues["g_Color"] = obj.color;
         material.customShader.constValues["g_Alpha"] = obj.alpha;
         // Wallpaper Engine multiplies the colour by the brightness only in its HDR
