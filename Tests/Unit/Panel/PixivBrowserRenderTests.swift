@@ -396,13 +396,19 @@ final class PixivBrowserRenderTests: MediaPanelTestCase {
     // not keep the split view's layout pass going (AppKit throws "needing another Update
     // Constraints in Window pass", a crash outside a test). Its tiles are small, so the place is
     // one well inside the shorter grid, where a lazy grid still estimating its height under load
-    // cannot clamp it.
-    let narrow = try host(count: 48, viewState: PanelViewState(scroll: ["pixiv": 160]))
-    try await narrow.controller.navigate(.pixiv)
-    try await narrow.fixture.waitUntil(timeout: 5) { narrow.fixture.pixiv.hasLoaded }
-    try await narrow.controller.pixivSelect(workID: "302")
+    // cannot clamp it. pixiv answers only once the window is that small with its inspector open,
+    // so the grid is restored where it is first laid out: one restored in a wider window is
+    // re-anchored frame by frame as its columns change, and lands a point or two off.
+    let ranking = PixivGate()
+    let narrow = try host(
+      listing: .held(ranking), count: 48, viewState: PanelViewState(scroll: ["pixiv": 160]))
+    narrow.controller.launch { try await narrow.controller.navigate(.pixiv) }
     try await narrow.layout(at: sizes[0], for: 1.0)
     narrow.controller.shell.isInspectorShown = true
+    try await narrow.layout(at: sizes[0], for: 0.5)
+    ranking.open()
+    try await narrow.fixture.waitUntil(timeout: 5) { narrow.fixture.pixiv.hasLoaded }
+    try await narrow.controller.pixivSelect(workID: "302")
     try await waitForOffset(narrow, near: 160, at: sizes[0])
     XCTAssertTrue(narrow.controller.shell.isInspectorShown)
     assertFits(narrow, sizes[0], "restored beside the inspector")
