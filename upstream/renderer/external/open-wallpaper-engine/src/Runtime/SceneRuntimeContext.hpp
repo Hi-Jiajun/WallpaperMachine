@@ -438,7 +438,14 @@ public:
     // Layer opacity a script writes. The authored `alpha` reaches the same
     // `g_Alpha` the flat shader reads; when the author already bound alpha to a
     // script or a user property that binding owns it and this one is not made,
-    // so a frame never has two writers.
+    // so a frame never has two writers. A write reaches every material given:
+    // the layer's own and the `g_Color4` and `g_Alpha` of each effect pass, the
+    // set an authored alpha, a property or a timeline reaches, and not an
+    // effect's own `g_UserAlpha` (`SceneMaterial::own_user_alpha`). A second
+    // registration of a name replaces the first.
+    void            RegisterNodeAlpha(std::string name,
+                                      std::vector<std::shared_ptr<SceneMaterial>> materials,
+                                      float value);
     void            RegisterNodeAlpha(std::string name, std::shared_ptr<SceneMaterial> material,
                                       float value);
     // Absent when the layer owns no material the runtime can tint, which the
@@ -873,8 +880,8 @@ private:
     CameraShake                                                    m_camera_shake;
     void                                                           ApplyCameraShake();
     struct NodeAlphaBinding {
-        std::shared_ptr<SceneMaterial> material;
-        float                          value { 1.0f };
+        std::vector<std::shared_ptr<SceneMaterial>> materials;
+        float                                       value { 1.0f };
     };
     std::unordered_map<std::string, NodeAlphaBinding>              m_node_alpha;
     struct ScalarAnimationBinding {

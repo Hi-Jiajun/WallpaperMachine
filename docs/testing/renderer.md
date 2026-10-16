@@ -736,13 +736,33 @@ into private textures; the three that draw skip visibly without a Metal device.
   HDR-only brightness go into the pass that draws the layer's image, the first of its
   chain, as the colour and alpha always have; the two agree for effects that scale
   linearly and can differ where an effect clamps or thresholds its input. A later pass
-  whose shader takes `g_Color4` itself, such as the passthrough that stands in for a
-  chain whose effects a script has all switched off, takes the colour and the HDR
-  brightness a second time when the layer's first pass already applied them (the colour
-  is squared, as it was before this change); on a compose layer, whose first pass reads no
-  `g_Color4`, that passthrough is where the colour lands once. Only a script
-  on the `brightness` property drives an image layer's brightness; a `thisLayer.brightness`
-  write is not read.
+  whose shader takes `g_Color4` itself takes them a second time, because the layer's
+  first pass has applied them already (a workshop effect that reads `g_Color4` or
+  `g_Alpha` does; no core effect does). The passthrough that blends a layer onto the
+  screen and the one that stands in for a chain whose effects a script has all switched
+  off are given white and do not (the latter took them twice before, squaring the colour
+  and the alpha); on a compose layer, whose first pass reads no `g_Color4`, that
+  passthrough is where the colour and alpha land once. A puppet with bones under
+  effects is the exception to "once": the layer's own pass draws its texture sheet,
+  the effects run over that and a skinned pass of the layer's material, appended to the
+  chain, draws the result, and both of them carry the layer's colour, HDR brightness and
+  alpha, so an alpha of 0.5 draws 0.25, whether it is authored, bound, keyed or written
+  by a script (a script's write reached only the skinned pass before it reached every
+  material, and now draws as the authored one does). Wallpaper Engine's rule above would
+  put them on the skinned pass, the final composite, alone, as the lighting of such a
+  layer already is (applied once, after assembly); no Wallpaper Engine frame has been
+  measured against this shape, so it is left as authored (the local scenes with an
+  authored alpha under a puppet's effects are 3444535389 and 3808922316). An effect's
+  own `g_UserAlpha` is left alone by a driven alpha, and an effect that sets none
+  starts from the layer's authored alpha and keeps it; whether Wallpaper Engine starts
+  such an effect from its shader's default instead has not been measured either. A
+  bound, keyed or script-owned alpha therefore does not fade a layer whose effect
+  replaces its picture and sets no alpha of its own (an effect that ignores its input,
+  or one with `copybackground` off): the layer's own pass, which carries that alpha, is
+  not what reaches the screen, while an authored alpha still does through the effect's
+  seed. No local scene has such a layer with a driven alpha. Only a
+  script on the `brightness` property drives an image layer's brightness; a
+  `thisLayer.brightness` write is not read.
 - **Shadows, spot cookies and volumetric lights are not drawn.** A light with
   `castshadow` lights as if nothing cast a shadow (`_rt_shadowAtlas` is never
   written), a spot cookie lights through its cone instead of its cookie image, and

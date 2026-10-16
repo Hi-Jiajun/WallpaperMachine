@@ -165,6 +165,27 @@ no pass or memory. It is also a script like any other, so a scene whose only scr
 an image layer's colour no longer goes idle (it did, while the colour script was never
 created); a scene with other scripts did not idle before either.
 
+A script that writes `thisLayer.alpha` on a layer whose alpha no timeline, script or
+user property owns sets the layer's opacity as the editor's `alpha` does. The layer's
+own pass applies it, once, on any layer but a puppet with bones under effects, which
+applies it twice. The write reaches that material, the `g_Color4` and `g_Alpha`
+each effect pass of the layer is given, as an authored alpha leaves them, and a compose
+layer's passthrough, which is where its alpha lands. An effect's own alpha is not the
+layer's: Wallpaper Engine's Opacity keeps the `g_UserAlpha` its `alpha` sets, or, when
+it sets none, the layer's authored alpha it starts from, so the two multiply, whether
+the layer's alpha is authored, bound to a property, keyed on a timeline or written by
+a script. A script that reads `thisLayer.alpha` back reads what it wrote, so a fade can
+step from it. The media widgets that fade themselves out while nothing plays rely on
+it: the write once reached only the pass built last, so a layer under an effect chain
+stayed on screen at its authored alpha. The passes that blend the layer onto the
+screen, and the passthrough a chain falls back on when a script has switched all its
+effects off, draw with white, because the layer's own pass has applied its colour and
+alpha already; on a compose layer, whose own pass reads no colour, that passthrough
+carries them. A puppet with bones under effects is drawn over its texture sheet by the
+layer's own pass and again by the skinned pass its chain ends in, and both carry the
+layer's colour and alpha, as an authored alpha always did and a script's write now
+does ([known limitations](../testing/renderer.md#known-limitations)).
+
 A scene follows the cursor anywhere on its display, but, as in Wallpaper Engine, a
 mouse press counts only where it lands on the desktop: the wallpaper, Finder's icons or
 a desktop widget. A click in another app's window, in the menu bar or the Dock, or in

@@ -64,6 +64,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <charconv>
@@ -3389,6 +3390,383 @@ TEST_F(MetalSceneDraw, AnImageLayersColourScriptDecidesItsColourOnBothRenderers)
                 << "the scene drew nothing at all, so the check above says nothing";
         }
         EXPECT_EQ(pictures[true].rgb, pictures[false].rgb) << variant.name;
+    }
+}
+
+/// The fixture's card in constant red times its `g_Color4`, over a scene cleared
+/// to green 0.25, with `object_fields` added to the card and `effects_json` as
+/// its effects (`swap` and `half` of the scripted-effect fixture, neither
+/// touching alpha, and `opacity`, which has an alpha of its own).
+/// `effectpassthrough` stands in for Wallpaper Engine's `genericimage3`: the
+/// layer times `g_Color4` and, for a colour blend mode, mixes it over the screen
+/// by its alpha.
+std::filesystem::path WriteLayerAlphaFixture(const std::filesystem::path& root,
+                                             std::string_view            object_fields,
+                                             std::string_view            effects_json)
+{
+    const auto project = WriteScriptedEffectFixture(root, "[]");
+    const auto file    = [&](const std::string& path, const std::string& text) {
+        std::filesystem::create_directories((root / path).parent_path());
+        std::ofstream(root / path) << text;
+    };
+    file("shaders/metal_probe.frag",
+         "uniform vec4 g_Color4;\nvarying vec2 v_TexCoord;\n"
+         "void main() {\n  gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0) * g_Color4;\n}\n");
+    file("materials/util/effectpassthrough.json",
+         R"({"passes":[{"shader":"blend_probe","cullmode":"nocull","blending":"normal",)"
+         R"("depthwrite":"disabled","depthtest":"disabled"}]})");
+    // Wallpaper Engine's Opacity effect: the effect's own opacity, `alpha`, is the
+    // `g_UserAlpha` of its shader and has nothing to do with the layer's.
+    file("shaders/opacity_probe.vert",
+         "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\n"
+         "attribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+         "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+         "  v_TexCoord = a_TexCoord;\n}\n");
+    file("shaders/opacity_probe.frag",
+         "uniform sampler2D g_Texture0;\n"
+         "uniform float g_UserAlpha; // {\"material\":\"alpha\",\"default\":1.0}\n"
+         "varying vec2 v_TexCoord;\nvoid main() {\n"
+         "  vec4 c = texture2D(g_Texture0, v_TexCoord);\n"
+         "  gl_FragColor = vec4(c.rgb, c.a * g_UserAlpha);\n}\n");
+    file("materials/opacity_probe.json",
+         R"({"passes":[{"shader":"opacity_probe","blending":"normal","cullmode":"nocull",)"
+         R"("depthtest":"disabled","depthwrite":"disabled","textures":[null]}]})");
+    file("effects/opacity/effect.json",
+         R"({"name":"opacity","passes":[{"material":"materials/opacity_probe.json"}]})");
+    file("shaders/blend_probe.vert",
+         "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\n"
+         "attribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\nvarying vec3 v_ScreenPos;\n"
+         "void main() {\n"
+         "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+         "  v_TexCoord = a_TexCoord;\n  v_ScreenPos = gl_Position.xyw;\n}\n");
+    file("shaders/blend_probe.frag",
+         "uniform sampler2D g_Texture0;\nuniform vec4 g_Color4;\n"
+         "#if BLENDMODE\n"
+         "uniform sampler2D g_Texture4; // {\"hidden\":true,\"default\":\"_rt_FullFrameBuffer\"}\n"
+         "#endif\n"
+         "varying vec2 v_TexCoord;\nvarying vec3 v_ScreenPos;\n"
+         "void main() {\n"
+         "  vec4 color = texSample2D(g_Texture0, v_TexCoord) * g_Color4;\n"
+         "  gl_FragColor = color;\n"
+         "#if BLENDMODE\n"
+         "  vec2 screenUV = (v_ScreenPos.xy / v_ScreenPos.z) * 0.5 + 0.5;\n"
+         "  vec4 screen = texSample2D(g_Texture4, screenUV);\n"
+         "  gl_FragColor.rgb = mix(screen.rgb, color.rgb, color.a);\n"
+         "  gl_FragColor.a = screen.a;\n"
+         "#endif\n}\n");
+    file("layout.json",
+         R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+         R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0,0.25,0],)"
+         R"("bloom":false,"cameraparallax":false,"orthogonalprojection":{"width":384,"height":256}},)"
+         R"("objects":[{"id":1,"name":"tile","image":"models/tile.json","origin":[192,128,0],)"
+         R"("scale":[1,1,1],"angles":[0,0,0],"visible":true,"effects":)" +
+             std::string(effects_json) + (object_fields.empty() ? "" : ",") +
+             std::string(object_fields) + "}]}");
+    return project;
+}
+
+/// `frames` frames of the layer-alpha fixture from one renderer, 384 x 256. A
+/// picture with an `error` is none: the scene did not load, or the native
+/// renderer would not take it.
+RendererPicture DrawLayerAlpha(const std::filesystem::path& root, const std::string& name,
+                               std::string_view object_fields, std::string_view effects_json,
+                               bool native, int frames)
+{
+    RendererPicture picture;
+    const auto project = WriteLayerAlphaFixture(root / name, object_fields, effects_json);
+    LoadedScene loaded;
+    if (! LoadScene(project, root / (name + "-cache"), loaded, picture.error)) return picture;
+    if (native) {
+        const auto selection = SelectSceneBackend(*loaded.scene);
+        if (selection.backend != SceneBackend::NativeMetal) {
+            picture.error = selection.fallback_reason;
+            return picture;
+        }
+    }
+    picture = DrawWithRenderer(*loaded.scene, native, 384, 256, frames, 1.0 / 60.0);
+    if (picture.error.empty() && picture.rgb.size() != 384u * 256u * 3u) {
+        picture.error = "the picture is not 384 x 256";
+    }
+    return picture;
+}
+
+/// A layer under `effects_json` with `fields_json` added to the card, and the
+/// colour of the card's centre when the layer is opaque and when it is half
+/// transparent over the green: red, or what `swap` makes of it.
+struct LayerAlphaShape
+{
+    std::string        name;
+    std::string        effects_json;
+    std::string        fields_json;
+    std::array<int, 3> opaque;
+    std::array<int, 3> half;
+};
+
+/// The chains a layer's alpha has to come out right under. An effect's own alpha
+/// (Wallpaper Engine's Opacity) belongs to the effect: the layer's alpha is
+/// applied once, by the layer, and the effect's multiplies it.
+std::vector<LayerAlphaShape> LayerAlphaShapes()
+{
+    const std::string off =
+        R"({"file":"effects/swap/effect.json","id":2,"visible":{"value":false,)"
+        R"("script":"export function update() { return false; }"}})";
+    const std::string on = R"({"file":"effects/swap/effect.json","id":3,"visible":true})";
+    const auto opacity = [](int id, const char* alpha) {
+        return R"({"file":"effects/opacity/effect.json","id":)" + std::to_string(id) +
+               R"(,"visible":true,"passes":[{"id":)" + std::to_string(id + 1) +
+               R"(,"constantshadervalues":{"alpha":)" + alpha + "}}]}";
+    };
+    return {
+        { "no effects", "[]", "", { 255, 0, 0 }, { 128, 32, 0 } },
+        { "an effect", "[" + on + "]", "", { 0, 255, 0 }, { 0, 160, 0 } },
+        { "an effect with an alpha of its own", "[" + opacity(4, "1.0") + "]", "",
+          { 255, 0, 0 }, { 128, 32, 0 } },
+        // The alphas multiply: 0.8 of the effect's, and the layer's 1 or 0.5.
+        { "an effect with an alpha of 0.8", "[" + opacity(4, "0.8") + "]", "",
+          { 204, 13, 0 }, { 102, 38, 0 } },
+        { "two effects with an alpha of their own",
+          "[" + opacity(4, "1.0") + "," + opacity(6, "1.0") + "]", "",
+          { 255, 0, 0 }, { 128, 32, 0 } },
+        // Every effect a script can switch off: the layer is drawn as one without.
+        { "every effect off", "[" + off + "]", "", { 255, 0, 0 }, { 128, 32, 0 } },
+        // A colour blend mode ends the chain in a pass that blends the layer onto
+        // the screen with the alpha it already carries.
+        { "every effect off and a colour blend", "[" + off + "]", R"("colorBlendMode":2)",
+          { 255, 0, 0 }, { 128, 32, 0 } },
+        { "an effect and a colour blend", "[" + on + "]", R"("colorBlendMode":2)",
+          { 0, 255, 0 }, { 0, 160, 0 } },
+        { "an effect with an alpha of its own and a colour blend",
+          "[" + opacity(4, "1.0") + "]", R"("colorBlendMode":2)",
+          { 255, 0, 0 }, { 128, 32, 0 } },
+    };
+}
+
+TEST_F(MetalSceneDraw, AScriptsLayerAlphaReachesTheLayerWhateverItsEffectsDoOnBothRenderers)
+{
+    // `thisLayer.alpha = x` is how a widget fades itself in and out. The write has
+    // to reach the layer's own pass, not the last one built: under an effect chain
+    // that pass draws the picture the chain goes on to carry, and a write that
+    // landed on an effect pass left it at its authored alpha, so a layer a script
+    // faded out was still on screen. And it is the layer's alpha alone: an effect
+    // with an alpha of its own, Wallpaper Engine's Opacity, keeps it, so the two
+    // multiply and do not each apply the layer's. Here the script switches the
+    // alpha at 0.5 s, from 1 to 0 and to 0.5.
+    const auto shapes = LayerAlphaShapes();
+    for (const auto& shape : shapes) {
+        SCOPED_TRACE(shape.name);
+        for (const bool half : { false, true }) {
+            SCOPED_TRACE(half ? "to half" : "to nothing");
+            const std::string fields =
+                R"("visible":{"value":true,"script":"export function update(value) { )"
+                R"(thisLayer.alpha = engine.runtime >= 0.5 ? )" + std::string(half ? "0.5" : "0.0") +
+                R"( : 1.0; return value; }"})" +
+                (shape.fields_json.empty() ? "" : "," + shape.fields_json);
+            for (const bool faded : { false, true }) {
+                SCOPED_TRACE(faded ? "after the switch" : "before the switch");
+                std::map<bool, RendererPicture> pictures;
+                for (const bool native : { false, true }) {
+                    const std::string name = std::string("script-alpha-") +
+                                             std::to_string(&shape - shapes.data()) +
+                                             (half ? "-half" : "-zero") +
+                                             (faded ? "-late" : "-early") +
+                                             (native ? "-native" : "-compat");
+                    pictures[native] = DrawLayerAlpha(root_, name, fields, shape.effects_json,
+                                                      native, faded ? 45 : 10);
+                    ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+                    const auto centre = RgbAt(pictures[native], 192, 128);
+                    const std::array<int, 3> expected =
+                        ! faded ? shape.opaque : half ? shape.half : std::array<int, 3> { 0, 64, 0 };
+                    for (std::size_t channel = 0; channel < 3; ++channel) {
+                        EXPECT_NEAR(centre[channel], expected[channel], 2)
+                            << (native ? "native" : "compatibility") << ", channel " << channel;
+                    }
+                }
+                EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
+                    << "the renderers drew the faded layer differently";
+            }
+        }
+    }
+}
+
+TEST_F(MetalSceneDraw, AnAuthoredBoundOrScriptedAlphaIsAppliedOnceUnderEffectsOnBothRenderers)
+{
+    // The layer's alpha is applied once, however it is set: as authored, as the
+    // value of a property, or as what its own script returns. Under effects it is
+    // the layer's own pass that applies it. The passes after that take no second
+    // helping, neither the passthrough a chain falls back on when a script has
+    // switched all its effects off, nor an effect with an alpha of its own; the
+    // alpha is a half here, so a second helping draws a quarter.
+    const auto shapes = LayerAlphaShapes();
+    const struct
+    {
+        const char* name;
+        const char* fields_json;
+    } owners[] {
+        { "authored", R"("alpha":0.5)" },
+        { "property", R"("alpha":{"user":"fade","value":1})" },
+        { "script", R"("alpha":{"value":1,"script":"export function update(value) { return 0.5; }"})" },
+    };
+    for (const auto& shape : shapes) {
+        SCOPED_TRACE(shape.name);
+        for (const auto& owner : owners) {
+            SCOPED_TRACE(owner.name);
+            std::map<bool, RendererPicture> pictures;
+            for (const bool native : { false, true }) {
+                const std::string name = std::string("owned-alpha-") +
+                                         std::to_string(&shape - shapes.data()) + "-" + owner.name +
+                                         (native ? "-native" : "-compat");
+                const auto project = WriteLayerAlphaFixture(
+                    root_ / name,
+                    std::string(owner.fields_json) +
+                        (shape.fields_json.empty() ? "" : "," + shape.fields_json),
+                    shape.effects_json);
+                std::ofstream(project)
+                    << R"({"title":"Metal alpha smoke","type":"scene","file":"layout.json","general":)"
+                       R"({"properties":{"fade":{"type":"slider","value":0.5}}}})";
+                LoadedScene loaded;
+                std::string error;
+                ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+                if (native) {
+                    const auto selection = SelectSceneBackend(*loaded.scene);
+                    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal)
+                        << selection.fallback_reason;
+                }
+                pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+                ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+                const auto centre = RgbAt(pictures[native], 192, 128);
+                for (std::size_t channel = 0; channel < 3; ++channel) {
+                    EXPECT_NEAR(centre[channel], shape.half[channel], 2)
+                        << (native ? "native" : "compatibility") << ", channel " << channel
+                        << ": the layer is not half transparent, once";
+                }
+            }
+            EXPECT_EQ(pictures[true].rgb, pictures[false].rgb);
+        }
+    }
+}
+
+TEST_F(MetalSceneDraw, ALayerColourIsAppliedOnceWhenEveryEffectIsSwitchedOffOnBothRenderers)
+{
+    // The layer's colour is in what its own pass draws. The passthrough a chain
+    // falls back on when a script has switched all its effects off draws that
+    // picture and no more, white, as the layer would draw with no effects: a grey
+    // of 0.5 is 0.5 on the screen, not 0.25. The card is red times its colour.
+    const std::map<std::string, std::array<int, 3>> expected {
+        { "no effects", { 128, 0, 0 } },
+        { "an effect", { 0, 128, 0 } },
+        { "every effect off", { 128, 0, 0 } },
+        { "every effect off and a colour blend", { 128, 0, 0 } },
+    };
+    std::size_t checked = 0;
+    for (const auto& shape : LayerAlphaShapes()) {
+        const auto want = expected.find(shape.name);
+        if (want == expected.end()) continue;
+        ++checked;
+        SCOPED_TRACE(shape.name);
+        const std::string fields = R"("color":"0.5 0.5 0.5")" +
+                                   (shape.fields_json.empty() ? "" : "," + shape.fields_json);
+        std::map<bool, RendererPicture> pictures;
+        for (const bool native : { false, true }) {
+            const std::string name = std::string("colour-once-") + std::to_string(checked) +
+                                     (native ? "-native" : "-compat");
+            pictures[native] = DrawLayerAlpha(root_, name, fields, shape.effects_json, native, 3);
+            ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+            const auto centre = RgbAt(pictures[native], 192, 128);
+            for (std::size_t channel = 0; channel < 3; ++channel) {
+                EXPECT_NEAR(centre[channel], want->second[channel], 2)
+                    << (native ? "native" : "compatibility") << ", channel " << channel;
+            }
+        }
+        EXPECT_EQ(pictures[true].rgb, pictures[false].rgb);
+    }
+    EXPECT_EQ(checked, expected.size());
+}
+
+/// The layer-alpha fixture's card as the child of a compose layer, which draws
+/// what is behind it through a pass that reads no `g_Color4`, so that only the
+/// pass behind it carries the layer's alpha. `object_fields` goes on the compose
+/// layer, and the project declares a `fade` slider for it to bind to.
+std::filesystem::path WriteComposeAlphaFixture(const std::filesystem::path& root,
+                                               std::string_view            object_fields)
+{
+    const auto project = WriteLayerAlphaFixture(root, "", "[]");
+    const auto file    = [&](const std::string& path, const std::string& text) {
+        std::filesystem::create_directories((root / path).parent_path());
+        std::ofstream(root / path) << text;
+    };
+    file("models/util/composelayer.json",
+         R"({"passthrough":true,"material":"materials/util/composelayer.json"})");
+    file("materials/util/composelayer.json",
+         R"({"passes":[{"shader":"compose_sample","blending":"translucent","cullmode":"nocull",)"
+         R"("depthtest":"disabled","depthwrite":"disabled","textures":["_rt_FullFrameBuffer"]}]})");
+    file("shaders/compose_sample.vert",
+         "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\n"
+         "attribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+         "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+         "  v_TexCoord = a_TexCoord;\n}\n");
+    file("shaders/compose_sample.frag",
+         "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\n"
+         "void main() {\n  gl_FragColor = texture(g_Texture0, v_TexCoord);\n}\n");
+    file("layout.json",
+         R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+         R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0,0.25,0],)"
+         R"("bloom":false,"cameraparallax":false,"orthogonalprojection":{"width":384,"height":256}},)"
+         R"("objects":[{"id":1,"name":"container","image":"models/util/composelayer.json",)"
+         R"("size":[384,256],"origin":[192,128,0],"copybackground":false,"dependencies":[2],)"
+         R"("visible":true,)" + std::string(object_fields) +
+             R"(},{"id":2,"name":"tile","parent":1,"image":"models/tile.json",)"
+             R"("origin":[0,0,0],"visible":true}]})");
+    std::ofstream(project)
+        << R"({"title":"Metal alpha smoke","type":"scene","file":"layout.json","general":)"
+           R"({"properties":{"fade":{"type":"slider","value":0.5}}}})";
+    return project;
+}
+
+TEST_F(MetalSceneDraw, AComposeLayersAlphaFollowsWhatDrivesItOnBothRenderers)
+{
+    // A compose layer's own pass copies what is behind it and takes no alpha; the
+    // pass behind it carries the layer's. A script that writes the alpha, or a
+    // property or timeline bound to it, has to reach that pass, as the authored
+    // alpha does: the red child comes out at the alpha, over the green.
+    const struct
+    {
+        const char*        name;
+        const char*        fields_json;
+        std::array<int, 3> expected;
+    } variants[] {
+        { "authored", R"("alpha":0.5)", { 128, 32, 0 } },
+        { "property", R"("alpha":{"user":"fade","value":1})", { 128, 32, 0 } },
+        { "script writes half",
+          R"("visible":{"value":true,"script":"export function update(value) { thisLayer.alpha = 0.5; return value; }"})",
+          { 128, 32, 0 } },
+        { "script writes nothing",
+          R"("visible":{"value":true,"script":"export function update(value) { thisLayer.alpha = 0.0; return value; }"})",
+          { 0, 64, 0 } },
+    };
+    for (const auto& variant : variants) {
+        SCOPED_TRACE(variant.name);
+        std::map<bool, RendererPicture> pictures;
+        for (const bool native : { false, true }) {
+            std::string name = std::string("compose-alpha-") + variant.name +
+                               (native ? "-native" : "-compat");
+            std::replace(name.begin(), name.end(), ' ', '-');
+            const auto project = WriteComposeAlphaFixture(root_ / name, variant.fields_json);
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            if (native) {
+                const auto selection = SelectSceneBackend(*loaded.scene);
+                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            }
+            pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+            ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+            const auto centre = RgbAt(pictures[native], 192, 128);
+            for (std::size_t channel = 0; channel < 3; ++channel) {
+                EXPECT_NEAR(centre[channel], variant.expected[channel], 2)
+                    << (native ? "native" : "compatibility") << ", channel " << channel;
+            }
+        }
+        EXPECT_EQ(pictures[true].rgb, pictures[false].rgb);
     }
 }
 

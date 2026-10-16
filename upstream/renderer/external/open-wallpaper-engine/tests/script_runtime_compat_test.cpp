@@ -517,6 +517,48 @@ export function update(value) { thisLayer.alpha = 0.25; return value; }
     EXPECT_EQ(runtime->scriptErrorCount(), 0u);
 }
 
+// A layer whose picture is drawn through more than one material -- its own and
+// each effect pass that takes its alpha -- fades them all, and a script that
+// reads the alpha back reads what it wrote, so a fade can step from it. An
+// effect's own alpha, the `g_UserAlpha` of a pass that owns it, is not the
+// layer's and stays as it is.
+TEST(ScriptRuntimeCompat, LayerAlphaWritesReachEveryMaterialOfTheLayer) {
+    auto runtime   = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
+    auto node      = std::make_shared<SceneNode>();
+    auto own       = std::make_shared<SceneMaterial>();
+    auto first     = std::make_shared<SceneMaterial>();
+    auto second    = std::make_shared<SceneMaterial>();
+    second->own_user_alpha = true;
+    second->customShader.constValues["g_UserAlpha"] = ShaderValue(0.9f);
+    runtime->RegisterNode("icon", node.get());
+    runtime->RegisterNodeAlpha("icon", { own, first, second }, 1.0f);
+    runtime->RegisterNodeVisibility("icon", node.get(), ResolveBoolSetting(*runtime, {
+        {"value", true}, {"script", R"JS(
+export function update(value) {
+  thisLayer.alpha = 0.5;
+  thisLayer.alpha -= 0.125;
+  return value;
+}
+)JS"}}, "icon"));
+
+    runtime->Tick(0.01);
+    for (const auto& material : { own, first, second }) {
+        ASSERT_TRUE(material->customShader.constValues.contains("g_UserAlpha"));
+        EXPECT_FLOAT_EQ(material->customShader.constValues.at("g_UserAlpha")[0],
+                        material == second ? 0.9f : 0.375f);
+        EXPECT_FLOAT_EQ(material->customShader.constValues.at("g_Color4")[3], 0.375f);
+    }
+    EXPECT_FLOAT_EQ(*runtime->NodeAlpha("icon"), 0.375f);
+    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
+
+    // Registering the name again replaces what it reached.
+    auto replacement = std::make_shared<SceneMaterial>();
+    runtime->RegisterNodeAlpha("icon", replacement, 1.0f);
+    EXPECT_TRUE(runtime->SetNodeAlpha("icon", 0.75f));
+    EXPECT_FLOAT_EQ(replacement->customShader.constValues.at("g_UserAlpha")[0], 0.75f);
+    EXPECT_FLOAT_EQ(own->customShader.constValues.at("g_UserAlpha")[0], 0.375f);
+}
+
 // A layer with no material of its own — a sound layer, an empty group — still
 // remembers what a script wrote to it rather than reporting a made-up 1.
 TEST(ScriptRuntimeCompat, LayerAlphaWithoutAMaterialKeepsWhatWasWritten) {

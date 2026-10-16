@@ -2157,9 +2157,18 @@ TextLayerState ResolveTextLayerState(const wpscene::WPTextObject& obj, fs::VFS& 
     return state;
 }
 
+// A layer's alpha reaches every material that takes it: its own, and the
+// `g_Color4` and `g_Alpha` of each effect pass (an effect's `g_UserAlpha` is the
+// effect's own, `SceneMaterial::own_user_alpha`, and keeps the alpha it started
+// with). A timeline, a script or a user property drives each of them. An alpha
+// none of those owns is the one another script writes (`thisLayer.alpha`), and
+// the materials it reaches are collected in `written` for the caller to hand to
+// `RegisterNodeAlpha` once, all of them: registered one at a time a write would
+// reach only the last.
 void RegisterLayerAlpha(ParseContext& context, std::string_view runtime_name,
                          const nlohmann::json& setting, float alpha,
-                         std::shared_ptr<SceneMaterial> material) {
+                         std::shared_ptr<SceneMaterial> material,
+                         std::vector<std::shared_ptr<SceneMaterial>>& written) {
     if (context.scene->runtime == nullptr || material == nullptr) return;
     auto& runtime = *context.scene->runtime;
     if (auto animation = ResolveScalarAnimation(setting)) {
@@ -2168,7 +2177,7 @@ void RegisterLayerAlpha(ParseContext& context, std::string_view runtime_name,
     } else if (HasUpdateScript(setting) || (setting.is_object() && setting.contains("user"))) {
         runtime.BindMaterialAlpha(material, ResolveFloatSetting(runtime, setting, runtime_name));
     } else {
-        runtime.RegisterNodeAlpha(std::string(runtime_name), material, alpha);
+        written.push_back(std::move(material));
     }
 }
 
@@ -2413,10 +2422,13 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
                                runtime_name));
         node->SetVisibilitySettled(VisibilitySettledBy(obj.visible_setting));
         context.scene->runtime->RegisterTextLayer(runtime_name, std::move(text_state), layout);
+        std::vector<std::shared_ptr<SceneMaterial>> alpha_materials;
         RegisterLayerAlpha(context, runtime_name,
                            obj.field_bindings.contains("alpha") ? obj.field_bindings.at("alpha")
                                                                : nlohmann::json(obj.alpha),
-                           obj.alpha, mesh->MaterialSlotPtr());
+                           obj.alpha, mesh->MaterialSlotPtr(), alpha_materials);
+        context.scene->runtime->RegisterNodeAlpha(std::string(runtime_name),
+                                                  std::move(alpha_materials), obj.alpha);
         if (const auto setting = obj.field_bindings.find("color");
             setting != obj.field_bindings.end()) {
             context.scene->runtime->RegisterMaterialConstant(
@@ -4249,6 +4261,9 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     const bool additive_color_blend = wpimgobj.colorBlendMode == kAdditiveColorBlendMode;
     bool color_blend_passthrough = false;
     std::optional<usize> color_blend_effect;
+    // The skinned pass of a puppet that has effects is a pass of the layer's own
+    // material, appended to the effects: it draws the layer, with its alpha.
+    std::optional<usize> puppet_layer_effect;
     if (wpimgobj.colorBlendMode != 0 && ! additive_color_blend) {
         auto colorEffect = MakeColorBlendEffect(vfs, wpimgobj.colorBlendMode);
         if (! colorEffect) return;
@@ -4369,11 +4384,12 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         if (color_animation != nullptr) color_animation_materials.push_back(material);
         if (bound_brightness != nullptr) bound_brightness_materials.push_back(material);
     };
-    const auto registerImageLayerMaterial = [&context, &wpimgobj, &runtime_name,
-                                             &tintLayerMaterial](std::shared_ptr<SceneMaterial> material) {
+    std::vector<std::shared_ptr<SceneMaterial>> alpha_materials;
+    const auto registerImageLayerMaterial = [&context, &wpimgobj, &runtime_name, &tintLayerMaterial,
+                                             &alpha_materials](std::shared_ptr<SceneMaterial> material) {
         tintLayerMaterial(material);
         RegisterLayerAlpha(context, runtime_name, wpimgobj.alpha_setting, wpimgobj.alpha,
-                           std::move(material));
+                           std::move(material), alpha_materials);
     };
     // A scripted or user-bound origin replaces the node translate every tick, so
     // an anchor baked into the translate is lost. Hand the anchor to the runtime
@@ -4573,6 +4589,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                     }
                     puppet_effect.materials.push_back(puppet_mat);
                     wpimgobj.effects.push_back(puppet_effect);
+                    puppet_layer_effect = wpimgobj.effects.size() - 1;
                 }
             } else {
                 if (has_puppet_bones) {
@@ -4720,12 +4737,25 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         }
         // Draws the layer's own picture through unchanged: the whole chain of
         // a compose layer without effects, and the fallback of a chain whose
-        // effects a script can all switch off.
+        // effects a script can all switch off. A compose layer's own pass reads no
+        // `g_Color4`, so its colour and alpha land here, once, and follow whatever
+        // drives them as the passes of a layer with an image do. On any other layer
+        // the first pass has applied them already, and the passthrough draws with
+        // white, as the one that blends the layer onto the screen does: the layer
+        // is drawn as one without effects.
         const auto make_passthrough_effect = [&]() -> std::shared_ptr<SceneImageEffect> {
+            auto passthrough_svs = baseConstSvs;
+            if (! render_as_compose) {
+                passthrough_svs["g_Color4"] = std::array<float, 4> { 1.0f, 1.0f, 1.0f, 1.0f };
+            }
             std::shared_ptr<SceneMaterial> slot;
-            auto effect = MakePassthroughEffect(context, effect_ppong_a, baseConstSvs,
+            auto effect = MakePassthroughEffect(context, effect_ppong_a, passthrough_svs,
                                                 runtime_name, wpimgobj.name, &slot);
-            if (effect != nullptr) tintLayerMaterial(slot);
+            if (effect != nullptr && render_as_compose) {
+                tintLayerMaterial(slot);
+                RegisterLayerAlpha(context, runtime_name, wpimgobj.alpha_setting,
+                                   wpimgobj.alpha, slot, alpha_materials);
+            }
             return effect;
         };
         if (render_as_compose && wpimgobj.effects.empty()) {
@@ -4745,6 +4775,8 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             const bool blends_onto_screen =
                 is_fog_composite ||
                 (color_blend_effect.has_value() && &wpeffobj == &wpimgobj.effects[*color_blend_effect]);
+            const bool is_layer_pass =
+                puppet_layer_effect.has_value() && &wpeffobj == &wpimgobj.effects[*puppet_layer_effect];
             if (! EffectIsBuilt(wpeffobj)) {
                 i_eff--;
                 continue;
@@ -4859,6 +4891,10 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
 
                 // load glname from alias and load to constvalue
                 LoadConstvalue(material, wpmat, wpEffShaderInfo);
+                // An effect's alpha is its own: the one the effect sets, or the
+                // layer's authored alpha it starts from when it sets none. What
+                // drives the layer's alpha afterwards reaches the layer's own pass.
+                material.own_user_alpha = ! is_layer_pass;
                 auto spMesh = std::make_shared<SceneMesh>();
                 {
                     svData.parallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
@@ -4897,6 +4933,8 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     registerImageNode();
     runtime_node_registration.Commit();
     if (context.scene->runtime != nullptr) {
+        context.scene->runtime->RegisterNodeAlpha(runtime_name, std::move(alpha_materials),
+                                                  wpimgobj.alpha);
         if (bound_color != nullptr) {
             context.scene->runtime->BindMaterialColor(runtime_name,
                                                       std::move(bound_color_materials),

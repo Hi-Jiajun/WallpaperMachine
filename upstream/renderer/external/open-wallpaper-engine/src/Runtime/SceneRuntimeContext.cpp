@@ -348,10 +348,16 @@ std::unique_ptr<DynamicValue> MakePropertyValue(const RuntimeScalarValue& value)
     return std::make_unique<DynamicValue>();
 }
 
+// The layer's alpha in a material that takes it: the `g_Color4` and `g_Alpha` every
+// pass of the layer is given and, on the layer's own pass, its `g_UserAlpha`. An
+// effect's is the effect's own opacity (`own_user_alpha`): it starts from the
+// layer's authored alpha, the effect's own `alpha` replaces that, and either is
+// left alone, or the layer's alpha would be applied again by every effect that has
+// an alpha.
 void ApplyMaterialAlpha(SceneMaterial& material, float alpha) {
     auto& values = material.customShader.constValues;
 
-    values["g_UserAlpha"] = ShaderValue(alpha);
+    if (! material.own_user_alpha) values["g_UserAlpha"] = ShaderValue(alpha);
 
     if (auto alpha_value = values.find("g_Alpha"); alpha_value != values.end()) {
         alpha_value->second = ShaderValue(alpha);
@@ -2582,11 +2588,18 @@ std::string SceneRuntimeContext::NodeParentName(std::string_view name) const {
     return parent != nullptr ? parent->Name() : std::string {};
 }
 
+void SceneRuntimeContext::RegisterNodeAlpha(
+    std::string name, std::vector<std::shared_ptr<SceneMaterial>> materials, float value) {
+    std::erase(materials, nullptr);
+    if (name.empty() || materials.empty()) return;
+    m_node_alpha[std::move(name)] = NodeAlphaBinding { .materials = std::move(materials),
+                                                       .value     = value };
+}
+
 void SceneRuntimeContext::RegisterNodeAlpha(std::string name,
                                             std::shared_ptr<SceneMaterial> material, float value) {
-    if (name.empty() || material == nullptr) return;
-    m_node_alpha[std::move(name)] = NodeAlphaBinding { .material = std::move(material),
-                                                       .value    = value };
+    RegisterNodeAlpha(std::move(name),
+                      std::vector<std::shared_ptr<SceneMaterial>> { std::move(material) }, value);
 }
 
 std::optional<float> SceneRuntimeContext::NodeAlpha(std::string_view name) const {
@@ -2597,10 +2610,10 @@ std::optional<float> SceneRuntimeContext::NodeAlpha(std::string_view name) const
 
 bool SceneRuntimeContext::SetNodeAlpha(std::string_view name, float value) {
     const auto iterator = m_node_alpha.find(std::string(name));
-    if (iterator == m_node_alpha.end() || iterator->second.material == nullptr) return false;
+    if (iterator == m_node_alpha.end()) return false;
     if (iterator->second.value == value) return true;
     iterator->second.value = value;
-    ApplyMaterialAlpha(*iterator->second.material, value);
+    for (const auto& material : iterator->second.materials) ApplyMaterialAlpha(*material, value);
     return true;
 }
 

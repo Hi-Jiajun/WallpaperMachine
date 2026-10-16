@@ -500,6 +500,42 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   without it the whole `update` throws every frame. `layer.alpha` must reach
   `g_UserAlpha`, and only for layers whose authored alpha is not already owned by
   a timeline, an update script or a user property (two writers per frame fight).
+  The layer's own pass applies the layer's alpha, once (twice on a puppet with bones
+  under effects). A write has to reach it, and the `g_Color4` of each effect pass, not
+  only the one registered last, and an effect with an alpha of its own (Wallpaper
+  Engine's Opacity, the `g_UserAlpha` of its shader) keeps it, as it does under an
+  authored alpha: a layer under such an effect drew a written, bound or keyed alpha
+  once more for each of them, a half as a quarter:
+  `ScriptRuntimeCompat.LayerAlphaWritesReachEveryMaterialOfTheLayer` (all of them,
+  except an effect's own `g_UserAlpha`; the read-back of a write; a second registration
+  replacing the first), `SceneSchema.AScriptsAlphaWriteReachesEveryMaterialOfTheLayer`
+  (a layer's own material and each pass of its chain after parsing, a script-switched
+  effect's pass included, an alpha a script owns left alone),
+  `.AnEffectsOwnAlphaIsLeftAloneWhenTheLayersAlphaIsDriven` (an Opacity pass keeps its
+  `alpha` whether a script writes the layer's, a property is bound to it or its own
+  script owns it, with one such effect and with two),
+  `.AnEffectThatSetsNoAlphaStartsFromTheLayersAuthoredAlphaAndKeepsIt` (an Opacity pass
+  that sets none starts from the layer's authored alpha and a write leaves that alone),
+  `.APuppetsSkinnedPassUnderEffectsTakesTheLayersAlpha` (the skinned pass appended to a
+  puppet's chain draws the layer, so it takes the layer's alpha and its effect does not;
+  the layer's own pass, the sheet the chain starts from, takes it too, and a write puts
+  every material where an authored alpha puts it: a puppet with bones under effects
+  applies its alpha twice, [a known limitation](renderer.md#known-limitations)),
+  `MetalSceneDraw.AScriptsLayerAlphaReachesTheLayerWhateverItsEffectsDoOnBothRenderers`
+  (a script fading a layer to nothing and to half at 0.5 s leaves it opaque before,
+  and clear or half transparent after, with no effects, a copying effect, an effect
+  with an alpha of its own at 1 and at 0.8, two of them, every effect switched off, and
+  a colour blend mode, the two renderers equal; a fade that left the layer's own pass at
+  its authored alpha kept a faded widget on screen, and one that wrote the Opacity pass
+  too drew a quarter where it should draw a half),
+  `.AnAuthoredBoundOrScriptedAlphaIsAppliedOnceUnderEffectsOnBothRenderers` (the same
+  shapes at an alpha of a half, authored, bound to a property and owned by a script:
+  a half once, where an effect's own alpha or the fallback passthrough of a chain whose
+  effects a script switched off drew a quarter),
+  `.ALayerColourIsAppliedOnceWhenEveryEffectIsSwitchedOffOnBothRenderers` (the same for
+  the layer's colour) and `.AComposeLayersAlphaFollowsWhatDrivesItOnBothRenderers` that
+  a compose layer's alpha, which lands in its passthrough because its own pass reads no
+  `g_Color4`, follows a property and a script as the authored one does.
 - **Property and name bindings** — `ScriptRuntimeCompat.AuthoredColorPropertiesStayVectorsAcrossTicksAndPropertyChanges`:
   `createScriptProperties().addColor(...)` exposes a `Vec3` even when the saved
   `scriptproperties` stores RGB as a space-separated string, and again after

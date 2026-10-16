@@ -3059,6 +3059,30 @@ void MountTintableImageFiles(fs::VFS& vfs, bool hdr_bloom = false) {
           R"({"name":"copy","passes":[{"material":"effect_mat.json","bind":[{"name":"previous","index":0}]}]})" },
         { "/effect_mat.json",
           R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":[null]}]})" },
+        // Wallpaper Engine's Opacity effect: its `alpha` is the `g_UserAlpha` of its
+        // own shader, the effect's, and not the layer's.
+        { "/effects/opacity/effect.json",
+          R"({"name":"opacity","passes":[{"material":"opacity_mat.json","bind":[{"name":"previous","index":0}]}]})" },
+        { "/opacity_mat.json",
+          R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"opacity","textures":[null]}]})" },
+        { "/shaders/opacity.vert",
+          R"(attribute vec3 a_Position;
+attribute vec2 a_TexCoord;
+varying vec2 v_TexCoord;
+void main() {
+  gl_Position = vec4(a_Position, 1.0);
+  v_TexCoord = a_TexCoord;
+}
+)" },
+        { "/shaders/opacity.frag",
+          R"(uniform sampler2D g_Texture0;
+uniform float g_UserAlpha; // {"material":"alpha","default":1.0}
+varying vec2 v_TexCoord;
+void main() {
+  vec4 color = texture(g_Texture0, v_TexCoord);
+  gl_FragColor = vec4(color.rgb, color.a * g_UserAlpha);
+}
+)" },
         { "/shaders/genericimage.vert",
           R"(attribute vec3 a_Position;
 attribute vec2 a_TexCoord;
@@ -3343,6 +3367,345 @@ void main() {
     expect_colour("cover", { 0.25f, 0.5f, 0.75f }, 1u);
     expect_colour("handler", { 0.25f, 0.5f, 0.75f }, 2u);
     EXPECT_EQ(parsed->runtime->scriptErrorCount(), 0u);
+}
+
+// A script writes a layer's opacity as `thisLayer.alpha`. The write has to reach
+// every material that takes the layer's alpha -- its own and the `g_Color4` of
+// each effect pass, as an authored alpha, a user property and a timeline do --
+// and not the one built last, and an alpha a property or a script owns is left
+// to its owner.
+TEST(SceneSchema, AScriptsAlphaWriteReachesEveryMaterialOfTheLayer) {
+    fs::VFS vfs;
+    MountTintableImageFiles(vfs);
+    audio::SoundManager sound_manager(audio::SoundManager::OutputBackend::Null);
+    const std::string   scene = R"({
+      "camera": {"center":[0,0,0], "eye":[0,0,1], "up":[0,1,0]},
+      "general": {
+        "ambientcolor":[0.2,0.2,0.2], "skylightcolor":[0.3,0.3,0.3],
+        "clearcolor":[0,0,0], "cameraparallax":false,
+        "cameraparallaxamount":0, "cameraparallaxdelay":0,
+        "cameraparallaxmouseinfluence":0,
+        "orthogonalprojection":{"width":640,"height":360}
+      },
+      "objects": [
+        {"id":1,"name":"plain","image":"image.json","alpha":0.5,
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true},
+        {"id":2,"name":"with effect","image":"image.json","alpha":0.5,
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true,
+         "effects":[{"file":"effects/copy/effect.json","id":3,"visible":true}]},
+        {"id":4,"name":"two effects","image":"image.json","alpha":0.5,
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true,
+         "effects":[{"file":"effects/copy/effect.json","id":5,"visible":true},
+                    {"file":"effects/copy/effect.json","id":6,"visible":{"value":false,
+                     "script":"export function update() { return false; }"}}]},
+        {"id":7,"name":"written by itself","image":"image.json","alpha":0.5,
+         "visible":{"value":true,"script":"export function update(value) { thisLayer.alpha = 0.25; return value; }"},
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],
+         "effects":[{"file":"effects/copy/effect.json","id":8,"visible":true}]},
+        {"id":9,"name":"owned by a script","image":"image.json",
+         "alpha":{"value":0.5,"script":"export function update(value) { return value; }"},
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true,
+         "effects":[{"file":"effects/copy/effect.json","id":10,"visible":true}]}
+      ]
+    })";
+
+    ProjectProperties properties;
+    auto              parsed = WPSceneParser().Parse(SceneParseRequest {
+                                                         .scene_id           = "script-alpha-write",
+                                                         .project_properties = &properties,
+                                                     },
+                                                     scene,
+                                                     vfs,
+                                                     sound_manager);
+    ASSERT_NE(parsed, nullptr);
+    ASSERT_NE(parsed->runtime, nullptr);
+
+    const auto expect_alpha = [&](std::string_view name, float alpha, std::size_t expected_materials) {
+        SCOPED_TRACE(std::string(name));
+        const auto materials = LayerMaterials(*parsed, name);
+        ASSERT_EQ(materials.size(), expected_materials);
+        for (const auto* material : materials) {
+            const auto& values = material->customShader.constValues;
+            ASSERT_TRUE(values.contains("g_Color4"));
+            EXPECT_FLOAT_EQ(values.at("g_Color4")[3], alpha);
+        }
+    };
+
+    expect_alpha("plain", 0.5f, 1u);
+    expect_alpha("with effect", 0.5f, 2u);
+    // Only the effects that are built have a pass; a script-switched one is built.
+    expect_alpha("two effects", 0.5f, 3u);
+
+    for (const auto& [name, count] : { std::pair<const char*, std::size_t> { "plain", 1u },
+                                       { "with effect", 2u },
+                                       { "two effects", 3u } }) {
+        SCOPED_TRACE(name);
+        ASSERT_TRUE(parsed->runtime->SetNodeAlpha(name, 0.25f));
+        expect_alpha(name, 0.25f, count);
+        EXPECT_FLOAT_EQ(*parsed->runtime->NodeAlpha(name), 0.25f);
+        ASSERT_TRUE(parsed->runtime->SetNodeAlpha(name, 0.0f));
+        expect_alpha(name, 0.0f, count);
+        EXPECT_FLOAT_EQ(*parsed->runtime->NodeAlpha(name), 0.0f);
+    }
+
+    // The layer's own script writes it, and the effect pass follows.
+    expect_alpha("written by itself", 0.5f, 2u);
+    parsed->runtime->Tick(1.0 / 60.0);
+    expect_alpha("written by itself", 0.25f, 2u);
+    EXPECT_FLOAT_EQ(*parsed->runtime->NodeAlpha("written by itself"), 0.25f);
+
+    // An alpha a script owns is that script's: no second writer.
+    EXPECT_FALSE(parsed->runtime->SetNodeAlpha("owned by a script", 0.1f));
+    expect_alpha("owned by a script", 0.5f, 2u);
+    EXPECT_EQ(parsed->runtime->scriptErrorCount(), 0u);
+}
+
+// An effect with an alpha of its own, Wallpaper Engine's Opacity, keeps it. Its
+// `g_UserAlpha` is the effect's `alpha`, set in the effect, while the layer's is
+// the layer's own pass's; a layer's alpha, whether a script writes it, a user
+// property is bound to it or its own script owns it, is applied once, by the
+// layer, and the effect's multiplies it. The `g_Color4` and `g_Alpha` the layer
+// hands every pass follow, as an authored alpha leaves them.
+TEST(SceneSchema, AnEffectsOwnAlphaIsLeftAloneWhenTheLayersAlphaIsDriven) {
+    fs::VFS vfs;
+    MountTintableImageFiles(vfs);
+    audio::SoundManager sound_manager(audio::SoundManager::OutputBackend::Null);
+    const std::string   opacity = [](int id) {
+        return R"("effects":[{"file":"effects/opacity/effect.json","id":)" + std::to_string(id) +
+               R"(,"visible":true,"passes":[{"id":)" + std::to_string(id + 1) +
+               R"(,"constantshadervalues":{"alpha":0.8}}]}])";
+    }(10);
+    const std::string   second_opacity = [](int id) {
+        return R"({"file":"effects/opacity/effect.json","id":)" + std::to_string(id) +
+               R"(,"visible":true,"passes":[{"id":)" + std::to_string(id + 1) +
+               R"(,"constantshadervalues":{"alpha":0.8}}]})";
+    }(20);
+    const std::string   scene = R"({
+      "camera": {"center":[0,0,0], "eye":[0,0,1], "up":[0,1,0]},
+      "general": {
+        "ambientcolor":[0.2,0.2,0.2], "skylightcolor":[0.3,0.3,0.3],
+        "clearcolor":[0,0,0], "cameraparallax":false,
+        "cameraparallaxamount":0, "cameraparallaxdelay":0,
+        "cameraparallaxmouseinfluence":0,
+        "orthogonalprojection":{"width":640,"height":360}
+      },
+      "objects": [
+        {"id":1,"name":"authored","image":"image.json","alpha":0.5,
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true,)" + opacity + R"(},
+        {"id":2,"name":"written","image":"image.json","alpha":0.5,
+         "visible":{"value":true,"script":"export function update(value) { thisLayer.alpha = 0.25; return value; }"},
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],)" + opacity + R"(},
+        {"id":3,"name":"bound","image":"image.json","alpha":{"user":"fade","value":1},
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true,)" + opacity + R"(},
+        {"id":4,"name":"owned by a script","image":"image.json",
+         "alpha":{"value":0.5,"script":"export function update(value) { return 0.3; }"},
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true,)" + opacity + R"(},
+        {"id":5,"name":"two effects","image":"image.json","alpha":0.5,
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true,
+         "effects":[{"file":"effects/opacity/effect.json","id":30,"visible":true,
+                     "passes":[{"id":31,"constantshadervalues":{"alpha":0.8}}]},)" + second_opacity + R"(]}
+      ]
+    })";
+
+    ProjectProperties properties { { "fade", RuntimeScalarValue::Float(0.4f) } };
+    auto              parsed = WPSceneParser().Parse(SceneParseRequest {
+                                                         .scene_id           = "effect-own-alpha",
+                                                         .project_properties = &properties,
+                                                     },
+                                                     scene,
+                                                     vfs,
+                                                     sound_manager);
+    ASSERT_NE(parsed, nullptr);
+    ASSERT_NE(parsed->runtime, nullptr);
+
+    // The layer's alpha is what its own pass, the first material, applies; every
+    // later one is an effect pass, which keeps the alpha it was authored with.
+    const auto expect_alpha = [&](std::string_view name, float alpha, std::size_t effect_passes) {
+        SCOPED_TRACE(std::string(name));
+        const auto materials = LayerMaterials(*parsed, name);
+        ASSERT_EQ(materials.size(), effect_passes + 1u);
+        for (std::size_t index = 0; index < materials.size(); ++index) {
+            SCOPED_TRACE(index);
+            const auto& values = materials[index]->customShader.constValues;
+            ASSERT_TRUE(values.contains("g_UserAlpha"));
+            ASSERT_TRUE(values.contains("g_Color4"));
+            ASSERT_TRUE(values.contains("g_Alpha"));
+            EXPECT_FLOAT_EQ(values.at("g_UserAlpha")[0], index == 0 ? alpha : 0.8f);
+            EXPECT_FLOAT_EQ(values.at("g_Color4")[3], alpha);
+            EXPECT_FLOAT_EQ(values.at("g_Alpha")[0], alpha);
+        }
+    };
+
+    expect_alpha("authored", 0.5f, 1u);
+    EXPECT_TRUE(parsed->runtime->SetNodeAlpha("authored", 0.1f));
+    expect_alpha("authored", 0.1f, 1u);
+
+    parsed->runtime->Tick(1.0 / 60.0);
+    expect_alpha("written", 0.25f, 1u);
+    expect_alpha("bound", 0.4f, 1u);
+    expect_alpha("owned by a script", 0.3f, 1u);
+
+    parsed->runtime->ApplyProjectPropertyOverride({ { "fade", RuntimeScalarValue::Float(0.7f) } });
+    parsed->runtime->Tick(1.0 / 60.0);
+    expect_alpha("bound", 0.7f, 1u);
+
+    expect_alpha("two effects", 0.5f, 2u);
+    EXPECT_TRUE(parsed->runtime->SetNodeAlpha("two effects", 0.2f));
+    expect_alpha("two effects", 0.2f, 2u);
+    EXPECT_EQ(parsed->runtime->scriptErrorCount(), 0u);
+}
+
+// Every pass of a layer is seeded with the layer's authored alpha, and only an
+// `alpha` the effect sets itself replaces it, so an effect that sets none (an
+// Opacity effect left at its defaults) starts from the layer's authored alpha. That
+// start is the effect's own like an alpha it authored: a write, a property or a
+// script that drives the layer's alpha afterwards leaves it where it was, and moves
+// the `g_Color4` and `g_Alpha` of the effect's pass with the layer's.
+TEST(SceneSchema, AnEffectThatSetsNoAlphaStartsFromTheLayersAuthoredAlphaAndKeepsIt) {
+    fs::VFS vfs;
+    MountTintableImageFiles(vfs);
+    audio::SoundManager sound_manager(audio::SoundManager::OutputBackend::Null);
+    const std::string   scene = R"({
+      "camera": {"center":[0,0,0], "eye":[0,0,1], "up":[0,1,0]},
+      "general": {
+        "ambientcolor":[0.2,0.2,0.2], "skylightcolor":[0.3,0.3,0.3],
+        "clearcolor":[0,0,0], "cameraparallax":false,
+        "cameraparallaxamount":0, "cameraparallaxdelay":0,
+        "cameraparallaxmouseinfluence":0,
+        "orthogonalprojection":{"width":640,"height":360}
+      },
+      "objects": [
+        {"id":1,"name":"authored","image":"image.json","alpha":0.5,
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true,
+         "effects":[{"file":"effects/opacity/effect.json","id":10,"visible":true}]},
+        {"id":2,"name":"written","image":"image.json","alpha":0.5,
+         "visible":{"value":true,"script":"export function update(value) { thisLayer.alpha = 0.25; return value; }"},
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],
+         "effects":[{"file":"effects/opacity/effect.json","id":20,"visible":true}]}
+      ]
+    })";
+
+    ProjectProperties properties;
+    auto              parsed = WPSceneParser().Parse(SceneParseRequest {
+                                                         .scene_id           = "effect-no-alpha",
+                                                         .project_properties = &properties,
+                                                     },
+                                                     scene,
+                                                     vfs,
+                                                     sound_manager);
+    ASSERT_NE(parsed, nullptr);
+    ASSERT_NE(parsed->runtime, nullptr);
+
+    const auto expect_alpha = [&](std::string_view name, float layer_alpha, float effect_alpha) {
+        SCOPED_TRACE(std::string(name));
+        const auto materials = LayerMaterials(*parsed, name);
+        ASSERT_EQ(materials.size(), 2u);
+        for (std::size_t index = 0; index < materials.size(); ++index) {
+            SCOPED_TRACE(index);
+            const auto& values = materials[index]->customShader.constValues;
+            ASSERT_TRUE(values.contains("g_UserAlpha"));
+            EXPECT_FLOAT_EQ(values.at("g_UserAlpha")[0], index == 0 ? layer_alpha : effect_alpha);
+            EXPECT_FLOAT_EQ(values.at("g_Color4")[3], layer_alpha);
+        }
+    };
+
+    expect_alpha("authored", 0.5f, 0.5f);
+    EXPECT_TRUE(parsed->runtime->SetNodeAlpha("authored", 0.1f));
+    expect_alpha("authored", 0.1f, 0.5f);
+
+    expect_alpha("written", 0.5f, 0.5f);
+    parsed->runtime->Tick(1.0 / 60.0);
+    expect_alpha("written", 0.25f, 0.5f);
+    EXPECT_EQ(parsed->runtime->scriptErrorCount(), 0u);
+}
+
+// A puppet that has effects is drawn by its effect chain and then by a skinned
+// pass of the layer's own material, appended to the chain: that pass is the layer
+// on screen, so its `g_UserAlpha` is the layer's, while the effect before it keeps
+// its own. The layer's own material, the sheet the chain starts from, carries it
+// too, so this layer's alpha is applied by two passes whoever sets it (a known
+// limitation, docs/testing/renderer.md): a script's write puts every material where
+// an authored alpha of the same value puts it, and that is what is pinned here.
+TEST(SceneSchema, APuppetsSkinnedPassUnderEffectsTakesTheLayersAlpha) {
+    std::map<std::string, std::string> files;
+    AddPuppetImageSceneFiles(files);
+    files["/effects/opacity/effect.json"] =
+        R"({"name":"opacity","passes":[{"material":"opacity_mat.json","bind":[{"name":"previous","index":0}]}]})";
+    files["/opacity_mat.json"] =
+        R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"opacity","textures":[null]}]})";
+    files["/shaders/opacity.vert"] = files["/shaders/baseimage.vert"];
+    files["/shaders/opacity.frag"] = R"(
+uniform sampler2D g_Texture0;
+uniform float g_UserAlpha; // {"material":"alpha","default":1.0}
+varying vec2 v_TexCoord;
+void main() {
+  vec4 color = texture(g_Texture0, v_TexCoord);
+  gl_FragColor = vec4(color.rgb, color.a * g_UserAlpha);
+}
+)";
+    fs::VFS vfs;
+    ASSERT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+    audio::SoundManager sound_manager;
+    auto                json = nlohmann::json::parse(BasicPuppetSceneJson());
+    json["objects"][0]["effects"] = nlohmann::json::parse(
+        R"([{"file":"effects/opacity/effect.json","id":10,"visible":true,)"
+        R"("passes":[{"id":11,"constantshadervalues":{"alpha":0.8}}]}])");
+    ProjectProperties properties;
+    auto              parsed = WPSceneParser().Parse(SceneParseRequest {
+                                                         .scene_id           = "puppet-effects-alpha",
+                                                         .project_properties = &properties,
+                                                     },
+                                                     json.dump(),
+                                                     vfs,
+                                                     sound_manager);
+    ASSERT_NE(parsed, nullptr);
+    ASSERT_NE(parsed->runtime, nullptr);
+
+    // Its own material, the effect's pass, then the skinned pass.
+    ASSERT_EQ(LayerMaterials(*parsed, "puppet image").size(), 3u);
+    ASSERT_TRUE(parsed->runtime->SetNodeAlpha("puppet image", 0.25f));
+    const auto materials = LayerMaterials(*parsed, "puppet image");
+    ASSERT_EQ(materials.size(), 3u);
+    for (std::size_t index = 0; index < materials.size(); ++index) {
+        SCOPED_TRACE(index);
+        const auto& values = materials[index]->customShader.constValues;
+        ASSERT_TRUE(values.contains("g_UserAlpha"));
+        EXPECT_FLOAT_EQ(values.at("g_UserAlpha")[0], index == 1 ? 0.8f : 0.25f);
+        EXPECT_FLOAT_EQ(values.at("g_Color4")[3], 0.25f);
+        EXPECT_EQ(materials[index]->own_user_alpha, index == 1);
+    }
+
+    // The same layer authored at 0.25: its materials hold what the write left.
+    json["objects"][0]["alpha"] = 0.25;
+    auto authored = WPSceneParser().Parse(SceneParseRequest {
+                                              .scene_id           = "puppet-effects-alpha-authored",
+                                              .project_properties = &properties,
+                                          },
+                                          json.dump(),
+                                          vfs,
+                                          sound_manager);
+    ASSERT_NE(authored, nullptr);
+    const auto authored_materials = LayerMaterials(*authored, "puppet image");
+    ASSERT_EQ(authored_materials.size(), materials.size());
+    for (std::size_t index = 0; index < materials.size(); ++index) {
+        SCOPED_TRACE(index);
+        const auto& written_values  = materials[index]->customShader.constValues;
+        const auto& authored_values = authored_materials[index]->customShader.constValues;
+        for (const char* name : { "g_UserAlpha", "g_Alpha", "g_Color4" }) {
+            SCOPED_TRACE(name);
+            ASSERT_EQ(written_values.contains(name), authored_values.contains(name));
+            if (! written_values.contains(name)) continue;
+            const auto& written_value  = written_values.at(name);
+            const auto& authored_value = authored_values.at(name);
+            if (std::string_view(name) == "g_Color4") {
+                EXPECT_FLOAT_EQ(written_value[3], authored_value[3]);
+            } else {
+                // The effect's own alpha is its authored 0.8 in both.
+                EXPECT_FLOAT_EQ(written_value[0], authored_value[0]);
+            }
+        }
+        EXPECT_EQ(materials[index]->own_user_alpha, authored_materials[index]->own_user_alpha);
+    }
 }
 
 // Wallpaper Engine multiplies a layer's colour by its brightness into the

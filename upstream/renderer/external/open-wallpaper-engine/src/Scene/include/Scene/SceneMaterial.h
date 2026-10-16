@@ -41,6 +41,14 @@ public:
     SceneMaterialCustomShader customShader;
     /// Set on the materials that take a layer's `g_Color4`; the rest keep white.
     SceneMaterialTint         tint;
+    /// An effect's `g_UserAlpha` is the effect's own opacity (`"material": "alpha"`
+    /// in its shader, `alpha` in its constants), not the layer's: it starts from the
+    /// layer's authored alpha, as every pass of the layer does, and an `alpha` the
+    /// effect sets replaces that. The layer's alpha is applied by the layer's own
+    /// pass and the effect's multiplies it, so whatever drives the layer's alpha, a
+    /// property, a script or a timeline, leaves it alone. Set on the passes of a
+    /// layer's effects.
+    bool                      own_user_alpha { false };
     BlendMode                 blenmode { BlendMode::Disable };
     /// As authored. A renderer draws with `ResolveSceneDepthState`, not these.
     bool                      depth_test { false };
