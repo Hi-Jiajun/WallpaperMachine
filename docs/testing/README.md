@@ -207,12 +207,18 @@ A test double that holds an answer suspends the task, never the thread:
 answers until the test opens the gate or the request is cancelled. A
 `DispatchSemaphore` in a fixture's answer blocks a concurrency-pool thread that
 cancellation cannot reach, so a fixture that shuts down waits out its timeout, and
-the answer lets itself through when the test runs slowly. A timed-out wait is also
-reported by Xcode's thread performance checker, and XCTest symbolicates that report
-on the main thread; like a failed assertion's symbolication, it has held a test
-until its time allowance ran out. Work off the main actor needs its own sync point:
-a nonisolated `async` double such as `ManualSleep` runs on the global executor, so
-flushing the main queue does not show it has run; wait for the state it records.
+the answer lets itself through when the test runs slowly. A timed-out wait was also
+reported by Xcode's thread performance checker as a priority inversion, and the
+test host symbolicates that report on the main thread; under the gate's load that
+has held a test until its time allowance ran out. AppKit raises the same report
+itself: the first time a focused text field with unchecked text is removed, the
+main thread waits for its data detectors to load. So `test.py` turns the checker's
+priority-inversion reports off in the test host (`PERFC_DISABLE_PRIORITY_INVERSIONS`,
+forwarded as `TEST_RUNNER_PERFC_DISABLE_PRIORITY_INVERSIONS`), and a blocking
+wait in a fixture now shows only as a slow test. Work off the main actor needs its
+own sync point: a nonisolated `async` double such as `ManualSleep` runs on the
+global executor, so flushing the main queue does not show it has run; wait for the
+state it records.
 
 A failed assertion in the app-hosted bundle can take about two minutes to
 report while XCTest symbolicates the failing frame, so a failure inside a loop
