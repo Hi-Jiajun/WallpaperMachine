@@ -63,6 +63,12 @@ was run.
       while the Frame rate limit slider reads No limit, and a display set above 30 fps notes
       the same limit in Settings → Displays and the inspector, whose button opens Playback &
       Power. Set the low-battery rule to Keep running: every one of those lines goes away.
+- [ ] On a laptop on battery, set **On battery** to Keep running and **When the battery is
+      low** to Pause at a level above the current charge: wallpapers pause, Quick Settings'
+      On battery module reads "The battery is low. Wallpapers are paused." and the When the
+      battery is low row adds "In effect now. Wallpapers are paused.". Set On battery to
+      Pause: the module's line goes away; set the rule to Stop: it reads "… Wallpapers are
+      stopped." again. Plug in: the line and the row's In effect now go away.
 
 ## Appearance
 

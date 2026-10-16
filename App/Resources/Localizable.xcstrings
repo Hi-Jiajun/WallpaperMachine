@@ -5072,6 +5072,33 @@
     "The battery is low. Reduced quality is in use." : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "バッテリー残量が少なくなっています。画質を下げて実行しています。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "电量低，已启用降低画质。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "電量低，已啟用「降低畫質」。"}}}
     },
+    "The Mac is hot. Wallpapers are paused." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "Macが高温です。壁紙を一時停止しています。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "Mac 过热，壁纸已暂停。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "Mac 過熱，桌布已暫停。"}}}
+    },
+    "The Mac is hot. Wallpapers are stopped." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "Macが高温です。壁紙を停止しています。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "Mac 过热，壁纸已停止。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "Mac 過熱，桌布已停止。"}}}
+    },
+    "Low Power Mode is on. Wallpapers are paused." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "低電力モードがオンです。壁紙を一時停止しています。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "低电量模式已开启，壁纸已暂停。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "低耗電模式已開啟，桌布已暫停。"}}}
+    },
+    "Low Power Mode is on. Wallpapers are stopped." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "低電力モードがオンです。壁紙を停止しています。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "低电量模式已开启，壁纸已停止。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "低耗電模式已開啟，桌布已停止。"}}}
+    },
+    "The battery is low. Wallpapers are paused." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "バッテリー残量が少なくなっています。壁紙を一時停止しています。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "电量低，壁纸已暂停。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "電量低，桌布已暫停。"}}}
+    },
+    "The battery is low. Wallpapers are stopped." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "バッテリー残量が少なくなっています。壁紙を停止しています。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "电量低，壁纸已停止。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "電量低，桌布已停止。"}}}
+    },
+    "In effect now. Reduced quality is in use." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "現在適用中です。画質を下げて実行しています。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "现已生效，已启用降低画质。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "目前已生效，已啟用「降低畫質」。"}}}
+    },
+    "In effect now. Wallpapers are paused." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "現在適用中です。壁紙を一時停止しています。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "现已生效，壁纸已暂停。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "目前已生效，桌布已暫停。"}}}
+    },
+    "In effect now. Wallpapers are stopped." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "現在適用中です。壁紙を停止しています。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "现已生效，壁纸已停止。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "目前已生效，桌布已停止。"}}}
+    },
     "App rules" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "Appルール"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "应用规则"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "App 規則"}}}
     },

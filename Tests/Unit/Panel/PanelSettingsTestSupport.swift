@@ -186,6 +186,6 @@ extension PanelFixture {
       playback: PlaybackPreferences(defaults: defaults), playlists: playlists,
       hotKeys: HotKeyPreferences(defaults: defaults), collections: collections, presets: presets,
       backup: backup, imagePlacement: imagePlacement, compatibility: compatibility,
-      automations: automations, spaces: spaces)
+      automations: automations, spaces: spaces, systemConditions: systemConditions)
   }
 }

@@ -356,6 +356,8 @@ final class PanelFixture {
   let playlists: PlaylistStore
   let automations: WallpaperAutomationStore
   let spaces: WallpaperSpaceMonitor
+  /// The condition rules engaged, as the app's monitor would publish them; empty until a test sets it.
+  let systemConditions = SystemConditionState()
   let collections: WallpaperCollectionStore
   let presets: WallpaperPresetStore
   let backup: WallpaperBackupStore
@@ -485,7 +487,7 @@ final class PanelFixture {
       appLanguage: .english(), playback: PlaybackPreferences(defaults: defaults), playlists: playlists,
       hotKeys: HotKeyPreferences(defaults: defaults), collections: collections, presets: presets,
       backup: backup, imagePlacement: imagePlacement, compatibility: compatibility, letterbox: letterbox,
-      automations: automations, spaces: self.spaces)
+      automations: automations, spaces: self.spaces, systemConditions: systemConditions)
     controller.signInToPixiv = { nil }
     return controller
   }

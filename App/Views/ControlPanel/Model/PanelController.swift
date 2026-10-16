@@ -35,6 +35,8 @@ final class PanelController {
   let automations: WallpaperAutomationStore
   let displayLayouts: WallpaperDisplayLayoutStore
   let spaces: WallpaperSpaceMonitor
+  /// The condition rules engaged now, as the app's `SystemConditionMonitor` publishes them.
+  let systemConditions: SystemConditionState
   let hotKeys: HotKeyPreferences
   let collections: WallpaperCollectionStore
   let presets: WallpaperPresetStore
@@ -249,7 +251,8 @@ final class PanelController {
     chooseApplication: (@MainActor () async -> URL?)? = nil,
     automations: WallpaperAutomationStore? = nil,
     displayLayouts: WallpaperDisplayLayoutStore? = nil,
-    spaces: WallpaperSpaceMonitor? = nil
+    spaces: WallpaperSpaceMonitor? = nil,
+    systemConditions: SystemConditionState? = nil
   ) {
     let pixiv = pixiv ?? PixivStore()
     let imports = imports ?? LibraryImportStore()
@@ -265,6 +268,7 @@ final class PanelController {
     let automations = automations ?? WallpaperAutomationStore(defaults: defaults)
     let displayLayouts = displayLayouts ?? WallpaperDisplayLayoutStore(defaults: defaults)
     let spaces = spaces ?? WallpaperSpaceMonitor()
+    let systemConditions = systemConditions ?? .shared
     let errors = PanelErrorState(store: store, imports: imports, workshop: workshop, pixiv: pixiv)
 
     self.store = store
@@ -280,6 +284,7 @@ final class PanelController {
     self.automations = automations
     self.displayLayouts = displayLayouts
     self.spaces = spaces
+    self.systemConditions = systemConditions
     self.hotKeys = hotKeys
     self.collections = collections
     self.presets = presets
@@ -302,8 +307,8 @@ final class PanelController {
     self.revisions = PanelStoreRevisions(
       playback: playback, hotKeys: hotKeys, playlists: playlists, collections: collections,
       presets: presets, imagePlacement: imagePlacement, automations: automations,
-      displayLayouts: displayLayouts, spaces: spaces, theme: theme, appLanguage: appLanguage,
-      navigation: navigation)
+      displayLayouts: displayLayouts, spaces: spaces, conditions: systemConditions, theme: theme,
+      appLanguage: appLanguage, navigation: navigation)
     self.chooseApplication = chooseApplication
     welcomeSeen = PanelPreferences.welcomeSeen(in: defaults)
     dragSelectLearned = PanelPreferences.dragSelectLearned(in: defaults)

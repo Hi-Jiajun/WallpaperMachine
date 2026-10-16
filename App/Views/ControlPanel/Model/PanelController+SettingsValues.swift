@@ -2,7 +2,7 @@ import Foundation
 
 /// The current settings values, merged from the bridge's snapshot, the playback preferences and the
 /// Mac's own facts. Each getter reads the counters of the stores SwiftUI cannot observe first
-/// (`revisions.playback`, `.power`, `.focus`, `.energy`, `systemReadingsRevision`), so a view that
+/// (`revisions.playback`, `.power`, `.focus`, `.conditions`, `.energy`, `systemReadingsRevision`), so a view that
 /// calls it is asked again when they change.
 extension PanelController {
   var generalSettings: GeneralSettings {
@@ -40,6 +40,7 @@ extension PanelController {
     _ = revisions.playback
     _ = revisions.power
     _ = revisions.focus
+    _ = revisions.conditions
     let settings = store.settingsSnapshot
     let focus = FocusFilterState.shared
     return PlaybackSettings(
@@ -56,6 +57,7 @@ extension PanelController {
       batteryPercent: batteryPercent,
       lowPowerModeIsOn: ProcessInfo.processInfo.isLowPowerModeEnabled,
       thermalLevel: ThermalLevel(ProcessInfo.processInfo.thermalState),
+      conditions: systemConditions.engaged,
       focusAction: focus.selection?.target.kind.rawValue ?? focus.action?.rawValue
         ?? FocusFilterEffect.keepRunning.rawValue,
       appRules: playback.appRules,

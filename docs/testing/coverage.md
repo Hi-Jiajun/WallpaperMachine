@@ -249,7 +249,11 @@ picture shows between a window closing and the web page's window opening.
   read nor observed until an action is chosen, engages at the level and releases five
   points above it, follows a changed level and a plug-in at any charge, never engages
   without an internal battery, joins the other conditions, and a wake-time refresh
-  reads a change nobody announced. `LowBatteryTests` pin the gate sequence, the margin
+  reads a change nobody announced. The engaged conditions it publishes for the panel
+  name each condition with what its own rule does (heat on Reduced quality reads as a
+  pause at critical, a Focus filter is not listed), follow the low-battery margin, change
+  the state without asking the policy again when a second condition adds the same
+  action, and clear on `stop()`. `LowBatteryTests` pin the gate sequence, the margin
   and the parse of IOKit's power-source description (internal battery only, no UPS, no
   zero maximum) with synthetic dictionaries; the real source is only started and
   stopped to prove it releases itself.
@@ -1072,7 +1076,10 @@ never to `.shared`.
   `AppearanceSettingsTests`, `PanelGeneralSettingsTests`, `PanelPerformanceSettingsTests` (values
   refused or clamped as their controls are, the condition choices, app rules, a mute from the menu
   bar reaching the open panel), `PanelSettingsValuesTests`, `QualityPresetTests`,
-  `QualityReportTests`, `PanelStorageActionsTests`, `StorageSettingsModelTests`,
+  `QualityReportTests`, `ConditionOverrideTests` (On battery names the strongest rule that
+  pauses or stops wallpapers on battery and nothing plugged in or already done by the choice,
+  each rule's row says In effect now, the published state reaches the panel's readers),
+  `PanelStorageActionsTests`, `StorageSettingsModelTests`,
   `AboutSettingsTests`, `UpdatePresentationTests`, `PanelSupportPromptTests`,
   `DisplaysSettingsModelTests`, `DisplaysSettingsDraftsTests`, `DisplaysRowLayoutTests`,
   `PanelDisplayActionsTests`, `PanelDisplayLayoutActionsTests`, `PanelAutomationActionsTests`,

@@ -166,6 +166,9 @@ struct PlaybackSettings: Equatable {
   var batteryPercent: Int?
   var lowPowerModeIsOn: Bool
   var thermalLevel: ThermalLevel
+  /// The low-battery, Low Power Mode and heat rules engaged now, as the app's condition monitor
+  /// evaluated them (the low-battery rule's hysteresis included), so a row never guesses.
+  var conditions: EngagedSystemConditions
   /// The Focus filter in effect, by name: `keepRunning` while none is (`FocusFilterEffect` knows the rest).
   var focusAction: String
   var appRules: [AppRule]
@@ -183,18 +186,49 @@ struct PlaybackSettings: Equatable {
   /// The quick On battery module is worth showing on a Mac with a battery, or while its choice is not the default.
   var offersBatteryMode: Bool { hasBattery || batteryMode != .keepRunning }
 
-  @MainActor var lowPowerModeNote: String {
-    lowPowerModeIsOn ? L("Low Power Mode is on now.") : L("Low Power Mode is off now.")
+  /// The condition rule that overrides the On battery choice now: one that pauses or stops
+  /// wallpapers while the Mac runs on battery, beyond what the choice does itself (Pause already
+  /// pauses, so only a stop overrides it). Nil plugged in, where the choice does nothing.
+  var conditionOverridingBatteryMode: EngagedSystemCondition? {
+    guard onBatteryPower, let rule = conditions.strongestRuleAction else { return nil }
+    if batteryMode == .pause, rule.effect == .pause { return nil }
+    return rule
   }
 
-  @MainActor var thermalNote: String { thermalLevel.note(for: thermalAction) }
+  /// What Quick Settings' On battery module says while another rule overrides the choice: the rule
+  /// that pauses or stops wallpapers, which outweighs any quality, or else the cause holding
+  /// quality down (`QualityReport.onBatteryText`). Nil while the choice is what is in force.
+  @MainActor func onBatteryText(quality: QualityReport) -> String? {
+    conditionOverridingBatteryMode?.statusText ?? quality.onBatteryText
+  }
 
-  /// "The battery is at 54% now." beside the low-battery choice, nil without a battery.
+  /// "Low Power Mode is on now.", and what its rule does while engaged.
+  @MainActor var lowPowerModeNote: String {
+    Self.note(
+      lowPowerModeIsOn ? L("Low Power Mode is on now.") : L("Low Power Mode is off now."),
+      engaged: conditions.effect(of: .lowPowerMode))
+  }
+
+  @MainActor var thermalNote: String {
+    Self.note(thermalLevel.note(for: thermalAction), engaged: conditions.effect(of: .heat))
+  }
+
+  /// "The battery is at 54% now." beside the low-battery choice, and what the rule does while
+  /// engaged, which the charge alone cannot tell: the rule ends only 5 points above its level.
+  /// Nil without a battery.
   @MainActor var lowBatteryNote: String? {
     guard let percent = batteryPercent else { return nil }
-    return L(
-      "Applies only while the Mac runs on battery. It ends 5 points above the level you choose, or when you plug in. The battery is at \(percent)% now."
-    )
+    return Self.note(
+      L(
+        "Applies only while the Mac runs on battery. It ends 5 points above the level you choose, or when you plug in. The battery is at \(percent)% now."
+      ), engaged: conditions.effect(of: .lowBattery))
+  }
+
+  /// A condition row's note, with "In effect now. Wallpapers are paused." on its own line while
+  /// the rule is engaged.
+  @MainActor private static func note(_ note: String, engaged: EngagedSystemCondition.Effect?) -> String {
+    guard let engaged else { return note }
+    return note + "\n" + engaged.inEffectText
   }
 
   /// "A Focus filter is in effect now: Mute.", nil while none is.

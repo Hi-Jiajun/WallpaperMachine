@@ -30,6 +30,7 @@ final class PanelStoreRevisionsTests: PanelTestCase {
       (WallpaperAutomationStore.statusChangedNotification, panel.automations, .automationStatus),
       (WallpaperDisplayLayoutStore.didChangeNotification, panel.controller.displayLayouts, .displayLayouts),
       (WallpaperSpaceMonitor.didChangeNotification, panel.spaces, .spaces),
+      (SystemConditionState.didChangeNotification, panel.systemConditions, .conditions),
     ]
     for (name, object, source) in posts {
       let before = Dictionary(

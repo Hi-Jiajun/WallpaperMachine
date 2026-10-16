@@ -23,6 +23,8 @@ final class PanelStoreRevisions {
     case automationSettings, automationStatus, displayLayouts, spaces, focus
     /// Low Power Mode and the thermal state, which the Playback section reports "in effect now".
     case power
+    /// Which Playback & Power condition rules are engaged and what they do (`SystemConditionState`).
+    case conditions
     case energy, libraryMetrics, libraryCovers
     case theme, language, navigation
   }
@@ -41,6 +43,7 @@ final class PanelStoreRevisions {
   private(set) var spaces: UInt64 = 0
   private(set) var focus: UInt64 = 0
   private(set) var power: UInt64 = 0
+  private(set) var conditions: UInt64 = 0
   private(set) var energy: UInt64 = 0
   private(set) var libraryMetrics: UInt64 = 0
   private(set) var libraryCovers: UInt64 = 0
@@ -57,6 +60,7 @@ final class PanelStoreRevisions {
   @ObservationIgnored private let automationStore: WallpaperAutomationStore
   @ObservationIgnored private let displayLayoutStore: WallpaperDisplayLayoutStore
   @ObservationIgnored private let spaceMonitor: WallpaperSpaceMonitor
+  @ObservationIgnored private let conditionState: SystemConditionState
   @ObservationIgnored private let themeStore: AppThemeStore
   @ObservationIgnored private let languageStore: AppLanguageStore
   @ObservationIgnored private let navigationModel: ControlPanelNavigation
@@ -69,7 +73,8 @@ final class PanelStoreRevisions {
     collections: WallpaperCollectionStore, presets: WallpaperPresetStore,
     imagePlacement: StillImagePlacementStore, automations: WallpaperAutomationStore,
     displayLayouts: WallpaperDisplayLayoutStore, spaces: WallpaperSpaceMonitor,
-    theme: AppThemeStore, appLanguage: AppLanguageStore, navigation: ControlPanelNavigation
+    conditions: SystemConditionState, theme: AppThemeStore, appLanguage: AppLanguageStore,
+    navigation: ControlPanelNavigation
   ) {
     playbackStore = playback
     hotKeyStore = hotKeys
@@ -80,6 +85,7 @@ final class PanelStoreRevisions {
     automationStore = automations
     displayLayoutStore = displayLayouts
     spaceMonitor = spaces
+    conditionState = conditions
     themeStore = theme
     languageStore = appLanguage
     navigationModel = navigation
@@ -102,6 +108,7 @@ final class PanelStoreRevisions {
     case .spaces: spaces &+= 1
     case .focus: focus &+= 1
     case .power: power &+= 1
+    case .conditions: conditions &+= 1
     case .energy: energy &+= 1
     case .libraryMetrics: libraryMetrics &+= 1
     case .libraryCovers: libraryCovers &+= 1
@@ -126,6 +133,7 @@ final class PanelStoreRevisions {
     case .spaces: spaces
     case .focus: focus
     case .power: power
+    case .conditions: conditions
     case .energy: energy
     case .libraryMetrics: libraryMetrics
     case .libraryCovers: libraryCovers
@@ -154,6 +162,9 @@ final class PanelStoreRevisions {
     observe(.NSProcessInfoPowerStateDidChange, nil, .power)
     observe(ProcessInfo.thermalStateDidChangeNotification, nil, .power)
     observe(FocusFilterState.didChangeNotification, nil, .focus)
+    // And whether a low-battery, Low Power Mode or heat rule is engaged, which only the app's
+    // condition monitor knows (the low-battery rule has hysteresis).
+    observe(SystemConditionState.didChangeNotification, conditionState, .conditions)
     // `objectWillChange` and `$preferences` publish before the value is stored, which is fine
     // here: a view reads the counter and the store later, in its own update.
     themeStore.$preferences.dropFirst().sink { [weak self] _ in self?.bump(.theme) }

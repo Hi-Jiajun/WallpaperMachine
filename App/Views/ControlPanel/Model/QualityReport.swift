@@ -24,6 +24,14 @@ enum QualityCause: String, CaseIterable, Sendable {
     return causes
   }
 
+  init(_ condition: SystemCondition) {
+    switch condition {
+    case .heat: self = .heat
+    case .lowPowerMode: self = .lowPowerMode
+    case .lowBattery: self = .lowBattery
+    }
+  }
+
   init(_ throttle: BridgeQualityThrottleCause) {
     switch throttle {
     case .heat: self = .heat
@@ -193,6 +201,35 @@ struct QualityReport: Equatable {
       renderScale: settings.renderScale, preferredRenderScale: settings.preferredRenderScale,
       renderScaleSupported: settings.renderScaleSupported, frameRate: FrameRateCeiling(settings),
       onBatteryPower: settings.onBatteryPower)
+  }
+}
+
+/// What Quick Settings and Playback & Power say about a low-battery, Low Power Mode or heat rule that
+/// is engaged, as `SystemConditionMonitor` reports it.
+extension EngagedSystemCondition {
+  /// "The battery is low. Wallpapers are paused." and its siblings. A reduced-quality effect reads
+  /// as its quality cause does.
+  @MainActor var statusText: String {
+    switch (condition, effect) {
+    case (_, .reducedQuality): QualityCause(condition).statusText
+    case (.heat, .pause): L("The Mac is hot. Wallpapers are paused.")
+    case (.heat, .stop): L("The Mac is hot. Wallpapers are stopped.")
+    case (.lowPowerMode, .pause): L("Low Power Mode is on. Wallpapers are paused.")
+    case (.lowPowerMode, .stop): L("Low Power Mode is on. Wallpapers are stopped.")
+    case (.lowBattery, .pause): L("The battery is low. Wallpapers are paused.")
+    case (.lowBattery, .stop): L("The battery is low. Wallpapers are stopped.")
+    }
+  }
+}
+
+extension EngagedSystemCondition.Effect {
+  /// The line a condition's own row adds while its rule is engaged.
+  @MainActor var inEffectText: String {
+    switch self {
+    case .reducedQuality: L("In effect now. Reduced quality is in use.")
+    case .pause: L("In effect now. Wallpapers are paused.")
+    case .stop: L("In effect now. Wallpapers are stopped.")
+    }
   }
 }
 

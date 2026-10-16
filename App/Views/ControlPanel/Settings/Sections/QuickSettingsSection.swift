@@ -3,7 +3,9 @@ import SwiftUI
 /// Settings › Quick Settings: the switches people change most as tiles, and the three choices they
 /// reach for most as segments, each leading to its full section. Every tile and segment is the
 /// same setting as its full row, so the two stay in step. A choice another setting overrides right
-/// now says so under its segments: Quality and On battery name the condition holding quality down.
+/// now says so under its segments: Quality and On battery name the condition holding quality down,
+/// and On battery also names a low-battery, Low Power Mode or heat rule that pauses or stops
+/// wallpapers on battery.
 struct QuickSettingsSection: View {
   // Tiles
   static let openAtLogin = SettingsItem(
@@ -112,7 +114,7 @@ struct QuickSettingsSection: View {
         if search.shows(Self.onBattery), controller.playbackSettings.offersBatteryMode {
           QuickModule(
             item: Self.onBattery, section: .playback,
-            status: controller.qualityReport.onBatteryText
+            status: controller.playbackSettings.onBatteryText(quality: controller.qualityReport)
           ) {
             SettingsSegmentsControl(
               key: "batteryMode", saved: controller.playbackSettings.batteryMode,

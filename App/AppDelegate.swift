@@ -333,7 +333,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             let preferences = PlaybackPreferences.shared
             let appRules = AppRuleMonitor(preferences: preferences)
             let otherAudio = OtherAudioMonitor(preferences: preferences)
-            let conditions = SystemConditionMonitor(preferences: preferences, focus: .shared)
+            let conditions = SystemConditionMonitor(preferences: preferences, focus: .shared, state: .shared)
             let activeDisplay = ActiveDisplayTracker()
             appRuleMonitor = appRules
             otherAudioMonitor = otherAudio

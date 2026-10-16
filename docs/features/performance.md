@@ -9,6 +9,9 @@ While a condition lowers quality, the Quality module says so under its segments 
 place of its hint, and so does **On battery** while the Mac runs on battery (`The
 battery is low. Reduced quality is in use.`), so **Keep running** that the
 low-battery, Low Power Mode or heat rule overrides never reads as the choice in force.
+On battery also names one of those rules that pauses or stops wallpapers (`The battery
+is low. Wallpapers are paused.`), ahead of any quality cause, since a pause outweighs
+it ([below](#low-battery-low-power-mode-heat-and-focus)).
 Every engine control is applied through the bridge and the page re-renders from the
 snapshot the engine returns, so the page never shows a setting the engine did not
 accept. Playback choices that the app owns (muting everything, other-app audio,
@@ -483,7 +486,8 @@ with scripted frame counters.
 stops wallpapers until the Mac is plugged in. The low-battery, Low Power Mode and heat
 rules below apply on top of it whatever it says, so with **Keep running** here a low
 battery set to Reduced quality still holds wallpapers to the reduced frame rate; the
-On battery module in Quick Settings and the frame-rate notes say when that happens. **Reduced quality** is the choice
+On battery module in Quick Settings and the frame-rate notes say when that happens, and the
+module says so too when one of them pauses or stops wallpapers. **Reduced quality** is the choice
 that makes the page show **Render scale when reduced** (100% / 75% / 50%, default
 75%) and **Frame rate when reduced** (1–240 fps, default 30) underneath, plus a
 **Reduced quality** line that says why quality is lower right now. This is one
@@ -513,7 +517,8 @@ exercised by unplugging a Mac in a test.
 (`ProcessInfo.isLowPowerModeEnabled`), and **When the Mac is hot** while it reports
 the thermal state as serious or critical, the states in which macOS starts
 throttling itself. Both are off until chosen. Each row's note says whether the
-condition holds right now.
+condition holds right now, and adds a line while its rule is engaged: `In effect now.
+Wallpapers are paused.` (or stopped, or `Reduced quality is in use.`).
 
 **When the battery is low** applies while the Mac runs on its internal battery at or
 below the **Low battery level** (10%, 20% or 30%; 20% unless you choose another). The
@@ -524,7 +529,27 @@ that hovers around it does not pause and resume the wallpapers over and over, an
 ends at once when you plug in, whatever the charge. Only the internal battery counts,
 never a UPS, and a reading that fails counts as not low. Like the other conditions it
 pauses or stops wallpapers without touching your own Play/Pause; **Stop** frees
-renderer memory and reloads the wallpapers when the rule ends.
+renderer memory and reloads the wallpapers when the rule ends. Because the rule ends
+only above its margin, the charge in the note cannot tell whether it is engaged; the
+**In effect now** line can.
+
+Whether a rule is engaged comes from `SystemConditionMonitor`, the one place that
+evaluates the conditions (the low-battery margin included). It publishes which
+condition holds and what its rule does (`EngagedSystemConditions`) to
+`SystemConditionState`, which the control panel reads; the panel never works the
+conditions out again. While the Mac runs on battery, Quick Settings' **On battery**
+module names the strongest of them that pauses or stops wallpapers: a stop before a
+pause, and heat, then Low Power Mode, then a low battery among equals, for example
+`Low Power Mode is on. Wallpapers are stopped.` What the choice already does is not an
+override, so **Pause** beside a rule that pauses says nothing, while one that stops is
+named. Plugged in, the choice does nothing and nothing is said. Heat on Reduced quality
+reads as a pause once it is critical.
+
+Focus filters and app rules stay on their own rows and are not named under **On
+battery**: they act whatever the power source, so they override every choice on the
+page alike, and they are things the user turned on for the moment (a Focus, an app
+in use) rather than a state of the Mac's power. The **Focus** row says which filter is
+in effect now; the **App rules** rows do not yet say which rule is engaged.
 
 All three conditions also offer **Reduced quality**, which keeps the wallpapers
 playing instead of pausing them. While a chosen condition holds, the app asks the
