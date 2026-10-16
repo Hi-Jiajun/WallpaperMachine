@@ -3475,6 +3475,19 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
         if (HasDynamicSetting(g.zoom_setting)) {
             g.zoom = ResolveFloatSetting(*scene.runtime, g.zoom_setting)->getFloat();
         }
+        if (g.camerashake || HasDynamicSetting(g.camerashake_setting)) {
+            const auto setting = [](const nlohmann::json& authored, auto value) {
+                return authored.is_null() ? nlohmann::json(value) : authored;
+            };
+            auto& runtime = *scene.runtime;
+            runtime.RegisterCameraShake(
+                ResolveBoolSetting(runtime, setting(g.camerashake_setting, g.camerashake)),
+                ResolveFloatSetting(runtime,
+                                    setting(g.camerashakeamplitude_setting, g.camerashakeamplitude)),
+                ResolveFloatSetting(runtime, setting(g.camerashakespeed_setting, g.camerashakespeed)),
+                ResolveFloatSetting(runtime,
+                                    setting(g.camerashakeroughness_setting, g.camerashakeroughness)));
+        }
     }
     context.ortho_w = scene.ortho[0];
     context.ortho_h = scene.ortho[1];

@@ -2306,6 +2306,43 @@ TEST(SceneSchema, ATextureSlotsTexelIsTheStepOfTheTextureItSamples) {
     EXPECT_FLOAT_EQ(texel[3], float(target->height));
 }
 
+TEST(SceneSchema, TheSceneCameraShakesAsWallpaperEngineWhileItsPropertyIsOn) {
+    fs::VFS vfs;
+    MountSceneFiles(vfs);
+    audio::SoundManager sound_manager;
+    WPSceneParser       parser;
+    ProjectProperties   properties {
+        { "shake", RuntimeScalarValue::Bool(true) },
+    };
+    std::string json = BasicImageSceneJson();
+    const auto general = json.find("\"general\": {") + std::string("\"general\": {").size();
+    json.insert(general, R"("camerashake":{"user":"shake","value":true},"camerashakeamplitude":1.0,)"
+                         R"("camerashakespeed":2.0,"camerashakeroughness":1.0,)");
+    auto scene = parser.Parse(
+        SceneParseRequest { .scene_id = "camera-shake", .project_properties = &properties }, json,
+        vfs, sound_manager);
+    ASSERT_NE(scene, nullptr);
+    ASSERT_NE(scene->runtime, nullptr);
+    ASSERT_NE(scene->activeCamera, nullptr);
+    const Eigen::Matrix4d still = scene->activeCamera->GetViewProjectionMatrix();
+
+    scene->runtime->Tick(0.25);
+    // t = speed^2 * time = 1; amplitude / 10 times a tenth of the canvas height;
+    // a 2D scene shakes in its plane only.
+    const double amplitude = 1.0 * 0.1 * 360.0 * 0.1;
+    const Eigen::Vector3d expected(std::cos(1.0) * amplitude, std::sin(1.333) * amplitude, 0.0);
+    EXPECT_TRUE(scene->activeCamera->ShakeOffset().isApprox(expected, 1e-6));
+    EXPECT_FALSE(scene->activeCamera->GetViewProjectionMatrix().isApprox(still, 1e-9))
+        << "the shake did not move the view";
+    EXPECT_NE(scene->runtime->DescribeTimeAdvancingWork() & SceneDemandReason::Animation, 0u);
+
+    scene->runtime->ApplyProjectPropertyOverride({ { "shake", RuntimeScalarValue::Bool(false) } });
+    scene->runtime->Tick(0.25);
+    EXPECT_TRUE(scene->activeCamera->ShakeOffset().isZero());
+    EXPECT_TRUE(scene->activeCamera->GetViewProjectionMatrix().isApprox(still, 1e-9));
+    EXPECT_EQ(scene->runtime->DescribeTimeAdvancingWork() & SceneDemandReason::Animation, 0u);
+}
+
 TEST(SceneSchema, TheNormalMatrixIsTheDrawsRotationWithoutItsScale) {
     std::map<std::string, std::string> files;
     AddLeafModelSceneFiles(files);

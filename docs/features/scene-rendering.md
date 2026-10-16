@@ -54,6 +54,12 @@ video, a plain video wallpaper, a shader that does not translate, particle geome
 in a layout it does not recognise (lit particles among them), a multisampled target,
 an effect that samples a depth buffer, or a layer that reads its own previous frame (its `_b` composite, bound anywhere but its
 own effects).
+A scene with `camerashake` on shakes its camera as Wallpaper Engine does: the eye and
+what it looks at move together by `(cos t, sin 1.333t, sin t)` at
+`t = camerashakespeed² × time`, its length raised to `camerashakeroughness³`, scaled
+by a tenth of `camerashakeamplitude` (and in a 2D scene by a tenth of the canvas
+height, in the canvas plane only). The switch and every setting follow their user
+properties, and a shaking scene keeps drawing while it shakes.
 `input.cursorWorldPosition` stays 2D (`z = 0`), so a scripted orbit drag may not
 match Wallpaper Engine.
 
@@ -236,7 +242,7 @@ declared default whatever the scene loaded with. It adds no per-frame work.
 
 Nearly every property is a live binding and follows on the next tick: layer
 visibility, alpha, colour, origin, scale and angles, camera, clear colour, bloom
-strength, threshold and tint, parallax delay, the scene zoom,
+strength, threshold and tint, parallax delay, the scene zoom, camera shake,
 shader constants, rope and particle values, text, puppets, and the values a
 script reads and reacts to. A few readers decide once, while the scene loads, and
 are **load-only**: a material slot that a `scenetexture` property picks, an

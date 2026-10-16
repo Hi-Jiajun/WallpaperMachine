@@ -203,6 +203,13 @@ public:
                                   std::unique_ptr<DynamicValue> value,
                                   std::shared_ptr<const MaterialConstantAnimation> animation = {});
     void RegisterSceneClearColor(std::unique_ptr<DynamicValue> value);
+    /// The scene camera's shake (`general.camerashake*`), each setting static
+    /// or bound to a property or script. Applied to the active camera every
+    /// tick as Wallpaper Engine applies it.
+    void RegisterCameraShake(std::unique_ptr<DynamicValue> enabled,
+                             std::unique_ptr<DynamicValue> amplitude,
+                             std::unique_ptr<DynamicValue> speed,
+                             std::unique_ptr<DynamicValue> roughness);
     void RegisterSceneZoomAnimation(std::shared_ptr<ScalarAnimationPlayback> animation);
     /// A scene zoom bound to a user property or a script: applied now and
     /// whenever the value changes.
@@ -572,6 +579,15 @@ private:
     std::unordered_map<std::string, NodeVec3Binding>               m_node_rotation;
     std::unordered_map<std::string, NodeEffectFinalBinding>        m_node_effect_final;
     std::vector<MaterialAlphaBinding>                              m_material_alpha;
+    struct CameraShake {
+        bool  registered { false };
+        bool  enabled { false };
+        float amplitude { 0.0f };
+        float speed { 0.0f };
+        float roughness { 1.0f };
+    };
+    CameraShake                                                    m_camera_shake;
+    void                                                           ApplyCameraShake();
     struct NodeAlphaBinding {
         std::shared_ptr<SceneMaterial> material;
         float                          value { 1.0f };

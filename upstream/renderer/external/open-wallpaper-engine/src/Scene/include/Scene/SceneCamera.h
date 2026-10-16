@@ -95,6 +95,11 @@ public:
 
     std::shared_ptr<SceneNode> GetAttachedNode() const { return m_node; }
 
+    /// Camera shake: moves the eye and what it looks at together, on top of
+    /// wherever the camera's node puts them.
+    void SetShakeOffset(const Eigen::Vector3d& offset) { m_shake = offset; }
+    const Eigen::Vector3d& ShakeOffset() const { return m_shake; }
+
     void Clone(const SceneCamera& cam) {
         m_width       = cam.m_width;
         m_height      = cam.m_height;
@@ -117,6 +122,7 @@ private:
         return (std::isfinite(m_zoom) && m_zoom > 0.0) ? m_zoom : 1.0;
     }
 
+    Eigen::Vector3d m_shake { Eigen::Vector3d::Zero() };
     double m_width { 1.0f };
     double m_height { 1.0f };
     double m_aspect { 16.0f / 9.0f };

@@ -89,6 +89,10 @@ bool WPSceneGeneral::FromJson(const nlohmann::json& json, uint16_t pkg_version) 
     GET_JSON_NAME_VALUE(json, "skylightcolor", skylightcolor);
     ReadVec3Setting(json, "clearcolor", &clearcolor, &clearcolor_setting, &dynamic_clearcolor);
 	GET_JSON_NAME_VALUE_NOWARN(json, "clearenabled", clearenabled);
+	ReadScalarSetting(json, "camerashake", camerashake, camerashake_setting);
+	ReadScalarSetting(json, "camerashakeamplitude", camerashakeamplitude, camerashakeamplitude_setting);
+	ReadScalarSetting(json, "camerashakespeed", camerashakespeed, camerashakespeed_setting);
+	ReadScalarSetting(json, "camerashakeroughness", camerashakeroughness, camerashakeroughness_setting);
 	ReadScalarSetting(json, "cameraparallax", cameraparallax, cameraparallax_setting);
 	ReadScalarSetting(json, "cameraparallaxamount", cameraparallaxamount, cameraparallaxamount_setting);
 	ReadScalarSetting(json, "cameraparallaxdelay", cameraparallaxdelay, cameraparallaxdelay_setting);

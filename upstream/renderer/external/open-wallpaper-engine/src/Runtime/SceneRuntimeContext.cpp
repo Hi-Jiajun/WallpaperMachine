@@ -612,6 +612,7 @@ void SceneRuntimeContext::Tick(double frame_time) {
     for (auto& shot : m_camera_shots) shot.origin_pending = false;
     ApplyCameraShots();
     ApplyPerspectiveCameraShots(frame_time);
+    ApplyCameraShake();
     for (auto& binding : m_material_alpha) {
         auto material = binding.material.lock();
         if (material == nullptr) continue;
@@ -1610,6 +1611,58 @@ void SceneRuntimeContext::ApplyPerspectiveCameraShots(double seconds) {
     m_scene->activeCamera = active;
 }
 
+void SceneRuntimeContext::RegisterCameraShake(std::unique_ptr<DynamicValue> enabled,
+                                              std::unique_ptr<DynamicValue> amplitude,
+                                              std::unique_ptr<DynamicValue> speed,
+                                              std::unique_ptr<DynamicValue> roughness) {
+    if (enabled == nullptr || amplitude == nullptr || speed == nullptr || roughness == nullptr) {
+        return;
+    }
+    m_camera_shake.registered = true;
+    RegisterDynamicValueListener(std::move(enabled), [this](const DynamicValue& value) {
+        m_camera_shake.enabled = value.getBool();
+    });
+    RegisterDynamicValueListener(std::move(amplitude), [this](const DynamicValue& value) {
+        m_camera_shake.amplitude = value.getFloat();
+    });
+    RegisterDynamicValueListener(std::move(speed), [this](const DynamicValue& value) {
+        m_camera_shake.speed = value.getFloat();
+    });
+    RegisterDynamicValueListener(std::move(roughness), [this](const DynamicValue& value) {
+        m_camera_shake.roughness = value.getFloat();
+    });
+}
+
+// Wallpaper Engine's camera shake: t = speed^2 * time, the offset
+// (cos t, sin 1.333t, sin t), its length raised to roughness^3 (unless that is
+// about 0 or exactly 1), scaled by amplitude / 10, and in a 2D scene by a tenth
+// of the canvas height with no depth. The eye and what it looks at move by it
+// together.
+void SceneRuntimeContext::ApplyCameraShake() {
+    if (! m_camera_shake.registered || m_scene == nullptr || m_scene->activeCamera == nullptr) {
+        return;
+    }
+    auto& camera = *m_scene->activeCamera;
+    if (! m_camera_shake.enabled) {
+        camera.SetShakeOffset(Eigen::Vector3d::Zero());
+        return;
+    }
+    const double t =
+        double(m_camera_shake.speed) * m_camera_shake.speed * m_host_context->runtime_seconds;
+    Eigen::Vector3d offset(std::cos(t), std::sin(t * 1.333), std::sin(t));
+    double amplitude = m_camera_shake.amplitude * 0.1;
+    if (! camera.IsPerspective()) {
+        offset.z() = 0.0;
+        amplitude *= m_scene->ortho[1] * 0.1;
+    }
+    const double roughness = std::pow(double(m_camera_shake.roughness), 3.0);
+    const double length    = offset.norm();
+    if (roughness > 0.001 && roughness != 1.0 && length > 0.0) {
+        offset *= std::pow(length, roughness) / length;
+    }
+    camera.SetShakeOffset(offset * amplitude);
+}
+
 void SceneRuntimeContext::RegisterSceneClearColor(std::unique_ptr<DynamicValue> value) {
     if (m_scene == nullptr || value == nullptr) return;
 
@@ -1793,6 +1846,11 @@ uint32_t SceneRuntimeContext::DescribeTimeAdvancingWork() const {
             if (shot.node->EffectiveVisible()) selected = &shot;
         }
         if (selected && !selected->path.empty()) reasons |= SceneDemandReason::Animation;
+    }
+
+    if (m_camera_shake.registered && m_camera_shake.enabled && m_camera_shake.amplitude != 0.0f &&
+        m_camera_shake.speed != 0.0f) {
+        reasons |= SceneDemandReason::Animation;
     }
 
     // Scripted values re-evaluate every tick and may read the clock, the

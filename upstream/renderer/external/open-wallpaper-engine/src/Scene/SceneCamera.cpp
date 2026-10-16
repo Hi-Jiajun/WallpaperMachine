@@ -13,9 +13,9 @@ using namespace Eigen;
 Vector3d SceneCamera::GetPosition() const {
 	if(m_node) {
 		m_node->UpdateTrans();
-		return Affine3d(m_node->ModelTrans()) * Vector3d::Zero();
+		return Affine3d(m_node->ModelTrans()) * Vector3d::Zero() + m_shake;
 	}
-	return Vector3d::Zero();
+	return m_shake;
 }
 
 Vector3d SceneCamera::GetDirection() const {
@@ -55,11 +55,12 @@ Matrix4d SceneCamera::GetViewProjectionMatrix() const {
 void SceneCamera::CalculateViewProjectionMatrix() {
 	// CalculateViewMatrix
 	{
+		const Matrix4d shake = Affine3d(Translation3d(m_shake)).matrix();
 		if(m_node) {
 			m_node->UpdateTrans();
-			m_viewMat = m_node->ModelTrans().inverse().eval();
+			m_viewMat = (shake * m_node->ModelTrans()).inverse().eval();
 		} else 
-			m_viewMat = Matrix4d::Identity();
+			m_viewMat = shake.inverse().eval();
 	};
 
 	if(m_perspective) {

@@ -37,6 +37,14 @@ public:
     nlohmann::json       clearcolor_setting;
     bool                 dynamic_clearcolor { false };
     bool                 clearenabled { true };
+    bool                 camerashake { false };
+    float                camerashakeamplitude { 0.5f };
+    float                camerashakespeed { 3.0f };
+    float                camerashakeroughness { 1.0f };
+    nlohmann::json       camerashake_setting;
+    nlohmann::json       camerashakeamplitude_setting;
+    nlohmann::json       camerashakespeed_setting;
+    nlohmann::json       camerashakeroughness_setting;
     bool                 cameraparallax { false };
     // Wallpaper Engine's defaults for a scene that leaves these out.
     float                cameraparallaxamount { 0.5f };
