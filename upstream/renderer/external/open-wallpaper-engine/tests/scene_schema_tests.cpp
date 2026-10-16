@@ -1376,6 +1376,39 @@ TEST(SceneSchema, ModelMaterialDefaultsAreOpaqueDepthTestedAndExplicitStateWins)
     EXPECT_EQ(explicit_state.blenmode, BlendMode::Translucent);
 }
 
+TEST(SceneSchema, PassStateValuesOutsideWallpaperEnginesListsReadAsTheirFirstEntry) {
+    // Wallpaper Engine knows only "disabled"/"enabled" for depthtest and
+    // depthwrite and "normal"/"nocull" for cullmode; any other word takes the
+    // list's first entry. A depth "compare" is never chosen per material.
+    std::map<std::string, std::string> files;
+    AddLeafModelSceneFiles(files);
+    files["/mat/head.json"] = R"({"passes":[{"shader":"genericimage","textures":["a.tex"],
+      "blending":"normal","cullmode":"inverted","depthtest":"greater","depthwrite":"always"}]})";
+    files["/mat/eyes.json"] = R"({"passes":[{"shader":"genericimage","textures":["a.tex"],
+      "blending":"normal","cullmode":"nocull","depthtest":"less","depthwrite":"enabled"}]})";
+    fs::VFS vfs;
+    ASSERT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+    audio::SoundManager sound_manager;
+    WPSceneParser parser;
+    auto scene = parser.Parse("model-pass-state", PerspectiveSceneJson(R"([
+      {"id":1,"name":"model","model":"planet.mdl"}
+    ])"), vfs, sound_manager);
+    ASSERT_NE(scene, nullptr);
+    auto node = FindRootChildByName(*scene, "model");
+    ASSERT_NE(node, nullptr);
+    ASSERT_EQ(node->Mesh()->MaterialSlots().size(), 2u);
+    const auto& unknown = *node->Mesh()->MaterialSlotPtr(0);
+    EXPECT_FALSE(unknown.depth_test);
+    EXPECT_FALSE(unknown.depth_write);
+    EXPECT_EQ(unknown.cull_mode, CullMode::Back);
+    const auto& less = *node->Mesh()->MaterialSlotPtr(1);
+    EXPECT_FALSE(less.depth_test);
+    EXPECT_TRUE(less.depth_write);
+    EXPECT_EQ(less.cull_mode, CullMode::None);
+    // Drawn as it reads: no depth test means no depth write either.
+    EXPECT_FALSE(ResolveSceneDepthState(less, true).write);
+}
+
 TEST(SceneSchema, ModelBonesReachEveryMaterialIncludingTheBindPose) {
     std::map<std::string, std::string> files;
     AddPuppetImageSceneFiles(files);

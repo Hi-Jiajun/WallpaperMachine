@@ -533,6 +533,14 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   `MdlSchema.Mdls3SkinningPreservesAuthoredHierarchyAndPivotsAcrossMeshVersions`
   in `mdl_schema_tests`: mesh format versions do not justify flattening an
   authored skeleton. Versioned model fixtures cover MDLV13–23 attribute layouts.
+- **Pass depth and cull words** — `SceneSchema.PassStateValuesOutsideWallpaperEnginesListsReadAsTheirFirstEntry`:
+  `depthtest` and `depthwrite` are on only for `enabled` and `cullmode` is off only for
+  `nocull`; any other word (`less`, `greater`, `always`, `inverted`) reads as the list's
+  first entry: no depth test, no depth write, back faces culled. A write without a
+  test is not drawn (`ResolveSceneDepthState`). The native capability check no longer
+  refuses a material for its depth word, so such scenes stay on Native Metal;
+  `MetalCapability.AnUnsupportedDepthCompareIsRefusedWithItsOwnReason` went with the
+  rule it pinned.
 - **Perspective model contracts** — the parser selects the index width from the
   vertex count (32-bit indices above 65535 vertices; reading that blob as uint16
   triples rejects the mesh or draws scrambled triangles), and the vertex cap is

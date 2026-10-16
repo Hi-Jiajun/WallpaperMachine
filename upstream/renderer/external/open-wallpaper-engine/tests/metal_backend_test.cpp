@@ -415,14 +415,6 @@ TEST(MetalCapability, ASpriteParticleLayerWithAPerspectiveCameraIsAccepted)
     EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
 }
 
-TEST(MetalCapability, AnUnsupportedDepthCompareIsRefusedWithItsOwnReason)
-{
-    ImageScene fixture;
-    fixture.material().depth_compare_unsupported = true;
-    EXPECT_EQ(RejectionFor(fixture),
-              "a material uses a depth compare the native renderer does not support");
-}
-
 TEST(MetalCapability, EveryUnsupportedConstructHasItsOwnReason)
 {
     std::vector<std::pair<std::string, std::string>> reasons;

@@ -237,12 +237,8 @@ std::string RejectNodes(const Scene& scene, const SceneNode* node)
         }
         for (const auto& slot : mesh->MaterialSlots()) {
             if (slot == nullptr) continue;
-            const auto& material = *slot;
-            const auto* shader   = material.customShader.shader.get();
+            const auto* shader = slot->customShader.shader.get();
             if (shader == nullptr) return "a layer has no shader";
-            if (material.depth_compare_unsupported) {
-                return "a material uses a depth compare the native renderer does not support";
-            }
         }
     }
 

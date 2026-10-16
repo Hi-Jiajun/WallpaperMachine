@@ -51,9 +51,8 @@ frame or, with
 [**Direct video plane sampling**](performance.md#direct-video-plane-sampling) on,
 sampled by the layer's own shader. A scene falls back as a whole for HDR or 10-bit
 video, a plain video wallpaper, a shader that does not translate, particle geometry
-in a layout it does not recognise (lit particles among them), a depth compare other
-than less-or-equal, a multisampled target, an effect that samples a depth buffer, or
-a layer that reads its own previous frame (its `_b` composite, bound anywhere but its
+in a layout it does not recognise (lit particles among them), a multisampled target,
+an effect that samples a depth buffer, or a layer that reads its own previous frame (its `_b` composite, bound anywhere but its
 own effects).
 `input.cursorWorldPosition` stays 2D (`z = 0`), so a scripted orbit drag may not
 match Wallpaper Engine.
@@ -79,11 +78,15 @@ premultiplied colours, which both renderers fill from the scene's lights the sam
 way. Both renderers apply a material's depth state and cull mode the same way: a
 pass into a depth-attached target (a model, a skybox, a scene with a perspective
 camera) takes its material's depth test, depth write and cull mode, against the same
-front faces, and every other pass draws in painter's order and culls nothing. A
-material writes depth as authored whatever its blending, as Wallpaper Engine's own
-translucent depth-tested font materials expect, so a translucent or additive layer
-that asks to write depth hides what is drawn behind it afterwards, its transparent
-texels included; a pass that does not depth-test writes none. A target the frame
+front faces, and every other pass draws in painter's order and culls nothing. A pass
+reads these words as Wallpaper Engine does: only `enabled` turns on a depth test or a
+depth write and only `nocull` turns culling off, so any other value (`less`,
+`inverted`) means no depth test, no depth write or back faces culled; there is no
+depth compare to choose. A material writes depth as authored whatever its blending,
+as Wallpaper Engine's own translucent depth-tested font materials expect, so a
+translucent or additive layer that asks to write depth hides what is drawn behind it
+afterwards, its transparent texels included; a pass that does not depth-test writes
+none. A target the frame
 reads before it writes it keeps its own image from one frame to the next on both
 renderers, so the reader sees exactly the previous frame; a scene with such a loop
 is never called still while it runs. Translating to the Metal shading language

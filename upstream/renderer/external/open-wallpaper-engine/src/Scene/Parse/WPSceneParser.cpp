@@ -1019,24 +1019,18 @@ BlendMode ParseBlendMode(std::string_view str) {
     return bm;
 }
 
+// Wallpaper Engine reads a pass's `depthtest`, `depthwrite` and `cullmode` as
+// two-value enums ("disabled"/"enabled", "normal"/"nocull") and gives a value
+// outside the list the list's first entry: no depth test, no depth write, back
+// faces culled. There is no depth compare to choose; a depth-tested draw always
+// compares the same way.
 void ApplyMaterialDepth(SceneMaterial& material, const wpscene::WPMaterial& wpmat) {
-    const auto& test = wpmat.depthtest;
-    if (test.empty() || test == "disabled") {
-        material.depth_test = false;
-    } else if (test == "enabled" || test == "less" || test == "lessorequal") {
-        material.depth_test = true;
-    } else {
-        material.depth_compare_unsupported = true;
-    }
+    material.depth_test  = wpmat.depthtest == "enabled";
     material.depth_write = wpmat.depthwrite == "enabled";
 }
 
 CullMode ParseSceneCullMode(std::string_view value) {
-    if (value == "inverted" || value == "front" || value == "clockwise") return CullMode::Front;
-    if (value == "normal" || value == "back" || value == "counterclockwise" || value == "ccw") {
-        return CullMode::Back;
-    }
-    return CullMode::None;
+    return value == "nocull" ? CullMode::None : CullMode::Back;
 }
 
 void ParseSpecTexName(std::string& name, Scene& scene, fs::VFS& vfs,

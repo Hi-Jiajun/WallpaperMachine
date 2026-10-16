@@ -30,9 +30,6 @@ public:
 
     SceneMaterialCustomShader customShader;
     BlendMode                 blenmode { BlendMode::Disable };
-    /// Authored `depthtest` other than disabled/enabled/less/lessorequal.
-    /// Presence is a whole-scene Metal fallback, not a silent disable.
-    bool                      depth_compare_unsupported { false };
     /// As authored. A renderer draws with `ResolveSceneDepthState`, not these.
     bool                      depth_test { false };
     bool                      depth_write { false };
