@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// The detail column: the page on show, with its title, toolbar, banners, Filters sidebar and
-/// inspector. Library pages (Installed, Steam Workshop, pixiv) have the Filters sidebar before them
-/// and an inspector column beside them; Settings is a page of its own.
+/// The page on show, with its title, toolbar, banners, Filters sidebar and inspector. Library pages
+/// (Installed, Steam Workshop, pixiv) have the Filters sidebar before them and an inspector column
+/// beside them; Settings is a page of its own.
 struct PanelDetail: View {
   @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
@@ -23,13 +23,13 @@ struct PanelDetail: View {
       workshopSubtitle: selection == .workshop ? controller.workshopTitleSubtitle : nil)
     HStack(spacing: 0) {
       if shell.areFiltersShown {
-        // It comes out from under the navigation sidebar, which floats above the detail.
+        // It slides out from the window's leading edge.
         FilterSidebar(selection: selection)
           .transition(
             reduceMotion ? .opacity : .move(edge: .leading).combined(with: .opacity))
       }
       page(for: selection)
-        // One search bar at the top of the pages that have one, kept in place across them.
+        // One search bar at the top of every page, kept in place across them.
         .safeAreaInset(edge: .top, spacing: 0) { PageSearchBar(selection: selection) }
         .safeAreaInset(edge: .top, spacing: 0) { PanelBanners() }
     }
@@ -46,9 +46,12 @@ struct PanelDetail: View {
       inspector(for: selection).inspectorColumnWidth(min: 260, ideal: 300, max: 420)
     }
     // Under the first-run guide the bare title bar names nothing: the guide is what is on show.
+    // The title names the window (the Window menu, Mission Control) but is not drawn in the
+    // title bar, where the tabs already say which page is on show.
     .navigationTitle(shell.isWelcomeOpen ? "" : title.title)
     .navigationSubtitle(shell.isWelcomeOpen ? "" : title.subtitle ?? "")
     .toolbar { PanelToolbarContent(controller: controller) }
+    .toolbar(removing: .title)
   }
 
   /// Open or closed by the person's choice, or by the window's width while they have not chosen, on

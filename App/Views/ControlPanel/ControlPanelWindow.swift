@@ -6,10 +6,9 @@ import AppKit
 /// resets the window's content minimum to zero even with `sizingOptions = []`, so the
 /// window delegate clamps every user resize through `clampedFrameSize` instead.
 ///
-/// The window carries no chrome of its own. The hosted `NavigationSplitView` draws the sidebar
-/// material under the title bar, and its `.toolbar` and `.navigationTitle` reach the window through
-/// the hosting controller's `sceneBridgingOptions`; a manually assigned `NSToolbar` would fight
-/// them.
+/// The window carries no chrome of its own. The hosted page's `.toolbar` (the tabs and the
+/// trailing tools) and `.navigationTitle` reach the window through the hosting controller's
+/// `sceneBridgingOptions`; a manually assigned `NSToolbar` would fight them.
 @MainActor
 enum ControlPanelWindow {
     /// Smallest content area the panel lays out without clipping; the layout tests use it too.

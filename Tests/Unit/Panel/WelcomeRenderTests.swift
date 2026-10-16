@@ -141,10 +141,9 @@ final class WelcomeRenderTests: PanelTestCase {
 
   // MARK: The window under the guide
 
-  /// While the guide is up nothing behind it looks usable or can be reached: the toolbar is hidden
-  /// (not emptied, so its items are never inserted again), the title bar names nothing, the panel
-  /// is out of the accessibility tree, and the sidebar's list ignores the arrow keys, which
-  /// `.disabled` alone lets through. Finishing brings all of it back.
+  /// While the guide is up nothing behind it looks usable or can be reached: the toolbar with the
+  /// tabs is hidden (not emptied, so its items are never inserted again), the title bar names
+  /// nothing, and the panel is out of the accessibility tree. Finishing brings all of it back.
   func testTheGuideHidesTheToolbarAndLocksThePanelBehindItUntilItEnds() async throws {
     try await withPanel(welcomeSeen: false) { panel in
       let harness = try WelcomeRenderHarness(panel: panel)
@@ -155,23 +154,19 @@ final class WelcomeRenderTests: PanelTestCase {
       let items = toolbar.items.map(\.itemIdentifier)
       XCTAssertFalse(toolbar.isVisible, "No toolbar control shows above the scrim")
       XCTAssertNotEqual(window.title, "All wallpapers", "The title bar does not name the page behind")
-      XCTAssertFalse(
-        harness.accessibilityTexts().contains(L("Main navigation")), "The sidebar is hidden from VoiceOver")
-      let sidebar = try XCTUnwrap(harness.lists().first)
-      harness.pressDownArrow(in: sidebar)
-      try await harness.layout(at: sizes[1])
-      XCTAssertEqual(library.scope, .all, "The sidebar behind the guide does not move")
+      let content = AccessibilityElement(object: try XCTUnwrap(window.contentView))
+      XCTAssertNil(content.first(identifier: "scope-all"), "The library's views are hidden from VoiceOver")
 
       panel.controller.welcome.finish()
       try await harness.layout(at: sizes[1])
       XCTAssertTrue(window.toolbar === toolbar, "The same toolbar")
-      XCTAssertTrue(toolbar.isVisible)
+      XCTAssertTrue(toolbar.isVisible, "The toolbar shows again")
       XCTAssertEqual(toolbar.items.map(\.itemIdentifier), items, "with the same items, never re-inserted")
       XCTAssertEqual(window.title, "All wallpapers")
-      XCTAssertTrue(harness.accessibilityTexts().contains(L("Main navigation")))
-      harness.pressDownArrow(in: sidebar)
+      XCTAssertNotNil(content.first(identifier: "scope-all"), "The library's views are back")
+      library.show(.favorites)
       try await harness.layout(at: sizes[1])
-      XCTAssertEqual(library.scope, .favorites, "The sidebar works again")
+      XCTAssertEqual(window.title, "Favorites")
 
       // Moving between two pages that share the search bar still works (PageSearchBar).
       panel.navigation.selection = .pixiv

@@ -1,13 +1,14 @@
 import SwiftUI
 
-/// The window toolbar: the activity pills, the target display menu, the downloads button and the
-/// inspector toggle, trailing, in that order. A pill, the downloads button and the inspector toggle
+/// The window toolbar: the page tabs in the middle, and trailing the activity pills, the target
+/// display menu, the downloads button and the inspector toggle, in that order. A pill, the downloads button and the inspector toggle
 /// are in the toolbar only while they have something to show; the target display menu is hidden on
 /// Settings. The pages' search field is in the page, not here (`PageSearchBar`).
 struct PanelToolbarContent: ToolbarContent {
   let controller: PanelController
 
   var body: some ToolbarContent {
+    ToolbarItem(placement: .principal) { PanelTabs() }
     // The pill is in the toolbar while an import runs and until its report has been looked at.
     // The library keeps that memory with the popover that clears it (`ImportPill`).
     if ImportActivityPill.isActive(in: controller) {

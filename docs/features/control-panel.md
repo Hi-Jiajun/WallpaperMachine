@@ -40,21 +40,21 @@ language: [Localization](../localization.md).
 
 ## Layout
 
-The window is a system split view: the sidebar on the left, the page beside it and, on the
-library pages, an inspector column on the right. The window's own toolbar names the page
-and holds its tools.
+The window has no sidebar: the pages are tabs in the middle of the title bar, the page
+fills the window under them and, on the library pages, an inspector column sits on the
+right. A Now Playing bar runs along the bottom of the window.
 
 | Region | Contents |
 | --- | --- |
-| Sidebar | The system sidebar, its translucent material reaching under the title bar; 220 points wide, resizable from 180 to 300. **Browse** holds Steam Workshop and pixiv. **Library** holds All wallpapers (the library's count, and an accent dot while Workshop updates exist; the whole row's tooltip then says how many, and VoiceOver reads it after the count) and Favorites (its count; it is Installed's own Favorite filter). **Collections** lists each local collection with its size ([Local collections](#local-collections)). The arrow keys move the highlight and open the row, as a click does. At the bottom are the Now Playing card (below) and **Settings**. Opening Settings swaps the list for Settings' own ([Pages and Settings](#pages-and-settings)) |
-| Toolbar | The window title names the place on show: **All wallpapers**, **Favorites**, the collection's name, **Steam Workshop**, **pixiv**, or the Settings section's name (**Search results** while searching Settings). The subtitle counts All wallpapers (with the number of updates), Favorites and a collection, and says nothing while the library loads. On the right: activity pills while there is something to report (an import in progress or a result not yet looked at, which opens Import; SteamCMD setup in progress; pixiv saves, which lead to the pixiv page), the target-display menu (named by the screen alone; its items, tooltip and VoiceOver value keep the renderer's full title, and two screens of one name keep it on the button too), the downloads button and **Wallpaper details**, which shows and hides the inspector; Settings shows neither the menu nor **Wallpaper details**. The downloads button appears once there is download activity, rings itself with the batch's mean progress while anything transfers, and carries the batch summary (status, percent, network speed, time left, **needs attention**) as its label and tooltip. |
-| Page | Installed, Steam Workshop and pixiv open with one full-width search bar at the top of the page (Command-F puts the keyboard in it), which stays in place when moving between them; VoiceOver names it for what it searches (**Search installed wallpapers**, **Search Steam Workshop**, **Search pixiv by tag**). **Installed**: a header row (**Filter** with its count, the sort menu and its direction, then **Select**, **Refresh** and **Import**; in a narrow column the controls keep their places and drop their words, which stay as tooltips and VoiceOver names), the tile grid and a footer (how many a search or filter leaves, **Update N wallpapers**, the selection tools, the drag-select tip, or *Loading your library…*; with none of these it is not shown, since the subtitle counts the view). **Steam Workshop** (the Discover page): a header with its lists (**Wallpapers**, **Collections**, **Your subscriptions**; one menu in the narrowest column), Filter, sort and Refresh (it searches from the page's search bar, which an author's or a collection's list leaves out); then the grid and a footer with the result summary and the pager (Previous, an editable page number with the number of pages, Next). A Workshop page is one Steam page of 30 tiles, at most 1,000 pages. **pixiv**: see [pixiv](pixiv.md#browsing) |
-| Filters sidebar | A second sidebar at the page's leading edge, drawn like the window sidebar, opened from the page's **Filter** button on Installed, Discover and pixiv ([Filtering](#filtering)) |
+| Tabs | In the middle of the title bar: **Library** (Installed), **Steam Workshop**, **pixiv** and **Settings**, each as wide as its name; in a window under 960 points they show their symbols alone, with the names as tooltips and VoiceOver labels, so the toolbar's tools keep their places. The page on show is tinted with the accent; VoiceOver reads them as buttons, that one as selected, in a group named **Main navigation** ([Pages and Settings](#pages-and-settings)) |
+| Toolbar | The window title, not drawn in the title bar (the tabs stand for it) but used by the Window menu and Mission Control, names the place on show: **All wallpapers**, **Favorites**, the collection's name, **Steam Workshop**, **pixiv**, or the Settings section's name (**Search results** while searching Settings). The subtitle counts All wallpapers (with the number of updates), Favorites and a collection, and says nothing while the library loads. On the right: activity pills while there is something to report (an import in progress or a result not yet looked at, which opens Import; SteamCMD setup in progress; pixiv saves, which lead to the pixiv page), the target-display menu (named by the screen alone; its items, tooltip and VoiceOver value keep the renderer's full title, and two screens of one name keep it on the button too), the downloads button and **Wallpaper details**, which shows and hides the inspector; Settings shows neither the menu nor **Wallpaper details**. The downloads button appears once there is download activity, rings itself with the batch's mean progress while anything transfers, and carries the batch summary (status, percent, network speed, time left, **needs attention**) as its label and tooltip. |
+| Page | Every page opens with one full-width search bar at the top (Command-F puts the keyboard in it), which stays in place when moving between them; VoiceOver names it for what it searches (**Search installed wallpapers**, **Search Steam Workshop**, **Search pixiv by tag**, **Search settings**). **Installed**: a row of view chips, **All wallpapers** (its count, and an accent dot while Workshop updates exist, whose tooltip and VoiceOver value say how many) and **Favorites** (its count; it is Installed's own Favorite filter), lit for the view on show, plus the shown collection's chip, which puts the collection away ([Local collections](#local-collections)); then a header row (**Filter** with its count, the sort menu and its direction, then **Select**, **Refresh** and **Import**; in a narrow column the controls keep their places and drop their words, which stay as tooltips and VoiceOver names), the tile grid and a footer (how many a search or filter leaves, **Update N wallpapers**, the selection tools, the drag-select tip, or *Loading your library…*; with none of these it is not shown, since the subtitle counts the view). **Steam Workshop** (the Discover page): a header with its lists (**Wallpapers**, **Collections**, **Your subscriptions**; one menu in the narrowest column), Filter, sort and Refresh (it searches from the page's search bar, which an author's or a collection's list leaves out); then the grid and a footer with the result summary and the pager (Previous, an editable page number with the number of pages, Next). A Workshop page is one Steam page of 30 tiles, at most 1,000 pages. **pixiv**: see [pixiv](pixiv.md#browsing) |
+| Filters sidebar | A floating panel at the page's leading edge, opened from the page's **Filter** button on Installed, Discover and pixiv ([Filtering](#filtering)) |
 | Inspector | The system inspector column: preview, title, facts, actions, tags, and the selected wallpaper's options and properties ([wallpaper properties](wallpaper-properties.md)). 300 points wide, resizable from 260 to 420. It starts open in a window 960 points wide or more and closed in a narrower one, and follows the width once a resize has settled, until the person opens or closes it with **Wallpaper details**: that choice then holds whatever the width, also across a visit to Settings, which has none. Nothing is stored. The top of an installed wallpaper's inspector is washed with a blurred copy of its still (never the animation); the sections below are collapsible cards |
-| Now Playing | The card above Settings in the sidebar: the target display's wallpaper and the playback controls ([Now Playing](#now-playing)) |
+| Now Playing | The bar along the bottom of the window, on every page: the target display's wallpaper, which opens its details, and the playback controls ([Now Playing](#now-playing)) |
 
-Full screen and Split View need nothing of the panel's own: the split view, the toolbar
-and the traffic lights are the system's, and the layout is the same in a full-screen
+Full screen and Split View need nothing of the panel's own: the inspector column, the
+toolbar and the traffic lights are the system's, and the layout is the same in a full-screen
 Space or either Split View tile.
 
 The visual direction combines Wallpaper Engine's image-first gallery, filtering
@@ -118,7 +118,7 @@ controller resets `contentMinSize` once it attaches.
 Arrow keys, `Home` and `End` move focus across a grid, and `Return` or `Space` on a
 focused tile acts as a click. `Escape` cancels a collection's name field, then closes an
 open popover, then leaves selection mode. `Command-F` puts the keyboard in the page's
-search field (on Settings, the sidebar's). Errors show in a banner at the top of the page
+search bar, Settings' included. Errors show in a banner at the top of the page
 with their original details, which can be selected and copied, and **Dismiss**; VoiceOver
 announces them.
 
@@ -131,23 +131,23 @@ the state as a disabled line. See [crash recovery](crash-recovery.md).
 
 ## Pages and Settings
 
-The sidebar opens the pages:
+The tabs open the pages:
 
+- **Library** shows the local library on the Installed page. Its chips choose
+  **All wallpapers** or **Favorites**, and the Filters sidebar's **Collections** group a
+  local collection. Favorites is Installed's own Favorite filter and a collection is its
+  collection filter, so Favorites can also be set from the [Filters sidebar](#filtering)'s
+  Show only box, and the chips follow. The view chosen survives a visit to another tab.
 - **Steam Workshop** opens the Discover page, which browses the Steam Workshop. See
   [Workshop downloads](workshop-downloads.md).
 - **pixiv** browses pixiv's illustration rankings and tag search in the same grid,
   Filters sidebar and inspector, and saves a page of a work as a still wallpaper.
   See [pixiv](pixiv.md).
-- **All wallpapers**, **Favorites** and each local collection show the local
-  library on the Installed page. Favorites is Installed's own Favorite filter and a
-  collection is its collection filter, so either can also be set from the
-  [Filters sidebar](#filtering) and the window sidebar follows.
 - **Settings** replaces the page with a sectioned settings view, described
   below.
 
-Opening Settings swaps the sidebar's contents for **Back to library** (it returns
-to the library page Settings was opened from), a search field and the sections,
-each with a System Settings-style tile: a white SF Symbol on a coloured rounded
+Settings lists its sections down the page's leading edge, a 220-point column under
+the search bar, each with a System Settings-style tile: a white SF Symbol on a coloured rounded
 square. Settings opens on **Quick Settings** in every window; a section the app asks
 for (**Check for Updates…**, an update notice) is shown once, even when the window
 opens afterwards. The sections, in order, are Quick Settings, General, Appearance,
@@ -161,7 +161,7 @@ the rest opens in a popover from the ⓘ beside the title.
 - **Search** filters rows across every section by their own words in the language
   on show (titles, explanations, keywords, choices and button labels). The page then
   lists every section with a match, one under another, with only the matching rows;
-  the sidebar counts the matches per section and dims the rest; disclosures holding a
+  the section list counts the matches per section and dims the rest; disclosures holding a
   match open for the search and fold again when it clears. `Escape` clears the field,
   and **No settings match “…”.** shows when nothing matches.
 - **Quick Settings** collects Control Center-style tiles that switch the same
@@ -415,13 +415,15 @@ no Share: they have no page to share.
 
 ## Now Playing
 
-The card above **Settings** in the sidebar shows the target display's wallpaper:
-its artwork (a click shows the wallpaper in the library), a *Now Playing* caption,
-its title, and the display's name beside a small equalizer that moves only while
-playback runs and the window is on screen. When the target display is empty it says
-**Nothing on this display** and still reports the global playback state
-(**Playback running** or **Playback paused**), or a hint to pick a wallpaper when
-nothing plays anywhere. Its controls:
+The bar along the bottom of the window shows the target display's wallpaper: its
+still, its title, and the display's name beside a small equalizer that moves only
+while playback runs and the window is on screen. When the target display is empty it
+says **Nothing on this display** and the hint to pick a wallpaper; VoiceOver reads the
+global playback state (**Playback running** or **Playback paused**) as the bar's
+value. The wallpaper's part of the bar lights on hover and, clicked, opens its details
+above it: the still at 16:9, a *Now Playing* caption, the title (selectable), its kind,
+the display's full name, the playback state and **Show in library**, which shows the
+wallpaper selected on Installed. Its controls:
 
 - **Previous wallpaper**, play/pause, **Next wallpaper** and **Recently used**
   (below). Play/pause acts on every wallpaper and is enabled whenever any display
@@ -435,13 +437,13 @@ nothing plays anywhere. Its controls:
 
 ## Previous, next and recently used
 
-**Previous wallpaper** on the Now Playing card returns the target display to its
+**Previous wallpaper** on the Now Playing bar returns the target display to its
 last successfully applied wallpaper. Repeated presses continue backward instead of
 alternating between two wallpapers. Missing or unsupported library entries are
 skipped; a failed application leaves history intact. The menu bar, global
 keyboard shortcuts and [automation](automation.md) offer the same commands.
 
-**Recently used** on the card opens a popover above it that lists up to 50 distinct
+**Recently used** on the bar opens a popover above it that lists up to 50 distinct
 wallpapers used on that display, newest use first, and applies one when chosen. The
 menu bar shows the latest ten. **Clear history** clears only the target display's
 recent list and back history. Neither action deletes wallpaper files. Successful
@@ -601,8 +603,9 @@ Show only counts selected tags, and exclude groups count visible boxes that diff
 from that page's defaults. **Clear** restores those defaults; hidden or unknown
 tags are not claimed to be represented by the sum of visible group counts.
 
-- **Installed:** the sidebar carries Discover's boxes and rules (see below),
-  applied in the page to each wallpaper. **Show only** starts with Favorites,
+- **Installed:** the sidebar opens with the **Collections** group
+  ([Local collections](#local-collections)), then carries Discover's boxes and rules
+  (see below), applied in the page to each wallpaper. **Show only** starts with Favorites,
   Active on target display and Update available, then Approved, Audio responsive
   and Customizable; **Type** (Scene, Video, Web) reads the wallpaper's kind; **Age
   rating** and **Tags** read its `project.json`, which `LibraryMetricsService`
@@ -640,11 +643,13 @@ keep their own states; a refresh can leave existing results visible.
 
 ### Local collections
 
-The window sidebar's **Collections** section lists named local collections,
-separate from Steam's Workshop collections and the author's tags; choosing one
-shows it on Installed, and a collection deleted while it is shown returns the page to
-All wallpapers. The + button in the section heading creates one with an inline name
-field (a refused name says why under the field), and a collection's context menu
+The **Collections** group at the top of Installed's filters panel lists named local
+collections with their sizes, separate from Steam's Workshop collections and the
+author's tags; choosing one shows it on Installed (its chip joins the view chips and
+the Filter count includes it), choosing it again or pressing its chip shows every
+wallpaper again, and a collection deleted while it is shown returns the page to All
+wallpapers. **New collection…** under the list creates one with an inline name field
+(a refused name says why under the field), and a collection's context menu
 (and its VoiceOver actions) offers **Rename…**, inline, and **Delete…**, which asks
 in a confirmation sheet. Add selected wallpapers through **Add to collection…** in
 Installed's footer (or **New collection…** there, named from the selection), remove

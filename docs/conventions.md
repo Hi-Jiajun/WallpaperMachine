@@ -152,7 +152,7 @@ How the panel runs (controller, actions, observation, window hosting) is in
   child.
 - **Selectable text** where people copy from it: the error banner, the inspectors,
   the download dialog and the first-run guide. Put `.textSelection(.enabled)` on the
-  static text, not on a container, where it can swallow button clicks. The sidebar,
+  static text, not on a container, where it can swallow button clicks. The tabs,
   the toolbar, tiles and Settings are not selectable.
 - **No per-frame or idle work.** Anything that animates on its own reads
   `\.panelIsVisible` and Reduce Motion and stops when either says so; no timer runs

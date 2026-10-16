@@ -1,6 +1,6 @@
 import Foundation
 
-/// What the library, the sidebar and the banners read: the Installed rows, selection and apply
+/// What the library, the tabs and the banners read: the Installed rows, selection and apply
 /// state, history, host states, held wallpapers and the import. Each getter reads the counter of
 /// every store SwiftUI cannot observe before the store itself (`PanelStoreRevisions`), so a view
 /// that calls it is told when the answer changes.

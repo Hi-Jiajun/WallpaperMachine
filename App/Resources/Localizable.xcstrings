@@ -1,6 +1,9 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Details" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "詳細"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "详细信息"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "詳細資訊"}}}
+    },
     "Like WallpaperMachine?" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachineを気に入りましたか？"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "喜欢 WallpaperMachine 吗？"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "喜歡 WallpaperMachine 嗎？"}}}
     },

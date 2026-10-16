@@ -8,12 +8,14 @@ import SwiftUI
 enum ShellPopover: Hashable, Sendable {
   /// Now Playing's Recently used list.
   case history
+  /// Now Playing's details: what the bar names, at a size that has room for it.
+  case nowPlaying
   /// The downloads button's list.
   case downloads
 }
 
-/// How the window adapts to its width. Below `compactWidth` there is not room for the sidebar, a
-/// readable grid and the inspector at once, so the inspector starts closed (the toolbar button
+/// How the window adapts to its width. Below `compactWidth` there is not room for a readable grid,
+/// the inspector and a filters panel at once, so the inspector starts closed (the toolbar button
 /// still opens it).
 enum ShellLayout {
   /// The width under which the inspector starts closed: the width the rail layout of the web panel
@@ -36,7 +38,7 @@ enum ShellLayout {
 }
 
 /// The window shell: what page is on show, the window-level presentation state, and the derived
-/// state the sidebar, the toolbar and the banners read.
+/// state the tabs, the toolbar and the banners read.
 ///
 /// It reads and acts through `controller`, which owns every store. Views start navigation through
 /// `show(_:)`, `open(_:)` and `setTarget(_:)`, which run the typed actions under the keys and
@@ -48,9 +50,7 @@ final class ShellModel {
 
   // MARK: Window state
 
-  /// The library page the person was on before opening Settings, which "Back to library" returns to.
-  private(set) var lastLibrarySelection = SidebarSelection.wallpaper
-  /// The window is too narrow for the sidebar, a readable grid and the inspector together
+  /// The window is too narrow for a readable grid, the inspector and a filters panel together
   /// (`ShellLayout.compactWidth`). The root reports it when the window crosses that width.
   private(set) var isCompact = false
   @ObservationIgnored private var hasMeasuredWidth = false
@@ -154,13 +154,6 @@ final class ShellModel {
       || controller.applyingWallpaperID != nil || !controller.queuedApplyIDs.isEmpty
   }
 
-  /// The row of the library sidebar that is lit.
-  var highlightedRow: SidebarRow? {
-    SidebarRow.highlighted(
-      selection: selection, scope: controller.library.scope,
-      collectionIDs: controller.collectionRows.map(\.id))
-  }
-
   /// The root reports where the window stands against `ShellLayout.compactWidth`: at once the first
   /// time it is placed (nothing is open yet to disturb), and after `compactDelay` on a change.
   func windowWidthChanged(_ width: ShellLayout.Width) {
@@ -185,11 +178,6 @@ final class ShellModel {
   /// A change of layout waiting on the delay, for a test to await.
   var pendingCompactChange: Task<Void, Never>? { compactTask }
 
-  /// Remembers a library page as the one Settings returns to.
-  func note(selection: SidebarSelection) {
-    if selection != .settings { lastLibrarySelection = selection }
-  }
-
   // MARK: Navigation
 
   private var navigateKey: String { PanelActionCoordinator.key("navigate") }
@@ -204,18 +192,6 @@ final class ShellModel {
     }
   }
 
-  /// A click on a sidebar row: sets the library's scope for a library row, then opens its page.
-  /// Search text, sort and the other filters are the library's and stay as they are.
-  @discardableResult
-  func show(_ row: SidebarRow) -> Task<Void, Never> {
-    if let scope = row.scope { controller.library.show(scope) }
-    return open(row.selection)
-  }
-
-  /// Settings' Back to library: the page Settings was opened from.
-  @discardableResult
-  func backToLibrary() -> Task<Void, Never> { open(lastLibrarySelection) }
-
   /// Chooses the display wallpapers are applied to. Only an enabled display with a wallpaper of its
   /// own is accepted (the model refuses another); several quick choices end on the last.
   @discardableResult
@@ -228,7 +204,7 @@ final class ShellModel {
 
   // MARK: Now Playing
 
-  /// What the Now Playing card's buttons do, each under its own key so one in flight disables only
+  /// What the Now Playing bar's buttons do, each under its own key so one in flight disables only
   /// itself.
   @discardableResult
   func togglePlayback() -> Task<Void, Never> {
@@ -267,7 +243,7 @@ final class ShellModel {
       PanelActionCoordinator.key("nextWallpaper", displayID: controller.targetDisplayID))
   }
 
-  /// The artwork: opens Installed with the wallpaper selected.
+  /// Show in library: opens Installed with the wallpaper selected.
   @discardableResult
   func showInstalled(_ id: String) -> Task<Void, Never> {
     let controller = controller
@@ -383,8 +359,7 @@ final class ShellModel {
     return false
   }
 
-  /// Command-F: puts the keyboard in the page's search field (its search bar, or the Settings
-  /// sidebar's). False when the window has none.
+  /// Command-F: puts the keyboard in the page's search bar. False when the window has none.
   @discardableResult
   func focusSearch() -> Bool {
     guard let window = controller.presentation.window else { return false }

@@ -80,8 +80,9 @@ Rather build it yourself? It takes two commands: see
 
 ## The app
 
-One window with a sidebar: Steam Workshop and pixiv to browse, your library (all wallpapers,
-favorites and your collections) and Settings. The website has a demo of it on a
+One window with tabs across the top: your library (all wallpapers, favorites and your
+collections), Steam Workshop and pixiv to browse, and Settings, with what is playing in a bar
+along the bottom. The website has a demo of it on a
 sample library, so you can
 [try it in your browser](https://www.wallpapermachine.app/#app). Close the
 window and the app keeps running in the menu bar, where you can pause, resume, mute

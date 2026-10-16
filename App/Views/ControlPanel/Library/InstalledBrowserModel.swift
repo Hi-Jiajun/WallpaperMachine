@@ -32,7 +32,7 @@ final class InstalledBrowserModel {
   /// Counts the times the grid must scroll to its top: a library view was chosen.
   private(set) var scrollToTopCount = 0
   /// Which Filters groups are open, by key. The person's choice, kept while the window lives.
-  var openFilterGroups: Set<String> = ["show-only", "type", "rating", "genre"]
+  var openFilterGroups: Set<String> = ["collections", "show-only", "type", "rating", "genre"]
 
   // MARK: Selection
   //
@@ -134,17 +134,17 @@ final class InstalledBrowserModel {
     importLoop?.start()
   }
 
-  // MARK: Cross-area contract (the sidebar reads and sets the scope)
+  // MARK: Cross-area contract (the view chips and the Collections group read and set the scope)
 
-  /// The part of the library on show, which the sidebar highlights: a collection, else Favorites
+  /// The part of the library on show, which the view chips light: a collection, else Favorites
   /// (the Favorite filter), else everything.
   var scope: LibraryScope {
     if let collection = shownCollection { return .collection(collection.id) }
     return filter.requiredTags.contains(LibraryFilterCatalog.favoriteTag) ? .favorites : .all
   }
 
-  /// Shows a part of the library, as the sidebar's All wallpapers, Favorites and collection rows
-  /// do. Favorites and a collection are filters of Installed, not pages of their own, so the
+  /// Shows a part of the library, as the All wallpapers and Favorites chips and the filters
+  /// panel's collection rows do. Favorites and a collection are filters of Installed, not pages of their own, so the
   /// search, sort and the other tags stay as they are, and the grid goes back to its top: a grid
   /// on screen scrolls there (`scrollToTopCount`), and one made afterwards (the view was chosen
   /// from another page, or from an empty state) starts there, since it restores `scrollOffset`.
@@ -192,7 +192,7 @@ final class InstalledBrowserModel {
   /// How many filters are in effect, for the Filter button's badge.
   var filterCount: Int { effectiveFilter.activeCount }
 
-  /// Whether a search or a filter narrows the view the sidebar lights, so the grid can show fewer
+  /// Whether a search or a filter narrows the view the chips light, so the grid can show fewer
   /// wallpapers than the window's subtitle counts. Favorites and a collection are that view, not a
   /// narrowing of it.
   var narrowsView: Bool {

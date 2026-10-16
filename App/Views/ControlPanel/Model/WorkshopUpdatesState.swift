@@ -1,6 +1,6 @@
 import Foundation
 
-/// The check for Workshop updates of installed wallpapers, for Settings and the sidebar's update
+/// The check for Workshop updates of installed wallpapers, for Settings and the All wallpapers chip's update
 /// dot. Which wallpaper has one is `WorkshopStore.updates.available`.
 struct WorkshopUpdatesState: Equatable {
   let isChecking: Bool

@@ -130,20 +130,20 @@ final class PanelRootRenderTests: PanelTestCase {
     try await settle()
     XCTAssertEqual(harness.window.title, "All wallpapers")
     XCTAssertEqual(
-      harness.contentToolbarItems.count, 2,
-      "A library page offers the target display menu and the inspector toggle")
+      harness.contentToolbarItems.count, 3,
+      "A library page offers the tabs, the target display menu and the inspector toggle")
 
     harness.navigation.selection = .settings
     try await settle()
     XCTAssertEqual(harness.window.title, "Quick Settings")
     XCTAssertEqual(
-      harness.contentToolbarItems.count, 0, "Settings has neither a target nor an inspector")
+      harness.contentToolbarItems.count, 1, "Settings has the tabs, but neither a target nor an inspector")
 
     harness.navigation.revealSettingsSection(.about)
     harness.navigation.selection = .pixiv
     try await settle()
     XCTAssertEqual(harness.window.title, "pixiv")
-    XCTAssertEqual(harness.contentToolbarItems.count, 2)
+    XCTAssertEqual(harness.contentToolbarItems.count, 3)
     await harness.close()
   }
 
@@ -160,20 +160,20 @@ final class PanelRootRenderTests: PanelTestCase {
 
   // MARK: The language on show
 
-  /// What a person reads first: the window's title and subtitle and the sidebar's rows, on a library
-  /// page and in Settings.
+  /// What a person reads first: the window's title and subtitle, the tabs, the library's views
+  /// and Settings' section list, on a library page and in Settings.
   private struct DrawnWords: Equatable {
     var libraryTitle = ""
     var librarySubtitle = ""
-    var workshopRow = ""
-    var allWallpapersRow = ""
+    var workshopTab = ""
+    var allWallpapersChip = ""
     var settingsTitle = ""
     var generalRow = ""
 
     var all: [(name: String, text: String)] {
       [
         ("library title", libraryTitle), ("library subtitle", librarySubtitle),
-        ("Steam Workshop row", workshopRow), ("All wallpapers row", allWallpapersRow),
+        ("Steam Workshop tab", workshopTab), ("All wallpapers chip", allWallpapersChip),
         ("Settings title", settingsTitle), ("General row", generalRow),
       ]
     }
@@ -208,21 +208,22 @@ final class PanelRootRenderTests: PanelTestCase {
     var words = DrawnWords()
     harness.layout(at: NSSize(width: 1240, height: 800))
     try await waitUntil {
-      !harness.window.subtitle.isEmpty && Self.sidebarRow("sidebar-all", in: harness.window) != nil
+      !harness.window.subtitle.isEmpty && Self.element("scope-all", in: harness.window) != nil
+        && Self.tab(.workshop, in: harness.window) != nil
     }
     words.libraryTitle = harness.window.title
     words.librarySubtitle = harness.window.subtitle
-    words.workshopRow = Self.sidebarRow("sidebar-workshop", in: harness.window) ?? ""
-    words.allWallpapersRow = Self.sidebarRow("sidebar-all", in: harness.window) ?? ""
+    words.workshopTab = Self.tab(.workshop, in: harness.window) ?? ""
+    words.allWallpapersChip = Self.element("scope-all", in: harness.window) ?? ""
 
     harness.navigation.revealSettingsSection(.general)
     harness.navigation.selection = .settings
     try await waitUntil {
       harness.window.title != words.libraryTitle
-        && Self.sidebarRow("settings-section-general", in: harness.window) != nil
+        && Self.listRow("settings-section-general", in: harness.window) != nil
     }
     words.settingsTitle = harness.window.title
-    words.generalRow = Self.sidebarRow("settings-section-general", in: harness.window) ?? ""
+    words.generalRow = Self.listRow("settings-section-general", in: harness.window) ?? ""
     return words
   }
 
@@ -235,9 +236,29 @@ final class PanelRootRenderTests: PanelTestCase {
     }
   }
 
-  /// What the sidebar row with `identifier` says, read from the cells of the window's lists the way
-  /// VoiceOver reads them; nil while no such row is drawn.
-  private static func sidebarRow(_ identifier: String, in window: NSWindow) -> String? {
+  /// What the element with `identifier` in the window's content says, as VoiceOver reads it; nil
+  /// while none is drawn.
+  private static func element(_ identifier: String, in window: NSWindow) -> String? {
+    guard let content = window.contentView else { return nil }
+    return AccessibilityElement(object: content).first(identifier: identifier)?.text
+  }
+
+  /// What the title bar's tab for `page` says, as VoiceOver reads it; nil while it is not drawn.
+  private static func tab(_ page: SidebarSelection, in window: NSWindow) -> String? {
+    let identifier = "tab-\(PanelTabs.identifier(of: page))"
+    for view in window.toolbar?.items.compactMap(\.view) ?? [] {
+      if let text = AccessibilityElement(object: view).first(identifier: identifier)?.text,
+        !text.isEmpty
+      {
+        return text
+      }
+    }
+    return nil
+  }
+
+  /// What the Settings section row with `identifier` says, read from the cells of the window's lists
+  /// the way VoiceOver reads them; nil while no such row is drawn.
+  private static func listRow(_ identifier: String, in window: NSWindow) -> String? {
     func tables(_ view: NSView) -> [NSTableView] {
       ((view as? NSTableView).map { [$0] } ?? []) + view.subviews.flatMap(tables)
     }

@@ -61,7 +61,7 @@ struct SettingsIndex {
 /// A row a section builds from live data instead of declaring it as an item: a display's card, a
 /// saved display layout, a wallpaper in a display's own list. The web page searched whatever a row
 /// said, so a display's name, a layout's name or a listed wallpaper's title found it; a search counts
-/// each live row that matches toward its section, so the section keeps its page and its sidebar
+/// each live row that matches toward its section, so the section keeps its page and its list
 /// count for it. The section's view decides which of its live rows to draw with `matches(_:)`.
 struct SettingsLiveUnit: Equatable, Sendable {
   let section: SettingsSection
@@ -194,7 +194,7 @@ struct SettingsSearch {
   /// How many items and live rows of the section match; zero without a search.
   func count(in section: SettingsSection) -> Int { counts[section] ?? 0 }
 
-  /// The sections that keep a page, in sidebar order.
+  /// The sections that keep a page, in the order of the section list.
   var sections: [SettingsSection] { SettingsSection.allCases.filter(shows) }
 
   /// Whether a search has no result at all, so the page says so.
@@ -202,7 +202,7 @@ struct SettingsSearch {
 
   /// Whether text that is not an item matches the query, for a row built from live data (a
   /// playlist, a display layout) that hides itself without being registered. It counts toward the
-  /// sidebar only when the section also hands the row in as a `SettingsLiveUnit`.
+  /// section list only when the section also hands the row in as a `SettingsLiveUnit`.
   func matches(_ text: String) -> Bool { !isActive || Self.contains(text, query) }
 
   fileprivate static func groupKey(_ section: SettingsSection, _ group: SettingsItem.Group)

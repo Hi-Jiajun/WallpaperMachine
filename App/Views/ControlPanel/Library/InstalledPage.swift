@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// The Installed page: the wallpaper grid with the bar of controls above it, the summary and the
-/// selection tools beneath it, and the search field in the toolbar.
+/// The Installed page (the Library tab): the views of the library and the bar of controls above
+/// the wallpaper grid, the summary and the selection tools beneath it, and the search bar at the
+/// top. The Filters sidebar beside it is the window's (`FilterSidebar`).
 ///
 /// The page keeps no state of its own that must outlive it: the filters, the selection and the
 /// scroll position are the model's, so leaving for another page and coming back finds them as
@@ -47,13 +48,15 @@ struct InstalledPage: View {
   }
 }
 
-/// The bar of controls, the grid or what stands in for it, and the footer.
+/// The views of the library and the bar of controls, the grid or what stands in for it, and the
+/// footer.
 private struct InstalledColumn: View {
   @Environment(PanelController.self) private var controller
 
   var body: some View {
     let model = controller.library
     VStack(spacing: 0) {
+      InstalledScopeBar()
       InstalledHeaderRow()
       Group {
         if let empty = model.emptyState {

@@ -235,9 +235,9 @@ final class InspectorRenderTests: InspectorTestCase {
         let shell = panel.controller.shell
         let library = panel.controller.library
         let pageWidth = { library.geometry.viewport.width }
-        // The page column beside the inspector: the window less the sidebar and the column.
-        let isBeside = { (200...320).contains(pageWidth()) }
-        let isAlone = { pageWidth() > 400 }
+        // The page beside the inspector: the window less the column.
+        let isBeside = { (380...520).contains(pageWidth()) }
+        let isAlone = { pageWidth() > 600 }
         let (window, hosting) = panelWindow(
           panel, size: madeSmall ? smallest : ControlPanelWindow.initialContentSize, dark: dark)
         if !madeSmall {

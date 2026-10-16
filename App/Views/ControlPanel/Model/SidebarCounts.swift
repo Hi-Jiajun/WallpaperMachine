@@ -1,6 +1,6 @@
 import Foundation
 
-/// The numbers the sidebar's Library and Collections items carry.
+/// The numbers the Library page's view chips and the Collections group carry.
 struct SidebarCounts: Equatable {
   struct Collection: Identifiable, Equatable {
     var id: String
@@ -18,7 +18,7 @@ struct SidebarCounts: Equatable {
   var updates: Int
   var collections: [Collection]
 
-  /// The All wallpapers item's tooltip while an update is waiting, replacing its label.
+  /// The All wallpapers chip's tooltip while an update is waiting.
   @MainActor
   var updateTooltip: String? {
     guard updates > 0 else { return nil }

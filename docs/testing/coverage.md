@@ -984,8 +984,9 @@ never to `.shared`.
   `ShellRenderTests` (the shell takes any window size in every language and appearance, full
   screen, Split View and minimum sizes, the window title and subtitle, the target menu and
   inspector toggle on library pages only, a banner never widening the layout, shrinking step by
-  step with the inspector open, Command-F reaching the Settings search, the Now Playing card),
-  `ShellBannersTests`, `ShellSearchFocusTests`, `SidebarRowTests`, `PanelTitleTests`,
+  step with the inspector open, Command-F reaching the Settings search, the tabs in the toolbar,
+  the Now Playing bar's height and its details popover), `ShellBannersTests`,
+  `ShellSearchFocusTests`, `PanelTitleTests`,
   `CollectionEditorModelTests` (create, rename and delete with the inline name field and the
   confirmation sheet), `PanelShellTests` (choosing a Settings section ends the search, a reveal is
   adopted once, disclosures, the inspector choice and the library page remembered, the guide open
@@ -1015,7 +1016,7 @@ never to `.shared`.
   window means no deletion, one question for a batch, partial failures named),
   `PanelLibraryRowsTests` (rows joined with measured facts, covers only once stamped, a rescan that
   replaced no preview leaves every row alone, 10,000 rows built once whatever else changes),
-  `PanelLibraryStateTests` (Now Playing, the target menu, display names, history, sidebar counts,
+  `PanelLibraryStateTests` (Now Playing, the target menu, display names, history, library counts,
   the update dot, the issue report's facts), `PanelCollectionActionsTests`, `LibrarySortTests`,
   `LibraryFilterTests`, `LibrarySelectionTests` (ticks, ranges and the hold-and-sweep gesture),
   `LibraryGridGeometryTests`, `LibraryTileRulesTests`, `TileGridLayoutTests` (at least three
@@ -1099,8 +1100,8 @@ never to `.shared`.
   any other id has no Share, the app is shared with the website in the panel's language, **Star on
   GitHub** in About and in the star prompt open the repository and answer the star prompt).
 
-Not covered: the sidebar material and its Reduce Transparency and inactive looks, the sidebar
-selection highlight, the toolbar's glass, popover placement, sheets on a real window, hover,
+Not covered: the Settings section list's selection highlight, the toolbar's glass and the tabs
+on it, popover placement, sheets on a real window, hover,
 pressed and focus rings, real pointer gestures (double clicks, modifier clicks, the hold-and-sweep
 and edge scrolling, slider drags; the logic behind each is tested through the models with a
 manual clock), the colour panel, Command-F in a real window, VoiceOver speech and reading order,

@@ -83,7 +83,7 @@ final class SettingsModel {
   /// A phrase of a row or section in the panel's language.
   func text(_ resource: LocalizedStringResource) -> String { locale.string(resolving: resource) }
 
-  /// Shows a section, as a click on its sidebar row does: the search ends and the page starts at
+  /// Shows a section, as a click on its row in the section list does: the search ends and the page starts at
   /// its top.
   func select(_ section: SettingsSection) {
     query = ""

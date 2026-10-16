@@ -17,14 +17,15 @@ was run.
 
 - [ ] One library window opens, the starter wallpaper is visible, and there are
       no blank floating panels.
-- [ ] Switch between Steam Workshop, pixiv, All wallpapers, Favorites, a collection and
-      Settings from the sidebar, and through the eleven Settings sections: Quick
+- [ ] Switch between the Library, Steam Workshop, pixiv and Settings tabs, between All
+      wallpapers and Favorites with Library's chips and to a collection from the filters
+      panel, and through the eleven Settings sections: Quick
       Settings (the one Settings opens on), General, Appearance, Desktop & Lock Screen,
       Playback & Power, Performance, Displays, Keyboard shortcuts, Library & Steam,
       Storage, About. The window title names the place on show each time, and on All
       wallpapers, Favorites and a collection the subtitle counts it.
-- [ ] Narrow the window below 960 points: the inspector closes, the sidebar keeps its
-      labels and counts, nothing overlaps the traffic lights or the toolbar, and widening
+- [ ] Narrow the window below 960 points: the inspector closes, the tabs stay whole in
+      the middle of the title bar, nothing overlaps the traffic lights or the toolbar, and widening
       the window opens the inspector again. Open it with the toolbar's **Wallpaper
       details** button while the window is narrow: it stays open as the window grows and
       shrinks, and so does a choice to close it in a wide window.
@@ -52,7 +53,7 @@ was run.
       away without any other action.
 - [ ] In Settings, flip a Quick Settings tile (try Mute All): its full row in
       Playback & Power follows, and the other way round. Search for a word from a row's
-      explanation: matching rows stay, the sidebar counts matches per section and dims
+      explanation: matching rows stay, the section list counts matches per section and dims
       the rest, a disclosure holding a match opens and closes again when the search
       clears, Escape clears the field, and a word nothing contains reads "No settings
       match …".
@@ -73,10 +74,8 @@ was run.
 ## Appearance
 
 - [ ] Choose Light and Dark, then System, and change the macOS appearance.
-- [ ] Check the toolbar, sidebar, menus, controls, dialogs, inspector, Filters
-      popover and download popover in each mode. The sidebar shows the system's
-      translucent material (it dims in an inactive window and turns opaque under
-      System Settings → Accessibility → Display → Reduce transparency).
+- [ ] Check the toolbar and its tabs, the Now Playing bar and its details, menus,
+      controls, dialogs, inspector, filters panel and download popover in each mode.
 - [ ] Set an accent and a surface tone; relaunch and confirm both persist.
 - [ ] Try white and black accents, then Reset appearance. Wallpapers and
       playback must not change.
@@ -130,8 +129,7 @@ was run.
 - [ ] Check Discover, pixiv and Installed at 1240×800, 960×640 and 760×560 in light and
       dark mode, with the inspector open and closed. Panes resize without losing the
       target menu or the primary actions, and nothing is cut off at the window's edge.
-- [ ] Command-F puts the keyboard in the page's search field (the Settings sidebar's on
-      Settings); grid arrows, Home and End, Return and Space, Delete, Escape (a name field,
+- [ ] Command-F puts the keyboard in the page's search field (Settings' too); grid arrows, Home and End, Return and Space, Delete, Escape (a name field,
       then a popover, then selection mode), text editing and VoiceOver names stay
       correctly scoped. With Reduce Motion on, no equalizer, spinner or preview animates.
 

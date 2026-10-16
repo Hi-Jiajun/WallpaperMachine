@@ -38,7 +38,7 @@ extension PanelController {
   }
 
   /// The Workshop's newer version of an installed wallpaper, when its author changed it since it
-  /// was installed. This is what marks the wallpaper in Installed and the sidebar.
+  /// was installed. This is what marks the wallpaper in Installed and the All wallpapers chip.
   func workshopUpdate(for id: String) -> WorkshopItem? { workshop.updates.available[id] }
 
   /// What the inspector says about an installed wallpaper's update, or nil when it has none and

@@ -6,7 +6,7 @@ extension PanelController {
   // MARK: Navigation
 
   /// Shows `selection`. A page opened for the first time starts its own first load, as every route
-  /// to it (the sidebar, a menu command, a link) always did: Discover searches and pixiv asks for
+  /// to it (the tabs, a menu command, a link) always did: Discover searches and pixiv asks for
   /// its default list, unless one is already loaded or loading.
   ///
   /// An `E` action: it leaves an older banner showing. A view that fires it for every click starts

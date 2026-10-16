@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// The whole panel: the sidebar and the page beside it, with the guide and the dialogs over them.
+/// The whole panel: the page under the title bar's tabs, the Now Playing bar along the bottom, and
+/// the guide and the dialogs over them.
 ///
 /// It applies the panel's theme and language to everything below it and publishes whether the
 /// window is on screen. It expects the `PanelController` in the environment, which
@@ -9,14 +10,16 @@ struct PanelRootView: View {
   @Environment(PanelController.self) private var controller
 
   var body: some View {
-    PanelSplitView()
+    PanelWindowContent()
       .panelTheme(theme: controller.theme, locale: PanelLocale.shared)
       .environment(\.panelIsVisible, controller.presentation.isVisible)
   }
 }
 
-/// The split view itself: sidebar, detail, and what sits over both.
-private struct PanelSplitView: View {
+/// The page with its inspector, the Now Playing bar, and what sits over them. There is no sidebar:
+/// the pages are tabs in the title bar (`PanelTabs`), and Settings lists its sections in its own
+/// page.
+private struct PanelWindowContent: View {
   @Environment(PanelController.self) private var controller
 
   /// Counts the Settings reveals the app asked for (Check for Updates, the update notice), which
@@ -28,11 +31,9 @@ private struct PanelSplitView: View {
 
   var body: some View {
     let shell = controller.shell
-    NavigationSplitView {
-      PanelSidebar()
-        .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 300)
-    } detail: {
+    VStack(spacing: 0) {
       PanelDetail()
+      NowPlayingBar()
     }
     // Command-F belongs to the page, not to what has the keyboard, so it is bound out here.
     .background { FindShortcut() }
@@ -51,10 +52,7 @@ private struct PanelSplitView: View {
     .onGeometryChange(for: ShellLayout.Width.self) { ShellLayout.Width(width: $0.size.width) }
     action: { shell.windowWidthChanged($0) }
     // A popover belongs to the page it was opened on.
-    .onChange(of: shell.selection, initial: true) { _, selection in
-      shell.note(selection: selection)
-      shell.closePopover()
-    }
+    .onChange(of: shell.selection, initial: true) { shell.closePopover() }
     .onChange(of: revealToken, initial: true) { controller.settings.adoptReveal() }
     // Escape, for what the shell owns; a name field and a popover handle their own first.
     .onExitCommand { shell.handleEscape() }

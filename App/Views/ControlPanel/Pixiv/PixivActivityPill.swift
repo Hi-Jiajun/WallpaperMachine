@@ -23,7 +23,7 @@ struct PixivActivityPill: View {
       let label = activity.label
       let isCompact = controller.shell.isCompact
       Button {
-        // The shell's navigation: one latest-wins chain with the sidebar, so the newest page wins.
+        // The shell's navigation: one latest-wins chain with the tabs, so the newest page wins.
         controller.shell.open(.pixiv)
       } label: {
         HStack(spacing: 6) {

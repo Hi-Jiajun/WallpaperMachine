@@ -1,6 +1,6 @@
 import Foundation
 
-/// The sidebar's Now Playing card: what the target display shows and which controls work.
+/// The window's Now Playing bar: what the target display shows and which controls work.
 ///
 /// Play and pause act on every display, so the status line reports them even when the target is
 /// empty, and the toggle works while any display has a wallpaper. Previous and Next act on the

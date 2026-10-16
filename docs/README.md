@@ -67,7 +67,7 @@ file; pass `rg -u` to search them deliberately.
 
 | Document | Purpose |
 |---|---|
-| [features/control-panel.md](features/control-panel.md) | The native window: language, sidebar, toolbar, grid and inspector, pages and Settings, selection versus apply, Now Playing, target display, filtering and local collections, recently used, deleting, downloads and import |
+| [features/control-panel.md](features/control-panel.md) | The native window: language, tabs, toolbar, grid and inspector, pages and Settings, selection versus apply, Now Playing, target display, filtering and local collections, recently used, deleting, downloads and import |
 | [features/first-run.md](features/first-run.md) | The first-run guide over the window, the one-time support prompt after the first downloaded wallpaper, the later star prompt and the performance data question |
 | [features/wallpaper-properties.md](features/wallpaper-properties.md) | Inspector properties, live preview, property presets, image placement, the compatibility check and the black-bar check |
 | [features/backup-restore.md](features/backup-restore.md) | The Settings → Storage backup package (settings, allowlisted preferences, chosen user files) and restoring it |

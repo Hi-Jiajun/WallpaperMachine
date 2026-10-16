@@ -1,94 +1,118 @@
 import SwiftUI
 
-/// The Collections section of the library sidebar: one row per collection with its size, a plus in
-/// the heading for a new one, and Rename… and Delete… in each row's menu.
+/// The Collections group of the Library's filters panel: one row per collection with its size,
+/// which shows that collection in the grid (and pressed again, every wallpaper), New collection…
+/// under them, and Rename… and Delete… in each row's menu.
 ///
-/// A new collection or a rename is typed in a field in the list itself: Return saves, Escape
+/// A new collection or a rename is typed in a field in the group itself: Return saves, Escape
 /// cancels, and a refusal of the name is written under the field. Deleting asks first. The result
-/// of a delete is shown under the list for a few seconds and spoken, and an empty section says what
+/// of a delete is shown under the group for a few seconds and spoken, and an empty group says what
 /// collections are for.
-struct CollectionsSidebarSection: View {
-  let collections: [SidebarCounts.Collection]
+struct CollectionsFilterGroup: View {
+  @Binding var isExpanded: Bool
 
   @Environment(PanelController.self) private var controller
-  @Environment(\.panelTheme) private var theme
 
   var body: some View {
+    let model = controller.library
     let shell = controller.shell
     let editor = shell.collectionEditor
-    Section {
+    let collections = controller.sidebarCounts.collections
+    let shownID = model.shownCollection?.id
+    FilterGroup("Collections", count: shownID == nil ? 0 : 1, isExpanded: $isExpanded) {
       ForEach(collections) { collection in
         if editor.mode == .rename(collection.id) {
           CollectionNameRow(editor: editor)
         } else {
-          row(collection, editor: editor)
+          CollectionFilterRow(collection: collection, isShown: collection.id == shownID, editor: editor)
         }
       }
       if editor.mode == .create {
         CollectionNameRow(editor: editor)
       }
       if collections.isEmpty && !editor.isOpen {
-        SidebarNote(Text("Group wallpapers for browsing and for playlists."))
+        CollectionsNote(Text("Group wallpapers for browsing and for playlists."))
       }
+      Button {
+        editor.beginCreate()
+      } label: {
+        Label("New collection…", systemImage: "plus")
+      }
+      .buttonStyle(.link)
+      .font(.system(size: 12))
+      .disabled(editor.isChanging || editor.mode == .create)
+      .accessibilityIdentifier("collection-new")
       if let notice = shell.notice {
         // A collection's name can be long, and the sentence is up for a few seconds only.
-        SidebarNote(Text(verbatim: notice))
+        CollectionsNote(Text(verbatim: notice))
           .accessibilityIdentifier("collection-notice")
       }
-    } header: {
-      header(editor)
     }
+    // A collection deleted from elsewhere takes the name field that was renaming it along.
+    .onChange(of: collections.map(\.id)) { editor.reconcile() }
   }
+}
 
-  private func row(_ collection: SidebarCounts.Collection, editor: CollectionEditorModel)
-    -> some View
-  {
-    Label {
-      Text(verbatim: collection.name)
-    } icon: {
-      Image(systemName: "folder")
+/// A collection: its name and size, lit while it is the one the grid shows. Pressing it shows it,
+/// or, when it is already shown, every wallpaper again.
+private struct CollectionFilterRow: View {
+  let collection: SidebarCounts.Collection
+  let isShown: Bool
+  let editor: CollectionEditorModel
+
+  @Environment(PanelController.self) private var controller
+  @Environment(\.panelTheme) private var theme
+  @State private var isHovering = false
+
+  var body: some View {
+    let model = controller.library
+    Button {
+      model.show(isShown ? .all : .collection(collection.id))
+    } label: {
+      HStack(spacing: 8) {
+        Image(systemName: isShown ? "folder.fill" : "folder")
+          .foregroundStyle(isShown ? theme.accent.accent.color : theme.surface.muted.color)
+          .frame(width: 16)
+        Text(verbatim: collection.name)
+          .lineLimit(1)
+          .truncationMode(.tail)
+        Spacer(minLength: 8)
+        Text(collection.count, format: .number)
+          .monospacedDigit()
+          .foregroundStyle(theme.surface.muted.color)
+      }
+      .font(.system(size: 13, weight: isShown ? .semibold : .regular))
+      .foregroundStyle(isShown ? theme.accent.accent.color : theme.surface.text.color)
+      .padding(.horizontal, 8)
+      .frame(minHeight: 26)
+      .background(background, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+      .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
-    .badge(Text(collection.count, format: .number))
-    .tag(SidebarRow.collection(collection.id))
+    .buttonStyle(.plain)
+    .onHover { isHovering = $0 }
     .contextMenu {
       Button("Rename…") { editor.beginRename(collection.id) }
         .disabled(editor.isChanging)
       Button("Delete…", role: .destructive) { editor.requestDelete(collection.id) }
         .disabled(editor.isChanging)
     }
+    .help(isShown ? L("Show all wallpapers") : "")
     // The same two commands for VoiceOver, which does not open a context menu.
     .accessibilityAction(named: Text("Rename…")) { editor.beginRename(collection.id) }
     .accessibilityAction(named: Text("Delete…")) { editor.requestDelete(collection.id) }
-    .accessibilityIdentifier("sidebar-collection-\(collection.id)")
+    .accessibilityAddTraits(isShown ? .isSelected : [])
+    .accessibilityIdentifier("collection-\(collection.id)")
   }
 
-  private func header(_ editor: CollectionEditorModel) -> some View {
-    HStack(spacing: 4) {
-      Text("Collections")
-      Spacer(minLength: 0)
-      Button {
-        editor.beginCreate()
-      } label: {
-        Image(systemName: "plus").font(.system(size: 11, weight: .semibold))
-      }
-      .buttonStyle(.plain)
-      .foregroundStyle(theme.surface.muted.color)
-      .frame(width: 20, height: 20)
-      .contentShape(Rectangle())
-      .disabled(editor.isChanging)
-      .help(L("New collection…"))
-      .accessibilityLabel(Text(verbatim: L("New collection…")))
-      .accessibilityIdentifier("collection-new")
-    }
+  private var background: Color {
+    if isShown { return theme.accent.accent.color.opacity(0.14) }
+    return isHovering ? theme.surface.hover.color : .clear
   }
 }
 
-/// A line of quiet text in the sidebar list: the empty Collections hint, and the result of a
+/// A line of quiet text in the Collections group: the empty group's hint, and the result of a
 /// change. It wraps rather than being cut.
-///
-/// A sidebar row is measured before its width is final, so wrapping text has to ask for its height
-/// itself: without the full-width frame and the fixed vertical size it is cut to one line.
-struct SidebarNote: View {
+struct CollectionsNote: View {
   let text: Text
 
   init(_ text: Text) { self.text = text }
@@ -100,7 +124,6 @@ struct SidebarNote: View {
       .lineLimit(4)
       .frame(maxWidth: .infinity, alignment: .leading)
       .fixedSize(horizontal: false, vertical: true)
-      .selectionDisabled()
   }
 }
 
@@ -171,9 +194,8 @@ private struct CollectionNameRow: View {
           .accessibilityIdentifier("collection-name-error")
       }
     }
-    .selectionDisabled()
     .onAppear {
-      // The row has to be in the list before it can take the keyboard.
+      // The row has to be in the panel before it can take the keyboard.
       DispatchQueue.main.async { isFocused = true }
     }
   }

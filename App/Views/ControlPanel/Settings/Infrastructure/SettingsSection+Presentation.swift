@@ -1,7 +1,7 @@
 import SwiftUI
 
 extension SettingsSection {
-  /// The name in the sidebar, as the title of the page and in the window title.
+  /// The name in the section list, as the title of the page and in the window title.
   var title: LocalizedStringResource {
     switch self {
     case .quick: "Quick Settings"
@@ -71,7 +71,7 @@ extension SettingsSection {
     }
   }
 
-  /// Whether the sidebar leaves a gap above this section: the list reads as five clusters, as in
+  /// Whether the section list leaves a gap above this section: the list reads as five clusters, as in
   /// the web panel's.
   var startsCluster: Bool {
     switch self {

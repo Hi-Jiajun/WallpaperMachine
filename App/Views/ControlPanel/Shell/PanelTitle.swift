@@ -1,8 +1,9 @@
 import Foundation
 
-/// What the window's title bar says: the place on show, and a line of detail under it.
+/// What the window's title says (the Window menu, Mission Control; the tabs stand for it in the
+/// title bar): the place on show, and a line of detail under it.
 ///
-/// Installed follows the library view the sidebar lights, as a Finder window names its folder: a
+/// Installed follows the library view the chips light, as a Finder window names its folder: a
 /// shown collection by its name, else Favorites, else All wallpapers, with how many wallpapers it
 /// holds (and, for All wallpapers, how many have an update). Settings is named by its section, or by
 /// "Search results" while a search is typed. Steam Workshop says under its name what is on show and
@@ -14,7 +15,7 @@ struct PanelTitle: Equatable {
 
   /// - Parameters:
   ///   - scope: The part of the library Installed shows.
-  ///   - counts: The sidebar's counts, nil while the library is still loading, which leaves the
+  ///   - counts: The library's counts, nil while the library is still loading, which leaves the
   ///     subtitle out rather than say "0 wallpapers".
   ///   - workshopSubtitle: The Workshop page's line (`PanelController.workshopTitleSubtitle`).
   @MainActor

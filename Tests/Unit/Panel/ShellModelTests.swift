@@ -36,23 +36,16 @@ final class ShellModelTests: PanelTestCase {
     }
   }
 
-  func testChoosingALibraryRowOpensInstalledAndASettingsBackRowReturnsToTheLastLibraryPage()
-    async throws
-  {
+  func testATabOpensItsPageAndTheLibrarysViewSurvivesAVisitToSettings() async throws {
     try await withPanel { panel in
       let shell = panel.controller.shell
-      await shell.show(.favorites).value
-      XCTAssertEqual(shell.selection, .wallpaper, "Favorites is a view of Installed")
-      await shell.show(.collection("any")).value
-      XCTAssertEqual(shell.selection, .wallpaper)
-
-      // The root remembers the library page Settings is opened from.
-      shell.note(selection: .pixiv)
+      XCTAssertEqual(PanelTabs.pages, [.wallpaper, .workshop, .pixiv, .settings])
+      panel.controller.library.show(.favorites)
       await shell.open(.settings).value
-      shell.note(selection: .settings)
-      XCTAssertEqual(shell.lastLibrarySelection, .pixiv)
-      await shell.backToLibrary().value
-      XCTAssertEqual(shell.selection, .pixiv, "Back to library returns to the page it was opened from")
+      XCTAssertEqual(shell.selection, .settings)
+      await shell.open(.wallpaper).value
+      XCTAssertEqual(shell.selection, .wallpaper)
+      XCTAssertEqual(panel.controller.library.scope, .favorites, "Library comes back to its view")
     }
   }
 

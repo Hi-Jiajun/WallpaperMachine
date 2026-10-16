@@ -3,7 +3,7 @@ import SwiftUI
 /// A white filled SF Symbol on a coloured rounded square: the tile of a Settings section, as in
 /// System Settings.
 struct SymbolTile: View {
-  /// The three sizes in use: the sidebar row, a compact row and the page header.
+  /// The three sizes in use: the section list's row, a compact row and the page header.
   enum Size: CGFloat {
     case small = 20
     case medium = 28

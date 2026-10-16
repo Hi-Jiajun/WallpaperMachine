@@ -93,7 +93,7 @@ never committed. `ImageRenderer` draws only pure SwiftUI, so AppKit-backed parts
 (lists, text fields, the split view, the toolbar, `AnimatedPreview`) are missing from
 its output. What such a capture cannot show: the inspector column, an
 `NSGlassEffectView` that draws blank (render the inspector alone in an
-`NSHostingView` at its width instead), the sidebar selection (drawn solid black),
+`NSHostingView` at its width instead), a list selection (drawn solid black),
 controls in their active colours (an unordered window is inactive, so switches,
 sliders and progress views are grey), sheets and popovers (an unordered window
 attaches none; render their content alone), hover, pressed and focus states, Reduce

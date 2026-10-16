@@ -66,7 +66,7 @@ App/                               WallpaperMachine application target sources o
                                    reopen state, and the AppKit sign-in, preview and what's-new windows
     Model/                         PanelController, its typed actions and derived state (PanelController+<Group>.swift),
                                    presentation, store revisions, error banner, action coordinator, dialogs, links
-    Shell/                         root view, sidebar, detail column (router, toolbar, banners, Filters sidebar, inspector), Now Playing
+    Shell/                         root view, tabs, detail column (router, toolbar, banners, Filters sidebar, inspector), Now Playing bar
     Library/ Inspector/            the Installed page and the installed wallpaper's inspector
     Discover/ Downloads/           the Steam Workshop page and its inspector; the downloads button, list and dialog
     Pixiv/                         the pixiv page, its inspector and toolbar pill

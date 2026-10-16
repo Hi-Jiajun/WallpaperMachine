@@ -150,7 +150,7 @@ It has no web view, and renderer content is never drawn into it. Coding rules fo
 | `ControlPanelWindow.swift` | Builds the window, owns its 760×560 size floor, `moveToActiveSpace` and `bringForward` |
 | `PanelViewState.swift` | Installed's filters and the grids' scroll offsets as a `Codable` value, kept in memory on `ControlPanelNavigation` for the next window; `normalized()` applies the limits |
 | `Model/` | `PanelController` and its `PanelController+<Group>.swift` extensions (typed actions and derived state), `PanelPresentation`, `PanelStoreRevisions`, `PanelErrorState`, `PanelActionCoordinator`, `PanelDialogs`, `PanelPreferences`, `ExternalLink`, `TransferFormat`, `DisplayOptionsLoader`, `DragStepPump`, and the typed values views read (`LibraryRow`, `UpdatePresentation`, `TileDownloadState`, ...) |
-| `Shell/` | `PanelRootView` (theme, language, the split view, the guide overlay), the sidebar, `PanelDetail` (page router, banners, Filters sidebar, inspector column, title, toolbar), `FilterSidebar`, Now Playing, and `ShellModel` (navigation, inspector and Filters sidebar state, popovers, Escape, Command-F) |
+| `Shell/` | `PanelRootView` (theme, language, the page over the Now Playing bar, the guide overlay), `PanelTabs`, `PanelDetail` (page router, banners, Filters sidebar, inspector column, title, toolbar), `FilterSidebar`, the Now Playing bar, and `ShellModel` (navigation, inspector state, popovers, Escape, Command-F) |
 | `Library/`, `Inspector/`, `Discover/`, `Downloads/`, `Pixiv/`, `Settings/`, `Welcome/` | One area each: its views and its `@Observable` view model, which hangs off the controller as a lazy property (`library`, `inspector`, `workshopBrowser`, `downloads`, `pixivBrowser`, `settings`, `displaysSettings`, `welcome`, `supportPrompt`, and `shell`) |
 | `Components/`, `Theme/`, `Localization/`, `Images/` | Shared views (`TileGrid`, `WallpaperTile`, `ProgressRing`, `Equalizer`, `FilterPanel`, `InspectorCard`, `PanelEmptyState`, `SymbolTile`, the button styles), the palettes, `PanelLocale` and `L()`, the image pipeline |
 | `WebSignInWindow.swift` | Separate sign-in window for pixiv and Steam: a private website data store, of which the app reads only the session cookie |
@@ -162,7 +162,7 @@ It has no web view, and renderer content is never drawn into it. Coding rules fo
   becomes a window minimum, and `sceneBridgingOptions = [.toolbars, .title]`, so the root's
   `.toolbar`, `.navigationTitle` and `.navigationSubtitle` become the window's toolbar, title
   and subtitle. `ControlPanelWindow.make` sets the style mask (with `.fullSizeContentView`: the
-  `NavigationSplitView` draws the sidebar material under the title bar), `isReleasedWhenClosed =
+  page scrolls under the title bar's tabs), `isReleasedWhenClosed =
   false`, a 1240×800 first size and the active-Space behavior; it adds no toolbar or backdrop of
   its own. The hosting controller resets `contentMinSize` once it attaches, so
   `windowWillResize` clamps every resize with `ControlPanelWindow.clampedFrameSize`. The app has

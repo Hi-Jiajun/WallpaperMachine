@@ -1,14 +1,14 @@
 import AppKit
 import SwiftUI
 
-/// The search bar of the pages that have one (Installed, Steam Workshop and pixiv): a full-width
+/// The search bar of every page (Installed, Steam Workshop, pixiv and Settings): a full-width
 /// field at the top of the page, above its own row of tools, owned by the detail column rather
 /// than by each page.
 ///
 /// It used to be the window's toolbar search item, which AppKit puts in the toolbar's trailing
 /// corner, above the inspector, where it was easy to miss. Here it is the first thing on the page,
 /// where the grid it searches starts. It stays one field across the pages and only changes its
-/// text, prompt and Return action. Settings searches in its sidebar. The Workshop's field is there
+/// text, prompt and Return action. The Workshop's field is there
 /// only while the list on show is one Steam searches (an author's or a collection's wallpapers are
 /// not).
 struct PageSearchBar: View {
@@ -54,7 +54,10 @@ struct PageSearchBar: View {
           ? L("Search Workshop or paste a link") : L("Search Workshop"),
         name: L("Search Steam Workshop"), submit: { model.search() })
     case .settings:
-      return nil
+      let settings = controller.settings
+      return .init(
+        text: Binding(get: { settings.query }, set: { settings.query = $0 }),
+        prompt: L("Search settings"), name: L("Search settings"), submit: {})
     }
   }
 }

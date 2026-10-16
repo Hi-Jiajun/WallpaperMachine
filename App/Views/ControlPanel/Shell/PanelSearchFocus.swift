@@ -3,9 +3,9 @@ import AppKit
 /// Finds the search field a page puts in the window and gives it the keyboard, which is what
 /// Command-F does.
 ///
-/// Installed's, Steam Workshop's and pixiv's field is the search bar at the top of the page
-/// (`PageSearchBar`); Settings keeps its field in the sidebar. Both are `NSSearchField`s in the
-/// window's content, found here instead of through a focus binding each page would have to share.
+/// Every page's field is the search bar at the top of the page (`PageSearchBar`), an
+/// `NSSearchField` in the window's content, found here instead of through a focus binding each
+/// page would have to share.
 @MainActor
 enum PanelSearchFocus {
   /// The first visible search field in the window's content.

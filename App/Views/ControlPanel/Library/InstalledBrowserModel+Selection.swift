@@ -198,7 +198,7 @@ extension InstalledBrowserModel {
   // MARK: Collections
 
   /// Whether a collection change is under way, which holds the collection controls: one of the
-  /// bar's own, or a rename or delete from the sidebar, which the bar's tools wait for as well.
+  /// bar's own, or a rename or delete from the filters panel, which the bar's tools wait for as well.
   var isChangingCollection: Bool {
     let keys = [
       PanelActionCoordinator.key("collectionAdd"), PanelActionCoordinator.key("collectionRemove"),
@@ -223,7 +223,7 @@ extension InstalledBrowserModel {
   }
 
   /// Begins typing the name of a new collection made from the ticked wallpapers. The window has one
-  /// collection name field at a time, so the sidebar's closes (and the sidebar's, opening, closes
+  /// collection name field at a time, so the filters panel's closes (and the panel's, opening, closes
   /// this one: `CollectionEditorModel`).
   func beginNewCollection() {
     guard !selection.isEmpty else { return }

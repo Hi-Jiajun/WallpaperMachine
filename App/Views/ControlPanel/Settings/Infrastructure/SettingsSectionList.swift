@@ -1,26 +1,18 @@
 import SwiftUI
 
-/// The sidebar while Settings is open: a way back to the library, the search field, and the
-/// sections, each with its coloured tile. While a search is typed the rows show how many matches
-/// each section has, sections without one fade, and none is highlighted.
-struct SettingsSidebar: View {
+/// The list of Settings sections along the Settings page's leading edge, each with its coloured
+/// tile. While a search is typed in the page's search bar the rows show how many matches each
+/// section has, sections without one fade, and none is highlighted.
+struct SettingsSectionList: View {
+  /// The list's width in the page.
+  static let width: CGFloat = 220
+
   @Environment(PanelController.self) private var controller
 
   var body: some View {
-    @Bindable var settings = controller.settings
+    let settings = controller.settings
     let search = settings.search
     List(selection: selection(settings, search)) {
-      Section {
-        Button {
-          controller.shell.backToLibrary()
-        } label: {
-          Label("Back to library", systemImage: "chevron.left")
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("settings-back")
-      }
       ForEach(Self.clusters, id: \.first) { cluster in
         Section {
           ForEach(cluster, id: \.self) { section in
@@ -33,7 +25,8 @@ struct SettingsSidebar: View {
       .selectionDisabled(controller.shell.isWelcomeOpen)
     }
     .listStyle(.sidebar)
-    .searchable(text: $settings.query, placement: .sidebar, prompt: Text("Search settings"))
+    .scrollContentBackground(.hidden)
+    .frame(width: Self.width)
     .accessibilityLabel(Text(verbatim: L("Settings categories")))
   }
 

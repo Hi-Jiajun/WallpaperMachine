@@ -60,15 +60,10 @@ final class PanelShellTests: PanelTestCase {
     }
   }
 
-  func testWindowStateIsKeptForTheInspectorAndSettingsRemembersWhereLibraryWas() async throws {
+  func testSettingsHasNoInspector() async throws {
     try await withPanel { panel in
       let shell = panel.controller.shell
       XCTAssertTrue(shell.hasInspector)
-      shell.note(selection: .pixiv)
-      shell.note(selection: .settings)
-      XCTAssertEqual(
-        shell.lastLibrarySelection, .pixiv,
-        "Back to library returns to the page Settings was opened from")
       panel.navigation.selection = .settings
       XCTAssertFalse(shell.hasInspector)
       XCTAssertEqual(shell.selection, .settings)

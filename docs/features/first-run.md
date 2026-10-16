@@ -10,9 +10,9 @@ they appear in is described in [control panel](control-panel.md).
 ## First run
 
 The first time the panel opens, a guide covers the window's content: a dimmed scrim over
-the sidebar and the page, with a card in the middle, 640 points wide and up to 700 tall,
+the page and the Now Playing bar, with a card in the middle, 640 points wide and up to 700 tall,
 that shrinks with the window and keeps a 24-point margin
-(`App/Views/ControlPanel/Welcome/`; `WelcomeOverlayHost` over the split view). While it is
+(`App/Views/ControlPanel/Welcome/`; `WelcomeOverlayHost` over the window's content). While it is
 open the rest of the panel is disabled and hidden from VoiceOver. It is a page, not a modal
 dialog: `Escape` and a click outside do nothing, and the download dialog can still open
 over it for an unrelated job. Nothing in it animates on its own except a spinner while

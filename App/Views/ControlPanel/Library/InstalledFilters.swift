@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// The Filters sidebar of the Installed page: the collection on show, the tags a wallpaper must
-/// have (Show only), and the boxes whose unticking hides every wallpaper that carries the tag.
+/// The Filters sidebar of the Installed page: the collections, one of which can be on show, the tags
+/// a wallpaper must have (Show only), and the boxes whose unticking hides every wallpaper that
+/// carries the tag.
 /// Nothing is sent anywhere: the grid narrows as the boxes change.
 struct InstalledFilters: View {
   @Environment(PanelController.self) private var controller
@@ -9,9 +10,7 @@ struct InstalledFilters: View {
   var body: some View {
     let model = controller.library
     FilterPanel(count: model.filterCount, onClear: { model.clearFilters() }) {
-      if let collection = model.shownCollection {
-        CollectionFilterRow(name: collection.name) { model.showAllWallpapers() }
-      }
+      CollectionsFilterGroup(isExpanded: expansion("collections"))
       FilterGroup(
         "Show only", count: model.filter.requiredTags.count, isExpanded: expansion("show-only")
       ) {
@@ -61,29 +60,6 @@ struct InstalledFilters: View {
       set: { isOpen in
         if isOpen { model.openFilterGroups.insert(key) } else { model.openFilterGroups.remove(key) }
       })
-  }
-}
-
-/// The collection the grid is narrowed to, which the count of filters includes. It is chosen in
-/// the sidebar; here it can be put away.
-private struct CollectionFilterRow: View {
-  let name: String
-  let onShowAll: () -> Void
-
-  var body: some View {
-    HStack(spacing: 8) {
-      Label {
-        Text(verbatim: name).lineLimit(1)
-      } icon: {
-        Image(systemName: "folder")
-      }
-      .font(.system(size: 13, weight: .semibold))
-      Spacer(minLength: 8)
-      Button("Show all wallpapers", action: onShowAll)
-        .buttonStyle(.link)
-        .font(.system(size: 12))
-    }
-    .padding(.vertical, 8)
   }
 }
 

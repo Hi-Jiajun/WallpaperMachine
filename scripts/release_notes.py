@@ -185,7 +185,8 @@ romanization, and not English with a character added. Keep product names \
 (WallpaperMachine, Steam, Workshop, macOS) as they are.
 - Name places in the app the way the panel does: Settings 设置, General 通用, \
 Appearance 外观, Performance 性能, Playback 播放, Library & Steam 壁纸库与 Steam, \
-Discover 发现, Installed 已安装, About 关于, Lock screen 锁定屏幕.
+Library 壁纸库, Steam Workshop Steam 创意工坊, Collections 合集, Now Playing 正在播放, \
+About 关于, Lock screen 锁定屏幕.
 - breaking: changes that make users act or take away behaviour they relied on. new: \
 things users can do that they could not before. improved: faster, smoother or \
 clearer behaviour, performance included. fixed: problems that no longer happen, \

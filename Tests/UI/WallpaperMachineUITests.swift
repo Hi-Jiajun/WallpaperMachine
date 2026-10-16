@@ -6,8 +6,9 @@ import XCTest
 /// accessibility tree, so they need a desktop run (`python3 scripts/test.py --ui`).
 ///
 /// The panel is SwiftUI. Controls are found by the stable `accessibilityIdentifier` the shell gives
-/// them (`sidebar-*`, `now-playing-*`, `dismiss-error`, `settings-section-*`) or, for the pages,
-/// by the label VoiceOver reads (the same words the interface shows).
+/// them (`scope-*`, `collection-*`, `now-playing-*`, `dismiss-error`, `settings-section-*`) or, for
+/// the title bar's tabs and the pages, by the label VoiceOver reads (the same words the interface
+/// shows).
 final class WallpaperMachineUITests: XCTestCase {
   private var app: XCUIApplication!
   private var window: XCUIElement { app.windows.firstMatch }
@@ -60,8 +61,8 @@ final class WallpaperMachineUITests: XCTestCase {
     XCTAssertTrue(
       app.windows.firstMatch.waitForExistence(timeout: 30), "The client must open a real window")
     XCTAssertTrue(
-      identified("sidebar-all").waitForExistence(timeout: 30),
-      "The window must show the native sidebar")
+      identified("scope-all").waitForExistence(timeout: 30),
+      "The window must show the Library page")
   }
 
   // MARK: Finding things
@@ -105,15 +106,23 @@ final class WallpaperMachineUITests: XCTestCase {
       "The enabled page-number control must show page \(number)")
   }
 
-  /// The sidebar rows and Settings by their identifiers: `workshop`, `pixiv`, `all`, `favorites`,
-  /// `settings`.
-  private func navigate(_ row: String) {
-    let item = identified("sidebar-\(row)")
-    XCTAssertTrue(item.waitForExistence(timeout: 10), "sidebar-\(row)")
+  /// A tab of the title bar by its title: `Library`, `Steam Workshop`, `pixiv`, `Settings`.
+  private func navigate(_ tab: String) {
+    let item = window.toolbars.descendants(matching: .any)
+      .matching(NSPredicate(format: "label == %@", tab)).firstMatch
+    XCTAssertTrue(item.waitForExistence(timeout: 10), tab)
     item.click()
   }
 
-  /// A Settings section by its title, from the Settings sidebar.
+  /// A view of the library by its chip: `all`, `favorites`.
+  private func showLibrary(_ scope: String) {
+    navigate("Library")
+    let chip = identified("scope-\(scope)")
+    XCTAssertTrue(chip.waitForExistence(timeout: 10), "scope-\(scope)")
+    chip.click()
+  }
+
+  /// A Settings section by its title, from Settings' section list.
   private func openSection(_ title: String) {
     let row = window.descendants(matching: .any)
       .matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "settings-section-", title))
@@ -167,8 +176,8 @@ final class WallpaperMachineUITests: XCTestCase {
     app.typeKey(",", modifierFlags: .command)
     XCTAssertTrue(identified("settings-section-library").waitForExistence(timeout: 10))
     XCTAssertEqual(app.windows.count, 1)
-    identified("settings-back").click()
-    XCTAssertTrue(identified("sidebar-all").waitForExistence(timeout: 10))
+    navigate("Library")
+    XCTAssertTrue(identified("scope-all").waitForExistence(timeout: 10))
     app.typeKey(",", modifierFlags: .command)
     XCTAssertTrue(identified("settings-section-library").waitForExistence(timeout: 10))
     XCTAssertEqual(app.windows.count, 1)
@@ -177,18 +186,16 @@ final class WallpaperMachineUITests: XCTestCase {
   func testFirstLaunchNavigationAndSettingsCategories() {
     XCTAssertTrue(wallpaper("Aurora Drift").waitForExistence(timeout: 15))
     XCTAssertEqual(window.title, "All wallpapers", "the window is named for the place on show")
-    navigate("settings")
+    navigate("Settings")
     XCTAssertTrue(identified("settings-section-general").waitForExistence(timeout: 10))
     openSection("Displays")
     XCTAssertTrue(pageText("Display mode").waitForExistence(timeout: 10))
     openSection("Library & Steam")
     XCTAssertTrue(pageText("SteamCMD").waitForExistence(timeout: 10))
-    identified("settings-back").click()
-    XCTAssertTrue(identified("sidebar-workshop").waitForExistence(timeout: 10))
-    navigate("workshop")
+    navigate("Steam Workshop")
     XCTAssertTrue(searchField("Search Steam Workshop").waitForExistence(timeout: 10))
     XCTAssertEqual(window.title, "Steam Workshop")
-    navigate("all")
+    showLibrary("all")
     XCTAssertTrue(searchField("Search wallpapers").waitForExistence(timeout: 10))
     XCTAssertEqual(app.alerts.count, 0)
   }
@@ -202,7 +209,9 @@ final class WallpaperMachineUITests: XCTestCase {
     XCTAssertEqual(search.value as? String, "aurora", "Command-F put the keyboard in the search field")
   }
 
-  func testCollectionsAreMadeRenamedAndDeletedInTheSidebar() {
+  func testCollectionsAreMadeRenamedAndDeletedInTheFiltersPanel() {
+    XCTAssertTrue(identified("installed-filter").waitForExistence(timeout: 15))
+    identified("installed-filter").click()
     XCTAssertTrue(identified("collection-new").waitForExistence(timeout: 15))
     identified("collection-new").click()
     let field = identified("collection-name")
@@ -272,7 +281,7 @@ final class WallpaperMachineUITests: XCTestCase {
     XCTAssertTrue(app.wait(for: .runningBackground, timeout: 10))
     app.activate()
     XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10))
-    XCTAssertTrue(identified("sidebar-all").waitForExistence(timeout: 10))
+    XCTAssertTrue(identified("scope-all").waitForExistence(timeout: 10))
     XCTAssertEqual(app.alerts.count, 0)
   }
 
@@ -281,7 +290,7 @@ final class WallpaperMachineUITests: XCTestCase {
     XCTAssertTrue(app.wait(for: .runningBackground, timeout: 10), "Command-W must close the panel")
     app.activate()
     XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10))
-    XCTAssertTrue(identified("sidebar-all").waitForExistence(timeout: 10))
+    XCTAssertTrue(identified("scope-all").waitForExistence(timeout: 10))
     XCTAssertEqual(app.alerts.count, 0)
   }
 
@@ -292,20 +301,20 @@ final class WallpaperMachineUITests: XCTestCase {
     toggle.click()
     XCTAssertTrue(labelled("Resume wallpaper playback").waitForExistence(timeout: 5))
     XCTAssertEqual(
-      identified("now-playing").value as? String, "Playback paused", "the card says so")
+      identified("now-playing").value as? String, "Playback paused", "the bar says so")
     toggle.click()
     XCTAssertTrue(labelled("Pause wallpaper playback").waitForExistence(timeout: 5))
     XCTAssertEqual(identified("now-playing").value as? String, "Playback running")
     app.terminate()
     app.launch()
-    XCTAssertTrue(identified("sidebar-all").waitForExistence(timeout: 30))
+    XCTAssertTrue(identified("scope-all").waitForExistence(timeout: 30))
     XCTAssertTrue(labelled("Pause wallpaper playback").waitForExistence(timeout: 30))
     XCTAssertTrue(wallpaper("Aurora Drift").waitForExistence(timeout: 15))
     XCTAssertEqual(app.alerts.count, 0)
   }
 
   func testWorkshopSearchPaginationAndNavigationPersistence() {
-    navigate("workshop")
+    navigate("Steam Workshop")
     let search = searchField("Search Steam Workshop")
     XCTAssertTrue(search.waitForExistence(timeout: 10))
     search.click()
@@ -318,8 +327,8 @@ final class WallpaperMachineUITests: XCTestCase {
       next.isEnabled, "The Workshop query needs more than one page to exercise pagination")
     next.click()
     expectPage(2)
-    navigate("all")
-    navigate("workshop")
+    showLibrary("all")
+    navigate("Steam Workshop")
     XCTAssertEqual(searchField("Search Steam Workshop").value as? String, "forest")
     expectPage(2)
     XCTAssertEqual(app.alerts.count, 0)

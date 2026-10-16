@@ -52,7 +52,7 @@ final class ShellRenderTests: PanelTestCase {
     }
   }
 
-  func testTheSidebarAndPageStayInsideTheWindowAtFullScreenSplitViewAndMinimumSizes() async throws {
+  func testThePageAndInspectorStayInsideTheWindowAtFullScreenSplitViewAndMinimumSizes() async throws {
     try await withShellHost(store: try await busyStore()) { host in
       for size in [
         NSSize(width: 1920, height: 1080), NSSize(width: 960, height: 1080),
@@ -67,11 +67,10 @@ final class ShellRenderTests: PanelTestCase {
           XCTAssertGreaterThanOrEqual(frame.minX, -1, "\(Int(size.width)): the split view starts inside")
           XCTAssertLessThanOrEqual(frame.maxX, content.maxX + 1, "\(Int(size.width)): and ends inside")
         }
-        // The sidebar is the first column of the outermost split view and keeps its own width range.
-        let outer = try XCTUnwrap(host.splitViews.first)
-        let sidebar = try XCTUnwrap(outer.arrangedSubviews.first)
-        XCTAssertGreaterThanOrEqual(sidebar.frame.width, 180 - 1, "\(Int(size.width))")
-        XCTAssertLessThanOrEqual(sidebar.frame.width, 300 + 1, "\(Int(size.width))")
+        // No sidebar: the page starts at the window's leading edge.
+        let page = try XCTUnwrap(host.pageScrollView)
+        XCTAssertLessThan(
+          page.convert(page.bounds, to: host.window.contentView).minX, 40, "\(Int(size.width))")
       }
     }
   }
@@ -82,10 +81,10 @@ final class ShellRenderTests: PanelTestCase {
       try await host.settle { host.window.title == "All wallpapers" }
       XCTAssertEqual(host.window.subtitle, "8 wallpapers", "the title bar says how many are shown")
 
-      // Settings searches in its own sidebar, so the page's search bar goes.
+      // Settings searches in the same search bar as the other pages.
       XCTAssertTrue(host.hasPageSearchField)
       host.navigation.selection = .settings
-      try await host.settle { host.window.title == "Quick Settings" && !host.hasPageSearchField }
+      try await host.settle { host.window.title == "Quick Settings" && host.hasPageSearchField }
       XCTAssertEqual(host.window.subtitle, "", "Settings has no count")
 
       host.navigation.selection = .workshop
@@ -101,10 +100,11 @@ final class ShellRenderTests: PanelTestCase {
     try await withShellHost(store: try await busyStore()) { host in
       host.layout(at: NSSize(width: 1240, height: 800))
       try await host.settle(400)
-      XCTAssertEqual(host.contentToolbarItems.count, 2, "the target display menu and the toggle")
+      XCTAssertEqual(
+        host.contentToolbarItems.count, 3, "the tabs, the target display menu and the toggle")
       host.navigation.selection = .settings
       try await host.settle(400)
-      XCTAssertEqual(host.contentToolbarItems.count, 0)
+      XCTAssertEqual(host.contentToolbarItems.count, 1, "the tabs")
     }
   }
 
@@ -212,7 +212,8 @@ final class ShellRenderTests: PanelTestCase {
         try await host.settle(600)
         let note = "\(Int(size.width))"
         let items = host.contentToolbarItems
-        XCTAssertEqual(items.count, 3, "\(note): the target display menu, Downloads and the toggle")
+        XCTAssertEqual(
+          items.count, 4, "\(note): the tabs, the target display menu, Downloads and the toggle")
         let visible = Set((host.window.toolbar?.visibleItems ?? []).map(ObjectIdentifier.init))
         for item in items {
           XCTAssertTrue(
@@ -412,31 +413,52 @@ final class ShellRenderTests: PanelTestCase {
     }
   }
 
-  func testTheNowPlayingCardKeepsAboutItsHeightWhenTheTargetDisplayShowsNothing() async throws {
+  func testTheNowPlayingBarKeepsItsHeightWhateverTheTargetDisplayShows() async throws {
     try await withPanel { panel in
-      @MainActor func height() -> CGFloat {
+      @MainActor func height(width: CGFloat) -> CGFloat {
         let hosting = NSHostingView(
-          rootView: NowPlayingCard()
+          rootView: NowPlayingBar()
             .environment(panel.controller)
-            .frame(width: 200))
-        hosting.frame = NSRect(x: 0, y: 0, width: 200, height: 10)
+            .panelTheme(theme: panel.controller.theme, locale: PanelLocale.shared)
+            .frame(width: width))
+        hosting.frame = NSRect(x: 0, y: 0, width: width, height: 10)
         hosting.layoutSubtreeIfNeeded()
         return hosting.fittingSize.height
       }
       try await ShellFixtures.seed(panel.store, bridge: panel.bridge)
       XCTAssertNotNil(panel.controller.nowPlaying.item)
-      let playing = height()
+      for width: CGFloat in [760, 1240] {
+        XCTAssertEqual(height(width: width), NowPlayingBar.height, accuracy: 0.5)
+      }
       try await ShellFixtures.seed(panel.store, bridge: panel.bridge, primary: nil, secondary: nil)
       XCTAssertNil(panel.controller.nowPlaying.item)
-      let empty = height()
-      XCTAssertLessThanOrEqual(
-        abs(empty - playing), 16, "the hint takes the artwork's place instead of growing the card")
+      XCTAssertEqual(
+        height(width: 760), NowPlayingBar.height, accuracy: 0.5,
+        "the hint keeps to one line instead of growing the bar")
+    }
+  }
+
+  func testTheNowPlayingDetailsOpenAboveTheBarAndOnePopoverIsOpenAtATime() async throws {
+    try await withPanel { panel in
+      let shell = panel.controller.shell
+      try await ShellFixtures.seed(panel.store, bridge: panel.bridge)
+      shell.popover(.nowPlaying).wrappedValue = true
+      XCTAssertTrue(shell.isPopoverOpen, "the support prompt waits behind the details")
+      shell.popover(.history).wrappedValue = true
+      XCTAssertFalse(shell.popover(.nowPlaying).wrappedValue, "Recently used replaces them")
+      let hosting = NSHostingView(
+        rootView: NowPlayingDetails()
+          .environment(panel.controller)
+          .environment(\.panelImages, panel.controller.images)
+          .panelTheme(theme: panel.controller.theme, locale: PanelLocale.shared))
+      hosting.layoutSubtreeIfNeeded()
+      XCTAssertEqual(hosting.fittingSize.width, NowPlayingDetails.width, accuracy: 1)
     }
   }
 
   func testTheCollectionsNoticeWrapsALongSentence() {
     func height(_ text: String) -> CGFloat {
-      let hosting = NSHostingView(rootView: SidebarNote(Text(verbatim: text)).frame(width: 160))
+      let hosting = NSHostingView(rootView: CollectionsNote(Text(verbatim: text)).frame(width: 160))
       hosting.frame = NSRect(x: 0, y: 0, width: 160, height: 10)
       hosting.layoutSubtreeIfNeeded()
       return hosting.fittingSize.height

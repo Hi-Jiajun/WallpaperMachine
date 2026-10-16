@@ -1,6 +1,6 @@
 import Foundation
 
-/// A collection in the sidebar, with the size it shows.
+/// A collection in the filters panel, with the size it shows.
 struct CollectionRow: Identifiable, Equatable, Sendable {
   let id: String
   let name: String
@@ -14,7 +14,7 @@ struct CollectionRow: Identifiable, Equatable, Sendable {
 extension PanelController {
   // MARK: Derived state
 
-  /// Every collection in the order it was made, for the sidebar, the selection bar's picker, the
+  /// Every collection in the order it was made, for the filters panel, the selection bar's picker, the
   /// inspector's membership card and a playlist's Wallpapers menu.
   var collectionRows: [CollectionRow] {
     _ = revisions.collections

@@ -42,7 +42,7 @@ clock times, so a daylight-saving day still switches at the time on the clock.
 interval; the row's note says roughly when the next change is due, or, for a rotation that
 waits for the unlock, that it changes then. The menu bar's
 **Next Wallpaper**, on the display it is shown for, the **Next wallpaper** button on the
-panel's Now Playing card (for the target display), and a link, Shortcuts action or
+panel's Now Playing bar (for the target display), and a link, Shortcuts action or
 shortcut key asking for the next wallpaper, on the panel's target display unless one is
 named, do the same for a display that rotates, and otherwise take the next wallpaper
 in library order. All of them are asked for, so they also change a display that is

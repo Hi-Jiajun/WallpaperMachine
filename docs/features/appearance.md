@@ -24,9 +24,8 @@ macOS resolved and never sets one itself; `AppDelegate` is the only writer of
 
 ## Window material
 
-The window's materials are the system's own. The sidebar is the sidebar column of the
-panel's `NavigationSplitView`, and because the window has a full-size content view its
-translucent material reaches under the title bar; the inspector is the system's
+The window's materials are the system's own. The window has a full-size content view, so
+the page scrolls under the title bar and its tabs; the inspector is the system's
 inspector column, and the toolbar is the window's own. The page column paints the
 tone's background (`SurfacePalette`), so the material never shows through content. The
 panel adds no visual-effect view, backdrop or toolbar of its own. macOS decides how the

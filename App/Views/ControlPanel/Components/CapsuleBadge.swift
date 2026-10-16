@@ -44,7 +44,7 @@ struct CapsuleBadge<Content: View>: View {
   }
 }
 
-/// A number in a capsule: a count beside a sidebar row, a filter, the downloads button.
+/// A number in a capsule: a count beside a Settings section, a filter, the downloads button.
 struct CountBadge: View {
   enum Style {
     case neutral
