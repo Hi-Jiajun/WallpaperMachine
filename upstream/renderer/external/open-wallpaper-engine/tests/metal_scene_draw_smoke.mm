@@ -2330,6 +2330,76 @@ TEST_F(MetalSceneDraw, ALayerWhoseEffectsAScriptHasAllSwitchedOffIsStillDrawnOnB
     }
 }
 
+TEST_F(MetalSceneDraw, AHiddenLayersScriptsStillRunOnBothRenderers)
+{
+    // Wallpaper Engine builds every layer, hidden ones too, and runs their
+    // scripts: a hidden controller layer often works out what the others show
+    // (a day/night switch, here). The tile's `swap` follows what the hidden
+    // layer's alpha script writes to `shared`, from 0.5 s on.
+    const std::string effects =
+        R"([{"file":"effects/swap/effect.json","id":2,"visible":{"value":false,)"
+        R"("script":"export function update() { return shared.on === true; }"}}]},)"
+        R"({"id":5,"name":"controller","image":"models/tile.json",)"
+        R"("origin":[192,128,0],"scale":[1,1,1],"angles":[0,0,0],"visible":false,)"
+        R"("alpha":{"value":1,"script":"export function update(value) { shared.on = engine.runtime >= 0.5; return value; }"})";
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        for (const auto& [frames, expected] :
+             { std::pair<int, std::array<int, 3>> { 10, { 255, 0, 0 } }, { 45, { 0, 255, 0 } } }) {
+            SCOPED_TRACE(frames);
+            const std::string name = std::string("hidden-controller-") +
+                                     (native ? "native-" : "compat-") + std::to_string(frames);
+            const auto  project = WriteScriptedEffectFixture(root_ / name, effects);
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, frames, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
+            ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+            const std::size_t centre = (128u * 384u + 192u) * 3u;
+            for (std::size_t c = 0; c < 3; ++c) {
+                EXPECT_NEAR(picture.rgb[centre + c], expected[c], 2) << "channel " << c;
+            }
+        }
+    }
+}
+
+TEST_F(MetalSceneDraw, AScriptCanShowAHiddenLayerItNamesOnBothRenderers)
+{
+    // A hidden layer a script finds by name has to exist to be shown: the
+    // driver's script turns the hidden red card on at 0.5 s.
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        for (const auto& [frames, expected] :
+             { std::pair<int, std::array<int, 3>> { 10, { 0, 0, 0 } }, { 45, { 255, 0, 0 } } }) {
+            SCOPED_TRACE(frames);
+            const std::string name = std::string("named-hidden-") + (native ? "native-" : "compat-") +
+                                     std::to_string(frames);
+            const auto project = WriteScriptedEffectFixture(root_ / name, "[]");
+            std::ofstream(root_ / name / "layout.json")
+                << R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+                   R"("general":{"clearcolor":[0,0,0],"bloom":false,"cameraparallax":false,)"
+                   R"("orthogonalprojection":{"width":384,"height":256}},)"
+                   R"("objects":[{"id":1,"name":"panel","image":"models/tile.json","origin":[192,128,0],)"
+                   R"("scale":[1,1,1],"angles":[0,0,0],"visible":false},)"
+                   R"({"id":2,"name":"driver","image":"models/tile.json","origin":[20,20,0],)"
+                   R"("scale":[0.05,0.05,1],"angles":[0,0,0],"visible":true,)"
+                   R"("alpha":{"value":1,"script":"export function update(value) { )"
+                   R"(thisScene.getLayer('panel').visible = engine.runtime >= 0.5; return value; }"}}]})";
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, frames, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
+            ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+            const std::size_t centre = (128u * 384u + 192u) * 3u;
+            for (std::size_t c = 0; c < 3; ++c) {
+                EXPECT_NEAR(picture.rgb[centre + c], expected[c], 2) << "channel " << c;
+            }
+        }
+    }
+}
+
 TEST_F(MetalSceneDraw, ACompositingEffectSeesTheScreenUprightOnBothRenderers)
 {
     // An effect that composes a layer over the screen (Wallpaper Engine's

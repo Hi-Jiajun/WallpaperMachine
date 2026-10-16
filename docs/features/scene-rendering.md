@@ -825,6 +825,16 @@ ships, and is back to what a fresh load with the current values holds the next
 time one is built. A hidden layer another layer samples keeps drawing into its
 composite.
 
+A layer the scene file hides outright (`"visible": false`, no property or script
+deciding it) is built, hidden, only when something can need it: another layer
+samples it, it carries a script of its own, or a script spells out its name.
+Wallpaper Engine builds every layer, so a hidden layer's scripts run there (a
+hidden controller layer often works out what the others show, a day/night switch
+for one) and any script can find it and show it; a name a script computes is not
+seen here. Every other hidden layer is not built at all. Sound and light objects
+are never kept hidden: neither reads its visibility, so a kept one would play or
+shine.
+
 Native Metal allocates render targets only when the compiled graph writes or samples
 them, plus the final output. Parser-provided shadow, mipmapped-frame and bloom
 buffers are metadata until a pass needs them. References from hidden passes left in

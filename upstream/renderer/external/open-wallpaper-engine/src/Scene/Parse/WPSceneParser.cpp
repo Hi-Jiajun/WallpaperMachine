@@ -5708,6 +5708,68 @@ std::unordered_set<int32_t> CollectReachableDependencyIds(const nlohmann::json& 
     return CollectReachableLayerIds(objects, index, &vfs);
 }
 
+// Every `script` string anywhere under `value`: a layer's properties, its
+// effects' visibility and constants, a particle's overrides.
+void CollectScriptSources(const nlohmann::json& value, std::vector<const std::string*>& out) {
+    if (value.is_object()) {
+        for (const auto& [key, child] : value.items()) {
+            if (key == "script" && child.is_string()) {
+                out.push_back(child.get_ptr<const std::string*>());
+            } else {
+                CollectScriptSources(child, out);
+            }
+        }
+    } else if (value.is_array()) {
+        for (const auto& child : value) CollectScriptSources(child, out);
+    }
+}
+
+// The quoted strings of a script (single, double or backtick quotes, escapes
+// skipped; comments are not told apart, which only ever adds names).
+void CollectScriptStringLiterals(std::string_view source, std::unordered_set<std::string>& out) {
+    for (std::size_t i = 0; i < source.size(); ++i) {
+        const char quote = source[i];
+        if (quote != '"' && quote != '\'' && quote != '`') continue;
+        std::string literal;
+        std::size_t j = i + 1;
+        for (; j < source.size() && source[j] != quote && source[j] != '\n'; ++j) {
+            if (source[j] == '\\' && j + 1 < source.size()) ++j;
+            literal.push_back(source[j]);
+        }
+        if (j < source.size() && source[j] == quote) out.insert(std::move(literal));
+        i = j;
+    }
+}
+
+// The layers a hidden object must be kept for although nothing draws it yet:
+// Wallpaper Engine builds every layer, so a hidden layer's own scripts run
+// (a hidden controller layer often computes what other layers show) and a
+// script can find it by name to show it. An object that carries a script, or
+// whose name a script spells out, is kept, hidden. A name a script computes is
+// not seen. Sound and light objects are not kept: neither reads its visibility,
+// so a kept hidden one would play or shine.
+std::unordered_set<int32_t> CollectScriptReachableIds(const nlohmann::json& objects) {
+    std::unordered_set<int32_t> ids;
+    if (! objects.is_array()) return ids;
+    std::vector<const std::string*> sources;
+    CollectScriptSources(objects, sources);
+    if (sources.empty()) return ids;
+    std::unordered_set<std::string> literals;
+    for (const auto* source : sources) CollectScriptStringLiterals(*source, literals);
+    for (const auto& object : objects) {
+        int32_t id = 0;
+        GET_JSON_NAME_VALUE_NOWARN(object, "id", id);
+        if (id == 0) continue;
+        std::vector<const std::string*> own;
+        CollectScriptSources(object, own);
+        const auto name = object.contains("name") && object.at("name").is_string()
+                              ? object.at("name").get<std::string>()
+                              : std::string();
+        if (! own.empty() || (! name.empty() && literals.contains(name))) ids.insert(id);
+    }
+    return ids;
+}
+
 template<typename T>
 void AddWPObject(std::vector<WPObjectVar>&        objs,
                  const nlohmann::json&           json_obj,
@@ -5862,8 +5924,13 @@ std::shared_ptr<Scene> WPSceneParser::Parse(const SceneParseRequest& request,
     context.object_list = &json.at("objects");
     auto layer_index = BuildLayerObjectIndex(json.at("objects"));
     const auto layer_refs  = CollectLayerTextureRefs(json.at("objects"), layer_index, &vfs);
-    const auto reachable_dependency_ids =
+    // A layer another samples is kept for its picture, so only image layers are
+    // (a hidden layer of another kind would draw nothing into it); a hidden
+    // layer a script reaches is kept whatever its kind.
+    const auto script_reachable_ids = CollectScriptReachableIds(json.at("objects"));
+    auto       reachable_dependency_ids =
         CollectReachableDependencyIds(json.at("objects"), layer_index, vfs);
+    reachable_dependency_ids.insert(script_reachable_ids.begin(), script_reachable_ids.end());
     for (const auto& ref : layer_refs) {
         if (ref.source_id != 0) context.referenced_layer_ids.insert(ref.source_id);
     }
@@ -5874,19 +5941,19 @@ std::shared_ptr<Scene> WPSceneParser::Parse(const SceneParseRequest& request,
         if (obj.contains("image") && ! obj.at("image").is_null()) {
             AddWPObject<wpscene::WPImageObject>(wp_objs, obj, vfs, reachable_dependency_ids);
         } else if (obj.contains("particle") && ! obj.at("particle").is_null()) {
-            AddWPObject<wpscene::WPParticleObject>(wp_objs, obj, vfs);
+            AddWPObject<wpscene::WPParticleObject>(wp_objs, obj, vfs, script_reachable_ids);
         } else if (obj.contains("sound") && ! obj.at("sound").is_null()) {
             AddWPObject<wpscene::WPSoundObject>(wp_objs, obj, vfs);
         } else if (obj.contains("light") && ! obj.at("light").is_null()) {
             AddWPObject<wpscene::WPLightObject>(wp_objs, obj, vfs);
         } else if (obj.contains("text") && ! obj.at("text").is_null()) {
-            AddWPObject<wpscene::WPTextObject>(wp_objs, obj, vfs);
+            AddWPObject<wpscene::WPTextObject>(wp_objs, obj, vfs, script_reachable_ids);
         } else if (obj.contains("model") && ! obj.at("model").is_null()) {
-            AddWPObject<wpscene::WPModelObject>(wp_objs, obj, vfs);
+            AddWPObject<wpscene::WPModelObject>(wp_objs, obj, vfs, script_reachable_ids);
         } else if (obj.contains("camera") && ! obj.at("camera").is_null()) {
-            AddWPObject<wpscene::WPCameraObject>(wp_objs, obj, vfs);
+            AddWPObject<wpscene::WPCameraObject>(wp_objs, obj, vfs, script_reachable_ids);
         } else if (obj.contains("shape") && obj.at("shape").is_string()) {
-            AddWPObject<wpscene::WPShapeObject>(wp_objs, obj, vfs);
+            AddWPObject<wpscene::WPShapeObject>(wp_objs, obj, vfs, script_reachable_ids);
         }
     }
     context.layer_name_counts.clear();

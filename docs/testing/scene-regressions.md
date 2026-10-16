@@ -1382,6 +1382,11 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   placeholders. `MetalSceneDraw.ALayerWhoseEffectsAScriptHasAllSwitchedOffIsStillDrawnOnBothRenderers`
   switches a layer's only effect off: the passthrough at the end of the chain
   must still draw the layer, inside its bounds.
+- **Hidden layers scripts reach** — `MetalSceneDraw.AHiddenLayersScriptsStillRunOnBothRenderers`
+  drives an effect from a value a hidden layer's script writes to `shared`, and
+  `MetalSceneDraw.AScriptCanShowAHiddenLayerItNamesOnBothRenderers` shows a hidden
+  layer another layer's script names: both layers must be built, hidden, though
+  nothing draws them at first.
 - **`colorBlendMode` on puppets** — `RenderGraph.puppetColorBlendModeSamplesTheScreenOnlyWhereItDrawsOnScreen`
   in `rendergraph_smoke`. A layer's `colorBlendMode` mixes it with the screen
   behind it, so only the pass that draws onto the screen may sample it. On a
