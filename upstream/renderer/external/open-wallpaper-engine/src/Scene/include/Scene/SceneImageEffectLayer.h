@@ -77,6 +77,10 @@ public:
     /// sorts, which this engine draws in scene order. A layer that never sets
     /// them keeps the pass's own.
     void        SetFinalDepth(bool test, bool write) { m_final_depth = SceneDepthState { test, write }; }
+    /// How the last pass is drawn instead of the final blend while no effect of the chain runs
+    /// and the chain ends in its passthrough fallback (a script has switched every effect off).
+    /// Without it the final blend applies then too.
+    void        SetIdleFinalBlend(BlendMode m) { m_idle_final_blend = m; }
     /// The camera the chain's last pass draws its result through. Empty is the
     /// scene's active camera, which is right for a layer that sits in the
     /// scene; a fullscreen layer's result is the screen and must cover it
@@ -96,6 +100,7 @@ private:
     std::unique_ptr<SceneNode> m_final_node;
     SceneNode*                 m_resolved_final_render_node { nullptr };
     BlendMode                  m_final_blend;
+    std::optional<BlendMode>   m_idle_final_blend;
 
     /// The depth test and write the last pass is drawn with; empty keeps the
     /// ones its own material authored.

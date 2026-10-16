@@ -225,6 +225,11 @@ DynamicValueUniquePtr resolve_auto_setting(
 
 } // namespace
 
+bool InitialBoolSetting(const nlohmann::json& setting)
+{
+    return parse_bool(setting);
+}
+
 std::string UserPropertyName(const nlohmann::json& setting)
 {
     std::string user_name;

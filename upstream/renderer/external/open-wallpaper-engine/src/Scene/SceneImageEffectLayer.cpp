@@ -129,7 +129,8 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
         auto& mesh          = *(last_output->sceneNode->Mesh());
         auto& material      = *mesh.Material();
         {
-            material.blenmode = m_final_blend;
+            material.blenmode = ! any_visible && m_idle_final_blend.has_value() ? *m_idle_final_blend
+                                                                                 : m_final_blend;
             if (m_final_depth.has_value()) {
                 material.depth_test  = m_final_depth->test;
                 material.depth_write = m_final_depth->write;

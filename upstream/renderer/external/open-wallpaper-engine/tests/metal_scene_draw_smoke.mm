@@ -6395,6 +6395,503 @@ TEST_F(MetalSceneDraw, ATextLayerWhoseEffectsAreAllOffIsDrawnAsPlainTextOnBothRe
 
 namespace
 {
+
+/// A backdrop of four flat quadrants -- red and green above, blue and white
+/// below -- under four black captions, one in the middle of each quadrant. Each
+/// caption is a heavy stem of a letter, at `alpha`, with `effects_json` as its
+/// effects (the layer's own `copy` effect, which writes what it reads without
+/// blending, when the caller names one). The backdrop gives the scene behind a
+/// text card an up and a left to get wrong.
+struct Quadrant
+{
+    const char*          name;
+    std::array<int, 3>   colour;
+    int                  x;
+    int                  y;
+};
+
+constexpr std::array<Quadrant, 4> kQuadrants { {
+    { "red", { 255, 0, 0 }, 96, 192 },
+    { "green", { 0, 255, 0 }, 288, 192 },
+    { "blue", { 0, 0, 255 }, 96, 64 },
+    { "white", { 255, 255, 255 }, 288, 64 },
+} };
+
+struct BackdropOptions
+{
+    /// One caption, turned and scaled, in the middle of the scene; otherwise one in each quadrant.
+    bool           turned { false };
+    /// The scene asks for HDR with a bloom whose strength is zero, so the targets are 16-bit and
+    /// the picture is the scene's own.
+    bool           hdr { false };
+    /// The effect and passthrough materials are Wallpaper Engine's own, mounted from its shipped
+    /// assets, not the stand-ins written here.
+    bool           shipped_assets { false };
+    /// Keys merged into every caption's object.
+    nlohmann::json caption = nlohmann::json::object();
+};
+
+std::filesystem::path WriteTextOverBackdropFixture(const std::filesystem::path& root, double alpha,
+                                                   std::string_view effects_json,
+                                                   const BackdropOptions& options = {})
+{
+    const bool turned  = options.turned;
+    const auto project = WriteTextFixture(root, "I");
+    const auto file    = [&](const std::string& path, const std::string& text) {
+        std::filesystem::create_directories((root / path).parent_path());
+        std::ofstream(root / path) << text;
+    };
+    if (! options.shipped_assets) {
+        // The effect copies what it reads and replaces what it writes to, so that what
+        // the final composition shows is the card's doing and not a blend of the effect's.
+        file("materials/copy.json",
+             R"({"passes":[{"shader":"probe_copy","blending":"normal","cullmode":"nocull",)"
+             R"("depthtest":"disabled","depthwrite":"disabled","textures":[null]}]})");
+        // The passthrough that ends a chain whose every effect a script has switched off. Like
+        // the shipped `genericimage3` it draws the layer's `g_Color4` times what it reads, and a
+        // layer that binds no colour to it draws nothing.
+        file("shaders/through.vert",
+             "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\n"
+             "attribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+             "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+             "  v_TexCoord = a_TexCoord;\n}\n");
+        file("shaders/through.frag",
+             "uniform sampler2D g_Texture0;\nuniform vec4 g_Color4;\nvarying vec2 v_TexCoord;\n"
+             "void main() {\n"
+             "  gl_FragColor = texture(g_Texture0, v_TexCoord) * g_Color4;\n}\n");
+        file("materials/util/effectpassthrough.json",
+             R"({"passes":[{"shader":"through","blending":"normal","cullmode":"nocull",)"
+             R"("depthtest":"disabled","depthwrite":"disabled","textures":[null]}]})");
+    }
+    file("shaders/quadrants.vert",
+         "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\n"
+         "attribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+         "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+         "  v_TexCoord = a_TexCoord;\n}\n");
+    file("shaders/quadrants.frag",
+         "varying vec2 v_TexCoord;\nvoid main() {\n"
+         "  vec3 top = v_TexCoord.x < 0.5 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);\n"
+         "  vec3 bottom = v_TexCoord.x < 0.5 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 1.0, 1.0);\n"
+         "  gl_FragColor = vec4(v_TexCoord.y < 0.5 ? top : bottom, 1.0);\n}\n");
+    file("materials/quadrants.json",
+         R"({"passes":[{"shader":"quadrants","blending":"normal","cullmode":"nocull",)"
+         R"("depthtest":"disabled","depthwrite":"disabled"}]})");
+    file("models/quadrants.json", R"({"width":384,"height":256,"material":"materials/quadrants.json"})");
+
+    nlohmann::json objects = nlohmann::json::array();
+    objects.push_back({ { "id", 1 },
+                        { "name", "backdrop" },
+                        { "image", "models/quadrants.json" },
+                        { "origin", { 192, 128, 0 } },
+                        { "scale", { 1, 1, 1 } },
+                        { "angles", { 0, 0, 0 } },
+                        { "visible", true } });
+    int id = 2;
+    // One caption in the middle of the scene, where the four colours meet, turned and
+    // scaled; or one in the middle of each quadrant.
+    const std::vector<Quadrant> places = turned ? std::vector<Quadrant> { { "turned", { 0, 0, 0 }, 192, 128 } }
+                                                : std::vector<Quadrant>(kQuadrants.begin(), kQuadrants.end());
+    for (const auto& quadrant : places) {
+        nlohmann::json caption = { { "id", id },
+                                   { "name", std::string("caption ") + quadrant.name },
+                                   { "text", "I" },
+                                   { "font", "Arial" },
+                                   { "pointsize", 20 },
+                                   { "color", "0 0 0" },
+                                   { "alpha", alpha },
+                                   { "origin", { quadrant.x, quadrant.y, 0 } },
+                                   { "scale", turned ? nlohmann::json { 1.5, 1.5, 1 } : nlohmann::json { 1, 1, 1 } },
+                                   { "angles", turned ? nlohmann::json { 0, 0, 0.6 } : nlohmann::json { 0, 0, 0 } },
+                                   { "visible", true } };
+        if (! effects_json.empty()) {
+            caption["effects"] = nlohmann::json::parse(effects_json);
+            for (auto& effect : caption["effects"]) effect["id"] = 100 + id;
+        }
+        caption.merge_patch(options.caption);
+        objects.push_back(std::move(caption));
+        ++id;
+    }
+    nlohmann::json layout = {
+        { "camera", { { "center", { 0, 0, 0 } }, { "eye", { 0, 0, 1 } }, { "up", { 0, 1, 0 } } } },
+        { "general",
+          { { "ambientcolor", { 0, 0, 0 } },
+            { "skylightcolor", { 0, 0, 0 } },
+            { "clearcolor", { 0, 0, 0 } },
+            { "cameraparallax", false },
+            { "orthogonalprojection", { { "width", 384 }, { "height", 256 } } } } },
+        { "objects", std::move(objects) },
+    };
+    if (options.shipped_assets) {
+        // The shipped bloom materials exist now, and a scene that does not say bloom is off gets
+        // the glow of the editor's defaults, which smears a small caption.
+        layout["general"]["bloom"] = false;
+        layout["general"]["hdr"]   = false;
+    }
+    if (options.hdr) {
+        WriteBloomStandIns(root);
+        auto& general                  = layout["general"];
+        general["hdr"]                 = true;
+        general["bloom"]               = true;
+        general["bloomhdrstrength"]    = 0.0;
+        general["bloomhdrthreshold"]   = 0.25;
+        general["bloomhdrfeather"]     = 0.0;
+        general["bloomhdriterations"]  = 2;
+        general["bloomhdrscatter"]     = 0.25;
+        general["bloomtint"]           = { 1.0, 1.0, 1.0 };
+    }
+    std::ofstream(root / "layout.json") << layout.dump();
+    return project;
+}
+
+/// The darkest pixel of the quadrant a caption sits in -- the middle of a stem of
+/// its letter, where the glyph covers the pixel entirely -- as red, green, blue, at
+/// least `margin` pixels from the quadrant's edges, where the backdrop changes colour.
+std::array<int, 3> DarkestInQuadrant(const RendererPicture& picture, const Quadrant& quadrant,
+                                     int margin = 0)
+{
+    const int left = quadrant.x < 192 ? 0 : 192;
+    const int top  = quadrant.y > 128 ? 0 : 128;
+    std::array<int, 3> darkest { 255, 255, 255 };
+    int                least = 1 << 30;
+    for (int y = top + margin; y < top + 128 - margin; ++y) {
+        for (int x = left + margin; x < left + 192 - margin; ++x) {
+            const auto* pixel = &picture.rgb[(static_cast<std::size_t>(y) * picture.width + x) * 3u];
+            const int   sum   = pixel[0] + pixel[1] + pixel[2];
+            if (sum < least) {
+                least   = sum;
+                darkest = { pixel[0], pixel[1], pixel[2] };
+            }
+        }
+    }
+    return darkest;
+}
+
+/// The pixel of the quadrant a caption sits in that is strongest in `channel`, as red, green,
+/// blue: for a caption lighter than its backdrop in that channel (the darkest is for black text).
+std::array<int, 3> StrongestInQuadrant(const RendererPicture& picture, const Quadrant& quadrant,
+                                       std::size_t channel)
+{
+    const int left = quadrant.x < 192 ? 0 : 192;
+    const int top  = quadrant.y > 128 ? 0 : 128;
+    std::array<int, 3> strongest { 0, 0, 0 };
+    int                most = -1;
+    for (int y = top; y < top + 128; ++y) {
+        for (int x = left; x < left + 192; ++x) {
+            const auto* pixel = &picture.rgb[(static_cast<std::size_t>(y) * picture.width + x) * 3u];
+            if (pixel[channel] > most) {
+                most      = pixel[channel];
+                strongest = { pixel[0], pixel[1], pixel[2] };
+            }
+        }
+    }
+    return strongest;
+}
+
+/// The box, in pixels, of what differs from the quadrant's flat colour by at least `threshold`
+/// in some channel: where a caption's ink is. `right` and `bottom` are the last column and row.
+struct InkBox
+{
+    int left { 1 << 30 };
+    int right { -1 };
+    int top { 1 << 30 };
+    int bottom { -1 };
+};
+
+InkBox InkBoxInQuadrant(const RendererPicture& picture, const Quadrant& quadrant, int threshold)
+{
+    const int left = quadrant.x < 192 ? 0 : 192;
+    const int top  = quadrant.y > 128 ? 0 : 128;
+    InkBox    box;
+    for (int y = top; y < top + 128; ++y) {
+        for (int x = left; x < left + 192; ++x) {
+            const auto* pixel = &picture.rgb[(static_cast<std::size_t>(y) * picture.width + x) * 3u];
+            bool        ink   = false;
+            for (std::size_t channel = 0; channel < 3; ++channel) {
+                ink = ink || std::abs(int(pixel[channel]) - quadrant.colour[channel]) >= threshold;
+            }
+            if (! ink) continue;
+            box.left   = std::min(box.left, x);
+            box.right  = std::max(box.right, x);
+            box.top    = std::min(box.top, y);
+            box.bottom = std::max(box.bottom, y);
+        }
+    }
+    return box;
+}
+
+constexpr const char* kCopyEffect = R"([{"file":"effects/probe.json","visible":true}])";
+
+
+} // namespace
+
+TEST_F(MetalSceneDraw, AnEffectsTextIsComposedOverTheSceneBehindItAsWallpaperEngineDoesOnBothRenderers)
+{
+    // Wallpaper Engine draws a text layer that has a visible effect through a composite
+    // of its own: the card starts as the scene behind it with no alpha, the glyphs are
+    // blended into it by their alpha on colour and on alpha alike, and the card goes
+    // back onto the scene by the alpha it now holds. A glyph of alpha `a` over a
+    // background therefore lands at `TextCompositeReach(a)`, `a` cubed with the exponent
+    // the constant has: one factor on the colour and `kTextCompositeAlphaExponent` on the
+    // alpha. Black text at 0.65 and at 0.5 over white stands at 0.275 and 0.125 of the way
+    // to black through an `opacity` effect in its own frames, not at 0.65 and 0.5, which is
+    // where the same text without an effect stands. (The effect here only copies, so this is
+    // the model for a chain that leaves alpha alone; whether a skew chain follows it is open,
+    // docs/testing/renderer.md.) The backdrop's four colours show the card is seeded with
+    // the scene behind it the right way up.
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        for (const double alpha : { 1.0, 0.65, 0.5 }) {
+            for (const bool through_effect : { false, true }) {
+                SCOPED_TRACE(std::string("alpha ") + std::to_string(alpha) +
+                             (through_effect ? " through an effect" : " plain"));
+                const std::string name = std::string("text-composite-") + (native ? "native-" : "compat-") +
+                                         std::to_string(static_cast<int>(alpha * 100.0)) +
+                                         (through_effect ? "-fx" : "-plain");
+                const auto project = WriteTextOverBackdropFixture(
+                    root_ / name, alpha, through_effect ? std::string_view(kCopyEffect) : std::string_view());
+                LoadedScene loaded;
+                std::string error;
+                ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+                const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+                ASSERT_TRUE(picture.error.empty()) << picture.error;
+                ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+                // How far a covered pixel is from the background towards the text's black.
+                const double reach = through_effect ? TextCompositeReach(float(alpha)) : alpha;
+                for (const auto& quadrant : kQuadrants) {
+                    SCOPED_TRACE(quadrant.name);
+                    const auto darkest = DarkestInQuadrant(picture, quadrant);
+                    for (std::size_t channel = 0; channel < 3; ++channel) {
+                        EXPECT_NEAR(darkest[channel], quadrant.colour[channel] * (1.0 - reach), 3.0)
+                            << "channel " << channel;
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST_F(MetalSceneDraw, ATurnedAndScaledEffectsTextIsComposedOverTheSceneBehindItOnBothRenderers)
+{
+    // The scene behind the card is found where the card lies in the scene, whatever the layer's
+    // transform: a stem turned through 0.6 radians and scaled by 1.5 about the point where the
+    // four backdrop colours meet crosses two of them, and over each the composite holds that
+    // quadrant's colour alone. A seed read where the card would lie unturned shows another
+    // quadrant's colour in the channels the backdrop has none.
+    constexpr double kAlpha = 0.5;
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        const std::string name = std::string("text-composite-turned-") + (native ? "native" : "compat");
+        const auto project = WriteTextOverBackdropFixture(root_ / name, kAlpha, kCopyEffect,
+                                                          BackdropOptions { .turned = true });
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+        const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+        ASSERT_TRUE(picture.error.empty()) << picture.error;
+        ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+        for (const auto& quadrant : kQuadrants) {
+            SCOPED_TRACE(quadrant.name);
+            const int left = quadrant.x < 192 ? 0 : 192;
+            const int top  = quadrant.y > 128 ? 0 : 128;
+            int leak = 0;
+            for (int y = top; y < top + 128; ++y) {
+                for (int x = left; x < left + 192; ++x) {
+                    const auto* pixel = &picture.rgb[(static_cast<std::size_t>(y) * picture.width + x) * 3u];
+                    for (std::size_t channel = 0; channel < 3; ++channel) {
+                        if (quadrant.colour[channel] == 0) leak = std::max(leak, int(pixel[channel]));
+                    }
+                }
+            }
+            // The bilinear read at a quadrant's edge may reach a few percent into the next.
+            EXPECT_LE(leak, 25) << "another quadrant's colour is in the composite";
+        }
+        // The stem has its full interior over the quadrants it runs through.
+        for (const std::size_t quadrant : { std::size_t(0), std::size_t(3) }) {
+            const auto darkest = DarkestInQuadrant(picture, kQuadrants[quadrant], 8);
+            for (std::size_t channel = 0; channel < 3; ++channel) {
+                if (kQuadrants[quadrant].colour[channel] == 0) continue;
+                EXPECT_NEAR(darkest[channel],
+                            kQuadrants[quadrant].colour[channel] * (1.0 - TextCompositeReach(float(kAlpha))), 3.0)
+                    << kQuadrants[quadrant].name;
+            }
+        }
+    }
+}
+
+TEST_F(MetalSceneDraw, ATextLayerWhoseEffectsAreAllOffKeepsItsSingleAlphaOnBothRenderers)
+{
+    // With every effect off there is no composite: the glyphs go straight onto the scene
+    // by their alpha, as for a layer with no effects at all.
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        std::map<bool, RendererPicture> pictures;
+        for (const bool hidden_effect : { false, true }) {
+            const std::string name = std::string("text-composite-off-") + (native ? "native-" : "compat-") +
+                                     (hidden_effect ? "hidden" : "plain");
+            const auto project = WriteTextOverBackdropFixture(
+                root_ / name, 0.5,
+                hidden_effect ? R"([{"file":"effects/probe.json","visible":false}])" : "");
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            pictures[hidden_effect] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+            ASSERT_TRUE(pictures[hidden_effect].error.empty()) << pictures[hidden_effect].error;
+        }
+        EXPECT_EQ(pictures[true].rgb, pictures[false].rgb);
+        EXPECT_NEAR(DarkestInQuadrant(pictures[true], kQuadrants[3])[0], 128, 3);
+    }
+}
+
+namespace
+{
+
+constexpr const char* kScriptedCopyEffect =
+    R"([{"file":"effects/probe.json","visible":{"value":false,)"
+    R"("script":"export function update() { return engine.runtime >= 0.5 && engine.runtime < 1.0; }"}}])";
+
+/// The frames of a scene whose script has an effect on from 0.5 s to 1 s, at 60 frames a second:
+/// before it, while it is on, and after.
+constexpr std::array<std::pair<int, bool>, 3> kScriptedFrames { {
+    { 10, false },
+    { 45, true },
+    { 90, false },
+} };
+
+} // namespace
+
+TEST_F(MetalSceneDraw, ATextLayersCompositeFollowsItsScriptedEffectsOnBothRenderers)
+{
+    // A script that switches the only effect on from 0.5 s to 1 s: Wallpaper Engine counts
+    // the visible effects as it draws, so the layer is a composite (`TextCompositeReach`)
+    // only while the effect is on, and plain text (alpha) before and after. While every
+    // effect is off the chain ends in the shipped passthrough, which draws the card times the
+    // layer's `g_Color4`: the text must still be there, and where it was.
+    constexpr float kAlpha = 0.5f;
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        std::map<int, RendererPicture> pictures;
+        for (const auto& [frames, composite] : kScriptedFrames) {
+            SCOPED_TRACE(frames);
+            const std::string name = std::string("text-composite-scripted-") +
+                                     (native ? "native-" : "compat-") + std::to_string(frames);
+            const auto project = WriteTextOverBackdropFixture(root_ / name, kAlpha, kScriptedCopyEffect);
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            pictures[frames] = DrawWithRenderer(*loaded.scene, native, 384, 256, frames, 1.0 / 60.0);
+            ASSERT_TRUE(pictures[frames].error.empty()) << pictures[frames].error;
+            for (const auto& quadrant : kQuadrants) {
+                SCOPED_TRACE(quadrant.name);
+                const auto darkest = DarkestInQuadrant(pictures[frames], quadrant);
+                const double reach = composite ? TextCompositeReach(kAlpha) : kAlpha;
+                for (std::size_t channel = 0; channel < 3; ++channel) {
+                    EXPECT_NEAR(darkest[channel], quadrant.colour[channel] * (1.0 - reach), 3.0)
+                        << "channel " << channel;
+                }
+            }
+        }
+        // The margin comes and goes with the effect, the ink stays where it is.
+        for (const auto& quadrant : kQuadrants) {
+            SCOPED_TRACE(quadrant.name);
+            const auto off = InkBoxInQuadrant(pictures[10], quadrant, 32);
+            const auto on  = InkBoxInQuadrant(pictures[45], quadrant, 8);
+            const auto off_again = InkBoxInQuadrant(pictures[90], quadrant, 32);
+            ASSERT_GE(off.right, off.left) << "no ink while the effect is off";
+            ASSERT_GE(on.right, on.left) << "no ink while the effect is on";
+            for (const auto* box : { &on, &off_again }) {
+                EXPECT_NEAR(box->left, off.left, 1);
+                EXPECT_NEAR(box->right, off.right, 1);
+                EXPECT_NEAR(box->top, off.top, 1);
+                EXPECT_NEAR(box->bottom, off.bottom, 1);
+            }
+        }
+    }
+}
+
+TEST_F(MetalSceneDraw, AnAddLayersTextIsAddedWhileItsScriptedEffectsAreOffAndComposedWhileOneIsOnOnBothRenderers)
+{
+    // Colour blend mode 31 ("add") draws a text layer without effects additively onto the
+    // scene, and Wallpaper Engine forces the last pass of a chain translucent: so the layer
+    // adds its glyphs while a script has every effect off, and mixes them in the composite
+    // while one is on. Green text of alpha 0.5 over the red quadrant adds (255, 128, 0) in the
+    // first case, and mixes to red towards green by `TextCompositeReach` in the second.
+    constexpr float kAlpha = 0.5f;
+    BackdropOptions options;
+    options.caption = { { "color", "0 1 0" }, { "colorBlendMode", 31 } };
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        for (const auto& [frames, composite] : kScriptedFrames) {
+            SCOPED_TRACE(frames);
+            const std::string name = std::string("text-composite-add-") + (native ? "native-" : "compat-") +
+                                     std::to_string(frames);
+            const auto project = WriteTextOverBackdropFixture(root_ / name, kAlpha, kScriptedCopyEffect, options);
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, frames, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
+            const auto green = StrongestInQuadrant(picture, kQuadrants[0], 1);
+            const double reach = composite ? TextCompositeReach(kAlpha) : kAlpha;
+            // The red of the backdrop is kept entirely by an addition and taken from by a mix.
+            EXPECT_NEAR(green[0], composite ? 255.0 * (1.0 - reach) : 255.0, 3.0);
+            EXPECT_NEAR(green[1], 255.0 * reach, 3.0);
+            EXPECT_NEAR(green[2], 0.0, 3.0);
+        }
+    }
+}
+
+TEST_F(MetalSceneDraw, AnEffectsTextIsComposedOverTheSceneInTheHdrPipelineOnBothRenderers)
+{
+    // The composite's seed is read from the scene's own target, which is a 16-bit one in the
+    // HDR pipeline, and the card it writes goes into 16-bit buffers there. The picture is the
+    // same as the 8-bit pipeline's.
+    constexpr float kAlpha = 0.65f;
+    BackdropOptions options;
+    options.hdr = true;
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        const std::string name = std::string("text-composite-hdr-") + (native ? "native" : "compat");
+        const auto project = WriteTextOverBackdropFixture(root_ / name, kAlpha, kCopyEffect, options);
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+        ASSERT_TRUE(loaded.scene->hdr);
+        const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+        ASSERT_TRUE(picture.error.empty()) << picture.error;
+        ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+        for (const auto& quadrant : kQuadrants) {
+            SCOPED_TRACE(quadrant.name);
+            const auto darkest = DarkestInQuadrant(picture, quadrant);
+            for (std::size_t channel = 0; channel < 3; ++channel) {
+                EXPECT_NEAR(darkest[channel], quadrant.colour[channel] * (1.0 - TextCompositeReach(kAlpha)), 4.0)
+                    << "channel " << channel;
+            }
+        }
+    }
+}
+
+TEST_F(MetalSceneDraw, AnEffectsTextIsTheSamePictureOnBothRenderers)
+{
+    std::map<bool, RendererPicture> pictures;
+    for (const bool native : { false, true }) {
+        const std::string name = std::string("text-composite-same-") + (native ? "native" : "compat");
+        const auto project = WriteTextOverBackdropFixture(root_ / name, 0.65, kCopyEffect);
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+        pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+        ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+    }
+    ASSERT_EQ(pictures[true].rgb.size(), pictures[false].rgb.size());
+    int worst = 0;
+    for (std::size_t i = 0; i < pictures[true].rgb.size(); ++i) {
+        worst = std::max(worst, std::abs(int(pictures[true].rgb[i]) - int(pictures[false].rgb[i])));
+    }
+    EXPECT_LE(worst, 2) << "the renderers draw a composited text card differently";
+}
+
+namespace
+{
 /// Turns the fixture at `root` into a scene that runs the HDR pipeline: hdr and bloom on,
 /// with the bloom stand-in materials.
 void MakeSceneHdr(const std::filesystem::path& root)
@@ -6778,7 +7275,10 @@ TEST_F(MetalSceneDraw, TextStylingChangesPixelsWithoutRerasterizingGlyphs)
             ASSERT_TRUE(render.drawFrame(*loaded.scene)) << render.lastError();
             const auto blue = ReadOutput(render, *loaded.scene);
             EXPECT_EQ(peak(blue, 0), 0);
-            EXPECT_NEAR(peak(blue, 2), 128, 2);
+            // Text through an effect is composited, and its alpha lands raised as the
+            // composite raises it, where plain text's lands as it is
+            // (`AnEffectsTextIsComposedOverTheSceneBehindIt...`).
+            EXPECT_NEAR(peak(blue, 2), 255.0 * (with_effect ? TextCompositeReach(0.5f) : 0.5), 2);
             loaded.scene->runtime->Tick(0.5);
             ASSERT_TRUE(render.drawFrame(*loaded.scene)) << render.lastError();
             EXPECT_EQ(LitPixels(ReadOutput(render, *loaded.scene)), 0u);
@@ -9879,6 +10379,73 @@ std::size_t DifferingBytes(const std::vector<uint8_t>& a, const std::vector<uint
 }
 
 } // namespace
+
+TEST_F(MetalSceneDraw, ATextLayerThroughShippedEffectsIsDrawnWhetherItsScriptHasThemOnOrOffOnBothRenderers)
+{
+    // The same scripted text as above, with Wallpaper Engine's own `opacity` effect and its own
+    // `effectpassthrough` material (the `genericimage3` shader), which the chain ends in while
+    // the script has the effect off. The stand-in materials of the other tests are written to
+    // do what the shipped ones do; this is the check that they do.
+    const auto assets = LocalSceneAssetsRoot();
+    if (assets.empty() || ! std::filesystem::is_regular_file(assets / "effects/opacity/effect.json") ||
+        ! std::filesystem::is_directory(assets / "effects/opacity/materials") ||
+        ! std::filesystem::is_regular_file(assets / "materials/util/effectpassthrough.json")) {
+        GTEST_SKIP() << "Wallpaper Engine's shipped effects are not installed here; text through "
+                        "them was not drawn";
+    }
+    const std::string effect =
+        R"([{"file":"effects/opacity/effect.json","visible":{"value":false,)"
+        R"("script":"export function update() { return engine.runtime >= 0.5 && engine.runtime < 1.0; }"}}])";
+    constexpr float kAlpha = 0.5f;
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        for (const auto& [frames, composite] : kScriptedFrames) {
+            SCOPED_TRACE(frames);
+            const std::string name = std::string("text-composite-shipped-") +
+                                     (native ? "native-" : "compat-") + std::to_string(frames);
+            BackdropOptions options;
+            options.shipped_assets = true;
+            const auto project     = WriteTextOverBackdropFixture(root_ / name, kAlpha, effect, options);
+            // A published wallpaper carries the material and shaders of the effects it uses at its
+            // root; the shipped assets keep them beside the effect.
+            for (const char* directory : { "materials", "shaders" }) {
+                if (! std::filesystem::is_directory(assets / "effects/opacity" / directory)) continue;
+                std::filesystem::copy(assets / "effects/opacity" / directory, root_ / name / directory,
+                                      std::filesystem::copy_options::recursive |
+                                          std::filesystem::copy_options::overwrite_existing);
+            }
+            LoadedScene loaded;
+            ASSERT_TRUE(loaded.vfs.Mount("/assets", fs::CreatePhysicalFs(assets.string()), "assets"));
+            ASSERT_TRUE(loaded.vfs.Mount("/assets", fs::CreatePhysicalFs(project.parent_path().string()), "scene"));
+            ASSERT_TRUE(loaded.vfs.Mount("/cache", fs::CreatePhysicalFs((root_ / (name + "-cache")).string(), true),
+                                         "cache"));
+            InstallVirtualAssets(loaded.vfs);
+            std::string error;
+            ASSERT_TRUE(ParseProjectProperties(project.string(), &loaded.properties, &error)) << error;
+            auto source = loaded.vfs.Open("/assets/layout.json");
+            ASSERT_NE(source, nullptr);
+            WPSceneParser parser;
+            loaded.scene = parser.Parse(SceneParseRequest {
+                                            .scene_id           = "metal-draw-smoke",
+                                            .project_path       = project.string(),
+                                            .project_properties = &loaded.properties,
+                                        },
+                                        source->ReadAllStr(), loaded.vfs, loaded.sound);
+            ASSERT_NE(loaded.scene, nullptr);
+            const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, frames, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
+            const double reach = composite ? TextCompositeReach(kAlpha) : kAlpha;
+            for (const auto& quadrant : kQuadrants) {
+                SCOPED_TRACE(quadrant.name);
+                const auto darkest = DarkestInQuadrant(picture, quadrant);
+                for (std::size_t channel = 0; channel < 3; ++channel) {
+                    EXPECT_NEAR(darkest[channel], quadrant.colour[channel] * (1.0 - reach), 4.0)
+                        << "channel " << channel;
+                }
+            }
+        }
+    }
+}
 
 TEST_F(MetalSceneDraw, TheShippedRopeAndTrailPreviewScenesAreParsedTranslatedAndDrawnNatively)
 {

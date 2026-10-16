@@ -965,7 +965,28 @@ into private textures; the three that draw skip visibly without a Metal device.
   not worked around. The `fbos` an effect declares are the card's size whatever their
   `scale` (Wallpaper Engine's divide it, from the decompile's call of the buffer
   builder, which was not re-read for the division), so a half-scale blur buffer costs
-  four times what it does there. A card past 4096 texels on a side is drawn into
+  four times what it does there. A text layer's composite is Wallpaper Engine's in what
+  its probes show: the card is seeded with the scene behind it and its glyph pass writes
+  the alpha squared (`kTextCompositeAlphaExponent`, 2), so text through an effect stands at
+  the alpha cubed (`TextCompositeReach`; probetext4's `opacity` effect and the clock of
+  3819684521; the `blurprecise` heading of the same scene, at alpha 1, shows the seed). **Open:** whether an effect that leaves alpha alone gives the same.
+  The cube is measured for `opacity` chains only (probetext4 and the clock); the one frame of
+  another chain that is measured at an alpha below 1 says it differs: the VHS timestamps of
+  3465215190 through `skew` and `pulse` stand at the alpha squared in Wallpaper Engine and
+  at the alpha cubed here. Most translucent text layers with an effect in the local corpus
+  go through other chains (`blurprecise` the most, `opacity` about a third of them), so the
+  exponent decides how they look. The alternative that fits every measurement is a glyph pass
+  that keeps a single alpha (exponent 1) and an `opacity` effect that takes the layer's
+  alpha for its own whatever its constant says; that is a rule about effect passes that this
+  change does not make, and changing the exponent is one line (the tests derive their
+  expectations from it). A capture of black text over white at alpha 0.65, 0.5 and 0.8
+  through each of `opacity` (the control), a no-op `transform`, a no-op `skew` and two
+  `transform`s settles it: the cube in every column is this model, the square in all but the
+  `opacity` column the alternative. The seed is sampled
+  where the card lies without the camera's parallax, so under parallax it lies a few
+  pixels from the scene it is drawn over; a layer with a colour blend, and the
+  composite that fog, an LED source or an opaque background asks for without an effect,
+  are not composites here. A card past 4096 texels on a side is drawn into
   buffers cut to 4096, where Wallpaper Engine has no limit of its own (the glyph raster
   is capped at 4096 as well, and stretches past it). A layer with an outline, blur or
   shadow draws into the card and the margin the style reaches, which Wallpaper Engine

@@ -1606,6 +1606,15 @@ void TextLayer::SetAlignment(std::string horizontal, std::string vertical) {
     MarkCacheDirty();
 }
 
+void TextLayer::SetPaddingApplies(bool applies) {
+    if (m_state.padding_applies == applies) return;
+    m_state.padding_applies = applies;
+    m_state.padding         = applies ? m_state.authored_padding : Eigen::Vector2f::Zero();
+    m_state.dirty           = true;
+    m_state.layout_pending  = true;
+    MarkCacheDirty();
+}
+
 bool TextLayer::ApplyPreparedLayout(uint64_t revision, TextLayerLayout layout) {
     if (revision <= m_prepared_revision || revision > m_state.cache_revision) return false;
     m_prepared_revision    = revision;

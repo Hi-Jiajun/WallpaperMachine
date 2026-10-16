@@ -263,6 +263,23 @@ public:
     /// effects that run and rebuilds the render graph before the next frame.
     void          RegisterEffectVisibility(std::shared_ptr<SceneImageEffect> effect,
                                            std::unique_ptr<DynamicValue> value);
+    /// What follows a text layer's effects as a script switches them. Wallpaper Engine counts the
+    /// visible effect passes of a text layer afresh whenever an effect's visibility changes: the
+    /// card is padded, and drawn as a composite, only while one is visible.
+    struct TextEffectGate {
+        /// The layer is padded whatever its effects do: a colour blend, an LED source, an opaque
+        /// background, or fog in the scene.
+        bool                                           padded_regardless { false };
+        /// The effects the layer's chain is built with; one that is visible counts.
+        std::vector<std::shared_ptr<SceneImageEffect>> effects;
+        /// The `g_Composite` constant of the card's material, 1 while the card is a composite
+        /// (some effect is visible) and 0 while the glyphs go straight onto the scene. Null for
+        /// a card that never composites.
+        DynamicValue*                                  composite { nullptr };
+    };
+    /// Registers the gate of the text layer `name` and applies it: the layer's padding and
+    /// composite follow its effects from here on.
+    void          RegisterTextEffectGate(std::string name, TextEffectGate gate);
     // A node's origin, scale or angles. `animation` is the authored timeline
     // that plays the value when no script or property writes it.
     void          RegisterNodeTranslate(std::string name, SceneNode* node,
@@ -697,6 +714,7 @@ public:
         std::optional<NodeHitMask>              hit_mask;
         std::optional<WPPuppetLayer>            puppet_layer;
         std::optional<TextLayer>                text_layer;
+        std::optional<TextEffectGate>           text_effect_gate;
         std::vector<TextValueBinding>           text_values;
         std::optional<NodeAlignmentBinding>     alignment;
         std::optional<NodeCursorTarget>         cursor_target;
@@ -790,6 +808,8 @@ private:
     void EnqueueTextLayerPreparation(std::string name, const TextLayer& layer);
     void CollectPreparedTextLayers();
     bool ApplyPreparedTextLayer(const RuntimePreparedTextLayerImage& prepared);
+    /// Works the gate of the text layer `name` out from its effects as they stand.
+    void RefreshTextEffectGate(const std::string& name);
     /// Moves the composite of a text layer another layer samples onto `card`,
     /// the card a relayout left it with, and resizes the target to it.
     void FitTextLayerComposite(SceneNode& node, const TextLayerRenderFrame& card);
@@ -891,6 +911,7 @@ private:
     std::unordered_map<std::string, NodeHitMask>                   m_node_hit_masks;
     std::unordered_map<std::string, WPPuppetLayer>                 m_puppet_layers;
     std::unordered_map<std::string, TextLayer>                     m_text_layers;
+    std::unordered_map<std::string, TextEffectGate>                m_text_effect_gates;
     std::unordered_map<std::string, uint64_t>                      m_queued_text_revisions;
     std::unordered_map<std::string, NodeAlignmentBinding>          m_node_alignment;
     // Looked up by name every frame the cursor is in the window, so the maps

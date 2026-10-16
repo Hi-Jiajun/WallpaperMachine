@@ -150,7 +150,7 @@ struct WPTextObject : WPMiscObjectBase {
     float                pointsize { 32.0f };
     // Wallpaper Engine's defaults for the key being absent: a 32 pixel margin
     // on each axis and no extra glyph or line spacing. Whether the margin
-    // applies is the parser's decision; see `ResolveTextCardPadding`.
+    // applies is the parser's decision; see `TextCardIsPadded`.
     std::array<float, 2> padding { 32.0f, 32.0f };
     std::array<float, 2> spacing { 0.0f, 0.0f };
     // Wallpaper Engine registers both as enumerations: a key that is missing

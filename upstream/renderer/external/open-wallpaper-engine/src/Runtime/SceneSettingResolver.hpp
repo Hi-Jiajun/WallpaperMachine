@@ -74,6 +74,10 @@ std::unique_ptr<DynamicValue> ResolveStringSetting(
     std::string_view current_layer_name = {});
 std::vector<CameraPath> ParseCameraPaths(const nlohmann::json& json);
 
+// What a bool setting reads before anything runs: its authored value, which a script's first
+// run replaces (the value `ResolveBoolSetting` starts from).
+bool InitialBoolSetting(const nlohmann::json& setting);
+
 // The wallpaper property a setting is bound to, in either authored form
 // (`{"user": "name"}` or `{"user": {"name": ..., "condition": ...}}`), or empty
 // when it is bound to none. The same reading the resolvers above bind with.

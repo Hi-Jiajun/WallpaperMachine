@@ -1,6 +1,7 @@
 #pragma once
 #include "Interface/ISceneParser.h"
 
+#include <cmath>
 #include <string>
 #include <string_view>
 #include <random>
@@ -8,6 +9,25 @@
 
 namespace wallpaper
 {
+/// The exponent of the alpha Wallpaper Engine's glyph pass leaves in a text composite. The pass
+/// blends with `SRC_ALPHA / INV_SRC_ALPHA` on colour and on alpha alike (the D3D translucent
+/// blend of its font material; the alpha factor is decoded from denormal constants, so it is
+/// inferred), so over a card whose alpha starts at zero the glyph's alpha `a` lands as `a * a`:
+/// the colour carries one factor of `a` and the alpha this exponent, and the card goes onto the
+/// scene by that alpha. Text through an `opacity` effect then stands at `a ^ (1 + exponent)`,
+/// `a` cubed, which is what Wallpaper Engine's frames show (black text at 0.65 and 0.5 over
+/// white stands at 0.275 and 0.125). One frame of a `skew` chain stands at `a` squared instead,
+/// which an exponent of 1 would give (and an `opacity` effect fed the layer's alpha would then
+/// supply the third factor): see docs/testing/renderer.md. One constant, so that a capture that
+/// settles it changes this line, and every expectation is derived from it.
+inline constexpr float kTextCompositeAlphaExponent = 2.0f;
+
+/// How far from the scene behind it towards its own colour text of alpha `alpha` stands when it
+/// goes through a composite: the share of the colour that lands on the scene.
+inline float TextCompositeReach(float alpha) {
+    return std::pow(alpha, 1.0f + kTextCompositeAlphaExponent);
+}
+
 struct SceneMaterial;
 struct WPShaderInfo;
 class RuntimeImageSource;

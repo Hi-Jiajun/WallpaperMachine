@@ -1266,6 +1266,7 @@ void SceneRuntimeContext::UnregisterNode(std::string_view name) {
     m_node_cursor_targets.erase(key);
     m_puppet_layers.erase(key);
     m_text_layers.erase(key);
+    m_text_effect_gates.erase(key);
     m_text_values.erase(std::remove_if(m_text_values.begin(),
                                        m_text_values.end(),
                                        [&key](const auto& binding) {
@@ -1342,6 +1343,9 @@ void SceneRuntimeContext::RollbackNodeRegistration(
     }
     if (previous->puppet_layer.has_value()) m_puppet_layers[key] = *previous->puppet_layer;
     if (previous->text_layer.has_value()) m_text_layers.emplace(key, *previous->text_layer);
+    if (previous->text_effect_gate.has_value()) {
+        m_text_effect_gates.insert_or_assign(key, *previous->text_effect_gate);
+    }
     m_text_values.insert(m_text_values.end(),
                          previous->text_values.begin(),
                          previous->text_values.end());
@@ -1399,6 +1403,9 @@ SceneRuntimeContext::CaptureNodeRegistration(std::string_view name) const {
     }
     if (const auto iterator = m_text_layers.find(key); iterator != m_text_layers.end()) {
         snapshot->text_layer = iterator->second;
+    }
+    if (const auto iterator = m_text_effect_gates.find(key); iterator != m_text_effect_gates.end()) {
+        snapshot->text_effect_gate = iterator->second;
     }
     for (const auto& binding : m_text_values) {
         if (binding.name == key) snapshot->text_values.push_back(binding);
@@ -1549,7 +1556,31 @@ void SceneRuntimeContext::RegisterEffectVisibility(std::shared_ptr<SceneImageEff
         if (effect->visible == visible) return;
         effect->visible       = visible;
         m_scene_graph_mutated = true;
+        // A text layer counts its visible effects: the switch may pad it or take its padding
+        // away, and decides whether its glyphs are composited.
+        for (const auto& [name, gate] : m_text_effect_gates) {
+            if (std::find(gate.effects.begin(), gate.effects.end(), effect) != gate.effects.end()) {
+                RefreshTextEffectGate(name);
+            }
+        }
     });
+}
+
+void SceneRuntimeContext::RegisterTextEffectGate(std::string name, TextEffectGate gate) {
+    if (name.empty()) return;
+    m_text_effect_gates.insert_or_assign(name, std::move(gate));
+    RefreshTextEffectGate(name);
+}
+
+void SceneRuntimeContext::RefreshTextEffectGate(const std::string& name) {
+    const auto gate = m_text_effect_gates.find(name);
+    if (gate == m_text_effect_gates.end()) return;
+    const bool visible = std::any_of(gate->second.effects.begin(), gate->second.effects.end(),
+                                     [](const auto& effect) { return effect->visible; });
+    if (const auto layer = m_text_layers.find(name); layer != m_text_layers.end()) {
+        layer->second.SetPaddingApplies(gate->second.padded_regardless || visible);
+    }
+    if (gate->second.composite != nullptr) gate->second.composite->update(visible ? 1.0f : 0.0f);
 }
 
 void SceneRuntimeContext::ApplyNodeVec3Animation(NodeVec3Binding& binding) {

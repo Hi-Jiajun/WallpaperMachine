@@ -1689,9 +1689,16 @@ std::string TextRuntimeName(const ParseContext& context, const wpscene::WPTextOb
     return "__we_text_" + std::to_string(obj.id);
 }
 
+/// The program a text card draws with. `composite` is the card of a text layer that goes
+/// through effects: where Wallpaper Engine first overwrites the layer's composite with the
+/// scene behind it (alpha 0) and then blends the glyphs into it, this does both in the one
+/// pass, because the card covers the whole composite: it samples the scene (`g_Texture1`, at
+/// the screen position of the fragment) and writes `mix(scene, glyph, alpha)` with alpha
+/// `alpha ^ kTextCompositeAlphaExponent`. While `g_Composite` is 0 -- every effect switched
+/// off -- it writes the glyph and its alpha as a card that is drawn directly does.
 std::shared_ptr<SceneShader> BuildTextSceneShader(fs::VFS& vfs, std::string_view scene_id,
                                                   const std::string& texture_key, bool styled,
-                                                  bool outlined) {
+                                                  bool outlined, bool composite) {
     std::string vertex_src =
         "layout(binding = 1) uniform mat4 g_ModelViewProjectionMatrix;\n"
         "in vec3 a_Position;\n"
@@ -1701,16 +1708,36 @@ std::shared_ptr<SceneShader> BuildTextSceneShader(fs::VFS& vfs, std::string_view
         "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
         "  v_TexCoord = a_TexCoord;\n"
         "}\n";
-    std::string fragment_src = "uniform sampler2D g_Texture0;\n"
-                               "uniform vec3 g_Color;\n"
-                               "uniform float g_Alpha;\n"
-                               "uniform float g_Brightness;\n"
-                               "in vec2 v_TexCoord;\n"
-                               "void main() {\n"
-                               "  vec4 glyph = texture(g_Texture0, v_TexCoord);\n"
-                               "  gl_FragColor = vec4(glyph.rgb * g_Color * g_Brightness, glyph.a * g_Alpha);\n"
-                               "}\n";
-    if (styled) {
+    if (composite) {
+        // Where the card lies on the screen, for the scene behind it: `g_EffectModelViewProjectionMatrix`
+        // is the scene camera's view-projection over the layer's own transform, whatever camera the
+        // card is drawn through. Direct3D's screen coordinate runs the other way up.
+        vertex_src =
+            "uniform mat4 g_ModelViewProjectionMatrix;\n"
+            "uniform mat4 g_EffectModelViewProjectionMatrix;\n"
+            "in vec3 a_Position;\n"
+            "in vec2 a_TexCoord;\n"
+            "out vec2 v_TexCoord;\n"
+            "out vec3 v_ScreenCoord;\n"
+            "void main() {\n"
+            "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+            "  v_TexCoord = a_TexCoord;\n"
+            "  v_ScreenCoord = (g_EffectModelViewProjectionMatrix * vec4(a_Position, 1.0)).xyw;\n"
+            "#if HLSL\n"
+            "  v_ScreenCoord.y = -v_ScreenCoord.y;\n"
+            "#endif\n"
+            "}\n";
+    }
+    // What the glyph is: its colour and its alpha, straight (not premultiplied).
+    std::string uniforms = "uniform sampler2D g_Texture0;\n"
+                           "uniform vec3 g_Color;\n"
+                           "uniform float g_Alpha;\n"
+                           "uniform float g_Brightness;\n";
+    std::string body;
+    if (! styled) {
+        body = "  vec4 glyph = texture(g_Texture0, v_TexCoord);\n"
+               "  vec4 result = vec4(glyph.rgb * g_Color * g_Brightness, glyph.a * g_Alpha);\n";
+    } else {
         // The font shader's mix of a glyph, its outline and its shadow, from the
         // three coverage masks the rasteriser leaves in the texture's channels:
         // red the glyph, green the glyph with its outline, blue the shadow. Only
@@ -1722,28 +1749,35 @@ std::shared_ptr<SceneShader> BuildTextSceneShader(fs::VFS& vfs, std::string_view
         const std::string glyph_colour =
             outlined ? "  vec3 glyph = mix(g_OutlineColor, g_Color * g_Brightness, mask.r);\n"
                      : "  vec3 glyph = g_Color * g_Brightness;\n";
-        fragment_src = std::string("uniform sampler2D g_Texture0;\n"
-                                   "uniform vec3 g_Color;\n"
-                                   "uniform float g_Alpha;\n"
-                                   "uniform float g_Brightness;\n") +
-                       (outlined ? "uniform vec3 g_OutlineColor;\n" : "") +
-                       "uniform vec3 g_ShadowColor;\n"
-                       "in vec2 v_TexCoord;\n"
-                       "void main() {\n"
-                       "  vec3 mask = texture(g_Texture0, v_TexCoord).rgb;\n" +
-                       glyph_colour +
-                       "  float glyph_alpha = mask.g * g_Alpha;\n"
-                       "  float shadow_alpha = mask.b * g_Alpha;\n"
-                       "  float alpha = glyph_alpha + shadow_alpha * (1.0 - glyph_alpha);\n"
-                       "  vec3 rgb = (glyph * glyph_alpha + g_ShadowColor * shadow_alpha * (1.0 - glyph_alpha)) / max(alpha, 0.000001);\n"
-                       "  gl_FragColor = vec4(rgb, alpha);\n"
-                       "}\n";
+        if (outlined) uniforms += "uniform vec3 g_OutlineColor;\n";
+        uniforms += "uniform vec3 g_ShadowColor;\n";
+        body = std::string("  vec3 mask = texture(g_Texture0, v_TexCoord).rgb;\n") + glyph_colour +
+               "  float glyph_alpha = mask.g * g_Alpha;\n"
+               "  float shadow_alpha = mask.b * g_Alpha;\n"
+               "  float alpha = glyph_alpha + shadow_alpha * (1.0 - glyph_alpha);\n"
+               "  vec3 rgb = (glyph * glyph_alpha + g_ShadowColor * shadow_alpha * (1.0 - glyph_alpha)) / max(alpha, 0.000001);\n"
+               "  vec4 result = vec4(rgb, alpha);\n";
     }
-    const char* shader_name = ! styled ? "text" : outlined ? "text_styled_outline" : "text_styled";
+    std::string varyings = "in vec2 v_TexCoord;\n";
+    std::string finish   = "  gl_FragColor = result;\n";
+    if (composite) {
+        uniforms += "uniform sampler2D g_Texture1;\n"
+                    "uniform float g_Composite;\n";
+        varyings += "in vec3 v_ScreenCoord;\n";
+        finish = "  vec2 screen = v_ScreenCoord.xy / v_ScreenCoord.z * 0.5 + 0.5;\n"
+                 "  vec3 behind = texture(g_Texture1, screen).rgb;\n"
+                 "  vec4 composed = vec4(mix(behind, result.rgb, result.a),\n"
+                 "                       pow(result.a, " + std::to_string(kTextCompositeAlphaExponent) + "));\n"
+                 "  gl_FragColor = g_Composite > 0.5 ? composed : result;\n";
+    }
+    std::string fragment_src = uniforms + varyings + "void main() {\n" + body + finish + "}\n";
+    const char* shader_name = composite ? (! styled ? "text_composite" : outlined ? "text_composite_styled_outline"
+                                                                                  : "text_composite_styled")
+                                        : (! styled ? "text" : outlined ? "text_styled_outline" : "text_styled");
 
     WPShaderInfo                 shader_info;
-    std::vector<WPShaderTexInfo> tex_infos(1);
-    tex_infos[0].enabled = true;
+    std::vector<WPShaderTexInfo> tex_infos(composite ? 2 : 1);
+    for (auto& tex_info : tex_infos) tex_info.enabled = true;
 
     std::array units {
         WPShaderUnit {
@@ -1775,6 +1809,7 @@ std::shared_ptr<SceneShader> BuildTextSceneShader(fs::VFS& vfs, std::string_view
         pending.shader_info  = shader_info;
         pending.texinfos.assign(tex_infos.begin(), tex_infos.end());
         pending.texture_keys = { texture_key };
+        if (composite) pending.texture_keys.push_back(std::string(SpecTex_Default));
         pending.vfs          = &vfs;
         g_pending_metal_translations.push_back(std::move(pending));
     }
@@ -1920,20 +1955,26 @@ std::optional<wpscene::WPImageEffect> MakeFogCompositeEffect(fs::VFS& vfs) {
     return effect;
 }
 
-void AttachEffectsToNode(ParseContext& context,
-                         SceneNode& node,
-                         int32_t layer_id,
-                         SceneMesh& final_mesh,
-                         std::span<const wpscene::WPImageEffect> effects,
-                         const std::string& runtime_name,
-                         std::array<int32_t, 2> render_extent,
-                         Eigen::Vector2f render_center,
-                         BlendMode final_blend,
-                         const ShaderValueMap& base_const_svs,
-                         std::array<float, 2> parallax_depth,
-                         bool copy_background,
-                         bool preserve_effect_fbo_resolution,
-                         const wpscene::WPImageEffect* screen_blend_effect = nullptr);
+/// Builds the effect chain of a layer, and returns the effects it put in it. `final_blend` is how
+/// the chain's last pass is drawn onto the scene; `idle_final_blend`, when given, replaces it while
+/// a script has every effect off and the chain ends in the passthrough that draws the layer as it
+/// is.
+std::vector<std::shared_ptr<SceneImageEffect>>
+AttachEffectsToNode(ParseContext& context,
+                    SceneNode& node,
+                    int32_t layer_id,
+                    SceneMesh& final_mesh,
+                    std::span<const wpscene::WPImageEffect> effects,
+                    const std::string& runtime_name,
+                    std::array<int32_t, 2> render_extent,
+                    Eigen::Vector2f render_center,
+                    BlendMode final_blend,
+                    const ShaderValueMap& base_const_svs,
+                    std::array<float, 2> parallax_depth,
+                    bool copy_background,
+                    bool preserve_effect_fbo_resolution,
+                    const wpscene::WPImageEffect* screen_blend_effect = nullptr,
+                    std::optional<BlendMode> idle_final_blend = std::nullopt);
 
 // Fills the font fields of `state` for the font the scene (or a script) names:
 // a system font, a font the wallpaper ships, or a family by name.
@@ -1988,41 +2029,63 @@ bool EffectIsBuilt(const wpscene::WPImageEffect& effect) {
     return effect.visible || effect.scripted_visible;
 }
 
-/// The margin Wallpaper Engine keeps around a text card on each axis. It sizes the
-/// card by `2 * padding` and insets the text by `padding`, but only for a layer
-/// that draws through effect passes, composites with a colour blend (any mode
-/// but none and "add") or an LED source, or paints an opaque background, or in a
-/// scene that enables distance fog or height fog (the renderer then composites
-/// every text layer, to fog it); a plain text layer has no margin whatever its
-/// `padding` says. Each lane is capped at 512 pixels, and not floored.
-Eigen::Vector2f ResolveTextCardPadding(const wpscene::WPTextObject& obj, bool scene_fog) {
+/// The padding a text object's file gives, on each axis: capped at 512 pixels from above and not
+/// floored, since Wallpaper Engine lets a negative padding take the card in around the text.
+Eigen::Vector2f AuthoredTextCardPadding(const wpscene::WPTextObject& obj) {
     constexpr float kMaxCardPadding = 512.0f;
-    const bool has_effect_pass = std::any_of(
-        obj.effects.begin(), obj.effects.end(), [](const wpscene::WPImageEffect& effect) {
-            return EffectIsBuilt(effect) && ! effect.materials.empty();
-        });
-    const bool composites = (obj.colorBlendMode != 0 && obj.colorBlendMode != kAdditiveColorBlendMode) ||
-                            obj.ledsource;
-    if (! has_effect_pass && ! composites && ! obj.opaquebackground && ! scene_fog) {
-        return Eigen::Vector2f::Zero();
-    }
-    // Capped from above only: Wallpaper Engine lets a negative padding take the
-    // card in around the text.
     const auto lane = [=](float value) {
         return std::isfinite(value) ? std::min(value, kMaxCardPadding) : 0.0f;
     };
     return { lane(obj.padding[0]), lane(obj.padding[1]) };
 }
 
+/// Whether an effect is visible as the scene loads: a fixed one by its value (a property's is
+/// resolved into it already), a scripted one by the value its script starts from.
+bool EffectStartsVisible(const wpscene::WPImageEffect& effect) {
+    return effect.scripted_visible ? InitialBoolSetting(effect.visible_setting) : effect.visible;
+}
+
+/// Whether an effect is one of the passes Wallpaper Engine counts for a text layer as the scene
+/// loads: one that is visible, and has a pass to draw. The effects the chain is built with are
+/// these (`EffectIsBuilt` and a material), and the runtime counts the visible ones among them
+/// afresh as a script switches them, so the margin and the composite start from the same count.
+bool EffectCountsForText(const wpscene::WPImageEffect& effect) {
+    return ! effect.materials.empty() && EffectStartsVisible(effect);
+}
+
+/// Whether Wallpaper Engine keeps a text card's margin whatever its effects do: the layer
+/// composites with a colour blend (any mode but none and "add") or an LED source, paints an
+/// opaque background, or sits in a scene that enables distance fog or height fog (the renderer
+/// then composites every text layer, to fog it).
+bool TextCardIsPaddedRegardless(const wpscene::WPTextObject& obj, bool scene_fog) {
+    const bool composites = (obj.colorBlendMode != 0 && obj.colorBlendMode != kAdditiveColorBlendMode) ||
+                            obj.ledsource;
+    return composites || obj.opaquebackground || scene_fog;
+}
+
+/// Whether Wallpaper Engine pads a text card as the scene loads: with `padding * 2` around
+/// the text and the text inset by `padding`, on each axis. Besides the cases above that is
+/// a layer that has a visible effect, which it counts afresh whenever an effect's visibility
+/// changes (`SceneRuntimeContext::TextEffectGate`); a plain text layer has no margin whatever
+/// its `padding` says.
+bool TextCardIsPadded(const wpscene::WPTextObject& obj, bool scene_fog) {
+    return TextCardIsPaddedRegardless(obj, scene_fog) ||
+           std::any_of(obj.effects.begin(), obj.effects.end(), EffectCountsForText);
+}
+
 TextLayerState ResolveTextLayerState(const wpscene::WPTextObject& obj, fs::VFS& vfs,
                                      std::string text, std::string font_key,
                                      std::string layer_key, bool scene_fog) {
+    const Eigen::Vector2f authored_padding = AuthoredTextCardPadding(obj);
+    const bool            padded           = TextCardIsPadded(obj, scene_fog);
     TextLayerState state {
         .text             = std::move(text),
         .layer_key        = std::move(layer_key),
         .font_key         = font_key,
         .point_size       = obj.pointsize,
-        .padding          = ResolveTextCardPadding(obj, scene_fog),
+        .padding          = padded ? authored_padding : Eigen::Vector2f::Zero().eval(),
+        .authored_padding = authored_padding,
+        .padding_applies  = padded,
         .spacing          = Eigen::Vector2f(obj.spacing[0], obj.spacing[1]),
         .color            = Eigen::Vector3f(obj.color.data()),
         .alpha            = obj.alpha,
@@ -2170,6 +2233,11 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         std::any_of(obj.effects.begin(), obj.effects.end(), [](const wpscene::WPImageEffect& effect) {
             return EffectIsBuilt(effect) && ! effect.materials.empty();
         });
+    // Such a text is drawn through a composite of its own, whose glyph pass blends over the
+    // scene behind the card (`BuildTextSceneShader`). A layer with a colour blend keeps
+    // drawing as it did: how the blend's passthrough treats a seeded card is not known.
+    const bool composites_over_scene = through_effects && ! color_blend_effect.has_value();
+    const bool scene_fog = context.scene->fog_distance || context.scene->fog_height;
     auto       text         = JsonStringOrObjectValue(obj.text, "text");
     const auto font_key     = JsonStringOrObjectValue(obj.font, {});
     std::unique_ptr<DynamicValue> runtime_text_value;
@@ -2185,7 +2253,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
                                             text,
                                             font_key,
                                             runtime_name,
-                                            context.scene->fog_distance || context.scene->fog_height);
+                                            scene_fog);
     // Cache glyph coverage, not animated styling. A fade or colour change only
     // updates uniforms; it must never measure, rasterize or upload the text again.
     text_state.color = Eigen::Vector3f::Ones();
@@ -2234,13 +2302,19 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         material.name                = "text";
         material.textures            = { texture_name };
         material.defines             = { "g_Texture0" };
+        if (composites_over_scene) {
+            // The scene behind the card, which the card's pass seeds the composite from.
+            material.textures.push_back(std::string(SpecTex_Default));
+            material.defines.push_back("g_Texture1");
+        }
         material.blenmode = through_effects ? BlendMode::Disable
                             : additive_color_blend ? BlendMode::Additive
                                                    : BlendMode::Translucent;
         const bool styled   = TextStyleActive(text_state.style);
         const bool outlined = styled && text_state.style.outline;
         material.customShader.shader = BuildTextSceneShader(
-            *context.vfs, context.scene->scene_id, texture_name, styled, outlined);
+            *context.vfs, context.scene->scene_id, texture_name, styled, outlined,
+            composites_over_scene);
         material.customShader.constValues["g_Color"] = obj.color;
         material.customShader.constValues["g_Alpha"] = obj.alpha;
         // Wallpaper Engine multiplies the colour by the brightness only in its HDR
@@ -2250,8 +2324,20 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         material.customShader.constValues["g_Brightness"] = brightness_applies ? obj.brightness : 1.0f;
         if (outlined) material.customShader.constValues["g_OutlineColor"] = obj.outlinecolor;
         if (styled) material.customShader.constValues["g_ShadowColor"] = obj.dropshadowcolor;
+        // Whether the card is a composite follows the layer's visible effects as they are
+        // switched (the gate registered below); it starts as they stand as the scene loads.
+        const float composite_start =
+            std::any_of(obj.effects.begin(), obj.effects.end(), EffectCountsForText) ? 1.0f : 0.0f;
+        if (composites_over_scene) material.customShader.constValues["g_Composite"] = composite_start;
         if (material.customShader.shader != nullptr) {
             mesh->AddMaterial(std::move(material));
+        }
+        DynamicValue* composite_value = nullptr;
+        if (composites_over_scene && mesh->MaterialSlotPtr() != nullptr) {
+            auto value      = std::make_unique<DynamicValue>(composite_start);
+            composite_value = value.get();
+            context.scene->runtime->RegisterMaterialConstant(mesh->MaterialSlotPtr(), "g_Composite",
+                                                             std::move(value));
         }
 
         if (! previous_runtime_name.empty() && previous_runtime_name != runtime_name) {
@@ -2321,21 +2407,42 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         RegisterNodeTransformSettings(*context.scene->runtime, node.get(), runtime_name,
                                       obj.origin_setting, obj.scale_setting, obj.angles_setting);
         if (through_effects) {
-            AttachEffectsToNode(context,
-                                *node,
-                                obj.id,
-                                effect_final_mesh,
-                                obj.effects,
-                                runtime_name,
-                                effect_render_extent,
-                                effect_frame.center,
-                                additive_color_blend ? BlendMode::Additive : BlendMode::Translucent,
-                                context.global_base_uniforms,
-                                { obj.parallaxDepth[0], obj.parallaxDepth[1] },
-                                /* copy_background */ true,
-                                /* preserve_effect_fbo_resolution */ true,
-                                color_blend_effect.has_value() ? &obj.effects[*color_blend_effect]
-                                                               : nullptr);
+            // The last pass is drawn translucent onto the scene whatever the colour blend
+            // mode: Wallpaper Engine forces it, "add" included, while an effect runs. A layer
+            // without effects, and so one whose effects a script has all off, is drawn
+            // directly, which "add" does additively.
+            //
+            // The card carries the layer's colour and alpha already, so the effects and the
+            // passthrough that ends a chain whose every effect is off take a white `g_Color4`:
+            // an unbound one is zero and draws nothing, as an image layer's carries its own.
+            ShaderValueMap effect_uniforms = context.global_base_uniforms;
+            effect_uniforms["g_Color4"]    = std::array<float, 4> { 1.0f, 1.0f, 1.0f, 1.0f };
+            auto built = AttachEffectsToNode(context,
+                                             *node,
+                                             obj.id,
+                                             effect_final_mesh,
+                                             obj.effects,
+                                             runtime_name,
+                                             effect_render_extent,
+                                             effect_frame.center,
+                                             BlendMode::Translucent,
+                                             effect_uniforms,
+                                             { obj.parallaxDepth[0], obj.parallaxDepth[1] },
+                                             /* copy_background */ true,
+                                             /* preserve_effect_fbo_resolution */ true,
+                                             color_blend_effect.has_value() ? &obj.effects[*color_blend_effect]
+                                                                            : nullptr,
+                                             additive_color_blend ? std::optional<BlendMode> { BlendMode::Additive }
+                                                                  : std::nullopt);
+            // The margin and the composite follow the effects that are visible, as they
+            // are switched.
+            context.scene->runtime->RegisterTextEffectGate(
+                runtime_name,
+                SceneRuntimeContext::TextEffectGate {
+                    .padded_regardless = TextCardIsPaddedRegardless(obj, scene_fog),
+                    .effects           = std::move(built),
+                    .composite         = composite_value,
+                });
         } else {
             // Camera parallax moves a layer through the model matrix of the draw, and
             // the value updater adds it to a draw that has a record with the layer's
@@ -2684,21 +2791,24 @@ std::shared_ptr<SceneImageEffect> MakePassthroughEffect(
     return effect;
 }
 
-void AttachEffectsToNode(ParseContext& context,
-                         SceneNode& node,
-                         int32_t layer_id,
-                         SceneMesh& final_mesh,
-                         std::span<const wpscene::WPImageEffect> effects,
-                         const std::string& runtime_name,
-                         std::array<int32_t, 2> render_extent,
-                         Eigen::Vector2f render_center,
-                         BlendMode final_blend,
-                         const ShaderValueMap& base_const_svs,
-                         std::array<float, 2> parallax_depth,
-                         bool copy_background,
-                         bool preserve_effect_fbo_resolution,
-                         const wpscene::WPImageEffect* screen_blend_effect) {
-    if (effects.empty()) return;
+std::vector<std::shared_ptr<SceneImageEffect>>
+AttachEffectsToNode(ParseContext& context,
+                    SceneNode& node,
+                    int32_t layer_id,
+                    SceneMesh& final_mesh,
+                    std::span<const wpscene::WPImageEffect> effects,
+                    const std::string& runtime_name,
+                    std::array<int32_t, 2> render_extent,
+                    Eigen::Vector2f render_center,
+                    BlendMode final_blend,
+                    const ShaderValueMap& base_const_svs,
+                    std::array<float, 2> parallax_depth,
+                    bool copy_background,
+                    bool preserve_effect_fbo_resolution,
+                    const wpscene::WPImageEffect* screen_blend_effect,
+                    std::optional<BlendMode> idle_final_blend) {
+    std::vector<std::shared_ptr<SceneImageEffect>> built;
+    if (effects.empty()) return built;
 
     auto& scene    = *context.scene;
     auto& vfs      = *context.vfs;
@@ -2720,6 +2830,7 @@ void AttachEffectsToNode(ParseContext& context,
         effect_ppong_a,
         effect_ppong_b);
     effect_layer->SetFinalBlend(final_blend);
+    if (idle_final_blend.has_value()) effect_layer->SetIdleFinalBlend(*idle_final_blend);
     effect_layer->FinalMesh().ChangeMeshDataFrom(final_mesh);
     effect_layer->SetFinalMeshDynamic(final_mesh.UpdateDriver());
     effect_layer->FinalNode().CopyTrans(node);
@@ -2755,7 +2866,9 @@ void AttachEffectsToNode(ParseContext& context,
 
     int scripted_effects = 0, fixed_effects = 0;
     for (const auto& effect : effects) {
-        if (! EffectIsBuilt(effect)) continue;
+        // An effect with no pass is not one Wallpaper Engine counts: it draws nothing, so it
+        // must neither stand for a visible effect nor keep the passthrough fallback away.
+        if (! EffectIsBuilt(effect) || effect.materials.empty()) continue;
 
         auto image_effect = std::make_shared<SceneImageEffect>();
         const std::string inRT { effect_ppong_a };
@@ -2859,6 +2972,7 @@ void AttachEffectsToNode(ParseContext& context,
         if (effect_materials_ok) {
             RegisterScriptedEffectVisibility(context, effect, image_effect, runtime_name);
             effect_layer->AddEffect(image_effect);
+            built.push_back(image_effect);
             (effect.scripted_visible ? scripted_effects : fixed_effects)++;
         } else {
             LOG_ERROR("effect '%s' failed to load", effect.name.c_str());
@@ -2873,6 +2987,7 @@ void AttachEffectsToNode(ParseContext& context,
             effect_layer->AddEffect(fallback);
         }
     }
+    return built;
 }
 
 /// The four corners `point0` to `point3` of the first effect's first pass, in the

@@ -305,8 +305,9 @@ zero and are made whether or not the effect's combos use them. A layer's colour 
 mode mixes it with the screen behind it through Wallpaper Engine's passthrough
 material, the layer's last step; the passthrough takes the layer as its first pass
 drew it, colour and alpha included, and does not apply them again. Mode 31 ("add")
-has no passthrough: the layer, or its last effect, is drawn with additive blending
-straight onto the scene, so it costs neither the extra pass nor a copy of the screen. Translating to the
+has no passthrough: an image layer, or its last effect, is drawn with additive blending
+straight onto the scene, so it costs neither the extra pass nor a copy of the screen (a
+text layer that goes through a visible effect is the exception, see below). Translating to the
 Metal shading language
 turns GLSL's `inverse`, which Metal has no built-in for, into helper functions, so
 the stock perspective, reflection, water, light-shaft and cursor-ripple effects
@@ -454,10 +455,13 @@ else Arial Unicode MS, else Helvetica) that is looked up when a layout meets suc
 glyph, never otherwise; Wallpaper Engine's list of up to eight faces is not followed.
 
 The card is the text plus `padding` on each axis, and the margin is
-there only for a layer that draws through effect passes, a colour blend, an LED
+there only for a layer that has a visible effect pass, a colour blend, an LED
 source or an opaque background, or in a scene that enables distance fog or height
 fog (`fogdistance`, `fogheight`): a plain text layer has none, whatever its `padding`
-says.
+says. Which effects are visible is counted again whenever a script switches one, as
+Wallpaper Engine counts it: the card of a layer whose effects a script has all off is
+unpadded, and gains its padding, laid out again, while one is on (on the text worker, as for
+any change of the text, so the card follows a frame or two after the switch).
 
 `padding` and `spacing` are two numbers, and `padding` is 32 on both axes where
 the scene leaves it out, each lane capped at 512 and not floored (a negative padding
@@ -494,6 +498,23 @@ the picture moves by that fraction of the card, as in Wallpaper Engine. A card p
 `width`, `height` or `fit` are the card's size whatever their `scale`; one that names its own
 size keeps that fixed size, as for an image layer, and is not resized with the card.
 
+A text layer that draws through a
+visible effect is a composite, as in Wallpaper Engine: the card first holds the scene behind
+it with no alpha, the glyphs are blended into it by their alpha on colour and on alpha, the
+effects run on that and the last pass goes onto the scene by the alpha it holds, so
+black text of alpha `a` through an `opacity` effect stands at `a` cubed of the way to black
+(the glyph pass leaves the alpha squared, `kTextCompositeAlphaExponent`), where text with
+no effect stands at `a`. The card seeds and blends in its own pass, sampling the scene at
+its fragment's screen position, and the last pass of the chain is drawn translucent
+whatever the colour blend mode, "add" included. A layer whose effects a script has all
+switched off is plain text: its glyphs go onto the scene by their alpha alone, drawn
+additively for mode 31, through the passthrough that ends the chain, which is given
+a white colour because the card already carries the layer's colour and alpha. A layer with
+a colour blend keeps the single alpha even with an effect running (the blend's passthrough
+is not known to treat a seeded card as Wallpaper Engine's does). Whether a chain of other
+effects stands at the same cube is open for some of them; see
+[renderer verification](../testing/renderer.md#known-limitations).
+
 `maxwidth` is the width a row may fill, as authored: padding is never
 taken from it, so a padded card can be wider than `maxwidth`. A row wraps before a
 glyph whose ink would end past that width, once it holds a glyph: at the last space
@@ -508,7 +529,8 @@ without a row of its own and without an ellipsis. With
 to exactly the width by spreading the slack over its spaces and tabs; the last row of
 a paragraph, a row a line break ended, a row the row limit cut and a row with no
 space are left alone. A text layer's colour blend mode works as an image layer's
-does, through the passthrough pass or, for mode 31, additively onto the scene.
+does, through the passthrough pass or, for mode 31, additively onto the scene while no
+effect of the layer is running (with one running the layer is a composite, above).
 `outline`, `blur` and `dropshadow` give the glyphs Wallpaper Engine's signed-distance
 look: sizes, offsets and the shadow's softness are pixels of the finished text,
 capped as the shader's glyph atlas caps them, the outline and shadow keep their own
@@ -713,7 +735,8 @@ the layer's effect chain again over the effects that run and rebuilds the render
 graph before the next frame, so nothing is paid per frame. While a script has
 every effect of a layer off, the chain ends in a passthrough: Wallpaper Engine
 draws such a layer as one without effects, so that state costs one layer-sized
-pass more here, and a text layer keeps its effect padding. A text layer whose every effect is off
+pass more here, and a text layer is then plain text, without its effect padding and with its
+glyphs going straight onto the scene by their alpha. A text layer whose every effect is off
 in the scene file, or by a property as the scene loads, is drawn as plain text,
 as Wallpaper Engine draws it: an effect that is off builds no chain. A sound layer's volume
 is live too: a slider bound to it sets the stream's volume when the slider moves,

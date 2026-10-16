@@ -112,10 +112,17 @@ struct TextLayerState {
     SharedFontData       resolved_font_data;
     float                point_size { 12.0f };
     // The margin the card keeps clear around the text on each axis, in pixels.
-    // This is the authored `padding` where Wallpaper Engine applies it -- the
-    // layer has effect passes, a colour blend or an opaque background -- and
-    // zero on a plain text layer.
+    // This is `authored_padding` while Wallpaper Engine applies it -- the layer has
+    // a visible effect pass, a colour blend or an opaque background -- and zero on
+    // a plain text layer. Which effects are visible changes while a scene runs, so
+    // the runtime switches it (`TextLayer::SetPaddingApplies`).
     Eigen::Vector2f      padding { Eigen::Vector2f::Zero() };
+    // The padding the scene file gives, capped like `padding`, whether or not the
+    // layer has the margin now. Set by the parser, for the runtime to switch
+    // `padding` between this and zero.
+    Eigen::Vector2f      authored_padding { Eigen::Vector2f::Zero() };
+    // Whether `padding` is `authored_padding` or zero.
+    bool                 padding_applies { true };
     // The authored `spacing`: pixels added to every glyph's advance (x) and to
     // the line pitch (y), at the rasterised size.
     Eigen::Vector2f      spacing { Eigen::Vector2f::Zero() };
@@ -260,6 +267,10 @@ public:
     void SetFont(std::string font_key, std::string kind, std::string identity, std::string path,
                  std::string face, SharedFontData data);
     void SetAlignment(std::string horizontal, std::string vertical);
+    /// Gives the card its authored padding or takes it away, as Wallpaper Engine does when
+    /// the layer's effects are switched on or off: the card is laid out again. Nothing
+    /// changes for a state the layer already has.
+    void SetPaddingApplies(bool applies);
     bool ApplyPreparedLayout(uint64_t revision, TextLayerLayout layout);
     void ClearDirty();
 

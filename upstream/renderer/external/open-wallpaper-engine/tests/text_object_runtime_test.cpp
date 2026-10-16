@@ -5173,6 +5173,165 @@ TEST(TextObjectRuntime, CardPaddingAppliesOnlyToLayersWallpaperEnginePads) {
     EXPECT_TRUE(fixture.scene->runtime->NodeSize("add").isApprox(plain));
 }
 
+TEST(TextObjectRuntime, ACardKeepsItsPaddingOnlyWhileAnEffectPassIsVisible) {
+    // Wallpaper Engine counts the visible effect passes again whenever an effect's
+    // visibility changes, and the card with them: a script that switches the layer's
+    // only effect on pads the card, and switching it off takes the padding away again.
+    // The scene-file value of a scripted effect is where it starts, not "on".
+    const auto window = [](const char* from, const char* to) {
+        return std::string(R"JSON({"value":false,"script":"export function update() { return engine.runtime >= )JSON") +
+               from + " && engine.runtime < " + to + R"JSON(; }"})JSON";
+    };
+    const std::string objects =
+        R"([
+      {"id":1,"name":"switched","text":"a","font":"Arial","padding":"32 24","visible":true,
+       "effects":[{"file":"effects/tint/effect.json","id":10,"visible":)" + window("0.25", "0.5") + R"(}]},
+      {"id":2,"name":"starts on","text":"a","font":"Arial","padding":"32 24","visible":true,
+       "effects":[{"file":"effects/tint/effect.json","id":11,"visible":{"value":true,
+        "script":"export function update() { return engine.runtime < 0.25; }"}}]},
+      {"id":3,"name":"always on","text":"a","font":"Arial","padding":"32 24","visible":true,
+       "effects":[{"file":"effects/tint/effect.json","id":12,"visible":true},
+                  {"file":"effects/tint/effect.json","id":13,"visible":)" + window("0.25", "0.5") + R"(}]},
+      {"id":4,"name":"plain","text":"a","font":"Arial","padding":"32 24","visible":true}
+    ])";
+    TextSceneFixture fixture(objects, "text-live-padding", ColorBlendAssets());
+    ASSERT_NE(fixture.scene, nullptr);
+    ASSERT_NE(fixture.scene->runtime, nullptr);
+    auto& runtime = *fixture.scene->runtime;
+
+    const Eigen::Vector2f none = Eigen::Vector2f::Zero();
+    const Eigen::Vector2f pad(32.0f, 24.0f);
+    const Eigen::Vector2f bare = runtime.NodeSize("plain");
+    const Eigen::Vector2f padded = bare + Eigen::Vector2f(64.0f, 48.0f);
+    const auto holds = [&](const char* name, bool padded_now, const char* when) {
+        SCOPED_TRACE(std::string(name) + " " + when);
+        EXPECT_TRUE(fixture.State(name).padding.isApprox(padded_now ? pad : none));
+        EXPECT_TRUE(runtime.NodeSize(name).isApprox(padded_now ? padded : bare));
+    };
+    const auto run_to = [&](int frames) {
+        for (int frame = 0; frame < frames; ++frame) runtime.Tick(1.0 / 60.0);
+        for (const char* name : { "switched", "starts on", "always on" }) {
+            for (int attempt = 0; attempt < 200 && runtime.NodeTextDirty(name); ++attempt) {
+                runtime.PumpTextLayerCache();
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+        }
+    };
+
+    // As loaded: the effect that starts off carries no margin before any tick, the one
+    // that starts on does, and a layer with a visible effect is padded whatever its other
+    // effects do.
+    holds("switched", false, "as loaded");
+    holds("starts on", true, "as loaded");
+    holds("always on", true, "as loaded");
+    run_to(1);
+    holds("switched", false, "at the first tick");
+    holds("starts on", true, "at the first tick");
+
+    run_to(20);  // 0.33 s: the first effect is on, the second is off.
+    holds("switched", true, "while its effect is on");
+    holds("starts on", false, "once its effect has switched off");
+    holds("always on", true, "while a second effect is on");
+
+    run_to(20);  // 0.67 s: off again.
+    holds("switched", false, "once its effect is off again");
+    holds("starts on", false, "still off");
+    holds("always on", true, "with only the fixed effect on");
+    EXPECT_EQ(runtime.scriptErrorCount(), 0u);
+}
+
+TEST(TextObjectRuntime, AnEffectWithNoPassCountsForNeitherTheMarginNorTheComposite) {
+    // An effect that has no pass draws nothing, so it is not an effect pass Wallpaper Engine
+    // counts: a layer whose only visible effect is one is plain text, and one that has a real
+    // effect as well is padded and composited by that one alone. The margin and the composite
+    // are worked out the same way as the scene loads and as the effects are switched, so the
+    // first switch of a script has no layout to redo for a margin that was never there.
+    const std::string scripted_off =
+        R"({"file":"effects/tint/effect.json","id":12,"visible":{"value":false,)"
+        R"("script":"export function update() { return false; }"}})";
+    const std::string empty = R"({"file":"effects/empty/effect.json","id":10,"visible":true})";
+    const std::string tint  = R"({"file":"effects/tint/effect.json","id":11,"visible":true})";
+    auto assets = ColorBlendAssets();
+    assets["/effects/empty/effect.json"] = R"({"name":"empty","passes":[]})";
+    struct Case {
+        const char* name;
+        std::string effects;
+        bool        padded;
+        float       composite;  // the card's `g_Composite`, or -1 where it has none
+    };
+    const std::vector<Case> cases {
+        { "empty", "[" + empty + "]", false, -1.0f },
+        { "empty and scripted off", "[" + empty + "," + scripted_off + "]", false, 0.0f },
+        { "empty and visible", "[" + empty + "," + tint + "]", true, 1.0f },
+    };
+    for (const auto& item : cases) {
+        SCOPED_TRACE(item.name);
+        TextSceneFixture fixture(R"([{"id":1,"name":"caption","text":"a","font":"Arial","padding":"32 24",)"
+                                 R"("visible":true,"effects":)" + item.effects + "}]",
+                                 std::string("text-effect-no-pass-") + item.name, assets);
+        ASSERT_NE(fixture.scene, nullptr);
+        const auto state = fixture.State("caption");
+        EXPECT_TRUE(state.padding.isApprox(item.padded ? Eigen::Vector2f(32.0f, 24.0f)
+                                                       : Eigen::Vector2f::Zero()));
+        EXPECT_FALSE(state.layout_pending) << "the margin was changed as the scene loaded";
+        auto* node = FindRootChild(*fixture.scene, "caption");
+        ASSERT_NE(node, nullptr);
+        const auto& values = node->Mesh()->Material()->customShader.constValues;
+        EXPECT_FLOAT_EQ(values.contains("g_Composite") ? values.at("g_Composite")[0] : -1.0f, item.composite);
+    }
+}
+
+TEST(TextObjectRuntime, OnlyATextThroughVisibleEffectsReadsTheSceneForItsCompositeAndOnlyOnce) {
+    // The card of a text layer that draws through a visible effect seeds its composite from the
+    // scene in its own pass: one pass that reads the scene however many effects follow, into the
+    // chain's buffer and not onto the scene, and a composite that is on only while an effect is.
+    // Text with no effect, with every effect off, or with a colour blend reads the scene for
+    // nothing but the blend's passthrough, which is how they were drawn before.
+    const std::string tint = R"({"file":"effects/tint/effect.json","id":10,"visible":true})";
+    const std::string off = R"({"file":"effects/tint/effect.json","id":11,"visible":false})";
+    const auto scripted = [](bool value) {
+        return std::string(R"({"file":"effects/tint/effect.json","id":12,"visible":{"value":)") +
+               (value ? "true" : "false") + R"(,"script":"export function update() { return )" +
+               (value ? "true" : "false") + R"(; }"}})";
+    };
+    struct Case {
+        const char* name;
+        std::string fields;
+        std::size_t readers;
+        bool        onto_scene;  // the reading pass draws onto the scene (the blend's passthrough)
+        float       composite;   // the card's `g_Composite`, or -1 where the card has none
+    };
+    const std::vector<Case> cases {
+        { "plain", "", 0, false, -1.0f },
+        { "one effect", R"(,"effects":[)" + tint + "]", 1, false, 1.0f },
+        { "two effects", R"(,"effects":[)" + tint + "," + off + "," + tint + "]", 1, false, 1.0f },
+        { "effect off", R"(,"effects":[)" + off + "]", 0, false, -1.0f },
+        { "colour blend", R"(,"colorBlendMode":12)", 1, true, -1.0f },
+        { "scripted on", R"(,"effects":[)" + scripted(true) + "]", 1, false, 1.0f },
+        { "scripted off", R"(,"effects":[)" + scripted(false) + "]", 1, false, 0.0f },
+    };
+    for (const auto& item : cases) {
+        SCOPED_TRACE(item.name);
+        TextSceneFixture fixture(R"([{"id":1,"name":"caption","text":"a","font":"Arial","visible":true)" +
+                                     item.fields + "}]",
+                                 std::string("text-composite-passes-") + item.name, ColorBlendAssets());
+        ASSERT_NE(fixture.scene, nullptr);
+        const auto graph = sceneToRenderGraph(*fixture.scene);
+        ASSERT_NE(graph, nullptr);
+        std::size_t readers = 0;
+        for (const auto* pass : CustomPasses(*graph)) {
+            if (! SamplesScreen(*pass)) continue;
+            ++readers;
+            EXPECT_EQ(pass->desc().output == SpecTex_Default, item.onto_scene);
+        }
+        EXPECT_EQ(readers, item.readers);
+        auto* node = FindRootChild(*fixture.scene, "caption");
+        ASSERT_NE(node, nullptr);
+        const auto& values = node->Mesh()->Material()->customShader.constValues;
+        EXPECT_FLOAT_EQ(values.contains("g_Composite") ? values.at("g_Composite")[0] : -1.0f, item.composite);
+    }
+}
+
 TEST(TextObjectRuntime, ASceneWithFogPadsEveryTextLayerWhateverItsEffects) {
     // The renderer composites every text layer of a scene that enables distance fog
     // or height fog, so each is padded as a layer with effects is.
@@ -5505,7 +5664,7 @@ TEST(TextObjectRuntime, ColorBlendModeMixesTextWithTheScreenThroughThePassthroug
     EXPECT_EQ(plain_node->Mesh()->Material()->blenmode, BlendMode::Translucent);
 }
 
-TEST(TextObjectRuntime, AddColorBlendTextIsDrawnAdditivelyOntoTheScene) {
+TEST(TextObjectRuntime, AddColorBlendTextIsDrawnAdditivelyOntoTheSceneUnlessItGoesThroughEffects) {
     const auto parse = [](const std::string& effects) {
         return std::make_unique<TextSceneFixture>(
             R"([{"id":1,"name":"caption","text":"hello","font":"Arial","pointsize":20,
@@ -5521,21 +5680,28 @@ TEST(TextObjectRuntime, AddColorBlendTextIsDrawnAdditivelyOntoTheScene) {
     EXPECT_TRUE(node->Camera().empty());
     EXPECT_EQ(node->Mesh()->Material()->blenmode, BlendMode::Additive);
 
-    // With an effect the chain ends in an additive draw onto the scene.
+    // With an effect the layer is drawn through a composite, and Wallpaper Engine forces the last
+    // pass of it translucent whatever the colour blend mode: "add" included. The card's pass is
+    // what samples the scene (it seeds the composite from it) and writes into the chain's buffer.
     auto with_effect = parse(R"(,"effects":[{"file":"effects/tint/effect.json","id":2,"visible":true}])");
     ASSERT_NE(with_effect->scene, nullptr);
     const auto graph = sceneToRenderGraph(*with_effect->scene);
     ASSERT_NE(graph, nullptr);
     std::size_t onto_scene = 0;
+    std::size_t seeding    = 0;
     for (const auto* pass : CustomPasses(*graph)) {
-        EXPECT_FALSE(SamplesScreen(*pass));
+        if (SamplesScreen(*pass)) {
+            ++seeding;
+            EXPECT_NE(pass->desc().output, SpecTex_Default);
+        }
         if (pass->desc().output != SpecTex_Default) continue;
         ++onto_scene;
         const auto* material = pass->desc().node->Mesh()->MaterialForSlot(pass->desc().material_slot);
         ASSERT_NE(material, nullptr);
-        EXPECT_EQ(material->blenmode, BlendMode::Additive);
+        EXPECT_EQ(material->blenmode, BlendMode::Translucent);
     }
     EXPECT_EQ(onto_scene, 1u);
+    EXPECT_EQ(seeding, 1u);
 }
 
 namespace

@@ -1590,7 +1590,11 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   saturated line. Opaque and fully transparent texels are unaffected. The case
   composites a half-covered source over transparent, half-covered and opaque
   destinations inside a compose layer and samples the composed alpha back as RGB
-  (expected 128/191/255). It uses synthetic shaders only.
+  (expected 128/191/255). It uses synthetic shaders only. A text composite is the one
+  exception: the card of a text layer that draws through effects writes its glyph's alpha
+  squared, as Wallpaper Engine's glyph pass does, because that is where its text lands at
+  alpha cubed; the rule above is the blend state of every other draw and is not touched
+  (see the text composite entry under Text, fonts and clocks).
 - **Alpha-to-coverage passes** — `MetalBlend.*` in `metal_backend_test`; the
   Compatibility backend sets the same state in `SetBlend`. On multisampled
   attachments coverage decides what an `alphatocoverage` pass keeps and kept
@@ -1774,6 +1778,90 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   compatibility renderer draw one picture, and
   `.EnablingAnEffectDoesNotMoveAnAlignedTextLayerOnBothRenderers` that padding moves
   nothing.
+- **Text composite and live padding** — a text layer that draws through a visible effect
+  is drawn through a composite of its own, as Wallpaper Engine draws it: the card starts as
+  the scene behind it with no alpha, the glyphs are blended into it by their alpha on
+  colour and on alpha alike, the effects run on that, and the last pass goes onto the scene
+  by the alpha the card holds. Black text of alpha `a` over a background therefore stands at
+  `a` cubed of the way to black through an `opacity` chain, where the same text with no
+  effect stands at `a`; in the probe scene `probetext4` (DIN Engschrift and Baqacents,
+  `Alpha`, through the `opacity` effect) Wallpaper Engine's stems are at 0.275 and 0.125 for
+  alpha 0.65 and 0.5 and so are ours (1.000, 0.651 and 0.498 without the effect, in both),
+  and the ink of its strokes is within 0.6 percent of Wallpaper Engine's where it was 2.5 to
+  4.2 times it. The clock of 3819684521 (black, alpha 0.73, one `opacity` effect over white)
+  draws its interior at (162, 161, 157) where Wallpaper Engine has (164, 162, 158) and the
+  old single alpha gave (75, 74, 70), and the `blurprecise` heading of the same scene (alpha
+  1) has 99.7 percent of Wallpaper Engine's ink where it had 152. The card does the seeding
+  and the glyph blend in its own pass, not in two, because it covers the whole composite:
+  it samples the scene (`_rt_default`) at the screen position of each fragment through
+  `g_EffectModelViewProjectionMatrix`, the matrix of the scene camera over the layer's own
+  transform, and writes `mix(scene, glyph, alpha)` with the alpha raised to
+  `kTextCompositeAlphaExponent` (2; declared in `WPSceneParser.hpp` with
+  `TextCompositeReach`, the share of the colour that lands, which every test derives its
+  expectation from, so a different measurement changes that one line). A composite is only
+  for a layer whose effects the glyphs go through: with every effect off the layer is plain
+  text (the card's `g_Composite` is 0, which a script that switches an effect moves with
+  it), and a layer with a colour blend keeps the single alpha it had, since how the blend's
+  passthrough treats a seeded card is not known. The chain's effects and the passthrough
+  that ends it while a script has every effect off take a white `g_Color4`: the card carries
+  the layer's colour and alpha, and an unbound `g_Color4` is zero, which made Wallpaper
+  Engine's own `effectpassthrough` (the `genericimage3` shader, the card times `g_Color4`)
+  draw nothing, so a text layer whose scripted effects were all off was invisible with the
+  shipped assets. Colour blend mode 31 ("add") draws a text layer without a running effect
+  additively, so the passthrough of that state is drawn additively
+  (`SceneImageEffectLayer::SetIdleFinalBlend`), and the last pass is translucent while an
+  effect runs, as Wallpaper Engine forces it. An effect with no pass counts for neither the
+  margin, the composite nor the fallback (`EffectCountsForText`: one predicate for the
+  load-time padding, the composite's start and the runtime's count). `text_object_runtime_test`
+  and `metal_scene_draw_smoke`:
+  `MetalSceneDraw.AnEffectsTextIsComposedOverTheSceneBehindItAsWallpaperEngineDoesOnBothRenderers`
+  draws black captions of alpha 1, 0.65 and 0.5, with and without an effect, over a backdrop of
+  four flat colours and requires `1 - a` and `1 - TextCompositeReach(a)` of each colour on
+  both renderers (so the seed is the scene behind the card, the right way up and the right
+  way round); `.ATurnedAndScaledEffectsTextIsComposedOverTheSceneBehindItOnBothRenderers`
+  does it for a stem turned and scaled about the point the four colours meet and requires no
+  quadrant's colour in the channels another's lacks;
+  `.AnEffectsTextIsComposedOverTheSceneInTheHdrPipelineOnBothRenderers` repeats the first in
+  the 16-bit HDR pipeline; `.ATextLayerWhoseEffectsAreAllOffKeepsItsSingleAlphaOnBothRenderers`
+  requires the picture of a layer whose only effect is off to be that of one with none;
+  `.ATextLayersCompositeFollowsItsScriptedEffectsOnBothRenderers` switches the one effect on
+  from 0.5 s to 1 s and requires single alpha, composed alpha, single alpha, with the ink in
+  the same place in all three (the margin comes and goes with the effect, the ink does not
+  move), through a passthrough stand-in that multiplies by `g_Color4` as `genericimage3` does,
+  so a layer that binds none is caught; `.AnAddLayersTextIsAddedWhileItsScriptedEffectsAreOffAndComposedWhileOneIsOnOnBothRenderers`
+  is the same for mode 31 (green over red adds to (255, 128, 0), then mixes);
+  `.ATextLayerThroughShippedEffectsIsDrawnWhetherItsScriptHasThemOnOrOffOnBothRenderers` is the
+  scripted case with Wallpaper Engine's own `opacity` effect and `effectpassthrough` and skips
+  without the shipped assets; `.AnEffectsTextIsTheSamePictureOnBothRenderers` that the
+  renderers agree to 2 levels. `TextObjectRuntime.ACardKeepsItsPaddingOnlyWhileAnEffectPassIsVisible`
+  is the padding's half: Wallpaper Engine counts the visible effect passes again whenever an
+  effect's visibility changes, so the card of a text layer whose scripted effect starts off
+  has no margin as it loads, gains it while the script has the effect on and loses it again, a
+  layer whose scripted effect starts on is padded as it loads, and one with another effect that
+  is always on keeps its margin through every switch;
+  `.AnEffectWithNoPassCountsForNeitherTheMarginNorTheComposite` that an effect with no pass
+  does none of it and leaves no layout to redo as the scene loads; and
+  `.OnlyATextThroughVisibleEffectsReadsTheSceneForItsCompositeAndOnlyOnce` that the seed is
+  one pass and only for a layer that has a visible effect. The drawn checks are
+  `metal_scene_draw_smoke` cases on both renderers, not a `check_renderer.py` case. Two tests
+  encoded the single alpha and were migrated:
+  `MetalSceneDraw.TextStylingChangesPixelsWithoutRerasterizingGlyphs` expects the composed
+  alpha (32 of 255 at alpha 0.5) from the layer that draws through an effect, and
+  `TextObjectRuntime.AddColorBlendTextIsDrawnAdditivelyOntoTheSceneUnlessItGoesThroughEffects`
+  (renamed) expects the chain of an "add" layer with an effect to end in a translucent draw,
+  with the card's own pass the one that samples the screen. Not established, and the one
+  measurement against the cube: whether an effect that leaves alpha alone (a skew, a
+  transform) also gives `a` cubed. The white VHS timestamp of 3465215190 (alpha 0.65, `skew`
+  and `pulse`) has its strongest pixels 0.41 of the way from the background to white in
+  Wallpaper Engine's frame, and the black one over it (alpha 0.63, `skew`) 0.40: `a` squared
+  (0.42 and 0.40), where this composite gives 0.28, `a` cubed, and the single alpha it
+  replaced 0.68; both renderers draw the same minified, turned card, so the ratio is the
+  exponent. A model that fits every measurement made so far is a glyph pass that keeps the
+  single alpha (`kTextCompositeAlphaExponent` 1, `a` squared for any chain) and an `opacity`
+  effect that takes the layer's alpha for its own `alpha` whatever its constant says (the
+  third factor of probetext4, whose effect has `alpha` 1). That is a rule about effect passes
+  that this change does not make, so the choice stays open; the capture that settles it is
+  described under Known limitations in [renderer verification](renderer.md#known-limitations).
 - **Text effect buffers are the card** — `text_object_runtime_test`. The buffers an effect
   chain on a text layer draws into are the layer's card with the fraction cut off, at least
   4 texels, as Wallpaper Engine builds them, so the chain's `v_TexCoord` runs 0 to 1 across
@@ -1832,7 +1920,7 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   brightness 0 in an HDR scene.
 - **Text colour blend and screen anchor** —
   `TextObjectRuntime.ColorBlendModeMixesTextWithTheScreenThroughThePassthroughPass`
-  and `.AddColorBlendTextIsDrawnAdditivelyOntoTheScene` (CPU, in the gate) and
+  and `.AddColorBlendTextIsDrawnAdditivelyOntoTheSceneUnlessItGoesThroughEffects` (CPU, in the gate) and
   `MetalSceneDraw.ATextLayersColourBlendModeAppliesItsColourAndAlphaOnceOnBothRenderers`,
   which draws white text at half alpha over green on both renderers: mode 2 mixes
   half of white once (128, 159, 128), mode 31 adds half of it (128, 191, 128), and
