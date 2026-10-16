@@ -381,7 +381,12 @@ removed when the page stops.
   running WebKit responds to them, and `WebWallpaperWindow` reports `isKeyWindow` as
   true because WebKit hit-tests hover only for active windows (it still cannot
   become key, so keyboard focus is never taken). The host script cancels
-  `contextmenu` defaults so WebKit's own menu never opens.
+  `contextmenu` defaults so WebKit's own menu never opens, and every frame of every
+  web surface cancels `dragstart` (`WebWallpaperProtocol.noDragScript`): the events
+  belong to Finder, so a drag WebKit started from an image, link or selection would
+  drop a copy onto the desktop and break Finder's selection rectangle. The page's
+  own handlers still see the event, and mouse-driven dragging inside a page is
+  unaffected.
   Moves are paced per window by `WebWallpaperMoveThrottle`, because a 1000 Hz mouse
   otherwise costs the main thread a rebuilt event and a WebKit hit test per report.
   The first move after a quiet stretch is delivered at once, moves inside the interval
