@@ -4271,6 +4271,78 @@ TEST_F(MetalSceneDraw, ATextLayerIsParsedTranslatedAndDrawnByTheNativeBackend)
 
 namespace
 {
+/// A text layer over a scene cleared to green 0.25, with the colour blend passthrough
+/// of `WriteColorBlendFixture` and `object_fields` on the layer.
+std::filesystem::path WriteTextColorBlendFixture(const std::filesystem::path& root,
+                                                 std::string_view            object_fields)
+{
+    const auto project = WriteColorBlendFixture(root, "");
+    std::ofstream(root / "layout.json")
+        << R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+           R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0,0.25,0],)"
+           R"("cameraparallax":false,"orthogonalprojection":{"width":384,"height":256}},)"
+           R"("objects":[{"id":1,"name":"caption","text":"I","font":"Arial","pointsize":60,)"
+           R"("origin":[192,128,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true,)"
+        << object_fields << "}]}";
+    return project;
+}
+
+/// How many pixels of the picture are within `tolerance` of `expected` (RGB bytes).
+std::size_t PixelsNear(const std::vector<uint8_t>& rgb, std::array<int, 3> expected, int tolerance)
+{
+    std::size_t count = 0;
+    for (std::size_t i = 0; i + 2 < rgb.size(); i += 3) {
+        if (std::abs(rgb[i] - expected[0]) <= tolerance &&
+            std::abs(rgb[i + 1] - expected[1]) <= tolerance &&
+            std::abs(rgb[i + 2] - expected[2]) <= tolerance) {
+            ++count;
+        }
+    }
+    return count;
+}
+} // namespace
+
+TEST_F(MetalSceneDraw, ATextLayersColourBlendModeAppliesItsColourAndAlphaOnceOnBothRenderers)
+{
+    // A text layer shares an image layer's colour blend: the text card is drawn
+    // with its colour and alpha, then the passthrough mixes it with the screen and
+    // is handed a white `g_Color4`. White text at half alpha mixes half of white
+    // over green 0.25; taking the alpha a second time would mix a quarter. Mode 31
+    // adds half of white to the scene instead, with no screen read.
+    struct Mode {
+        const char*          fields;
+        std::array<int, 3>   expected;
+    };
+    for (const auto& mode : { Mode { R"("colorBlendMode":2,"alpha":0.5)", { 128, 159, 128 } },
+                              Mode { R"("colorBlendMode":31,"alpha":0.5)", { 128, 191, 128 } } }) {
+        SCOPED_TRACE(mode.fields);
+        std::map<bool, RendererPicture> pictures;
+        for (const bool native : { false, true }) {
+            const std::string name = std::string(native ? "text-blend-native-" : "text-blend-compat-") +
+                                     std::to_string(mode.expected[1]);
+            const auto project = WriteTextColorBlendFixture(root_ / name, mode.fields);
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            if (native) {
+                const auto selection = SelectSceneBackend(*loaded.scene);
+                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            }
+            pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+            ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+        }
+        const auto& rgb = pictures[true].rgb;
+        ASSERT_EQ(rgb.size(), 384u * 256u * 3u);
+        // The stem of the "I", well inside the glyph, takes the blended colour.
+        EXPECT_GT(PixelsNear(rgb, mode.expected, 3), 200u)
+            << "the text was not blended once with the screen behind it";
+        EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
+            << "the native renderer blended the text differently from the compatibility renderer";
+    }
+}
+
+namespace
+{
 /// A 16 by 12 layer with a copy effect, shown 16 times larger: its target holds
 /// one texel to every 16 pixels of the picture, so how the target is sampled is
 /// the whole of what separates a smooth gradient from a staircase.

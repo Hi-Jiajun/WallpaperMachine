@@ -4001,4 +4001,189 @@ TEST(TextObjectRuntime, PreparedTextWakesWhoeverOwnsTheFrameClock) {
     runtime.SetContentWakeHandler({});
 }
 
+namespace
+{
+// A parsed scene of text layers with the files it needs. The file system, sound
+// manager and parser outlive the scene.
+struct TextSceneFixture {
+    fs::VFS                vfs;
+    audio::SoundManager    sound { audio::SoundManager::OutputBackend::Null };
+    WPSceneParser          parser;
+    ProjectProperties      properties;
+    std::shared_ptr<Scene> scene;
+
+    TextSceneFixture(const std::string& objects, std::string scene_id,
+                     std::map<std::string, std::string> files = {},
+                     ProjectProperties initial_properties = {},
+                     std::string scene_general_extra = {})
+        : properties(std::move(initial_properties)) {
+        EXPECT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+        auto document = MinimalSceneObjects(objects);
+        if (! scene_general_extra.empty()) {
+            // Extra keys of the scene's `general` block, written as `"key":value,`.
+            const auto at = document.find("\"general\": {");
+            document.insert(at + std::string("\"general\": {").size(), scene_general_extra);
+        }
+        scene = parser.Parse(SceneParseRequest { .scene_id = std::move(scene_id),
+                                                 .project_properties = &properties },
+                             document, vfs, sound);
+    }
+
+    TextLayerState State(std::string_view name) const {
+        if (scene == nullptr || scene->runtime == nullptr) return {};
+        return scene->runtime->NodeTextState(name).value_or(TextLayerState {});
+    }
+};
+
+// What a colour blend needs: a passthrough material and a shader that samples
+// the screen when a blend mode is set.
+std::map<std::string, std::string> ColorBlendAssets() {
+    const std::string vert = R"(attribute vec3 a_Position;
+attribute vec2 a_TexCoord;
+varying vec2 v_TexCoord;
+void main() {
+  gl_Position = vec4(a_Position, 1.0);
+  v_TexCoord = a_TexCoord;
+}
+)";
+    const std::string frag = R"(uniform sampler2D g_Texture0;
+#if BLENDMODE
+uniform sampler2D g_Texture4; // {"hidden":true,"default":"_rt_FullFrameBuffer"}
+#endif
+uniform vec4 g_Color4;
+varying vec2 v_TexCoord;
+void main() {
+  gl_FragColor = texture(g_Texture0, v_TexCoord) * g_Color4;
+#if BLENDMODE
+  gl_FragColor.rgb += texture(g_Texture4, v_TexCoord).rgb;
+#endif
+}
+)";
+    return {
+        // A stand-in for the engine's passthrough material: its own shader name
+        // and its own order and values, with the one property the parser relies on,
+        // that the material is found at this path and takes a `BLENDMODE` combo.
+        { "/materials/util/effectpassthrough.json",
+          R"({"passes":[{"cullmode":"nocull","shader":"blend_probe","blending":"translucent",)"
+          R"("depthwrite":"disabled","depthtest":"disabled"}]})" },
+        { "/shaders/blend_probe.vert", vert },
+        { "/shaders/blend_probe.frag", frag },
+        { "/effects/tint/effect.json",
+          R"({"name":"tint","passes":[{"material":"materials/effects/tint.json"}]})" },
+        { "/materials/effects/tint.json",
+          R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled",)"
+          R"("depthwrite":"disabled","shader":"effects/tint","textures":[null]}]})" },
+        { "/shaders/effects/tint.vert", vert },
+        { "/shaders/effects/tint.frag", frag },
+    };
+}
+
+std::vector<const vulkan::CustomShaderPass*> CustomPasses(const rg::RenderGraph& graph) {
+    std::vector<const vulkan::CustomShaderPass*> passes;
+    for (const auto id : graph.topologicalOrder()) {
+        if (const auto* pass = dynamic_cast<const vulkan::CustomShaderPass*>(graph.getPass(id))) {
+            passes.push_back(pass);
+        }
+    }
+    return passes;
+}
+
+bool SamplesScreen(const vulkan::CustomShaderPass& pass) {
+    const auto& textures = pass.desc().textures;
+    return std::any_of(textures.begin(), textures.end(), [](const std::string& texture) {
+        return texture.starts_with(SpecTex_Default);
+    });
+}
+} // namespace
+
+TEST(TextObjectRuntime, ColorBlendModeMixesTextWithTheScreenThroughThePassthroughPass) {
+    const std::string layer = R"([{"id":1,"name":"caption","text":"hello","font":"Arial",
+        "pointsize":20,"colorBlendMode":12,"alpha":0.5,"visible":true}])";
+    TextSceneFixture blended(layer, "text-color-blend", ColorBlendAssets());
+    ASSERT_NE(blended.scene, nullptr);
+    auto* node = FindRootChild(*blended.scene, "caption");
+    ASSERT_NE(node, nullptr);
+
+    // The text is drawn into a layer target first; the passthrough pass is the
+    // layer's last effect and the only pass that reads the screen.
+    ASSERT_FALSE(node->Camera().empty());
+    auto* layers = blended.scene->cameras.at(node->Camera()).get();
+    ASSERT_TRUE(layers->HasImgEffect());
+    auto* effect_layer = layers->GetImgEffect().get();
+    ASSERT_EQ(effect_layer->EffectCount(), 1u);
+    auto* blend_node = effect_layer->GetEffect(0)->nodes.front().sceneNode.get();
+    ASSERT_NE(blend_node, nullptr);
+    ASSERT_NE(blend_node->Mesh(), nullptr);
+    // The layer's own colour and alpha are already in what it blends.
+    const auto& values = blend_node->Mesh()->Material()->customShader.constValues;
+    ASSERT_TRUE(values.contains("g_Color4"));
+    for (std::size_t lane = 0; lane < 4; ++lane) EXPECT_FLOAT_EQ(values.at("g_Color4")[lane], 1.0f);
+
+    // The chain has nothing to spread into, so its buffers are the card, not the
+    // room an authored effect over text is given.
+    const auto* ping_pong = blended.scene->FindRenderTarget(
+        std::string(WE_EFFECT_PPONG_PREFIX_A.data()) + node->Camera());
+    ASSERT_NE(ping_pong, nullptr);
+    const auto card = TextLayerRasterSize(blended.State("caption"));
+    EXPECT_LE(ping_pong->width, static_cast<int32_t>(std::ceil(card.x())) + 1);
+    EXPECT_LE(ping_pong->height, static_cast<int32_t>(std::ceil(card.y())) + 1);
+
+    const auto graph = sceneToRenderGraph(*blended.scene);
+    ASSERT_NE(graph, nullptr);
+    std::size_t screen_readers = 0;
+    for (const auto* pass : CustomPasses(*graph)) {
+        if (! SamplesScreen(*pass)) continue;
+        ++screen_readers;
+        // It is the pass that draws onto the scene, as an image layer's is, with
+        // the layer's final blend.
+        EXPECT_EQ(pass->desc().output, SpecTex_Default);
+        const auto* material = pass->desc().node->Mesh()->MaterialForSlot(pass->desc().material_slot);
+        ASSERT_NE(material, nullptr);
+        EXPECT_EQ(material->blenmode, BlendMode::Translucent);
+    }
+    EXPECT_EQ(screen_readers, 1u);
+
+    // Mode "none" keeps the plain translucent card and no effect chain.
+    TextSceneFixture plain(R"([{"id":1,"name":"caption","text":"hello","font":"Arial",
+        "pointsize":20,"visible":true}])", "text-no-blend", ColorBlendAssets());
+    ASSERT_NE(plain.scene, nullptr);
+    auto* plain_node = FindRootChild(*plain.scene, "caption");
+    ASSERT_NE(plain_node, nullptr);
+    EXPECT_TRUE(plain_node->Camera().empty());
+    EXPECT_EQ(plain_node->Mesh()->Material()->blenmode, BlendMode::Translucent);
+}
+
+TEST(TextObjectRuntime, AddColorBlendTextIsDrawnAdditivelyOntoTheScene) {
+    const auto parse = [](const std::string& effects) {
+        return std::make_unique<TextSceneFixture>(
+            R"([{"id":1,"name":"caption","text":"hello","font":"Arial","pointsize":20,
+                 "colorBlendMode":31,"visible":true)" + effects + "}]",
+            "text-add-blend", ColorBlendAssets());
+    };
+
+    // Without effects the text card itself adds; nothing samples the screen.
+    auto bare = parse("");
+    ASSERT_NE(bare->scene, nullptr);
+    auto* node = FindRootChild(*bare->scene, "caption");
+    ASSERT_NE(node, nullptr);
+    EXPECT_TRUE(node->Camera().empty());
+    EXPECT_EQ(node->Mesh()->Material()->blenmode, BlendMode::Additive);
+
+    // With an effect the chain ends in an additive draw onto the scene.
+    auto with_effect = parse(R"(,"effects":[{"file":"effects/tint/effect.json","id":2,"visible":true}])");
+    ASSERT_NE(with_effect->scene, nullptr);
+    const auto graph = sceneToRenderGraph(*with_effect->scene);
+    ASSERT_NE(graph, nullptr);
+    std::size_t onto_scene = 0;
+    for (const auto* pass : CustomPasses(*graph)) {
+        EXPECT_FALSE(SamplesScreen(*pass));
+        if (pass->desc().output != SpecTex_Default) continue;
+        ++onto_scene;
+        const auto* material = pass->desc().node->Mesh()->MaterialForSlot(pass->desc().material_slot);
+        ASSERT_NE(material, nullptr);
+        EXPECT_EQ(material->blenmode, BlendMode::Additive);
+    }
+    EXPECT_EQ(onto_scene, 1u);
+}
+
 } // namespace wallpaper

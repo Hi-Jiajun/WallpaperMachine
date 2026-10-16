@@ -960,6 +960,13 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   and `.EllipsisFitsTheLastVisibleRowAndLimitFlagsRemainIndependent` compare the
   rendered pixels and layout bounds, and FreeType and fallback fonts share the
   same wrapping and truncation rules.
+- **Text colour blend** —
+  `TextObjectRuntime.ColorBlendModeMixesTextWithTheScreenThroughThePassthroughPass`
+  and `.AddColorBlendTextIsDrawnAdditivelyOntoTheScene` (CPU, in the gate) and
+  `MetalSceneDraw.ATextLayersColourBlendModeAppliesItsColourAndAlphaOnceOnBothRenderers`,
+  which draws white text at half alpha over green on both renderers: mode 2 mixes
+  half of white once (128, 159, 128), mode 31 adds half of it (128, 191, 128), and
+  the pictures are identical.
 - **Cache metadata and corruption** — `render_target_lifetime_test`,
   `text_object_runtime_test` and `shader_cache_metadata_test` cover clock/text
   corruption, persistent shader-cache metadata, cache invalidation after include

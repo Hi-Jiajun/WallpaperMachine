@@ -1764,11 +1764,15 @@ std::array<int32_t, 2> ResolveTextRenderExtent(Eigen::Vector2f render_size,
 
 Eigen::Vector2f ResolveTextEffectCapacity(const wpscene::WPTextObject& obj,
                                           const ParseContext& context,
-                                          Eigen::Vector2f render_size) {
+                                          Eigen::Vector2f render_size, bool author_effects) {
     constexpr float kExplicitCapacityScale = 4.0f;
     constexpr float kImplicitCapacityScale = 2.0f;
     constexpr float kMaxRuntimeTextEffectSize = 4096.0f;
     const Eigen::Vector2f max_capacity(kMaxRuntimeTextEffectSize, kMaxRuntimeTextEffectSize);
+    // A layer whose only step is the colour blend's passthrough draws its card and
+    // nothing wider, so its buffers are the card's size, not room for an effect
+    // to spread into.
+    if (! author_effects) return render_size.cwiseMin(max_capacity);
     const bool has_explicit_size = obj.size[0] > 0.0f && obj.size[1] > 0.0f;
     Eigen::Vector2f capacity = render_size.cwiseMin(max_capacity);
     if (has_explicit_size) {
@@ -1883,7 +1887,8 @@ void AttachEffectsToNode(ParseContext& context,
                          const ShaderValueMap& base_const_svs,
                          std::array<float, 2> parallax_depth,
                          bool copy_background,
-                         bool preserve_effect_fbo_resolution);
+                         bool preserve_effect_fbo_resolution,
+                         const wpscene::WPImageEffect* screen_blend_effect = nullptr);
 
 TextLayerState ResolveTextLayerState(const wpscene::WPTextObject& obj, fs::VFS& vfs,
                                      std::string text, std::string font_key,
@@ -1982,6 +1987,20 @@ void ResolveUserEffectVisibility(ParseContext& context,
 void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
     const auto runtime_name = TextRuntimeName(context, obj);
     ResolveUserEffectVisibility(context, obj.effects, runtime_name);
+    // A text layer shares an image layer's colour blend: the text card is drawn
+    // first, and the passthrough pass appended after any effects mixes it with
+    // the screen. Mode 31 ("add") is drawn additively straight onto the scene.
+    const bool additive_color_blend = obj.colorBlendMode == kAdditiveColorBlendMode;
+    std::optional<std::size_t> color_blend_effect;
+    if (obj.colorBlendMode != 0 && ! additive_color_blend) {
+        if (auto effect = MakeColorBlendEffect(*context.vfs, obj.colorBlendMode)) {
+            obj.effects.push_back(std::move(*effect));
+            color_blend_effect = obj.effects.size() - 1;
+        } else {
+            LOG_ERROR("failed to parse the colour blend passthrough material for '%s'",
+                      obj.name.c_str());
+        }
+    }
     auto       text         = JsonStringOrObjectValue(obj.text, "text");
     const auto font_key     = JsonStringOrObjectValue(obj.font, {});
     const auto anchor       = TextAnchorForObject(obj);
@@ -2009,7 +2028,13 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
     auto       raster_size         = TextLayerRasterSize(text_state);
     auto       render_frame        = TextLayerRenderFrameForRasterSize(text_state, raster_size);
     auto       effect_target_size =
-        ResolveTextEffectCapacity(obj, context, layout_size.cwiseMax(raster_size));
+        ResolveTextEffectCapacity(obj, context, layout_size.cwiseMax(raster_size),
+                                  std::any_of(obj.effects.begin(), obj.effects.end(),
+                                              [&](const wpscene::WPImageEffect& effect) {
+                                                  return effect.visible &&
+                                                         (! color_blend_effect.has_value() ||
+                                                          &effect != &obj.effects[*color_blend_effect]);
+                                              }));
     auto       effect_target_frame =
         TextLayerRenderFrameForCapacity(text_state, raster_size, effect_target_size);
     auto       effect_render_extent = ResolveTextRenderExtent(effect_target_frame.size, context);
@@ -2053,7 +2078,9 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         material.name                = "text";
         material.textures            = { texture_name };
         material.defines             = { "g_Texture0" };
-        material.blenmode = obj.effects.empty() ? BlendMode::Translucent : BlendMode::Disable;
+        material.blenmode = ! obj.effects.empty() ? BlendMode::Disable
+                            : additive_color_blend ? BlendMode::Additive
+                                                   : BlendMode::Translucent;
         material.customShader.shader =
             BuildTextSceneShader(*context.vfs, context.scene->scene_id, texture_name);
         material.customShader.constValues["g_Color"] = obj.color;
@@ -2133,11 +2160,13 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
                                 runtime_name,
                                 effect_render_extent,
                                 effect_target_frame.center,
-                                BlendMode::Translucent,
+                                additive_color_blend ? BlendMode::Additive : BlendMode::Translucent,
                                 context.global_base_uniforms,
                                 { obj.parallaxDepth[0], obj.parallaxDepth[1] },
                                 /* copy_background */ true,
-                                /* preserve_effect_fbo_resolution */ true);
+                                /* preserve_effect_fbo_resolution */ true,
+                                color_blend_effect.has_value() ? &obj.effects[*color_blend_effect]
+                                                               : nullptr);
         }
         const auto& card = obj.effects.empty() ? render_frame : effect_final_frame;
         context.text_cards[obj.id] = card;
@@ -2449,7 +2478,8 @@ void AttachEffectsToNode(ParseContext& context,
                          const ShaderValueMap& base_const_svs,
                          std::array<float, 2> parallax_depth,
                          bool copy_background,
-                         bool preserve_effect_fbo_resolution) {
+                         bool preserve_effect_fbo_resolution,
+                         const wpscene::WPImageEffect* screen_blend_effect) {
     if (effects.empty()) return;
 
     auto& scene    = *context.scene;
@@ -2579,6 +2609,11 @@ void AttachEffectsToNode(ParseContext& context,
                 ShaderValue::fromMatrix(Eigen::Matrix4f::Identity());
             shader_info.baseConstSvs["g_EffectTextureProjectionMatrixInverse"] =
                 ShaderValue::fromMatrix(Eigen::Matrix4f::Identity());
+            // The pass that blends the layer onto the screen draws it with a
+            // white colour: the layer's own colour and alpha are in what it blends.
+            if (&effect == screen_blend_effect) {
+                shader_info.baseConstSvs["g_Color4"] = std::array<float, 4> { 1.0f, 1.0f, 1.0f, 1.0f };
+            }
 
             if (! LoadMaterial(vfs,
                                wpmat,

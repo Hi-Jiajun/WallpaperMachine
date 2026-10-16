@@ -158,6 +158,9 @@ uploaded again; a script that produces it still runs on its own schedule every
 frame. Effect and video output of Native Metal has not been compared against real
 wallpapers.
 
+A text layer's colour blend mode works as an image layer's
+does, through the passthrough pass or, for mode 31, additively onto the scene.
+
 An image layer's own render targets, the pair its effects run through and the
 composite another layer reads, are point-sampled when the layer says
 `nointerpolation` or its primary texture's header does (read from the texture's
