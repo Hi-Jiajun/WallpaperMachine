@@ -9,6 +9,29 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-14 — Send performance data, sharing and the one-time prompts
+
+Opt-in telemetry (docs/features/telemetry.md), share buttons, and a prompt store that schedules the support, star and performance data prompts. The website endpoint lives in the website repository and is not deployed.
+
+- `python3 scripts/test.py` — exit 0; 2730 tests: 2685 passed, 0 failed, 45 skipped (opt-in layers)
+- `python3 scripts/test.py --only TelemetrySamplerTests --only TelemetryServiceTests --only TelemetryClientTests --only SupportPromptStoreTests --only WebPanelSharingTests --only WebPanelSupportPromptTests` — 45 passed while iterating
+- First full run failed one assertion: ControlPanelShellTests counted 3 welcome preference controls, now 4 with the new switch; updated, class passes 27/27
+- `scripts/tests/test_panel_localization.py` — 6 passed; 17 new panel keys and 3 native strings in every shipped language
+- webui-bridge-reviewer: no CSP, escaping, origin or URL findings; two prompt-flow bugs it found are fixed and tested
+- Website: `pnpm typecheck` passed; local `wrangler dev` end to end (store, row dropping, 400/413/429, delete, 180-day cron) passed; not deployed, D1 database not created
+- Not verified: energy cost of the 60 s frame window (T9 in power-benchmark.md, needs an authorized desktop run); share menu placement and the inspector row layout with the new button (no desktop run); live upload to production
+- App not rebuilt (no Release build)
+
+## 2026-10-14 — Reduced quality under heat and live property edits: integrated gate
+
+The reduced-quality request (heat, Low Power Mode, low battery) and live property edits (preview window, optional desktop, live slider and colour drags), verified together on top of 51975a7f.
+
+- `python3 scripts/test.py` — exit 0 on the first run; Python 316 tests OK; Swift 2656 passed, 0 failed, 45 skipped of 2701 (media, asset and live-network opt-ins)
+- `python3 scripts/check_rust.py` — exit 0; core 305, bridge 596, core-integration 16, shader 551 passed; desktop window tests and corpus cases skipped
+- `python3 scripts/check_renderer.py` — exit 0; 753 passed, 6 skipped (local-asset cases), 0 failed; project_property_preview_test 23 passed; generated scenes 12 of 12 pixel-equal pooled versus isolated
+- `python3 scripts/build.py --renderer-only` — exit 0; regenerated bindings identical to the committed ones
+- Not verified: no desktop run. Frame rate and render scale following heat, Low Power Mode or low battery on a real Mac, energy saved by Reduced quality, a web page at a fast display's full refresh reloading when Reduced quality starts or ends, and the feel of live property edits on a running wallpaper
+
 ## 2026-10-13 — Follow sliders and colours while they are dragged
 
 A property's slider or colour picker now shows its value in the preview window and, with the Settings switch on, on the displays while the person is still dragging (propertyPreview, at most one step every 100 ms, one in flight), through a pending list on the bridge's wallpaper_preview and preview_wallpaper_properties; releasing saves through the normal property edit. Lane worktree, targeted runs only, not the bare full gate.
