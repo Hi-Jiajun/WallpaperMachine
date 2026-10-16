@@ -3209,7 +3209,7 @@ TEST(ShaderValueUpdaterCompat, CameraParallaxFollowsTheCursorAndDepthNotThePosit
     EXPECT_LT(displacement(*nested, 0.5f).norm(), 1e-3f) << "a nested layer left its place";
 
     updater.MouseInput(1.0, 0.0);
-    scene.frameTime = 0.5; // the whole delay: the smoothed cursor has arrived
+    scene.frameTime = 10.0; // long enough for the eased cursor to arrive
     updater.FrameBegin();
     const Eigen::Vector2f moved = displacement(*centred, 0.5f);
     EXPECT_GT(moved.norm(), 1.0f) << "a cursor away from the centre must move the layer";
@@ -3279,6 +3279,49 @@ TEST(ShaderValueUpdaterCompat, ZeroParallaxDelayFollowsTheCursorAtOnce) {
     const auto model = node->ModelTrans();
     EXPECT_GT(std::abs(values["g_ModelMatrix"][12] - static_cast<float>(model(0, 3))), 1.0f)
         << "an off-centre cursor must still move a parallax layer";
+}
+
+// Wallpaper Engine eases only parallax: each frame it closes
+// (1 - delay / 3) * 10 * frametime of the way to the cursor, while shaders read
+// the cursor itself. A delay of 1.5 at 60 FPS closes a twelfth per frame.
+TEST(ShaderValueUpdaterCompat, ParallaxEasesAsWallpaperEngineWhileShadersSeeTheCursor) {
+    Scene scene;
+    auto  camera       = std::make_shared<SceneCamera>(1920, 1080, -1.0f, 1.0f);
+    scene.activeCamera = camera.get();
+    auto node          = std::make_shared<SceneNode>();
+    auto mesh          = std::make_shared<SceneMesh>();
+    mesh->AddMaterial(SceneMaterial {});
+    node->AddMesh(mesh);
+    WPShaderValueUpdater updater(&scene);
+    updater.InitUniforms(node.get(), [](std::string_view name) {
+        return name == "g_PointerPosition" || name == "g_ParallaxPosition";
+    });
+    updater.SetCameraParallax({ .enable = true, .amount = 1.0f, .delay = 1.5f,
+                                .mouseinfluence = 1.0f });
+    scene.frameTime = 1.0 / 60.0;
+    const auto frame = [&] {
+        updater.FrameBegin();
+        std::map<std::string, ShaderValue, std::less<>> values;
+        sprite_map_t                                    sprites;
+        updater.UpdateUniforms(node.get(), sprites,
+                               [&](std::string_view name, const ShaderValue& v) {
+                                   values[std::string(name)] = v;
+                               });
+        return values;
+    };
+    updater.MouseInput(1.0, 0.5);
+    auto values = frame();
+    EXPECT_FLOAT_EQ(values["g_PointerPosition"][0], 1.0f) << "shaders see the cursor at once";
+    const float step = (1.0f - 1.5f / 3.0f) * 10.0f / 60.0f;
+    EXPECT_NEAR(values["g_ParallaxPosition"][0], 0.5f + 0.5f * step, 1e-5f);
+    values = frame();
+    EXPECT_NEAR(values["g_ParallaxPosition"][0],
+                1.0f - 0.5f * (1.0f - step) * (1.0f - step), 1e-5f);
+    // A cursor outside the window is followed only to its edge.
+    updater.MouseInput(3.0, 0.5);
+    scene.frameTime = 10.0;
+    values = frame();
+    EXPECT_FLOAT_EQ(values["g_ParallaxPosition"][0], 1.0f);
 }
 
 // Camera parallax moves a layer through its model matrix, which neither the
@@ -3502,8 +3545,15 @@ TEST(ShaderValueUpdaterCompat, SimulationEffectsSeeFrameTimeCursorTravelAndButto
     EXPECT_FLOAT_EQ(values["g_PointerPositionLast"][1], 0.75f);
     EXPECT_FLOAT_EQ(values["g_PointerState"][0], 1.0f);
     EXPECT_FLOAT_EQ(values["g_PointerState"][1], 1.0f);
-    EXPECT_FLOAT_EQ(values["g_PointerState"][2], 1.0f) << "the held button pushes the simulation";
+    EXPECT_FLOAT_EQ(values["g_PointerState"][2], 1.0f) << "the press pushes the simulation";
     EXPECT_FLOAT_EQ(values["g_PointerState"][3], 0.0f);
+
+    // Still held a frame later: held, but no new push, as in Wallpaper Engine.
+    updater.MouseButtonsInput(1u);
+    values = frame();
+    EXPECT_FLOAT_EQ(values["g_PointerState"][0], 1.0f);
+    EXPECT_FLOAT_EQ(values["g_PointerState"][1], 1.0f);
+    EXPECT_FLOAT_EQ(values["g_PointerState"][2], 0.0f) << "a held button pushed again";
 
     updater.MouseButtonsInput(2u);
     values = frame();
@@ -3575,6 +3625,63 @@ TEST(ShaderValueUpdaterCompat, EffectModelMatrixAndInverseProjectionMatchTheEffe
                     .isApprox(mvp, 1e-5));
     EXPECT_TRUE((matrix("g_EffectModelViewProjectionMatrixInverse") * mvp)
                     .isApprox(Eigen::Matrix4d::Identity(), 1e-4));
+}
+
+// A pointer or direction effect maps the screen back into the layer's own
+// texture space through the inverse of the layer card's projection, wherever the
+// card sits: moved, scaled, turned or flipped, on an intermediate pass and on
+// the final one alike.
+TEST(ShaderValueUpdaterCompat, EffectTextureProjectionMapsTheLayerCardOntoTheScreen) {
+    Scene scene;
+    auto  camera            = std::make_shared<SceneCamera>(1920, 1080, -1.0f, 1.0f);
+    scene.activeCamera      = camera.get();
+    scene.cameras["effect"] = std::make_shared<SceneCamera>(2, 2, -1.0f, 1.0f);
+    SceneNode owner;
+    owner.SetScale(Eigen::Vector3f(-0.8f, 0.6f, 1.0f));
+    owner.SetRotation(Eigen::Vector3f(0.0f, 0.0f, 0.5f));
+    owner.SetTranslate(Eigen::Vector3f(100.0f, 200.0f, 0.0f));
+    owner.UpdateTrans();
+    for (const char* pass_camera : { "effect", "" }) {
+        SCOPED_TRACE(pass_camera);
+        auto node = std::make_shared<SceneNode>();
+        auto mesh = std::make_shared<SceneMesh>();
+        mesh->AddMaterial(SceneMaterial {});
+        node->AddMesh(mesh);
+        node->SetCamera(pass_camera);
+        WPShaderValueData data;
+        data.effect_owner  = &owner;
+        data.effect_extent = Eigen::Vector2f(280, 300);
+        WPShaderValueUpdater updater(&scene);
+        updater.SetNodeData(node.get(), data);
+        updater.InitUniforms(node.get(), [](std::string_view name) {
+            return name == "g_EffectTextureProjectionMatrix" ||
+                   name == "g_EffectTextureProjectionMatrixInverse";
+        });
+        sprite_map_t                                 sprites;
+        std::unordered_map<std::string, ShaderValue> values;
+        updater.UpdateUniforms(node.get(), sprites,
+                               [&](std::string_view name, const ShaderValue& v) {
+                                   values[std::string(name)] = v;
+                               });
+        ASSERT_TRUE(values.contains("g_EffectTextureProjectionMatrix"));
+        ASSERT_TRUE(values.contains("g_EffectTextureProjectionMatrixInverse"));
+        const auto matrix = [&](std::string_view name) {
+            Eigen::Matrix4d m;
+            for (int i = 0; i < 16; ++i) m.data()[i] = values.at(std::string(name))[i];
+            return m;
+        };
+        // The card's (1, 1) corner, in its own half-extent space, lands where
+        // the layer's transform puts its corner on the screen.
+        const Eigen::Vector4d card_corner =
+            owner.ModelTrans() * Eigen::Vector4d(140.0, 150.0, 0.0, 1.0);
+        const Eigen::Vector4d expected = camera->GetViewProjectionMatrix() * card_corner;
+        const Eigen::Vector4d mapped =
+            matrix("g_EffectTextureProjectionMatrix") * Eigen::Vector4d(1, 1, 0, 1);
+        EXPECT_TRUE(mapped.isApprox(expected, 1e-5));
+        EXPECT_TRUE((matrix("g_EffectTextureProjectionMatrixInverse") *
+                     matrix("g_EffectTextureProjectionMatrix"))
+                        .isApprox(Eigen::Matrix4d::Identity(), 1e-4));
+    }
 }
 
 TEST(ScriptRuntimeCompat, CompiledExportsIgnoreSourceTextAndRecognizePlainFunctions) {

@@ -181,22 +181,22 @@ uint64_t HashFloats(uint64_t hash, const float* values, std::size_t count) {
 void WPShaderValueUpdater::FrameBegin() {
     for (auto& group : m_puppetAttachments) UpdatePuppetAttachments(group);
     if (const auto day_time = LocalTimeOfDay(m_wall_clock())) m_dayTime = *day_time;
-    // A zero delay (authored as `cameraparallaxdelay: 0`) means no smoothing:
-    // the cursor is followed at once, the limit of the ramp below. Dividing by
-    // it made `t` NaN, which latched into the smoothed cursor and, through
-    // parallax, into every layer's model matrix, so only the clear colour drew.
-    double t = 1.0;
+    // Shaders see the cursor itself; only parallax eases towards it, as in
+    // Wallpaper Engine: each frame it closes (1 - delay / 3) * 10 * frametime of
+    // the remaining way, clamped to [0, 1], so a delay of zero (authored as
+    // `cameraparallaxdelay: 0`) follows the cursor at once.
+    m_mousePosLast = m_mousePos;
+    m_mousePos     = m_mousePosInput;
+    const std::array<float, 2> target { std::clamp(m_mousePosInput[0], 0.0f, 1.0f),
+                                        std::clamp(m_mousePosInput[1], 0.0f, 1.0f) };
+    double step = 1.0;
     if (m_parallax.delay > 0.0f) {
-        double new_time    = m_mouseDelayedTime + m_scene->frameTime;
-        new_time           = new_time > m_parallax.delay ? m_parallax.delay : new_time;
-        m_mouseDelayedTime = new_time;
-        t                  = new_time / m_parallax.delay;
-    } else {
-        m_mouseDelayedTime = 0.0;
+        step = std::clamp((1.0 - m_parallax.delay / 3.0) * 10.0 * m_scene->frameTime, 0.0, 1.0);
     }
-    m_mousePosLast     = m_mousePos;
-    m_mousePos         = std::array { (float)algorism::lerp(t, m_mousePos[0], m_mousePosInput[0]),
-                              (float)algorism::lerp(t, m_mousePos[1], m_mousePosInput[1]) };
+    for (std::size_t axis = 0; axis < 2; ++axis) {
+        m_parallaxPos[axis] = static_cast<float>(
+            algorism::lerp(step, m_parallaxPos[axis], target[axis]));
+    }
 }
 
 void WPShaderValueUpdater::FrameEnd() {}
@@ -301,17 +301,8 @@ void WPShaderValueUpdater::UpdatePuppetAttachments(PuppetAttachmentGroup& group)
 }
 
 void WPShaderValueUpdater::MouseInput(double x, double y) {
-    using namespace std::chrono;
-
-    auto   now_time = steady_clock::now();
-    double new_time = m_mouseDelayedTime -
-                      duration_cast<duration<double>>(now_time - m_last_mouse_input_time).count();
-    m_mouseDelayedTime = new_time < 0.0f ? 0.0f : new_time;
-
     m_mousePosInput[0] = (float)x;
     m_mousePosInput[1] = (float)y;
-
-    m_last_mouse_input_time = now_time;
 }
 
 void WPShaderValueUpdater::InitUniforms(SceneNode* pNode, const ExistsUniformOp& existsOp) {
@@ -427,7 +418,7 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, uint32_t material_sl
     }
     bool hasNodeData = nodeData != nullptr;
     if (info.has_layer_model || info.has_effect_mvp || info.has_effect_model ||
-        info.has_effect_mvpi) {
+        info.has_effect_mvpi || info.has_ETVP || info.has_ETVPI) {
         auto* owner = hasNodeData && nodeData->effect_owner != nullptr
             ? nodeData->effect_owner : pNode;
         owner->UpdateTrans();
@@ -445,6 +436,24 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, uint32_t material_sl
         // Where the effect quad lands in the scene, for lit effects that
         // shade by world position.
         if (info.has_effect_model) updateOp(G_EFFECTMODEL, ShaderValue::fromMatrix(effect_model));
+        // An effect pass maps the layer's own texture space onto the screen
+        // with the layer card's projection: its view-projection, its model and
+        // half its card size, intermediate and final passes alike. A pointer or
+        // direction effect undoes it to land in the layer's texture wherever the
+        // layer sits, turned, scaled or flipped. Outside an effect chain the
+        // parser's identity stays.
+        if ((info.has_ETVP || info.has_ETVPI) && hasNodeData && nodeData->effect_owner != nullptr &&
+            m_scene->activeCamera != nullptr) {
+            const Matrix4d texture_projection =
+                m_scene->activeCamera->GetViewProjectionMatrix() * layer_model *
+                Affine3d(Scaling(double(nodeData->effect_extent.x()) * 0.5,
+                                 double(nodeData->effect_extent.y()) * 0.5, 1.0))
+                    .matrix();
+            if (info.has_ETVP) updateOp(G_ETVP, ShaderValue::fromMatrix(texture_projection));
+            if (info.has_ETVPI) {
+                updateOp(G_ETVPI, ShaderValue::fromMatrix(Matrix4d(texture_projection.inverse())));
+            }
+        }
         if ((info.has_effect_mvp || info.has_effect_mvpi) && m_scene->activeCamera != nullptr) {
             const Matrix4d effect_mvp =
                 m_scene->activeCamera->GetViewProjectionMatrix() * effect_model;
@@ -489,8 +498,6 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, uint32_t material_sl
     bool reqAM    = info.has_AM;
     bool reqMVP   = info.has_MVP;
     bool reqMVPI  = info.has_MVPI;
-    bool reqETVP  = info.has_ETVP;
-    bool reqETVPI = info.has_ETVPI;
 
     // composelayer.vert draws a full local target using UVs, but its MVP is
     // used to sample the *screen* behind the layer. The effect camera and
@@ -539,7 +546,7 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, uint32_t material_sl
                 Vector2f ortho { (float)m_scene->ortho[0], (float)m_scene->ortho[1] };
                 // flip mouse y axis
                 Vector2f mouseVec =
-                    Scaling(1.0f, -1.0f) * (Vector2f { 0.5f, 0.5f } - Vector2f(&m_mousePos[0]));
+                    Scaling(1.0f, -1.0f) * (Vector2f { 0.5f, 0.5f } - Vector2f(&m_parallaxPos[0]));
                 mouseVec = mouseVec.cwiseProduct(ortho) * m_parallax.mouseinfluence;
                 // In a 2D scene parallax moves a layer by the cursor's offset
                 // from the centre of the view, scaled by the layer's depth.
@@ -584,16 +591,6 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, uint32_t material_sl
             Matrix4d mvpTrans = viewProTrans * modelTrans;
             updateOp(G_MVP, ShaderValue::fromMatrix(mvpTrans));
             if (reqMVPI) updateOp(G_MVPI, ShaderValue::fromMatrix(mvpTrans.inverse()));
-        }
-        if (reqETVP || reqETVPI) {
-            /*
-            Vector3d nodePos = pNode->Translate().cast<double>();
-            nodePos.z()      = 1.0f;
-            Matrix4d etvpTrans =
-                viewProTrans * modelTrans * Affine3d(Eigen::Scaling(nodePos)).matrix();
-            if (reqETVPI) updateOp(G_ETVP, ShaderValue::fromMatrix(etvpTrans));
-            if (reqETVPI) updateOp(G_ETVPI, ShaderValue::fromMatrix(etvpTrans.inverse()));
-            */
         }
     }
 
@@ -646,8 +643,12 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, uint32_t material_sl
     // since the last frame and push harder while the primary button is held.
     if (info.has_POINTERPOSITIONLAST) updateOp(G_POINTERPOSITIONLAST, m_mousePosLast);
     if (info.has_POINTERSTATE) {
-        const float down = (m_mouseButtonsDown & 1u) != 0 ? 1.0f : 0.0f;
-        updateOp(G_POINTERSTATE, std::array { down, down, down, 0.0f });
+        // Held in x and y; z only on the frame the button went down, the
+        // one-frame push a ripple or fluid gets per click.
+        const bool  held    = (m_mouseButtonsDown & 1u) != 0;
+        const float down    = held ? 1.0f : 0.0f;
+        const float pressed = held && (m_mouseButtonsDownLast & 1u) == 0 ? 1.0f : 0.0f;
+        updateOp(G_POINTERSTATE, std::array { down, down, pressed, 0.0f });
     }
     // The seconds this frame advances the scene, which simulation steps scale by.
     if (info.has_FRAMETIME) updateOp(G_FRAMETIME, (float)m_scene->frameTime);
@@ -667,7 +668,7 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, uint32_t material_sl
     if (info.has_PARALLAXPOSITION) {
         Vector2f para { 0.5f, 0.5f };
         if (m_parallax.enable) {
-            const Vector2f mouseCentered = Vector2f(&m_mousePos[0]) - Vector2f { 0.5f, 0.5f };
+            const Vector2f mouseCentered = Vector2f(&m_parallaxPos[0]) - Vector2f { 0.5f, 0.5f };
             para = Vector2f { 0.5f, 0.5f } +
                    (Scaling(1.0f, -1.0f) * mouseCentered) * m_parallax.mouseinfluence;
         }

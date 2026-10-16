@@ -116,7 +116,12 @@ public:
     uint32_t FrameVaryingUniforms(SceneNode*, uint32_t material_slot,
                                   const std::string& camera_override) const override;
     void MouseInput(double, double) override;
-    void MouseButtonsInput(uint32_t down) override { m_mouseButtonsDown = down; }
+    // Called once per frame with that frame's buttons; the previous frame's
+    // are kept for the press edge `g_PointerState.z` shows.
+    void MouseButtonsInput(uint32_t down) override {
+        m_mouseButtonsDownLast = m_mouseButtonsDown;
+        m_mouseButtonsDown     = down;
+    }
     void SetTexelSize(float x, float y) override;
 
     void SetNodeData(void*, const WPShaderValueData&);
@@ -150,11 +155,12 @@ private:
     /// `m_mousePos` as the previous frame's shaders saw it.
     std::array<float, 2> m_mousePosLast { 0.5f, 0.5f };
     uint32_t             m_mouseButtonsDown { 0 };
+    uint32_t             m_mouseButtonsDownLast { 0 };
     std::array<float, 2> m_mousePosInput { 0.5f, 0.5f };
-    double               m_mouseDelayedTime { 0.0f };
+    /// The cursor parallax follows, eased by the camera parallax delay.
+    std::array<float, 2> m_parallaxPos { 0.5f, 0.5f };
     uint                 m_mouseInputCount { 0 };
 
-    std::chrono::time_point<std::chrono::steady_clock> m_last_mouse_input_time;
 
     std::array<float, 2> m_screen_size { 1920, 1080 };
     std::optional<ShaderValue> m_audioSpectrumPacked;

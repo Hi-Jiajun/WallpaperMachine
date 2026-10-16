@@ -755,13 +755,11 @@ into private textures; the three that draw skip visibly without a Metal device.
 - **On-demand rendering stops parallax partway.** A scene that sleeps wakes for
   one frame per pointer event (`wakeForPointer`), but nothing asks for frames
   while the layers are still easing toward the cursor, so after the pointer stops
-  they rest partway and catch up at its next movement. `m_mouseDelayedTime` is no
-  end condition: `SceneWallpaper` calls `MouseInput` every frame, and that
-  subtracts the real frame interval `FrameBegin` has just added as the ideal one,
-  so `cameraparallaxdelay` acts as an exponential time constant and the eased
-  cursor approaches the pointer without reaching it. A demand of
-  `m_mouseDelayedTime < delay` would never clear and would keep the scene awake
-  for good; a correct one needs a threshold on the offset still to travel.
+  they rest partway and catch up at its next movement. Parallax eases as Wallpaper
+  Engine eases it, closing `(1 - cameraparallaxdelay / 3) * 10 * frametime` of the
+  remaining way each frame (`WPShaderValueUpdater::FrameBegin`), which approaches
+  the cursor without reaching it; a correct demand needs a threshold on the offset
+  still to travel.
 - **An animated material constant keeps a scene awake after its timeline ends.**
   `DescribeTimeAdvancingWork` reports `NodeBinding` for every material-constant
   binding that has an animation, playing or not. The timeline's clock is a

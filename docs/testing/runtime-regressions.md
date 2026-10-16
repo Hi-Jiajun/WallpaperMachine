@@ -58,7 +58,7 @@ device.
   it -- and the layer vanished. Native Metal now clears the scene just before a
   pass that copies or samples it ahead of any draw. Three frames are drawn; both
   renderers must agree and show the background plus the blend's quarter red.
-- **The host's frame step** — `MetalSceneDraw.ThePointerSmoothingStepsOnceForEachFrameTheHostDraws`:
+- **The host's frame step** — `MetalSceneDraw.TheParallaxEasingStepsOnceForEachFrameTheHostDraws`:
   `WPShaderValueUpdater::FrameBegin` (the parallax cursor's smoothing, puppet
   attachments) is the host's, once per frame before it draws, on either
   backend. `MetalRender::drawFrame` used to call it again, which stepped the

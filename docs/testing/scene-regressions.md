@@ -98,6 +98,10 @@ Playback, backend, host and startup areas are in
   - `cameraparallaxdelay` of zero means no easing. Dividing by it makes the eased
     cursor NaN, which reaches every parallax layer's model matrix and leaves only
     the clear color on both backends.
+  - `ShaderValueUpdaterCompat.ParallaxEasesAsWallpaperEngineWhileShadersSeeTheCursor`:
+    parallax closes `(1 - delay / 3) * 10 * frametime` of the way to the cursor
+    (clamped to the window) each frame, while `g_PointerPosition` is the cursor
+    itself, not the eased one.
 - **Parallax inheritance** — in `scene_schema_tests`:
   `SceneSchema.ParallaxInheritanceResolvesRootsWithoutDependingOnDeclarationOrder`
   (nesting, zero/default depth, missing/duplicate parents, cycles),
@@ -1009,13 +1013,17 @@ Rust regressions in `crates/shader/tests` (`legalize`, `preprocess`,
   `ShaderValueUpdaterCompat.SimulationEffectsSeeFrameTimeCursorTravelAndButtons`
   checks that a shader declaring `g_Frametime`, `g_PointerPositionLast`,
   `g_PointerState` or `g_TextureReductionScale` receives the frame's step, the
-  previous frame's cursor, the primary button (held in x, y and z) and 1, and
-  that such a pass counts as following the clock or the cursor. Left at zero,
+  previous frame's cursor, the primary button (held in x and y, z only on the
+  frame it went down, as Wallpaper Engine pushes a ripple once per click) and 1,
+  and that such a pass counts as following the clock or the cursor. Left at zero,
   Wallpaper Engine's cursor ripple and fluid simulation effects never moved and
   `blend` with `TRANSFORMUV` divided by zero.
   `.EffectModelMatrixAndInverseProjectionMatchTheEffectProjection` checks
   `g_EffectModelMatrix` and `g_EffectModelViewProjectionMatrixInverse` against
-  the effect projection.
+  the effect projection, and `.EffectTextureProjectionMapsTheLayerCardOntoTheScreen`
+  that `g_EffectTextureProjectionMatrix(Inverse)` maps the layer card onto the
+  screen wherever the card is moved, turned or flipped, so a cursor effect lands
+  under the cursor on a layer that does not fill the canvas.
 - **Trailing commas** — `SceneSchema.EffectFilesWithTrailingCommasLoadTheirPasses`
   loads an effect and material whose arrays and objects end with a comma, as
   Wallpaper Engine's own `effects/fluidsimulation/effect.json` does; strict

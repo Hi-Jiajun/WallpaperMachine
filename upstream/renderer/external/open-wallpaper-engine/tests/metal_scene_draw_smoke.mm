@@ -7460,26 +7460,27 @@ TEST_F(MetalSceneDraw, AStepSamplingAnImageNothingProducesIsSkippedLikeOnCompati
     }
 }
 
-TEST_F(MetalSceneDraw, ThePointerSmoothingStepsOnceForEachFrameTheHostDraws)
+TEST_F(MetalSceneDraw, TheParallaxEasingStepsOnceForEachFrameTheHostDraws)
 {
-    // `FrameBegin` steps the parallax cursor's smoothing by one frame time; the
+    // `FrameBegin` steps the parallax cursor's easing by one frame time; the
     // host calls it once per frame before drawing, on either backend. The card
-    // shows the smoothed pointer's x as red. With a 1 s delay the first 1/60 s
-    // frame moves it a sixtieth of the way from the centre to the cursor at
-    // the right edge; a backend that stepped it again inside its own frame
-    // would draw it nearer the cursor than the compatibility backend does.
+    // shows the eased parallax x as red. With a 1 s delay Wallpaper Engine's
+    // first 1/60 s frame moves it (1 - 1/3) x 10 / 60 of the way from the
+    // centre to the cursor at the right edge; a backend that stepped it again
+    // inside its own frame would draw it nearer the cursor than the
+    // compatibility backend does.
     const auto project = WriteFixture(root_ / "pointer");
     std::ofstream(root_ / "pointer/shaders/metal_probe.frag")
-        << "uniform vec2 g_PointerPosition;\n"
+        << "uniform vec2 g_ParallaxPosition;\n"
            "varying vec2 v_TexCoord;\n"
            "void main() {\n"
-           "  gl_FragColor = vec4(g_PointerPosition.x, 0.0, 0.25, 1.0);\n"
+           "  gl_FragColor = vec4(g_ParallaxPosition.x, 0.0, 0.25, 1.0);\n"
            "}\n";
     std::ofstream(root_ / "pointer/layout.json")
         << R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
            R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0.0,0.0,0.0],)"
            R"("cameraparallax":true,"cameraparallaxdelay":1.0,"cameraparallaxamount":0.0,)"
-           R"("cameraparallaxmouseinfluence":0.0,"orthogonalprojection":{"width":384,"height":256}},)"
+           R"("cameraparallaxmouseinfluence":1.0,"orthogonalprojection":{"width":384,"height":256}},)"
            R"("objects":[{"id":1,"name":"tile","image":"models/tile.json","origin":[192,128,0],)"
            R"("scale":[1,1,1],"angles":[0,0,0],"visible":true}]})";
     LoadedScene loaded;
@@ -7520,9 +7521,9 @@ TEST_F(MetalSceneDraw, ThePointerSmoothingStepsOnceForEachFrameTheHostDraws)
 
         ASSERT_EQ(rgba.size(), 384u * 256u * 4u);
         const std::size_t centre = (128u * 384u + 192u) * 4u;
-        // 0.5 + 0.5 / 60 = 0.5083, 129.6 of 255; stepped twice it is 0.5247.
-        EXPECT_NEAR(rgba[centre + 0], 130, 1)
-            << "the pointer smoothing did not step exactly once for the frame";
+        // 0.5 + 0.5 / 9 = 0.5556, 141.7 of 255; stepped twice it is 0.6049.
+        EXPECT_NEAR(rgba[centre + 0], 142, 1)
+            << "the parallax easing did not step exactly once for the frame";
     }
 }
 
