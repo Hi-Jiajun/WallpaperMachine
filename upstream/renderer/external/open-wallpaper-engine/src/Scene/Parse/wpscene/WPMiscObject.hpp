@@ -170,6 +170,20 @@ struct WPTextObject : WPMiscObjectBase {
     bool                 ledsource { false };
     std::array<float, 3> backgroundcolor { 0.0f, 0.0f, 0.0f };
     float                backgroundbrightness { 1.0f };
+    // The signed-distance font shader's looks, with Wallpaper Engine's defaults
+    // for the keys being absent. `msdf` only picks how the glyph edges are
+    // rebuilt, so it is read and nothing more.
+    bool                 msdf { false };
+    bool                 outline { false };
+    float                outlinethickness { 4.0f };
+    std::array<float, 3> outlinecolor { 0.0f, 0.0f, 0.0f };
+    bool                 blur { false };
+    float                blursize { 6.0f };
+    bool                 dropshadow { false };
+    float                dropshadowsize { 6.0f };
+    float                dropshadowopacity { 1.0f };
+    std::array<float, 2> dropshadowoffset { 4.0f, 4.0f };
+    std::array<float, 3> dropshadowcolor { 0.0f, 0.0f, 0.0f };
     std::vector<WPImageEffect> effects;
 
     bool FromJson(const nlohmann::json& json, fs::VFS& vfs) {
@@ -202,6 +216,17 @@ struct WPTextObject : WPMiscObjectBase {
         GET_JSON_NAME_VALUE_NOWARN(json, "ledsource", ledsource);
         GET_JSON_NAME_VALUE_NOWARN(json, "backgroundcolor", backgroundcolor);
         GET_JSON_NAME_VALUE_NOWARN(json, "backgroundbrightness", backgroundbrightness);
+        GET_JSON_NAME_VALUE_NOWARN(json, "msdf", msdf);
+        GET_JSON_NAME_VALUE_NOWARN(json, "outline", outline);
+        GET_JSON_NAME_VALUE_NOWARN(json, "outlinethickness", outlinethickness);
+        GET_JSON_NAME_VALUE_NOWARN(json, "outlinecolor", outlinecolor);
+        GET_JSON_NAME_VALUE_NOWARN(json, "blur", blur);
+        GET_JSON_NAME_VALUE_NOWARN(json, "blursize", blursize);
+        GET_JSON_NAME_VALUE_NOWARN(json, "dropshadow", dropshadow);
+        GET_JSON_NAME_VALUE_NOWARN(json, "dropshadowsize", dropshadowsize);
+        GET_JSON_NAME_VALUE_NOWARN(json, "dropshadowopacity", dropshadowopacity);
+        ReadMiscVec2Setting(json, "dropshadowoffset", dropshadowoffset);
+        GET_JSON_NAME_VALUE_NOWARN(json, "dropshadowcolor", dropshadowcolor);
         if (json.contains("effects")) {
             for (const auto& jE : json.at("effects")) {
                 WPImageEffect effect;

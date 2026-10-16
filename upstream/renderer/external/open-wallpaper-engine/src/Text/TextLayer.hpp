@@ -51,6 +51,29 @@ private:
     std::shared_ptr<const std::vector<uint8_t>> m_data;
 };
 
+/// The look Wallpaper Engine gives text through its signed-distance-field font
+/// shader: an outline around the glyphs, soft edges, and a drop shadow. The
+/// fields are the scene file's, in the units it writes them in; they are pixels
+/// of the rasterised text, as Wallpaper Engine scales them with the point size.
+/// `msdf` alone only changes how that shader reconstructs the glyph edges, which
+/// FreeType's own coverage already gives, so it has no field here.
+struct TextStyle {
+    bool            outline { false };
+    float           outline_thickness { 4.0f };
+    Eigen::Vector3f outline_color { Eigen::Vector3f::Zero() };
+    bool            blur { false };
+    float           blur_size { 6.0f };
+    bool            drop_shadow { false };
+    float           shadow_size { 6.0f };
+    float           shadow_opacity { 1.0f };
+    Eigen::Vector2f shadow_offset { 4.0f, 4.0f };
+    Eigen::Vector3f shadow_color { Eigen::Vector3f::Zero() };
+};
+
+/// True when the text is drawn through the font shader's outline, blur or
+/// shadow combos, which Wallpaper Engine turns on from the same fields.
+bool TextStyleActive(const TextStyle& style);
+
 struct TextLayerState {
     std::string          text;
     std::string          layer_key;
@@ -82,6 +105,7 @@ struct TextLayerState {
     bool                 use_ellipsis { false };
     // `blockalign`: rows that end at a word wrap are justified to `max_width`.
     bool                 block_align { false };
+    TextStyle            style;
     bool                 dirty { false };
     bool                 cache_dirty { false };
     bool                 full_dirty { false };
@@ -139,10 +163,19 @@ private:
     uint64_t m_prepared_revision { 0 };
 };
 
+/// How far the outline, blur and shadow reach past the text on each side, in
+/// pixels. The raster is this much larger than the card on every side, and the
+/// card the layer draws grows with it, so nothing is cut off at the layout box.
+float TextStyleMargin(const TextLayerState& state);
+
 Eigen::Vector2f EstimateTextLayerSize(std::string_view text, float point_size, float padding);
 Eigen::Vector2f MeasureTextLayerSize(const TextLayerState& state);
 Eigen::Vector2f TextLayerLayoutSize(const TextLayerState& state);
 Eigen::Vector2f TextLayerRasterSize(const TextLayerState& state);
+/// `TextLayerRasterSize` for a text already measured: the authored size where the
+/// text fits in it, else the text's card, and the room the style reaches on every side.
+Eigen::Vector2f TextLayerRasterSizeForMeasured(const TextLayerState& state,
+                                               const Eigen::Vector2f& measured);
 TextLayerRenderBounds TextLayerRenderBoundsForRasterSize(const TextLayerState& state,
                                                          Eigen::Vector2f raster_size);
 TextLayerRenderFrame TextLayerRenderFrameForRasterSize(const TextLayerState& state,

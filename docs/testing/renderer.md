@@ -751,7 +751,11 @@ into private textures; the three that draw skip visibly without a Metal device.
   kerning, ligatures, complex scripts) and draws colour glyphs from an RGBA atlas; the
   layout kerns only from a font's legacy `kern` table (Arial has one, many OpenType
   fonts have only GPOS kerning and so go unkerned), forms no ligatures, and colour
-  glyphs are monochrome or missing. **The authored
+  glyphs are monochrome or missing. It draws one quad per glyph from a distance-field atlas, so the outline of
+  a glyph that overlaps its neighbour's fill is drawn over it there, and the outline,
+  blur and shadow are made here from the union of the glyphs, at their reach but not
+  clipped to the atlas margin. `msdf` alone, `opaquebackground`, `backgroundcolor` and
+  `backgroundbrightness` are read and draw nothing. **The authored
   `size` of a text object is kept**: Wallpaper Engine ignores it and sets the card from
   the layout every time the text is laid out (the text object's size function writes
   the layout box plus twice the padding, and its guard byte only keeps it from
@@ -765,7 +769,10 @@ into private textures; the three that draw skip visibly without a Metal device.
   authored size and needs a picture comparison. The distance fog and height fog flags
   of a scene, which make Wallpaper Engine pad and composite every text layer, are
   modelled for the padding only: the composite itself and the `FOG_COMPUTED` combo
-  change nothing a text layer draws here. The text object's other layout keys
+  change nothing a text layer draws here. A style key (`outline`, `blur`,
+  `dropshadow`, their sizes and opacity) driven by a script or a timeline keeps the
+  scene file's value; one bound to a property is read once at load, with the user's
+  value, and held there (a load-only property). The text object's other layout keys
   (`pointsize`, `padding`, `spacing`, `maxwidth`, `maxrows`, the limit flags) read the
   scene file's value whatever property or script is bound to them.
 - **Model utility flags.** A project layer is sized by the canvas but still takes the

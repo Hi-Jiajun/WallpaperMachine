@@ -4065,7 +4065,8 @@ namespace
 std::filesystem::path WriteTextFixture(const std::filesystem::path& root, std::string_view text,
                                        bool with_effect = false,
                                        std::string_view text_json = {},
-                                       std::string_view style_json = {})
+                                       std::string_view style_json = {},
+                                       std::string_view clear_color = "0.0,0.0,0.0")
 {
     const std::string effects =
         with_effect ? R"(,"effects":[{"file":"effects/probe.json","visible":true}])" : "";
@@ -4097,7 +4098,8 @@ std::filesystem::path WriteTextFixture(const std::filesystem::path& root, std::s
           "}\n" },
         { "layout.json",
           R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
-          R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0.0,0.0,0.0],)"
+          R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[)" +
+              std::string(clear_color) + R"(],)"
           R"("cameraparallax":false,"orthogonalprojection":{"width":384,"height":256}},)"
           R"("objects":[{"id":1,"name":"caption","text":)" +
               (text_json.empty() ? "\"" + std::string(text) + "\"" : std::string(text_json)) +
@@ -4543,6 +4545,115 @@ TEST_F(MetalSceneDraw, AShapeIsAddedOntoTheSceneOnBothRenderers)
         }
         EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
             << "the native renderer drew the shape differently from the compatibility renderer";
+    }
+}
+
+TEST_F(MetalSceneDraw, StyledTextIsDrawnWithItsOutlineAndShadowByTheNativeBackend)
+{
+    // The font shader's outline and drop shadow, through the ordinary parser:
+    // the styled text program has to translate to Metal, the three masks the
+    // rasteriser leaves in the texture's channels have to reach it, and the glyph
+    // has to take the layer's colour while the outline and the shadow keep theirs.
+    // Green and magenta read the same whichever channel order the target has.
+    const auto project = WriteTextFixture(
+        root_ / "styled-text-project", "HI", false, {},
+        R"(,"pointsize":20,"outline":true,"outlinethickness":4,"outlinecolor":"0 1 0",)"
+        R"("dropshadow":true,"dropshadowsize":1,"dropshadowopacity":1,)"
+        R"("dropshadowoffset":"16 16","dropshadowcolor":"1 0 1")");
+    LoadedScene loaded;
+    std::string error;
+    ASSERT_TRUE(LoadScene(project, root_ / "cache", loaded, error)) << error;
+    const auto selection = SelectSceneBackend(*loaded.scene);
+    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+
+    @autoreleasepool {
+        id<MTLDevice> device  = MTLCreateSystemDefaultDevice();
+        CAMetalLayer* layer   = [CAMetalLayer layer];
+        layer.device          = device;
+        layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+        layer.drawableSize    = CGSizeMake(384, 256);
+        layer.framebufferOnly = NO;
+
+        MetalRender         render;
+        MetalRenderInitInfo info {
+            .metal_layer          = (__bridge void*)layer,
+            .width                = 384,
+            .height               = 256,
+            .render_width         = 384,
+            .render_height        = 256,
+            .display_scale_factor = 1.0,
+        };
+        ASSERT_TRUE(render.init(info)) << render.lastError();
+
+        auto graph = sceneToRenderGraph(*loaded.scene);
+        ASSERT_NE(graph, nullptr);
+        ASSERT_TRUE(render.compileRenderGraph(*loaded.scene, *graph)) << render.lastError();
+        render.UpdateCameraFillMode(*loaded.scene, FillMode::ASPECTFIT);
+        for (int frame = 0; frame < 3; ++frame) AdvanceSceneFrame(render, *loaded.scene);
+
+        const auto drawn = ReadOutput(render, *loaded.scene);
+        ASSERT_FALSE(drawn.empty());
+        std::size_t glyph = 0, outline = 0, shadow = 0;
+        for (std::size_t i = 0; i + 3 < drawn.size(); i += 4) {
+            const int a = drawn[i], b = drawn[i + 1], c = drawn[i + 2];
+            if (a > 220 && b > 220 && c > 220) ++glyph;
+            if (b > 200 && a < 60 && c < 60) ++outline;
+            if (a > 200 && c > 200 && b < 60) ++shadow;
+        }
+        EXPECT_GT(glyph, 200u) << "the glyph is not the layer's colour";
+        EXPECT_GT(outline, 100u) << "no outline in the outline's own colour";
+        EXPECT_GT(shadow, 100u) << "no shadow in the shadow's own colour";
+        render.destroy();
+    }
+}
+
+TEST_F(MetalSceneDraw, StyledTextWithoutAnOutlineKeepsTheLayersColourAtItsEdgesOnBothRenderers)
+{
+    // The font shader mixes the outline's colour into the glyph only when the layer
+    // has an outline. Red text, blurred or shadowed in red, over white: every pixel
+    // is red mixed with white, so its red channel is full. An outline colour nobody
+    // asked for (black by default) mixed in at the partly covered edges would take
+    // the red channel down there.
+    struct Variant {
+        const char* name;
+        const char* style;
+    };
+    for (const auto& variant :
+         { Variant { "blur", R"(,"color":"1 0 0","blur":true,"blursize":2)" },
+           Variant { "shadow", R"(,"color":"1 0 0","dropshadow":true,"dropshadowsize":2,)"
+                               R"("dropshadowopacity":1,"dropshadowoffset":"5 5",)"
+                               R"("dropshadowcolor":"1 0 0")" } }) {
+        SCOPED_TRACE(variant.name);
+        std::map<bool, RendererPicture> pictures;
+        for (const bool native : { false, true }) {
+            const std::string name = std::string("styled-edge-") + variant.name +
+                                     (native ? "-native" : "-compat");
+            const auto project = WriteTextFixture(root_ / name, "HI", false, {}, variant.style,
+                                                  "1.0,1.0,1.0");
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            if (native) {
+                const auto selection = SelectSceneBackend(*loaded.scene);
+                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            }
+            pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+            ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+            ASSERT_EQ(pictures[native].rgb.size(), 384u * 256u * 3u);
+        }
+        for (const bool native : { false, true }) {
+            SCOPED_TRACE(native ? "native" : "compatibility");
+            const auto& rgb = pictures[native].rgb;
+            std::size_t solid = 0, partial = 0, dark_red = 0;
+            for (std::size_t i = 0; i + 2 < rgb.size(); i += 3) {
+                if (rgb[i] < 250) ++dark_red;
+                if (rgb[i + 1] < 40) ++solid;
+                if (rgb[i + 1] >= 40 && rgb[i + 1] <= 215) ++partial;
+            }
+            EXPECT_GT(solid, 300u) << "the glyphs were not drawn in the layer's colour";
+            EXPECT_GT(partial, 100u) << "no partly covered pixels to look at";
+            EXPECT_EQ(dark_red, 0u) << "an edge was darkened by a colour the layer never asked for";
+        }
     }
 }
 

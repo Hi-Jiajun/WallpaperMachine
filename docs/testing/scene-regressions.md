@@ -1022,6 +1022,30 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   which draws white text at half alpha over green on both renderers: mode 2 mixes
   half of white once (128, 159, 128), mode 31 adds half of it (128, 191, 128), and
   the pictures are identical.
+- **Outline, blur and drop shadow** — `TextObjectRuntime.OutlineGrowsTheGlyphByItsThicknessInPixels`,
+  `.OutlineThicknessIsCappedWithTheGlyphAtlasAndNeverBelowOnePixel`,
+  `.BlurSoftensEdgesOverItsSizeAndKeepsTheGlyphWhereItIs`,
+  `.DropShadowFollowsItsOffsetAndOpacityAndOutlineWidth`,
+  `.StyledTextCardGrowsOutwardAndKeepsTheLayoutBoxWhereItWas`,
+  `.ParserReadsTheFontShaderStyleAndPicksTheStyledShader`,
+  `.StyledTextCardCoversTheStyleWhenTheLayerIsParsed` and
+  `.StyleColoursFollowTheirPropertiesAndTheBakedKeysAreReadOnceAndHeld`, and
+  `MetalSceneDraw.StyledTextIsDrawnWithItsOutlineAndShadowByTheNativeBackend` and
+  `.StyledTextWithoutAnOutlineKeepsTheLayersColourAtItsEdgesOnBothRenderers`.
+  The raster of a styled layer holds three coverage masks (red the glyph, green the
+  glyph and its outline, blue the shadow with its opacity), so the glyph takes the
+  layer's colour and the outline and shadow keep theirs; the first Metal test requires
+  green outline and magenta shadow pixels around white glyphs (Native Metal only), and
+  the second, on both renderers, draws red text blurred, and shadowed in red, over
+  white: every pixel is red mixed with white, so its red channel must stay full,
+  which it does not when an outline colour the layer never asked for is mixed in at
+  the partly covered pixels (the shader takes the outline colour into the glyph only
+  for a layer with an outline, as the reference's path without `OUTLINE_ENABLED`
+  does). The property test binds the outline and shadow colours, which follow their
+  property live, and the switches, sizes and opacity, which are read once at load with
+  the user's value, noted load-only and held by a preview. Sizes are pixels of the
+  finished text, capped in the shader's atlas units (outline 5.1, blur and shadow 6),
+  and the tests state them as distances from the unstyled glyph box.
 - **Cache metadata and corruption** — `render_target_lifetime_test`,
   `text_object_runtime_test` and `shader_cache_metadata_test` cover clock/text
   corruption, persistent shader-cache metadata, cache invalidation after include

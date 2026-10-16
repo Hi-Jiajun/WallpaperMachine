@@ -4606,6 +4606,76 @@ TEST(TextObjectRuntime, ASceneWithFogPadsEveryTextLayerWhateverItsEffects) {
     EXPECT_TRUE(off.State("plain").padding.isApprox(none));
 }
 
+TEST(TextObjectRuntime, StyleColoursFollowTheirPropertiesAndTheBakedKeysAreReadOnceAndHeld) {
+    // The outline and shadow colours are uniforms of the card's shader, so a bound
+    // one drives it live. Sizes, offsets, opacity and the switches are baked into
+    // the card's pixels: a bound one is read as the scene loads, with the value
+    // the user has chosen, and noted as load-only so a preview holds it.
+    TextSceneFixture fixture(R"([
+      {"id":1,"name":"caption","text":"a","font":"Arial","visible":true,
+       "outline":{"user":"edge","value":false},
+       "outlinethickness":{"user":"thick","value":4},
+       "outlinecolor":{"user":"ink","value":"0 0 0"},
+       "dropshadow":true,
+       "dropshadowsize":{"user":"soft","value":6},
+       "dropshadowopacity":{"user":"dim","value":1},
+       "dropshadowcolor":{"user":"shade","value":"0 0 0"}}
+    ])", "text-style-properties", {},
+                             ProjectProperties {
+                                 { "edge", RuntimeScalarValue::Bool(true) },
+                                 { "thick", RuntimeScalarValue::Float(2.0f) },
+                                 { "ink", RuntimeScalarValue::String("1 0 0") },
+                                 { "soft", RuntimeScalarValue::Float(1.5f) },
+                                 { "dim", RuntimeScalarValue::Float(0.25f) },
+                                 { "shade", RuntimeScalarValue::String("0 0 1") },
+                             });
+    ASSERT_NE(fixture.scene, nullptr);
+    ASSERT_NE(fixture.scene->runtime, nullptr);
+    auto& runtime = *fixture.scene->runtime;
+
+    // What the user chose, not the editor's default saved in the scene file.
+    const auto style = fixture.State("caption").style;
+    EXPECT_TRUE(style.outline);
+    EXPECT_FLOAT_EQ(style.outline_thickness, 2.0f);
+    EXPECT_FLOAT_EQ(style.shadow_size, 1.5f);
+    EXPECT_FLOAT_EQ(style.shadow_opacity, 0.25f);
+
+    // The baked keys are held, the colours are not.
+    const auto held = runtime.LoadOnlyProperties();
+    EXPECT_EQ(held, (std::vector<std::string> { "dim", "edge", "soft", "thick" }));
+
+    auto* node = FindRootChild(*fixture.scene, "caption");
+    ASSERT_NE(node, nullptr);
+    ASSERT_NE(node->Mesh(), nullptr);
+    const auto* material = node->Mesh()->Material();
+    ASSERT_NE(material, nullptr);
+    const auto colour = [&](const char* name) {
+        const auto& value = material->customShader.constValues.at(name);
+        return Eigen::Vector3f(value[0], value[1], value[2]);
+    };
+    EXPECT_TRUE(colour("g_OutlineColor").isApprox(Eigen::Vector3f(1.0f, 0.0f, 0.0f)));
+    EXPECT_TRUE(colour("g_ShadowColor").isApprox(Eigen::Vector3f(0.0f, 0.0f, 1.0f)));
+    runtime.ApplyProjectPropertyOverride({ { "ink", RuntimeScalarValue::String("0 1 0") },
+                                           { "shade", RuntimeScalarValue::String("1 1 0") } });
+    runtime.Tick(1.0 / 60.0);
+    EXPECT_TRUE(colour("g_OutlineColor").isApprox(Eigen::Vector3f(0.0f, 1.0f, 0.0f)));
+    EXPECT_TRUE(colour("g_ShadowColor").isApprox(Eigen::Vector3f(1.0f, 1.0f, 0.0f)));
+
+    // A document that asks for other baked values is held at the ones the scene
+    // loaded with and says so; the colours move (`shade`, left out, returns to the
+    // value the scene loaded with).
+    const auto preview = runtime.PreviewProjectPropertyOverride({
+        { "edge", RuntimeScalarValue::Bool(false) },
+        { "thick", RuntimeScalarValue::Float(9.0f) },
+        { "ink", RuntimeScalarValue::String("0 0 1") },
+    });
+    EXPECT_EQ(preview.changed, (std::vector<std::string> { "ink", "shade" }));
+    EXPECT_EQ(preview.deferred, (std::vector<std::string> { "edge", "thick" }));
+    runtime.Tick(1.0 / 60.0);
+    EXPECT_TRUE(colour("g_OutlineColor").isApprox(Eigen::Vector3f(0.0f, 0.0f, 1.0f)));
+    EXPECT_FLOAT_EQ(fixture.State("caption").style.outline_thickness, 2.0f);
+}
+
 TEST(TextObjectRuntime, SpacingAndBlockAlignReachTheLayerState) {
     TextSceneFixture fixture(R"([
       {"id":1,"name":"set","text":"abc","font":"Arial","spacing":"6 0","blockalign":true,
@@ -4717,6 +4787,292 @@ TEST(TextObjectRuntime, AddColorBlendTextIsDrawnAdditivelyOntoTheScene) {
     EXPECT_EQ(onto_scene, 1u);
 }
 
+namespace
+{
+// The box of the pixels of one channel at or above `threshold`.
+InkBox ChannelBounds(const Rastered& image, std::size_t channel, uint8_t threshold) {
+    InkBox box;
+    for (uint32_t y = 0; y < image.height; ++y) {
+        for (uint32_t x = 0; x < image.width; ++x) {
+            if (image.rgba[(static_cast<std::size_t>(y) * image.width + x) * 4u + channel] <
+                threshold) {
+                continue;
+            }
+            box.min_x = std::min(box.min_x, static_cast<int>(x));
+            box.max_x = std::max(box.max_x, static_cast<int>(x));
+            box.min_y = std::min(box.min_y, static_cast<int>(y));
+            box.max_y = std::max(box.max_y, static_cast<int>(y));
+        }
+    }
+    return box;
+}
+
+TextLayerState StyledState(float point_size = 40.0f) {
+    auto state = HelveticaState("H", point_size);
+    state.style.outline_color = Eigen::Vector3f(1.0f, 0.0f, 0.0f);
+    return state;
+}
+} // namespace
+
+TEST(TextObjectRuntime, OutlineGrowsTheGlyphByItsThicknessInPixels) {
+    auto plain = StyledState();
+    auto outlined          = plain;
+    outlined.style.outline = true;
+    outlined.style.outline_thickness = 3.0f;
+    ASSERT_TRUE(TextStyleActive(outlined.style));
+    ASSERT_FALSE(TextStyleActive(plain.style));
+
+    const auto glyph = RasterOf(outlined);
+    const auto fill  = ChannelBounds(glyph, 0, 128);
+    const auto outer = ChannelBounds(glyph, 1, 128);
+    ASSERT_TRUE(fill.Any() && outer.Any());
+    // One unit of thickness is one pixel of the finished text.
+    EXPECT_NEAR(fill.min_x - outer.min_x, 3, 1);
+    EXPECT_NEAR(outer.max_x - fill.max_x, 3, 1);
+    EXPECT_NEAR(fill.min_y - outer.min_y, 3, 1);
+    EXPECT_NEAR(outer.max_y - fill.max_y, 3, 1);
+
+    // The glyph itself is where plain text puts it, shifted by the room the
+    // style asks around the card.
+    const auto bare   = RasterOf(plain);
+    const auto bare_box = InkBounds(bare.rgba, bare.width, bare.height);
+    const int  margin = static_cast<int>((glyph.width - bare.width) / 2u);
+    EXPECT_GE(margin, 4);
+    EXPECT_EQ(glyph.height - bare.height, static_cast<uint32_t>(2 * margin));
+    EXPECT_NEAR(fill.min_x - margin, bare_box.min_x, 1);
+    EXPECT_NEAR(fill.max_x - margin, bare_box.max_x, 1);
+    EXPECT_NEAR(fill.min_y - margin, bare_box.min_y, 1);
+    EXPECT_NEAR(fill.max_y - margin, bare_box.max_y, 1);
+    // Reconstructed from the distance field, the glyph keeps its antialiasing:
+    // nearly every pixel agrees with plain coverage.
+    std::size_t differing = 0, covered = 0;
+    for (uint32_t y = 0; y < bare.height; ++y) {
+        for (uint32_t x = 0; x < bare.width; ++x) {
+            const int a = bare.rgba[(static_cast<std::size_t>(y) * bare.width + x) * 4u + 3u];
+            const int r = glyph.rgba[(static_cast<std::size_t>(y + margin) * glyph.width +
+                                      (x + margin)) * 4u];
+            if (a > 0 || r > 0) ++covered;
+            if (std::abs(a - r) > 40) ++differing;
+        }
+    }
+    ASSERT_GT(covered, 100u);
+    EXPECT_LT(differing * 50u, covered) << differing << " of " << covered;
+}
+
+TEST(TextObjectRuntime, OutlineThicknessIsCappedWithTheGlyphAtlasAndNeverBelowOnePixel) {
+    auto state                   = StyledState();
+    state.style.outline          = true;
+    state.style.outline_thickness = 100.0f;
+    const auto huge = RasterOf(state);
+    const auto huge_gap = ChannelBounds(huge, 0, 128).min_x - ChannelBounds(huge, 1, 128).min_x;
+    // 5.1 pixels of a 32 pixel atlas em, at 166 pixels to the em.
+    EXPECT_NEAR(huge_gap, 26.6f, 2.0f);
+
+    state.style.outline_thickness = 0.1f;
+    const auto thin = RasterOf(state);
+    const auto thin_gap = ChannelBounds(thin, 0, 128).min_x - ChannelBounds(thin, 1, 128).min_x;
+    EXPECT_NEAR(thin_gap, 1, 1);
+}
+
+TEST(TextObjectRuntime, BlurSoftensEdgesOverItsSizeAndKeepsTheGlyphWhereItIs) {
+    auto crisp = StyledState();
+    crisp.style.outline = true; // an active style that does not blur
+    crisp.style.outline_thickness = 1.0f;
+    auto soft          = StyledState();
+    soft.style.blur    = true;
+    soft.style.blur_size = 3.0f;
+
+    const auto sharp = RasterOf(crisp);
+    const auto blurred = RasterOf(soft);
+    const auto partial = [](const Rastered& image) {
+        std::size_t count = 0;
+        for (uint32_t index = 0; index < image.width * image.height; ++index) {
+            const auto value = image.rgba[static_cast<std::size_t>(index) * 4u];
+            if (value > 20u && value < 235u) ++count;
+        }
+        return count;
+    };
+    EXPECT_GT(partial(blurred), partial(sharp) * 2u);
+
+    // The half-coverage edge stays on the glyph's outline; the tail runs past it by a
+    // few pixels, on a smoothstep three pixels either side.
+    const auto half = ChannelBounds(blurred, 0, 128);
+    const auto tail = ChannelBounds(blurred, 0, 8);
+    ASSERT_TRUE(half.Any() && tail.Any());
+    EXPECT_GE(half.min_x - tail.min_x, 1);
+    EXPECT_LE(half.min_x - tail.min_x, 4);
+}
+
+TEST(TextObjectRuntime, DropShadowFollowsItsOffsetAndOpacityAndOutlineWidth) {
+    auto state                    = StyledState();
+    state.style.drop_shadow       = true;
+    state.style.shadow_size       = 1.0f;
+    state.style.shadow_opacity    = 0.5f;
+    state.style.shadow_offset     = { 6.0f, 4.0f };
+    const auto shadowed = RasterOf(state);
+    const auto glyph    = ChannelBounds(shadowed, 0, 128);
+    const auto shadow   = ChannelBounds(shadowed, 2, 32);
+    ASSERT_TRUE(glyph.Any() && shadow.Any());
+    // The same shape, 6 pixels right and 4 down, a little soft at the edge.
+    EXPECT_NEAR((shadow.max_x - glyph.max_x), 6, 2);
+    EXPECT_NEAR((shadow.max_y - glyph.max_y), 4, 2);
+    EXPECT_NEAR((shadow.min_x - glyph.min_x), 6, 2);
+    EXPECT_NEAR((shadow.min_y - glyph.min_y), 4, 2);
+    // Opacity is in the mask: the blue channel never reaches more than half.
+    int strongest = 0;
+    for (std::size_t offset = 2; offset < shadowed.rgba.size(); offset += 4u) {
+        strongest = std::max<int>(strongest, shadowed.rgba[offset]);
+    }
+    EXPECT_NEAR(strongest, 128, 3);
+
+    // Outlined text casts the shadow of the outlined shape.
+    auto outlined                    = state;
+    outlined.style.outline           = true;
+    outlined.style.outline_thickness = 3.0f;
+    const auto both        = RasterOf(outlined);
+    const auto both_glyph  = ChannelBounds(both, 0, 128);
+    const auto both_shadow = ChannelBounds(both, 2, 32);
+    EXPECT_NEAR(both_shadow.max_x - both_glyph.max_x, 6 + 3, 2);
+    EXPECT_NEAR(both_shadow.max_y - both_glyph.max_y, 4 + 3, 2);
+}
+
+TEST(TextObjectRuntime, StyledTextCardGrowsOutwardAndKeepsTheLayoutBoxWhereItWas) {
+    auto state             = HelveticaState("Hg", 30.0f);
+    state.explicit_size    = Eigen::Vector2f(400.0f, 120.0f);
+    state.horizontal_align = "left";
+    state.vertical_align   = "top";
+    const auto plain_size   = TextLayerRasterSize(state);
+    const auto plain_bounds = TextLayerRenderBoundsForRasterSize(state, plain_size);
+    EXPECT_EQ(TextStyleMargin(state), 0.0f);
+
+    state.style.outline = true;
+    state.style.outline_thickness = 4.0f;
+    const float margin = TextStyleMargin(state);
+    ASSERT_GE(margin, 5.0f);
+    const auto size = TextLayerRasterSize(state);
+    EXPECT_TRUE(size.isApprox(plain_size + Eigen::Vector2f::Constant(2.0f * margin)));
+    // The layout box, which the layer is placed by, does not move: the card gains
+    // the margin on every side.
+    EXPECT_TRUE(TextLayerLayoutSize(state).isApprox(state.explicit_size));
+    const auto bounds = TextLayerRenderBoundsForRasterSize(state, size);
+    EXPECT_FLOAT_EQ(bounds.left, plain_bounds.left - margin);
+    EXPECT_FLOAT_EQ(bounds.right, plain_bounds.right + margin);
+    EXPECT_FLOAT_EQ(bounds.top, plain_bounds.top + margin);
+    EXPECT_FLOAT_EQ(bounds.bottom, plain_bounds.bottom - margin);
+    // And the text sits in the card where it would without the style.
+    const auto styled = RasterOf(state);
+    const auto box    = ChannelBounds(styled, 1, 128);
+    ASSERT_TRUE(box.Any());
+    EXPECT_GE(box.min_x, 1);
+    EXPECT_GE(box.min_y, 1);
+    EXPECT_LT(box.max_x, static_cast<int>(styled.width) - 1);
+}
+
+TEST(TextObjectRuntime, ParserReadsTheFontShaderStyleAndPicksTheStyledShader) {
+    TextSceneFixture fixture(R"([
+      {"id":1,"name":"plain","text":"a","font":"Arial","visible":true},
+      {"id":2,"name":"msdf only","text":"a","font":"Arial","msdf":true,"visible":true},
+      {"id":3,"name":"outlined","text":"a","font":"Arial","pointsize":26,"outline":true,
+       "outlinethickness":2.45,"outlinecolor":"1 0.5 0.25","visible":true},
+      {"id":4,"name":"shadowed","text":"a","font":"Arial","dropshadow":true,"dropshadowsize":1.0,
+       "dropshadowopacity":0.75,"dropshadowoffset":"2.0 3.0","dropshadowcolor":"0.4 0.3 0.6",
+       "visible":true},
+      {"id":5,"name":"blurred","text":"a","font":"Arial","msdf":true,"blur":true,"blursize":1.0,
+       "visible":true},
+      {"id":6,"name":"defaults","text":"a","font":"Arial","outline":true,"blur":true,"dropshadow":true,
+       "visible":true}
+    ])", "text-style-keys");
+    ASSERT_NE(fixture.scene, nullptr);
+
+    EXPECT_FALSE(TextStyleActive(fixture.State("plain").style));
+    // `msdf` only picks how the glyph edges are rebuilt.
+    EXPECT_FALSE(TextStyleActive(fixture.State("msdf only").style));
+
+    const auto outlined = fixture.State("outlined").style;
+    EXPECT_TRUE(outlined.outline);
+    EXPECT_FLOAT_EQ(outlined.outline_thickness, 2.45f);
+    EXPECT_TRUE(outlined.outline_color.isApprox(Eigen::Vector3f(1.0f, 0.5f, 0.25f)));
+    EXPECT_FALSE(outlined.drop_shadow);
+
+    const auto shadowed = fixture.State("shadowed").style;
+    EXPECT_TRUE(shadowed.drop_shadow);
+    EXPECT_FLOAT_EQ(shadowed.shadow_size, 1.0f);
+    EXPECT_FLOAT_EQ(shadowed.shadow_opacity, 0.75f);
+    EXPECT_TRUE(shadowed.shadow_offset.isApprox(Eigen::Vector2f(2.0f, 3.0f)));
+    EXPECT_TRUE(shadowed.shadow_color.isApprox(Eigen::Vector3f(0.4f, 0.3f, 0.6f)));
+
+    const auto blurred = fixture.State("blurred").style;
+    EXPECT_TRUE(blurred.blur);
+    EXPECT_FLOAT_EQ(blurred.blur_size, 1.0f);
+
+    // Wallpaper Engine's defaults for the keys being absent.
+    const auto defaults = fixture.State("defaults").style;
+    EXPECT_FLOAT_EQ(defaults.outline_thickness, 4.0f);
+    EXPECT_FLOAT_EQ(defaults.blur_size, 6.0f);
+    EXPECT_FLOAT_EQ(defaults.shadow_size, 6.0f);
+    EXPECT_FLOAT_EQ(defaults.shadow_opacity, 1.0f);
+    EXPECT_TRUE(defaults.shadow_offset.isApprox(Eigen::Vector2f(4.0f, 4.0f)));
+    EXPECT_TRUE(defaults.outline_color.isZero());
+
+    const auto shader_of = [&](std::string_view name) -> const SceneMaterial* {
+        auto* node = FindRootChild(*fixture.scene, name);
+        return node != nullptr && node->Mesh() != nullptr ? node->Mesh()->Material() : nullptr;
+    };
+    const auto* plain_material    = shader_of("plain");
+    const auto* outlined_material = shader_of("outlined");
+    const auto* shadowed_material = shader_of("shadowed");
+    ASSERT_NE(plain_material, nullptr);
+    ASSERT_NE(outlined_material, nullptr);
+    ASSERT_NE(shadowed_material, nullptr);
+    EXPECT_EQ(plain_material->customShader.shader->name, "text");
+    // The glyph is mixed with the outline's colour only for a layer with an
+    // outline; a shadow or a blur alone leaves the glyph the layer's colour.
+    EXPECT_EQ(outlined_material->customShader.shader->name, "text_styled_outline");
+    EXPECT_EQ(shadowed_material->customShader.shader->name, "text_styled");
+    // Only the glyph takes the layer's colour; the outline and shadow keep their own.
+    const auto& values = outlined_material->customShader.constValues;
+    ASSERT_TRUE(values.contains("g_OutlineColor"));
+    ASSERT_TRUE(values.contains("g_ShadowColor"));
+    EXPECT_FLOAT_EQ(values.at("g_OutlineColor")[1], 0.5f);
+    EXPECT_FALSE(plain_material->customShader.constValues.contains("g_OutlineColor"));
+    EXPECT_FALSE(shadowed_material->customShader.constValues.contains("g_OutlineColor"));
+    EXPECT_TRUE(shadowed_material->customShader.constValues.contains("g_ShadowColor"));
+}
+
+TEST(TextObjectRuntime, StyledTextCardCoversTheStyleWhenTheLayerIsParsed) {
+    // A layer with an outline gets a larger raster than its text, and its card
+    // mesh the same room, so the outline is not cut off at the layout box.
+    TextSceneFixture fixture(R"([
+      {"id":1,"name":"plain","text":"Hg","font":"Arial","pointsize":20,"visible":true,
+       "origin":[100,100,0],"horizontalalign":"left","verticalalign":"top"},
+      {"id":2,"name":"outlined","text":"Hg","font":"Arial","pointsize":20,"visible":true,
+       "outline":true,"outlinethickness":4,"origin":[100,100,0],"horizontalalign":"left",
+       "verticalalign":"top"}
+    ])", "text-style-card");
+    ASSERT_NE(fixture.scene, nullptr);
+    auto* plain    = FindRootChild(*fixture.scene, "plain");
+    auto* outlined = FindRootChild(*fixture.scene, "outlined");
+    ASSERT_NE(plain, nullptr);
+    ASSERT_NE(outlined, nullptr);
+    const auto plain_card    = MeshLocalBounds(*plain->Mesh());
+    const auto outlined_card = MeshLocalBounds(*outlined->Mesh());
+    const float margin = TextStyleMargin(fixture.State("outlined"));
+    ASSERT_GT(margin, 4.0f);
+    EXPECT_NEAR(outlined_card.min_x, plain_card.min_x - margin, 0.01f);
+    EXPECT_NEAR(outlined_card.max_x, plain_card.max_x + margin, 0.01f);
+    EXPECT_NEAR(outlined_card.min_y, plain_card.min_y - margin, 0.01f);
+    EXPECT_NEAR(outlined_card.max_y, plain_card.max_y + margin, 0.01f);
+    // The layer's size, which places it and answers the cursor, is the text's.
+    EXPECT_TRUE(fixture.scene->runtime->NodeSize("outlined").isApprox(
+        fixture.scene->runtime->NodeSize("plain")));
+    // And the texture is that large, with the outline in it.
+    auto* material = outlined->Mesh()->MaterialForSlot(0);
+    ASSERT_NE(material, nullptr);
+    auto image = fixture.scene->imageParser->Parse(material->textures.front());
+    ASSERT_NE(image, nullptr);
+    EXPECT_NEAR(image->header.width, plain_card.max_x - plain_card.min_x + 2.0f * margin, 1.0f);
+}
+
 
 // The size of a text layer in a scene file is the card Wallpaper Engine laid the
 // text out in, so it is ground truth for the layout. These are five cards it saved
@@ -4787,6 +5143,34 @@ TEST(TextObjectRuntime, PenAdvancesAreUnhintedWholePixelsKernedWithTheNextGlyph)
     };
     // "Te": the pen steps by the kerned advance, then the 'e' adds its own ink.
     EXPECT_FLOAT_EQ(width_of("Te"), pen + width_of("e"));
+}
+
+TEST(TextObjectRuntime, StyledTextKeepsItsMarginWhenItsTextChanges) {
+    TextSceneFixture fixture(R"([
+      {"id":1,"name":"caption","text":"Hg","font":"Arial","pointsize":20,"visible":true,
+       "outline":true,"outlinethickness":4,"dropshadow":true,"dropshadowoffset":"6 6",
+       "origin":[100,100,0],"horizontalalign":"left","verticalalign":"top"}
+    ])", "text-style-relayout");
+    ASSERT_NE(fixture.scene, nullptr);
+    auto& runtime = *fixture.scene->runtime;
+    const float margin = TextStyleMargin(fixture.State("caption"));
+    ASSERT_GT(margin, 6.0f);
+
+    ASSERT_TRUE(runtime.SetNodeText("caption", "Hello, world"));
+    PumpTextUntilClean(runtime);
+    auto* node = FindRootChild(*fixture.scene, "caption");
+    ASSERT_NE(node, nullptr);
+    auto* material = node->Mesh()->MaterialForSlot(0);
+    ASSERT_NE(material, nullptr);
+    auto image = fixture.scene->imageParser->Parse(material->textures.front());
+    ASSERT_NE(image, nullptr);
+    // The layer's size is the text's; the texture and the card hold the margin too.
+    const auto layout = runtime.NodeSize("caption");
+    EXPECT_NEAR(image->header.width, layout.x() + 2.0f * margin, 1.0f);
+    EXPECT_NEAR(image->header.height, layout.y() + 2.0f * margin, 1.0f);
+    const auto card = MeshLocalBounds(*node->Mesh());
+    EXPECT_NEAR(card.max_x - card.min_x, layout.x() + 2.0f * margin, 0.5f);
+    EXPECT_NEAR(card.max_y - card.min_y, layout.y() + 2.0f * margin, 0.5f);
 }
 
 } // namespace wallpaper

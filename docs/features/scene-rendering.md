@@ -194,6 +194,20 @@ to exactly the width by spreading the slack over its spaces and tabs; the last r
 a paragraph, a row a line break ended, a row the row limit cut and a row with no
 space are left alone. A text layer's colour blend mode works as an image layer's
 does, through the passthrough pass or, for mode 31, additively onto the scene.
+`outline`, `blur` and `dropshadow` give the glyphs Wallpaper Engine's signed-distance
+look: sizes, offsets and the shadow's softness are pixels of the finished text,
+capped as the shader's glyph atlas caps them, the outline and shadow keep their own
+colours while the glyph takes the layer's (with no outline the glyph is the layer's
+colour at every edge; an outline colour is mixed in only for a layer that has an
+outline), and the raster, and the card drawn from it,
+grow by what the style reaches so nothing is cut off at the layout box (the layer's
+size, which places it and answers the cursor, does not change). `msdf` alone only picks
+how that shader rebuilds glyph edges and changes nothing here. The outline and
+shadow colours follow a property or script bound to them while the scene runs. The
+switches, sizes and opacity are baked into the card's pixels, so a property bound to
+one is read once, as the scene loads, with the value the user has chosen, and is held
+at it by a preview of changed properties (a load-only property); a script or a
+timeline on one of them is not followed.
 A text object that leaves keys out has Wallpaper Engine's defaults: 32 points,
 `maxwidth` 500 and `maxrows` 1.
 

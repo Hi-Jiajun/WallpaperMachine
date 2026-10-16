@@ -49,6 +49,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <random>
@@ -1655,7 +1656,8 @@ std::string TextRuntimeName(const ParseContext& context, const wpscene::WPTextOb
 }
 
 std::shared_ptr<SceneShader> BuildTextSceneShader(fs::VFS& vfs, std::string_view scene_id,
-                                                  const std::string& texture_key) {
+                                                  const std::string& texture_key, bool styled,
+                                                  bool outlined) {
     std::string vertex_src =
         "layout(binding = 1) uniform mat4 g_ModelViewProjectionMatrix;\n"
         "in vec3 a_Position;\n"
@@ -1674,6 +1676,36 @@ std::shared_ptr<SceneShader> BuildTextSceneShader(fs::VFS& vfs, std::string_view
                                "  vec4 glyph = texture(g_Texture0, v_TexCoord);\n"
                                "  gl_FragColor = vec4(glyph.rgb * g_Color * g_Brightness, glyph.a * g_Alpha);\n"
                                "}\n";
+    if (styled) {
+        // The font shader's mix of a glyph, its outline and its shadow, from the
+        // three coverage masks the rasteriser leaves in the texture's channels:
+        // red the glyph, green the glyph with its outline, blue the shadow. Only
+        // the glyph takes the layer's colour; the outline and shadow keep theirs.
+        // Without an outline the glyph is the layer's colour whatever its
+        // coverage, as the reference shader's path without `OUTLINE_ENABLED`
+        // returns it: mixing in an outline colour nobody asked for would darken
+        // every partly covered pixel of the glyph and of its blur.
+        const std::string glyph_colour =
+            outlined ? "  vec3 glyph = mix(g_OutlineColor, g_Color * g_Brightness, mask.r);\n"
+                     : "  vec3 glyph = g_Color * g_Brightness;\n";
+        fragment_src = std::string("uniform sampler2D g_Texture0;\n"
+                                   "uniform vec3 g_Color;\n"
+                                   "uniform float g_Alpha;\n"
+                                   "uniform float g_Brightness;\n") +
+                       (outlined ? "uniform vec3 g_OutlineColor;\n" : "") +
+                       "uniform vec3 g_ShadowColor;\n"
+                       "in vec2 v_TexCoord;\n"
+                       "void main() {\n"
+                       "  vec3 mask = texture(g_Texture0, v_TexCoord).rgb;\n" +
+                       glyph_colour +
+                       "  float glyph_alpha = mask.g * g_Alpha;\n"
+                       "  float shadow_alpha = mask.b * g_Alpha;\n"
+                       "  float alpha = glyph_alpha + shadow_alpha * (1.0 - glyph_alpha);\n"
+                       "  vec3 rgb = (glyph * glyph_alpha + g_ShadowColor * shadow_alpha * (1.0 - glyph_alpha)) / max(alpha, 0.000001);\n"
+                       "  gl_FragColor = vec4(rgb, alpha);\n"
+                       "}\n";
+    }
+    const char* shader_name = ! styled ? "text" : outlined ? "text_styled_outline" : "text_styled";
 
     WPShaderInfo                 shader_info;
     std::vector<WPShaderTexInfo> tex_infos(1);
@@ -1693,7 +1725,7 @@ std::shared_ptr<SceneShader> BuildTextSceneShader(fs::VFS& vfs, std::string_view
     };
 
     auto shader              = std::make_shared<SceneShader>();
-    shader->name             = "text";
+    shader->name             = shader_name;
     std::string reflection_json;
     // Captured before the SPIR-V compile consumes the units and merges its
     // results into `shader_info`, exactly as a material's translation is. A
@@ -1703,7 +1735,7 @@ std::shared_ptr<SceneShader> BuildTextSceneShader(fs::VFS& vfs, std::string_view
     if (MetalTranslationRequested()) {
         PendingMetalTranslation pending;
         pending.shader      = shader;
-        pending.shader_name = "text";
+        pending.shader_name = shader_name;
         pending.scene_id    = std::string(scene_id);
         pending.units.assign(units.begin(), units.end());
         pending.shader_info  = shader_info;
@@ -1713,7 +1745,7 @@ std::shared_ptr<SceneShader> BuildTextSceneShader(fs::VFS& vfs, std::string_view
         g_pending_metal_translations.push_back(std::move(pending));
     }
     if (! WPShaderParser::CompileToSpvRust(
-            scene_id, "text", units, shader->codes, vfs, &shader_info, tex_infos, &reflection_json)) {
+            scene_id, shader_name, units, shader->codes, vfs, &shader_info, tex_infos, &reflection_json)) {
         return nullptr;
     }
     shader->rust_reflection_json = std::move(reflection_json);
@@ -1940,6 +1972,18 @@ TextLayerState ResolveTextLayerState(const wpscene::WPTextObject& obj, fs::VFS& 
         .limit_rows       = obj.limitrows,
         .use_ellipsis     = obj.limituseellipsis,
         .block_align      = obj.blockalign,
+        .style            = TextStyle {
+            .outline           = obj.outline,
+            .outline_thickness = obj.outlinethickness,
+            .outline_color     = Eigen::Vector3f(obj.outlinecolor.data()),
+            .blur              = obj.blur,
+            .blur_size         = obj.blursize,
+            .drop_shadow       = obj.dropshadow,
+            .shadow_size       = obj.dropshadowsize,
+            .shadow_opacity    = obj.dropshadowopacity,
+            .shadow_offset     = Eigen::Vector2f(obj.dropshadowoffset[0], obj.dropshadowoffset[1]),
+            .shadow_color      = Eigen::Vector3f(obj.dropshadowcolor.data()),
+        },
     };
 
     constexpr std::string_view system_prefix = "systemfont_";
@@ -2012,9 +2056,50 @@ void ResolveUserEffectVisibility(ParseContext& context,
     }
 }
 
+// The keys of a text object that are baked into the card's pixels when the layer
+// is laid out: the outline, blur and shadow switches, sizes and opacity. A
+// property bound to one is read once, as the scene loads, with the value the user
+// has chosen rather than the editor's default in the scene file, and noted as
+// load-only so a running scene holds it there (SceneRuntimeContext::
+// NoteLoadOnlyProperty). A key a script drives keeps the scene file's value.
+// (The colours are uniforms of the card's shader and follow their property live;
+// the offset, `padding` and `spacing` are two-number keys, which no property type
+// of a project can supply.)
+void ResolveLoadTimeTextStyle(ParseContext& context, wpscene::WPTextObject& obj,
+                              std::string_view runtime_name) {
+    if (context.scene->runtime == nullptr) return;
+    auto& runtime = *context.scene->runtime;
+    const auto bound = [&](const char* key) -> const nlohmann::json* {
+        const auto setting = obj.field_bindings.find(key);
+        if (setting == obj.field_bindings.end() || ! setting->is_object() ||
+            ! setting->contains("user") || setting->contains("script")) {
+            return nullptr;
+        }
+        runtime.NoteLoadOnlyProperty(UserPropertyName(*setting));
+        return &*setting;
+    };
+    for (const auto& [key, field] : { std::pair<const char*, bool*> { "outline", &obj.outline },
+                                      { "blur", &obj.blur },
+                                      { "dropshadow", &obj.dropshadow } }) {
+        if (const auto* setting = bound(key)) {
+            *field = ResolveBoolSetting(runtime, *setting, runtime_name)->getBool();
+        }
+    }
+    for (const auto& [key, field] :
+         { std::pair<const char*, float*> { "outlinethickness", &obj.outlinethickness },
+           { "blursize", &obj.blursize },
+           { "dropshadowsize", &obj.dropshadowsize },
+           { "dropshadowopacity", &obj.dropshadowopacity } }) {
+        if (const auto* setting = bound(key)) {
+            *field = ResolveFloatSetting(runtime, *setting, runtime_name)->getFloat();
+        }
+    }
+}
+
 void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
     const auto runtime_name = TextRuntimeName(context, obj);
     ResolveUserEffectVisibility(context, obj.effects, runtime_name);
+    ResolveLoadTimeTextStyle(context, obj, runtime_name);
     // A text layer shares an image layer's colour blend: the text card is drawn
     // first, and the passthrough pass appended after any effects mixes it with
     // the screen. Mode 31 ("add") is drawn additively straight onto the scene.
@@ -2110,11 +2195,15 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         material.blenmode = ! obj.effects.empty() ? BlendMode::Disable
                             : additive_color_blend ? BlendMode::Additive
                                                    : BlendMode::Translucent;
-        material.customShader.shader =
-            BuildTextSceneShader(*context.vfs, context.scene->scene_id, texture_name);
+        const bool styled   = TextStyleActive(text_state.style);
+        const bool outlined = styled && text_state.style.outline;
+        material.customShader.shader = BuildTextSceneShader(
+            *context.vfs, context.scene->scene_id, texture_name, styled, outlined);
         material.customShader.constValues["g_Color"] = obj.color;
         material.customShader.constValues["g_Alpha"] = obj.alpha;
         material.customShader.constValues["g_Brightness"] = obj.brightness;
+        if (outlined) material.customShader.constValues["g_OutlineColor"] = obj.outlinecolor;
+        if (styled) material.customShader.constValues["g_ShadowColor"] = obj.dropshadowcolor;
         if (material.customShader.shader != nullptr) {
             mesh->AddMaterial(std::move(material));
         }
@@ -2148,6 +2237,20 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
             context.scene->runtime->RegisterMaterialConstant(
                 mesh->MaterialSlotPtr(), "g_Brightness",
                 ResolveFloatSetting(*context.scene->runtime, *setting, runtime_name));
+            QueueSceneScriptIfNeeded(context, runtime_name, *setting);
+        }
+        // The outline and shadow colours are uniforms of the card's shader, so a
+        // property or script bound to one drives it live, like the layer's colour.
+        // (Their sizes, offsets and opacity are baked into the card's pixels and
+        // are read once, as the scene loads; see `ResolveLoadTimeTextStyle`.)
+        for (const auto& [key, uniform, wanted] :
+             { std::tuple<const char*, const char*, bool> { "outlinecolor", "g_OutlineColor", outlined },
+               std::tuple<const char*, const char*, bool> { "dropshadowcolor", "g_ShadowColor", styled } }) {
+            const auto setting = obj.field_bindings.find(key);
+            if (! wanted || setting == obj.field_bindings.end()) continue;
+            context.scene->runtime->RegisterMaterialConstant(
+                mesh->MaterialSlotPtr(), uniform,
+                ResolveVec3Setting(*context.scene->runtime, *setting, runtime_name));
             QueueSceneScriptIfNeeded(context, runtime_name, *setting);
         }
         if (const auto setting = obj.field_bindings.find("alpha");

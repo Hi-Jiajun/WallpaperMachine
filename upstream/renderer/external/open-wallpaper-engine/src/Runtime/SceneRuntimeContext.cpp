@@ -88,8 +88,7 @@ RuntimePreparedTextLayerImage PrepareTextLayerImage(std::string name, uint64_t r
     const bool has_explicit_size =
         state.explicit_size.x() > 0.0f && state.explicit_size.y() > 0.0f;
     const Eigen::Vector2f layout_size = has_explicit_size ? state.explicit_size : measured_size;
-    const Eigen::Vector2f raster_size =
-        has_explicit_size ? state.explicit_size.cwiseMax(measured_size) : measured_size;
+    const Eigen::Vector2f raster_size = TextLayerRasterSizeForMeasured(state, measured_size);
     const uint32_t width =
         std::clamp(static_cast<uint32_t>(std::ceil(std::max(1.0f, raster_size.x()))), 1u, 4096u);
     const uint32_t height =
