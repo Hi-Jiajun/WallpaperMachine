@@ -2345,6 +2345,356 @@ TEST_F(MetalSceneDraw, ADepthWritingDrawHidesLaterDrawsAsOnCompatibility)
     }
 }
 
+/// What the red layer of `WriteEffectDepthFixture` is: an ordinary image
+/// layer, a solid layer (the editor's `solidlayer_depthtest` model, sized by
+/// the scene file), or a composition layer (the `composelayer_depthtest`
+/// model) holding one red child card that its effect shows.
+enum class DepthLayerKind
+{
+    Card,
+    Solid,
+    Compose,
+};
+
+/// How `WriteEffectDepthFixture` frames its three cards: through an
+/// orthographic canvas, where the scene draws its layers in scene order, or
+/// through a perspective camera of a scene that turns `transparentsorting` on,
+/// where Wallpaper Engine draws the layers that are not opaque back to front.
+enum class DepthFixtureScene
+{
+    Flat,
+    Sorted,
+};
+
+/// Three flat cards in a row, drawn in this order: an opaque green one nearest
+/// the camera (x 32..192) that depth-tests and writes depth; a red layer
+/// between (x 112..272), translucent, with the given authored `depthtest` and
+/// `depthwrite` and, when `effect_test` is not empty, one pass-through effect
+/// whose pass authors those two strings; then a blue card furthest away
+/// (x 192..352) that depth-tests and writes none. Where the red layer overlaps
+/// the green card it is hidden if it depth-tests; where it overlaps the blue
+/// card, the blue card is hidden if the layer wrote depth. In a `Sorted` scene
+/// the cards sit at three depths of a perspective view that shows each of them
+/// where the flat scene does, the blue card is translucent (an opaque one is
+/// drawn first there, so nothing could hide it), `back_effect` runs the same
+/// effect over it, with the authored state of the red layer, and a red layer
+/// that blends (`layer_blending` translucent or additive) is transparent over
+/// the half of its card that overlaps the blue one, as a glare card is, so
+/// what it draws there is the blue card or nothing, never the layer's red.
+std::filesystem::path WriteEffectDepthFixture(const std::filesystem::path& root,
+                                              std::string_view layer_test,
+                                              std::string_view layer_write,
+                                              std::string_view effect_test,
+                                              std::string_view effect_write,
+                                              DepthLayerKind   kind = DepthLayerKind::Card,
+                                              DepthFixtureScene scene = DepthFixtureScene::Flat,
+                                              bool              back_effect = false,
+                                              std::string_view  layer_blending = "translucent")
+{
+    const std::string vertex =
+        "uniform mat4 g_ModelViewProjectionMatrix;\n"
+        "attribute vec3 a_Position;\n"
+        "attribute vec2 a_TexCoord;\n"
+        "varying vec2 v_TexCoord;\n"
+        "void main() {\n"
+        "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+        "  v_TexCoord = a_TexCoord;\n"
+        "}\n";
+    const auto flat = [](std::string_view colour) {
+        return "varying vec2 v_TexCoord;\n"
+               "void main() {\n"
+               "  gl_FragColor = vec4(" + std::string(colour) + ");\n"
+               "}\n";
+    };
+    const auto pass = [](std::string_view shader, std::string_view blend, std::string_view test,
+                         std::string_view write, std::string_view textures = "") {
+        return R"({"passes":[{"shader":")" + std::string(shader) + R"(","blending":")" +
+               std::string(blend) + R"(","cullmode":"nocull","depthtest":")" +
+               std::string(test) + R"(","depthwrite":")" + std::string(write) + R"(")" +
+               std::string(textures) + "}]}";
+    };
+    const auto card = [](int id, std::string_view name, std::string_view image,
+                         std::string_view origin, std::string_view extra,
+                         std::string_view scale = "1,1,1") {
+        return R"({"id":)" + std::to_string(id) + R"(,"name":")" + std::string(name) +
+               R"(","image":")" + std::string(image) + R"(","origin":[)" + std::string(origin) +
+               R"(],"scale":[)" + std::string(scale) + R"(],"angles":[0,0,0],"visible":true)" +
+               std::string(extra) + "}";
+    };
+    // Where each card sits and how large it is: the flat scene's pixels, or the
+    // world units that put the same 160 x 128 pixel card at the same place on
+    // screen from the perspective camera, 10 units in front of the middle card
+    // (a vertical field of view of 50 degrees puts 128 pixels at tan(25) units
+    // per unit of distance).
+    const bool sorted = scene == DepthFixtureScene::Sorted;
+    struct Placement
+    {
+        std::string origin;
+        std::string scale { "1,1,1" };
+    };
+    const auto place = [sorted](double screen_x, double z) {
+        if (! sorted) {
+            return Placement { std::to_string(int(screen_x)) + ",128," + std::to_string(int(z)) };
+        }
+        constexpr double kEye       = 10.0;
+        constexpr double kHalfField = 0.46630765815499864; // tan(25 degrees)
+        const double     distance   = kEye - z;
+        const double     per_unit   = 128.0 / (distance * kHalfField);
+        const auto       text = [](double value) { return std::to_string(value); };
+        return Placement { text((screen_x - 192.0) / per_unit) + ",0," + text(z),
+                           text(1.0 / per_unit) + "," + text(1.0 / per_unit) + ",1" };
+    };
+    // Red and opaque on the half of the card that the blue card does not overlap
+    // (v_TexCoord.x under 0.5), nothing on the half it does.
+    const bool        blends = layer_blending == "translucent" || layer_blending == "additive";
+    const std::string see_through_overlap =
+        "varying vec2 v_TexCoord;\n"
+        "void main() {\n"
+        "  float shown = 1.0 - step(0.5, v_TexCoord.x);\n"
+        "  gl_FragColor = vec4(shown, 0.0, 0.0, shown);\n"
+        "}\n";
+    const Placement front_at = place(112, sorted ? 5 : 100);
+    const Placement layer_at = place(192, 0);
+    const Placement back_at  = place(272, sorted ? -10 : -100);
+    const bool        with_effect = ! effect_test.empty();
+    const auto        effects_json = [](int id) {
+        return R"(,"effects":[{"file":"effects/identity/effect.json","id":)" +
+               std::to_string(id) + R"(,"visible":true}])";
+    };
+    const std::string effects = with_effect ? effects_json(9) : "";
+    // The layer in the middle, and for a composition layer the card it holds.
+    std::string layer_objects;
+    switch (kind) {
+    case DepthLayerKind::Card:
+        layer_objects =
+            card(2, "layer", "models/layer.json", layer_at.origin, effects, layer_at.scale);
+        break;
+    case DepthLayerKind::Solid:
+        layer_objects = card(2, "layer", "models/util/solidlayer_depthtest.json", layer_at.origin,
+                             R"(,"size":[160,128])" + effects, layer_at.scale);
+        break;
+    case DepthLayerKind::Compose:
+        layer_objects =
+            card(2, "layer", "models/util/composelayer_depthtest.json", layer_at.origin,
+                 R"(,"size":[160,128],"copybackground":false)" + effects, layer_at.scale) +
+            "," + card(4, "swatch", "models/swatch.json", "0,0,0", R"(,"parent":2)");
+        break;
+    }
+
+    std::map<std::string, std::string> files {
+        { "project.json",
+          R"({"title":"Metal effect depth","type":"scene","file":"layout.json","general":{"properties":{}}})" },
+        { "models/front.json", R"({"width":160,"height":128,"material":"materials/front.json"})" },
+        { "models/layer.json", R"({"width":160,"height":128,"material":"materials/layer.json"})" },
+        { "models/util/solidlayer_depthtest.json",
+          R"({"solidlayer":true,"material":"materials/layer.json"})" },
+        { "models/util/composelayer_depthtest.json",
+          R"({"passthrough":true,"material":"materials/layer.json"})" },
+        { "models/swatch.json", R"({"width":160,"height":128,"material":"materials/swatch.json"})" },
+        { "models/back.json", R"({"width":160,"height":128,"material":"materials/back.json"})" },
+        { "materials/front.json", pass("effect_depth_front", "normal", "enabled", "enabled") },
+        { "materials/layer.json", pass("effect_depth_layer", layer_blending, layer_test, layer_write) },
+        { "materials/swatch.json", pass("effect_depth_layer", "translucent", "disabled", "disabled") },
+        { "materials/back.json",
+          sorted ? pass("effect_depth_back", "translucent", back_effect ? layer_test : "enabled",
+                        back_effect ? layer_write : "disabled")
+                 : pass("effect_depth_back", "normal", "enabled", "disabled") },
+        { "shaders/effect_depth_front.vert", vertex },
+        { "shaders/effect_depth_front.frag", flat("0.0, 1.0, 0.0, 1.0") },
+        { "shaders/effect_depth_layer.vert", vertex },
+        { "shaders/effect_depth_layer.frag",
+          sorted && blends ? see_through_overlap : flat("1.0, 0.0, 0.0, 1.0") },
+        { "shaders/effect_depth_back.vert", vertex },
+        { "shaders/effect_depth_back.frag", flat("0.0, 0.0, 1.0, 1.0") },
+        { "layout.json",
+          std::string(sorted ? R"({"camera":{"center":[0,0,0],"eye":[0,0,10],"up":[0,1,0]},)"
+                               R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],)"
+                               R"("clearcolor":[0.0,0.0,0.0],"bloom":false,"cameraparallax":false,)"
+                               R"("orthogonalprojection":null,"fov":50,"nearz":0.1,"farz":1000,)"
+                               R"("transparentsorting":true},)"
+                             : R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+                               R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],)"
+                               R"("clearcolor":[0.0,0.0,0.0],"bloom":false,"cameraparallax":false,)"
+                               R"("orthogonalprojection":{"width":384,"height":256}},)") +
+              R"("objects":[)" + card(1, "front", "models/front.json", front_at.origin, "",
+                                      front_at.scale) +
+              "," + layer_objects + "," +
+              card(3, "back", "models/back.json", back_at.origin,
+                   back_effect && with_effect ? effects_json(10) : "", back_at.scale) +
+              "]}" },
+    };
+    if (with_effect) {
+        files["shaders/effect_depth_through.vert"] = vertex;
+        files["shaders/effect_depth_through.frag"] =
+            "uniform sampler2D g_Texture0;\n"
+            "varying vec2 v_TexCoord;\n"
+            "void main() {\n"
+            "  gl_FragColor = texture2D(g_Texture0, v_TexCoord);\n"
+            "}\n";
+        files["materials/identity.json"] =
+            pass("effect_depth_through", "normal", effect_test, effect_write,
+                 R"(,"textures":[null])");
+        files["effects/identity/effect.json"] =
+            R"({"name":"identity","passes":[{"material":"materials/identity.json"}]})";
+    }
+    for (const auto& [name, contents] : files) {
+        const auto path = root / name;
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream(path) << contents;
+    }
+    return root / "project.json";
+}
+
+TEST_F(MetalSceneDraw, ALayerDrawnThroughEffectsKeepsItsOwnDepthTestAndWriteOnBothRenderers)
+{
+    // Wallpaper Engine draws the last pass of an image layer's effects with
+    // the layer's own blending, depth test and depth write rather than the
+    // pass's (its image object copies them from the layer's material onto
+    // that pass). A translucent layer authored `depthtest` enabled is hidden
+    // by a nearer opaque model whether or not effects run over it, and one
+    // authored `depthwrite` enabled hides what is drawn behind it afterwards;
+    // neither follows the effect pass's own state. The solid and composition
+    // layers the editor offers with a depth test are image layers too.
+    //
+    // The write is the exception for a layer that Wallpaper Engine sorts in a
+    // scene that turns `transparentsorting` on. It draws the layers of such a
+    // scene whose material blends (translucent or additive) back to front, so
+    // what their write could hide is drawn before them; this engine draws them
+    // in scene order, where the write cuts a card-shaped hole out of every
+    // farther layer drawn after it -- another star's glow, a HUD ring. The
+    // last pass of such a layer tests depth and writes none, and the farther
+    // card shows through the layer's transparent texels. A layer whose
+    // material is `normal` or `alphatocoverage` is not sorted: it stays in the
+    // scene-order set drawn first, and its write hides the farther card there
+    // as in any scene. Each case is drawn by both renderers and checked at two
+    // points: over the nearer card (x 150) and over the one behind (x 230).
+    enum class Colour { Green, Red, Blue };
+    struct Case
+    {
+        const char*    name;
+        const char*    layer_test;
+        const char*    layer_write;
+        const char*    effect_test; // empty: no effect
+        const char*    effect_write;
+        Colour         over_nearer;
+        Colour         over_farther;
+        DepthLayerKind kind { DepthLayerKind::Card };
+        DepthFixtureScene scene { DepthFixtureScene::Flat };
+        bool              back_effect { false };
+        const char*       layer_blending { "translucent" };
+    };
+    const Case cases[] = {
+        // The reference: a layer with no effects, where the layer's own state is the draw's.
+        { "card-tests-and-writes", "enabled", "enabled", "", "", Colour::Green, Colour::Red },
+        { "card-neither", "disabled", "disabled", "", "", Colour::Red, Colour::Blue },
+        // The same layers behind an effect whose pass authors neither.
+        { "effect-tests-and-writes", "enabled", "enabled", "disabled", "disabled", Colour::Green,
+          Colour::Red },
+        { "effect-tests-only", "enabled", "disabled", "disabled", "disabled", Colour::Green,
+          Colour::Blue },
+        { "effect-neither", "disabled", "disabled", "disabled", "disabled", Colour::Red,
+          Colour::Blue },
+        // A layer that authors neither is not given the effect pass's own state.
+        { "effect-pass-tests-and-writes", "disabled", "disabled", "enabled", "enabled",
+          Colour::Red, Colour::Blue },
+        // The depth-testing solid and composition layers (a test, no write), whose
+        // effects' result is tested against the scene as a plain layer's is.
+        { "solid-effect-tests-only", "enabled", "disabled", "disabled", "disabled", Colour::Green,
+          Colour::Blue, DepthLayerKind::Solid },
+        { "compose-effect-tests-only", "enabled", "disabled", "disabled", "disabled",
+          Colour::Green, Colour::Blue, DepthLayerKind::Compose },
+        { "compose-effect-pass-tests-and-writes", "disabled", "disabled", "enabled", "enabled",
+          Colour::Red, Colour::Blue, DepthLayerKind::Compose },
+        // In a scene that sorts, a layer that blends (translucent or additive) is sorted: the
+        // test stays, the write goes. The layer is transparent over the farther card, so a
+        // farther layer drawn after it shows there, whether it is a plain translucent card or
+        // another layer drawn through the same effect, and the layer's transparent texels
+        // cut nothing out of it. (A layer that was opaque there would be drawn over the
+        // farther card, which Wallpaper Engine draws first; this engine draws in scene order.)
+        { "sorted-effect-tests-and-writes", "enabled", "enabled", "disabled", "disabled",
+          Colour::Green, Colour::Blue, DepthLayerKind::Card, DepthFixtureScene::Sorted },
+        { "sorted-effect-neither", "disabled", "disabled", "disabled", "disabled", Colour::Red,
+          Colour::Blue, DepthLayerKind::Card, DepthFixtureScene::Sorted },
+        { "sorted-effects-test-and-write", "enabled", "enabled", "disabled", "disabled",
+          Colour::Green, Colour::Blue, DepthLayerKind::Card, DepthFixtureScene::Sorted, true },
+        { "sorted-additive-effect-tests-and-writes", "enabled", "enabled", "disabled", "disabled",
+          Colour::Green, Colour::Blue, DepthLayerKind::Card, DepthFixtureScene::Sorted, false,
+          "additive" },
+        // The solid and composition layers are image layers with effects too, and take the
+        // same rule from the same place.
+        { "sorted-solid-effect-tests-and-writes", "enabled", "enabled", "disabled", "disabled",
+          Colour::Green, Colour::Blue, DepthLayerKind::Solid, DepthFixtureScene::Sorted },
+        { "sorted-compose-effect-tests-and-writes", "enabled", "enabled", "disabled", "disabled",
+          Colour::Green, Colour::Blue, DepthLayerKind::Compose, DepthFixtureScene::Sorted },
+        // A layer that does not blend is not sorted and keeps its write: it hides the
+        // farther translucent card drawn after it, as the same layer does in a scene that
+        // does not sort.
+        { "sorted-normal-effect-tests-and-writes", "enabled", "enabled", "disabled", "disabled",
+          Colour::Green, Colour::Red, DepthLayerKind::Card, DepthFixtureScene::Sorted, false,
+          "normal" },
+        { "sorted-alphatocoverage-effect-tests-and-writes", "enabled", "enabled", "disabled",
+          "disabled", Colour::Green, Colour::Red, DepthLayerKind::Card, DepthFixtureScene::Sorted,
+          false, "alphatocoverage" },
+    };
+    const auto expected = [](Colour colour) {
+        switch (colour) {
+        case Colour::Green: return std::array<int, 3> { 0, 255, 0 };
+        case Colour::Red: return std::array<int, 3> { 255, 0, 0 };
+        case Colour::Blue: return std::array<int, 3> { 0, 0, 255 };
+        }
+        return std::array<int, 3> {};
+    };
+    for (const auto& c : cases) {
+        SCOPED_TRACE(c.name);
+        for (const bool native : { false, true }) {
+            const std::string name = std::string(c.name) + (native ? "-native" : "-compat");
+            const auto        project = WriteEffectDepthFixture(root_ / ("effect-depth-" + name),
+                                                                c.layer_test, c.layer_write,
+                                                                c.effect_test, c.effect_write,
+                                                                c.kind, c.scene, c.back_effect,
+                                                                c.layer_blending);
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / ("effect-depth-cache-" + name), loaded, error))
+                << error;
+            loaded.scene->FindRenderTarget(std::string(SpecTex_Default))->withDepth = true;
+            if (native) {
+                ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal);
+            }
+            const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
+            ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+            const char* renderer = native ? "native" : "compatibility";
+            const auto  at       = [&picture](std::size_t x) {
+                const std::size_t i = (128u * 384u + x) * 3u;
+                return std::array<int, 3> { picture.rgb[i], picture.rgb[i + 1], picture.rgb[i + 2] };
+            };
+            const auto near_colour = [](std::array<int, 3> a, std::array<int, 3> b) {
+                return std::abs(a[0] - b[0]) < 16 && std::abs(a[1] - b[1]) < 16 &&
+                       std::abs(a[2] - b[2]) < 16;
+            };
+            const auto show = [](std::array<int, 3> rgb) {
+                return std::to_string(rgb[0]) + "," + std::to_string(rgb[1]) + "," +
+                       std::to_string(rgb[2]);
+            };
+            // Both overlaps are well inside their cards, away from any edge.
+            for (const std::size_t x : { 140u, 150u, 160u }) {
+                EXPECT_TRUE(near_colour(at(x), expected(c.over_nearer)))
+                    << renderer << " drew " << show(at(x)) << " at x " << x
+                    << ", over the nearer opaque card";
+            }
+            for (const std::size_t x : { 220u, 230u, 240u }) {
+                EXPECT_TRUE(near_colour(at(x), expected(c.over_farther)))
+                    << renderer << " drew " << show(at(x)) << " at x " << x
+                    << ", over the card behind the layer";
+            }
+            // The cards beside the overlaps are the same in every case.
+            EXPECT_TRUE(near_colour(at(60), expected(Colour::Green))) << renderer;
+            EXPECT_TRUE(near_colour(at(320), expected(Colour::Blue))) << renderer;
+        }
+    }
+}
+
 TEST_F(MetalSceneDraw, ADepthTestedDrawCullsTheSameFacesAsCompatibility)
 {
     // The compatibility backend honours a material's `cullmode` for every

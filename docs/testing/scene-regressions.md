@@ -1038,6 +1038,69 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   `autosize` and `projectlayer` is as large as the scene's canvas, whatever size
   the scene saved. `solidlayer` is read and unused, and `autosize` alone still takes
   the saved size.
+- **Depth state of a layer drawn through effects** —
+  `MetalSceneDraw.ALayerDrawnThroughEffectsKeepsItsOwnDepthTestAndWriteOnBothRenderers`.
+  The last pass of an image layer's effects is drawn with the layer's authored
+  `depthtest` and `depthwrite`, not the state its effect pass authored
+  (`SceneImageEffectLayer::SetFinalDepth`, applied beside the layer's blending in
+  `ResolveEffect`). The write is left out for a layer Wallpaper Engine sorts: one whose
+  material blends, `translucent` or `additive`, in a scene with `transparentsorting` on
+  a perspective camera (`Scene::opaque_first`); the parser hands such a layer no write.
+  The fixture is an opaque card nearest the camera, a red translucent layer behind it,
+  and a card behind that which depth-tests and writes none, drawn into a depth-attached
+  scene with and without a pass-through effect that authors neither state, by both
+  renderers. A layer that tests is hidden over the nearer card with effects exactly as
+  without; one that writes hides the card behind it; one that authors neither draws over
+  the nearer card even when its effect pass authors both. The red layer is also a solid
+  layer (`solidlayer_depthtest`) and a composition layer (`composelayer_depthtest`,
+  holding a red card) that test without writing. Eight more cases draw the same cards
+  through a perspective camera with `transparentsorting` (the far card translucent,
+  since an opaque one is drawn first there). A translucent or additive layer that tests
+  and writes, whether a plain card, a solid layer or a composition layer, is hidden over
+  the nearer card yet does not hide the far card drawn after it, whether or not the far
+  card runs the same effect and authors the same state. That layer is transparent over
+  the far card, as a glare card is, so the case asserts that its texels cut nothing out
+  of the far card, not that the far card is drawn under the layer, which Wallpaper
+  Engine's sort would add and this engine's scene order does not. A layer authoring
+  neither is the reference that proves the geometry. A `normal` or `alphatocoverage`
+  layer is not one Wallpaper Engine sorts: it keeps its write, and the far card is
+  hidden behind it. Each case except the geometry references fails on both renderers
+  when the rule it guards is broken: with no final depth state the effect cases draw the layer over the nearer card
+  and a layer authoring neither is hidden; with the write kept for a layer that blends
+  the sorted cases of such a layer draw nothing over the far card (it is cut out); with
+  the write dropped from every layer of a sorting scene the `normal` and
+  `alphatocoverage` cases draw the far card over the layer.
+
+  The depth test and write rest on Wallpaper Engine's binary (its image layer copies the
+  material's `depthtest` and `depthwrite` flags onto the pass, and a scene that sorts
+  draws the layers that blend after the others, back to front, so the write hides
+  nothing there), and on frames of 3509243656 (a star's glare layers, authored
+  translucent with both enabled, over opaque spheres). Without the test each star is a
+  smooth warm disc; with the test and the write a card-shaped hole is cut out of
+  everything farther drawn after the nearest star's glare card: the other stars' glows
+  (a star without its halo), the nebula layers (a dark rectangle with hard edges around
+  a star) and the hover HUD of a farther star, whose ring and leader line are absent
+  while its text label, drawn without a depth state, is there. With the test and no
+  write the discs are white with a warm glow outside them, the glows and the rings are
+  back and no rectangle is left, as in Wallpaper Engine's frame. The seeded A/B behind
+  that (the scene's script `Math.random` seeded, 12 s in, pointer at the centre: seeds 1
+  to 3, 5 to 8, 10, 13 and 14) differs by 13 to 86 thousand of 7 million pixels per
+  frame, and seed 14 is the pair in which a star's ring and leader line return. A ring
+  in the glare card's own plane is drawn with the write (equal depth passes), so the
+  failure is a farther layer under a nearer star's card, not a coplanar one. Across the
+  100 local scenes 14 image layers with effects author a depth-tested material; of the
+  two perspective scenes that sort (3509243656, 3589454154) only 3509243656 has effect
+  layers that author a write, and they are all translucent, so no local frame shows a
+  layer that keeps its write in a sorting scene: that half rests on the binary and the
+  test. 3665954520 (2D, no depth attachment) draws byte for byte as before. 3589454154
+  (Saturn) differs between no depth state, the test alone and the test with the write in
+  no more than 13 pixels outside its clock text. 3477054430 (a moon layer that tests and
+  writes, no sorting) draws the same pixels with and without the write; the test draws
+  17 small clusters of star pixels (about 500 of 7 million pixels at 3456x2024) over the
+  moon's disc that Wallpaper Engine's frame does not have: with the test those pixels
+  are 38 to 44 levels off its frame on average, without it 2 to 3. The likely cause is
+  the star shell model (additive, `depthwrite` enabled) being nearer than the moon; it
+  is not settled here and not changed.
 - **Layers a wallpaper's properties hide** — `HiddenLayers.ALayerItsPropertiesHideStaysOutOfTheGraphUntilSomethingShowsIt`
   in `layer_texture_reference_test` (CPU, in the gate) and
   `MetalSceneDraw.ALayerItsPropertiesHideHoldsNoImagesUntilAScriptShowsIt` in

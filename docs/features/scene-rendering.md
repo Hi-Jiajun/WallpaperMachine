@@ -246,7 +246,25 @@ depth compare to choose. A material writes depth as authored whatever its blendi
 as Wallpaper Engine's own translucent depth-tested font materials expect, so a
 translucent or additive layer that asks to write depth hides what is drawn behind it
 afterwards, its transparent texels included; a pass that does not depth-test writes
-none. A target the frame
+none. The last pass of an image layer's effects, the one that puts the layer into the
+scene, is drawn with the layer's own blending and depth test, not the ones its effect
+pass authored, and with its depth write unless the layer is one Wallpaper Engine
+sorts: Wallpaper Engine's image layer copies all three from its material onto that
+pass, but a scene that turns `transparentsorting` on draws the layers whose material
+blends (`translucent`, `additive`) back to front after the others, where the write
+hides nothing that comes after it, and this engine draws in scene order, where the
+write would cut the layer's whole card, transparent texels included, out of every
+farther layer drawn later (another star's glow, a HUD ring). A layer whose material is
+`normal` (which `disabled` also reads as) or `alphatocoverage` stays in the scene-order
+set drawn first and keeps its write, which hides the farther layers drawn after it.
+A translucent glare layer authored `depthtest` enabled is hidden by a nearer model
+whether or not an effect runs over it, a layer authored `depthwrite` hides what is
+drawn behind it afterwards unless the scene sorts it, and the editor's depth-testing
+solid and compose layers, image layers too, test their effects' result against the
+scene. A text layer drawn through effects keeps its last pass's depth state, and a
+plain translucent layer that writes depth still hides farther layers drawn after it
+in a scene that sorts
+([known limitations](../testing/renderer.md#known-limitations)). A target the frame
 reads before it writes it keeps its own image from one frame to the next on both
 renderers, so the reader sees exactly the previous frame; a scene with such a loop
 is never called still while it runs. An effect's own buffers are made the way

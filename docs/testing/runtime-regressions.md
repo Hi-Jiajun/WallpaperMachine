@@ -83,7 +83,11 @@ device.
   depth state from `ResolveSceneDepthState` (`SceneMaterial.h`). Native Metal used
   to drop depth writes for translucent and additive materials, and depth-tested
   into targets with no depth attachment, where Compatibility draws in painter's
-  order.
+  order. A layer drawn through effects takes the same state from the layer, not
+  its effect pass, except that a layer Wallpaper Engine sorts (blending `translucent` or
+  `additive`) in a scene that sorts takes no write from it
+  (`MetalSceneDraw.ALayerDrawnThroughEffectsKeepsItsOwnDepthTestAndWriteOnBothRenderers`,
+  [scene regressions](scene-regressions.md#layers-textures-and-compositing)).
 - **Render passes** — `MetalSceneDraw.LayersSharingATargetShareOneRenderPassAndHiddenLayersCostNone`:
   consecutive passes into one image share one render pass, a hidden layer starts
   none, a hidden card draws exactly what a dropped one does, and showing it

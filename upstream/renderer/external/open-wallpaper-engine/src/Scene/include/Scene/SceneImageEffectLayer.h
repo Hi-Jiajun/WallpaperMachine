@@ -2,9 +2,11 @@
 #include <vector>
 #include <list>
 #include <memory>
+#include <optional>
 #include <cstdint>
 #include <string>
 #include "Core/Literals.hpp"
+#include "SceneMaterial.h"
 #include "Type.hpp"
 
 namespace wallpaper
@@ -67,6 +69,14 @@ public:
     SceneNode*  ResolvedFinalRenderNode() const { return m_resolved_final_render_node; }
     void        SetFinalMeshDynamic(MeshUpdate update);
     void        SetFinalBlend(BlendMode m) { m_final_blend = m; }
+    /// The depth test and depth write the last pass draws with. The chain's
+    /// last pass is what puts the layer into the scene, and Wallpaper Engine
+    /// draws it with the ones the layer authored for its own material, as it
+    /// does with the layer's blending, not with the state its effect pass
+    /// authored; the parser leaves the write out for a layer Wallpaper Engine
+    /// sorts, which this engine draws in scene order. A layer that never sets
+    /// them keeps the pass's own.
+    void        SetFinalDepth(bool test, bool write) { m_final_depth = SceneDepthState { test, write }; }
     /// The camera the chain's last pass draws its result through. Empty is the
     /// scene's active camera, which is right for a layer that sits in the
     /// scene; a fullscreen layer's result is the screen and must cover it
@@ -86,6 +96,10 @@ private:
     std::unique_ptr<SceneNode> m_final_node;
     SceneNode*                 m_resolved_final_render_node { nullptr };
     BlendMode                  m_final_blend;
+
+    /// The depth test and write the last pass is drawn with; empty keeps the
+    /// ones its own material authored.
+    std::optional<SceneDepthState> m_final_depth;
 
     std::vector<std::shared_ptr<SceneImageEffect>> m_effects;
     bool                                           m_authored_captured { false };

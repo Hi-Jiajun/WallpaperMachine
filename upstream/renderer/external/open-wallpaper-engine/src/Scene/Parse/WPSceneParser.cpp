@@ -1179,6 +1179,17 @@ BlendMode ParseBlendMode(std::string_view str) {
     return bm;
 }
 
+// Whether Wallpaper Engine draws an image layer among the ones sorted back to
+// front, after the rest, in a scene that turns `transparentsorting` on. Its
+// image object marks the layer for the sort unless the blending its material
+// authors is the first entry of the blending enum, `normal`, or the fourth,
+// `alphatocoverage`: the layers that blend, `translucent` and `additive`, sort;
+// the others stay in scene order in the set drawn first. `Normal` also covers
+// `disabled` and an unknown value, which it reads as the enum's first entry.
+bool ImageLayerIsSorted(BlendMode authored) {
+    return authored == BlendMode::Translucent || authored == BlendMode::Additive;
+}
+
 // Wallpaper Engine reads a pass's `depthtest`, `depthwrite` and `cullmode` as
 // two-value enums ("disabled"/"enabled", "normal"/"nocull") and gives a value
 // outside the list the list's first entry: no depth test, no depth write, back
@@ -4436,6 +4447,18 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     }
     // material blendmode for last step to use
     auto imgBlendMode = additive_color_blend ? BlendMode::Additive : material.blenmode;
+    // And the depth test and write the layer authored: the chain's last pass
+    // draws the layer into the scene with them, not with the state its effect
+    // pass authored. A layer that Wallpaper Engine sorts, in a scene that sorts,
+    // is drawn without the write: it is drawn back to front there, where the
+    // write hides nothing that comes after it, and in scene order it would cut
+    // the layer's whole card out of every farther layer drawn later. A layer
+    // that stays in the scene's first, scene-order set keeps its write, which
+    // hides the farther sorted layers drawn after it as it does there.
+    const bool imgDepthTest = material.depth_test;
+    const bool imgDepthWrite =
+        material.depth_write &&
+        ! (context.scene->opaque_first && ImageLayerIsSorted(material.blenmode));
     // disable img material blend, as it's the first effect node now
     if (hasEffect) {
         material.blenmode = BlendMode::Normal;
@@ -4496,6 +4519,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             effect_ppong_b);
         {
             imgEffectLayer->SetFinalBlend(imgBlendMode);
+            imgEffectLayer->SetFinalDepth(imgDepthTest, imgDepthWrite);
             if (wpimgobj.fullscreen) {
                 imgEffectLayer->SetFinalCamera(std::string(FullscreenLayerCamera));
             }

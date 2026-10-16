@@ -838,6 +838,53 @@ into private textures; the three that draw skip visibly without a Metal device.
   more texture memory for them than the display rule; the figures from the mip
   headers of one machine's library are in `upstream/provenance.json`
   (`textureMipBudgetChanges`).
+- **A scene with `transparentsorting` is drawn in scene order.** Wallpaper Engine
+  draws such a perspective scene's objects in two sets: the unmarked ones first, in
+  scene order, then the marked ones, stably sorted by descending
+  `dot(world position, a vector of the render context)` (`FUN_14018aac0`,
+  `FUN_1401865c0`, the insertion sort `FUN_14019ee60`; layers that carry the 0x200
+  flag take minus infinity and come last). The mark is flag 0x100 of the object;
+  `FUN_14018ff60`, which creates the objects, puts a marked one in the sorted list and
+  in the set the first loop skips. An image layer is marked unless the blending its
+  material authors is `normal` or `alphatocoverage` (constructor `FUN_1401fac50`;
+  the blending enum reads `normal` 0, `translucent` 1, `additive` 2 and
+  `alphatocoverage` 3, and `disabled` or any other word as `normal`). So the layers
+  that blend, `translucent` and `additive`, are sorted, and `normal` and
+  `alphatocoverage` ones stay in the first set in scene order. A `passthrough` layer
+  (flag 0x20) would be marked whatever its blending if flag 0x40 were clear. Flag 0x40
+  is `copybackground` (its setter `FUN_1401ef350`), but it is applied by the load step
+  that runs after the constructor, and the base constructor `FUN_1401e6980` starts the
+  flags with 0x40 set, so the sort decision always sees it set and passthrough
+  changes nothing. Other object kinds were not read. That the vector is the view
+  direction, and the order therefore back to front, is inferred from the frames (no
+  farther layer is cut by a nearer star's glare card), not read from the code. This
+  engine draws its opaque set first (nodes without effects whose materials are all
+  `normal` or disabled and depth-test, narrower than the unmarked set) and the rest
+  in scene order (`Scene::opaque_first`). The one place that shows is a depth write:
+  the last pass of an image layer's effects drops it when Wallpaper Engine sorts the
+  layer (below), but a plain translucent layer authored `depthwrite` (a HUD ring's
+  card) still hides every farther layer drawn after it, inside its whole card, where
+  Wallpaper Engine draws that farther layer first. Sorting the marked layers has to
+  follow layers a script moves every frame, which the compiled graph's fixed pass
+  order does not, so it wants its own design and a measurement of the graph rebuilds
+  it would cost.
+- **A depth-tested layer with effects can show additive star sprites through it.** The
+  last pass of an image layer's effects is depth-tested like the layer's own material,
+  and in the moon scene (3477054430) about 500 of 7 million pixels of small stars that
+  Wallpaper Engine's frame does not show appear over the moon's disc: the star shell
+  model (additive, `depthwrite` enabled) is likely nearer than the moon, so the moon's
+  tested pass fails where a star was drawn. Without the test those pixels match the
+  frame. Why Wallpaper Engine's tested pass does not fail there is not established
+  (does it write depth for additive draws?); the effect on the picture is a few
+  pixels a frame.
+- **A text layer drawn through effects keeps its last effect pass's depth state.** An
+  image layer's last pass is drawn with the layer's own depth test and depth write
+  (`SceneImageEffectLayer::SetFinalDepth`; no write for a layer a sorting scene sorts,
+  above); a text layer sets none, so its last pass keeps what its effect authored.
+  Wallpaper Engine's text object (`0x140258580`) sets that pass translucent and
+  depth-tested under the condition that also selects its depth-tested font materials
+  (`materials/fonts/*_depth.json`, not selected here either) and leaves the depth
+  write alone, so a text layer is never depth-tested against a nearer model here.
 - **File textures are sampled trilinearly.** Wallpaper Engine's sampler for a file
   texture is anisotropic (8x), which only shows on a surface seen at an angle (the
   local scene with 3D models), and it samples a shadow atlas through a comparison

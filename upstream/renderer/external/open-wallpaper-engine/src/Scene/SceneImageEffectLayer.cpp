@@ -130,6 +130,10 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
         auto& material      = *mesh.Material();
         {
             material.blenmode = m_final_blend;
+            if (m_final_depth.has_value()) {
+                material.depth_test  = m_final_depth->test;
+                material.depth_write = m_final_depth->write;
+            }
             last_output->sceneNode->SetCamera(m_final_camera);
             last_output->sceneNode->CopyTrans(*m_final_node);
             mesh.ChangeMeshDataFrom(*m_final_mesh);
