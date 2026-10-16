@@ -322,6 +322,7 @@ decode-correctness defect.
 | `WALLPAPER_MACHINE_METAL_TARGET_SHARING=0` | Native Metal lets targets never alive together share images, and traded copies share a small set | Every target keeps an image of its own; the picture is byte-identical either way, the target memory is not |
 | Settings → Performance → Advanced → Video playback (`video_backend` in the app config) | Compatibility: every wallpaper on the scene engine | Native video preferred: eligible plain local videos on the platform player |
 | Settings → Performance → Advanced → Scene renderer (`scene_renderer` in the app config) | See [scene rendering](../features/scene-rendering.md#scene-renderer) | The other renderer for every scene it can draw; headless, `LocalProjectEnergyIsMeasuredHeadlessly` ([renderer.md](renderer.md#ccmake-test-binaries)) runs one scene on either |
+| Settings → Performance → Quality → 2D scene resolution (`scene_resolution` under `[quality]`) | Display resolution: a 2D scene is rasterized at the size it is presented at | Canvas size: rasterized at the authored canvas and stretched; less GPU time and memory |
 
 `WALLPAPER_MACHINE_CONTENT_PACING=1` switches content pacing on in headless
 probes. An explicit setting wins over it and the app pushes its saved value at

@@ -87,6 +87,7 @@ extension PanelController {
         sessions: Int(settings.sharedVideoDecodeSessions),
         consumers: Int(settings.sharedVideoDecodeConsumers)),
       sceneRenderer: SceneRendererMode(rawValue: settings.sceneRenderer) ?? .compatibility,
+      sceneResolution: SceneResolutionMode(rawValue: settings.sceneResolution) ?? .display,
       sceneOptimization: settings.sceneOptimizationEnabled,
       sceneOnDemand: settings.sceneOnDemandEnabled,
       sceneVideoPlaneSampling: settings.sceneVideoPlaneSamplingEnabled,

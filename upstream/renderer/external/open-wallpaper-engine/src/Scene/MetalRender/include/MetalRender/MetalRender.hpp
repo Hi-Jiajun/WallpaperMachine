@@ -3,6 +3,7 @@
 #include "Core/RendererCounters.hpp"
 #include "Presentation/WallpaperScaling.hpp"
 #include "MetalRender/MetalVideoSupport.hpp"
+#include "Scene/include/Scene/SceneResolution.hpp"
 #include "Type.hpp"
 
 #include <cstdint>
@@ -115,10 +116,13 @@ public:
 
     bool clearLastRenderGraph();
     bool compileRenderGraph(Scene& scene, rg::RenderGraph& graph);
-    /// Applies a new internal rasterization scale to an already compiled graph.
-    /// Render targets and the pipelines attached to them are rebuilt; the
-    /// parsed scene, uploaded images and shader libraries are not.
-    bool ApplyRenderScale(Scene& scene, rg::RenderGraph& graph, double scale);
+    /// Applies a new internal rasterization scale, and the resolution the scene
+    /// is rasterized at, to an already compiled graph. Render targets and the
+    /// pipelines attached to them are rebuilt, and only when one of the two
+    /// changes what this scene rasterizes; the parsed scene, uploaded images and
+    /// shader libraries are not.
+    bool ApplyRenderScale(Scene& scene, rg::RenderGraph& graph, double scale,
+                          SceneResolution resolution);
 
     /// Draws one frame. `presented`, when given, reports whether a frame
     /// actually reached the layer: returning true having presented nothing is

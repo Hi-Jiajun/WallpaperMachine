@@ -84,7 +84,7 @@ kernel's resource-coalition accounting (`CoalitionEnergySource`,
   has no such entry and shows no line.
 - **Before and after.** A setting on Performance or Playback & Power that changes rendering work
   (`RenderingSetting` in `PanelController+Settings.swift`: presets, frame-rate limit, render scale,
-  battery mode and quality, what to do in Low Power Mode, when the Mac is hot and when
+  2D scene resolution, battery mode and quality, what to do in Low Power Mode, when the Mac is hot and when
   the battery is low, video backend, scene renderer and the scene and
   experimental switches) calls `EnergyUsageMonitor.settingChanged()` once the
   engine has accepted it. The window restarts, the row reads **Measuring…** with
@@ -214,7 +214,8 @@ measured ([limits](web-wallpapers.md#limits)).
 only. Output size, placement and composition are unchanged; a lower scale
 rasterizes fewer pixels and draws the result into the same area, so detail softens
 as the scale drops. It is a quality tier and is not part of any same-quality
-backend comparison. For 2D scenes the authored canvas defines 100%; perspective
+backend comparison. For 2D scenes 100% is the raster the
+[2D scene resolution](#2d-scene-resolution) below picks; perspective
 scenes with no authored canvas use the physical output size instead of a fixed
 1920×1080 fallback, and the camera aspect follows the surface. This is native
 resolution, not supersampling. For Web wallpapers the scale multiplies the page's
@@ -240,6 +241,73 @@ replaces it. Whenever the effective `renderScale` differs from the saved
 names the cause only while reduced quality is actually in force: heat, Low Power
 Mode, a low battery or the battery, in that order when several hold. Otherwise it
 says only that the saved setting is not in effect.
+
+### 2D scene resolution
+
+**2D scene resolution** (**Display resolution**, the default, or **Canvas size**) is
+how many pixels a 2D scene is rasterized with before the internal render scale takes
+its share; the scale multiplies whichever is chosen. A 2D scene is one with an authored
+canvas, drawn with an orthographic camera.
+
+- **Display resolution** rasterizes the canvas at the size it is presented at on the
+  display: the Fill layout's scale times the display's backing scale, which is what
+  Wallpaper Engine does. The 1920×1080 canvas of a scene on a 3456×2234 panel is drawn
+  into a 3972×2234 image (Fill crops the part that overhangs the panel, but it is
+  rasterized) instead of 1920×1080 stretched to that size at the last step, so edges
+  and grain keep the panel's own pixels. Text layers are still laid out and
+  rasterized at the canvas's size, so text gains no detail from it. At the Low and Medium presets the render
+  scale then applies to that size (50% is half of it in each direction).
+- **Canvas size** rasterizes at the size the author made the canvas, as the app did
+  before this setting existed, and stretches the picture to the display when it is
+  presented. It costs the least GPU time and memory and is the softest on a display
+  with more pixels than the canvas.
+
+Only the pixel sizes of the images a scene is drawn into change: its own picture, and
+the targets that follow the screen (bloom and the other effects' mip levels
+among them, as the same fraction of it). The canvas stays the source extent of
+everything else: layout, the cursor mapping, `engine.canvasSize` and every other
+coordinate a script sees, parallax and camera zoom. The buffers an effect's author
+sized (ping-pong buffers, fixed-fraction scratch buffers) keep their authored size and
+follow the render scale alone, so a screen-sized effect buffer is not made larger by a
+finer raster. Screen-space shader inputs, the texel size a blur steps by among them,
+describe the image actually drawn, as they do under a lower render scale.
+
+Display resolution does not apply to perspective scenes, which already rasterize at the
+output size, or to video wallpapers, whose frames keep their own size, and is
+capped at the largest texture the GPU can create (16384 pixels on a side on every Mac
+this app runs on), keeping the canvas's aspect. The raster is sized for the placement
+every display starts from, Fill at the display's scale: the **Zoom** slider, which
+moves while it is dragged, does not change it, so a wallpaper zoomed in is magnified
+from that raster, and a display shown with Fit, Stretch or Original size is drawn
+from the same Fill-sized raster. The aspect handling itself is unchanged: a canvas that is not the
+display's shape is filled and cropped.
+
+The choice reaches a running scene as a render-scale change does: the renderer
+resizes its targets in place on both renderers, with no reparse and no timeline
+reset, and a pause is kept; on Native Metal the scene's own video layers are
+reopened, as for any render-scale change. Every scene opened afterwards, a display
+change that rebuilds a scene's graph included, sizes its targets from the choice
+and the display it is then on. The battery profile and a quality throttle still lower
+the render scale on top of it, and **Effective now** describes that scale only. The
+setting is saved as `scene_resolution` under `[quality]` in `config.toml`.
+
+**Cost** (headless, the production `SceneWallpaper` at 60 fps for 20 seconds on a
+3456×2234 surface backed at 2×, 1920×1080 canvases, alternating Canvas, Display,
+Display, Canvas; [`LocalProjectEnergyIsMeasuredHeadlessly`](../testing/renderer.md#probe-environment-variables)):
+
+| Scene | Renderer | GPU time per frame | Render targets | Process footprint (peak) |
+| --- | --- | --- | --- | --- |
+| Bloom and an effect chain | Native Metal | 1.62 → 3.42 ms | 35 → 94 MB | 380 → 455 MB |
+| Bloom and an effect chain | Compatibility | 1.91 → 3.27 ms | not read | 399 → 480 MB |
+| 26 layers, author-sized effect buffers, no bloom | Native Metal | 1.76 → 2.33 ms | 132 → 160 MB | 515 → 555 MB |
+
+The cost follows how much of a scene is screen-sized, so a scene of mostly
+author-sized buffers pays little and a bloom or full-screen effect chain pays for
+every level. At 60 fps the first scene's extra 1.8 ms is about a tenth of a frame.
+CPU time per frame did not move, and the energy effect has not been measured: the
+whole-GPU energy figures of the probe are not usable on a machine that is also doing
+other work. Peak footprint carries about ±30 MB of run-to-run noise. The Canvas figures
+are what the app drew before the setting; choose **Canvas size** to keep them.
 
 ### Default per-display frame rate
 

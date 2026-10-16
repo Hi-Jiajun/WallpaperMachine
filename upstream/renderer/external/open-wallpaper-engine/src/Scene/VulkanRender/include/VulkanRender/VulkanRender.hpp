@@ -3,6 +3,7 @@
 #include "Core/RendererCounters.hpp"
 #include "RenderGraph/RenderGraph.hpp"
 #include "Presentation/WallpaperScaling.hpp"
+#include "Scene/include/Scene/SceneResolution.hpp"
 #include "SceneWallpaperSurface.hpp"
 #include "Swapchain/ExSwapchain.hpp"
 #include "Type.hpp"
@@ -57,10 +58,12 @@ public:
 
     bool clearLastRenderGraph();
     bool compileRenderGraph(Scene&, rg::RenderGraph&);
-    /// Applies a new internal rasterization scale to an already compiled graph.
-    /// Keeps the parsed scene, the render graph, uploaded images and live video
-    /// decoders; only render targets and the passes that attach them are rebuilt.
-    bool ApplyRenderScale(Scene&, rg::RenderGraph&, double scale);
+    /// Applies a new internal rasterization scale, and the resolution the scene
+    /// is rasterized at, to an already compiled graph. Keeps the parsed scene,
+    /// the render graph, uploaded images and live video decoders; only render
+    /// targets and the passes that attach them are rebuilt, and only when one of
+    /// the two changes what this scene rasterizes.
+    bool ApplyRenderScale(Scene&, rg::RenderGraph&, double scale, SceneResolution resolution);
     /// Rebuilds the copy plan and the reuse table for the current scene
     /// optimisation setting, without reparsing the project, reopening a video
     /// or resetting a timeline. Called at a frame boundary when the setting

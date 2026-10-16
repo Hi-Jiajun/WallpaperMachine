@@ -14,7 +14,8 @@ import UniformTypeIdentifiers
 enum RenderingSetting: String, CaseIterable, Sendable {
   case batteryMode, batteryRenderScale, batteryTargetFps, frameRateCap, qualityPreset, renderScale
   case videoBackend, contentPacing, sharedVideoDecode, sceneOptimization, sceneOnDemand
-  case sceneVideoPlaneSampling, sceneRenderer, lowPowerModeAction, thermalAction, lowBatteryAction
+  case sceneVideoPlaneSampling, sceneRenderer, sceneResolution
+  case lowPowerModeAction, thermalAction, lowBatteryAction
 }
 
 /// Every key of the old `setting` action as its own typed setter, plus the app rules and the small
@@ -295,6 +296,11 @@ extension PanelController {
   /// `sceneRenderer`.
   func setSceneRenderer(_ mode: SceneRendererMode) async throws {
     try await change(.sceneRenderer) { try await store.setSceneRendererAsync(mode.rawValue) }
+  }
+
+  /// `sceneResolution`: running 2D scenes resize their render targets in place.
+  func setSceneResolution(_ mode: SceneResolutionMode) async throws {
+    try await change(.sceneResolution) { try await store.setSceneResolutionAsync(mode.rawValue) }
   }
 
   // MARK: Troubleshooting and Steam

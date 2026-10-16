@@ -145,9 +145,12 @@ Frames, time and surfaces:
 | `WE_TEST_COMPARE_PROJECTS` | `metal_scene_draw_smoke --gtest_filter='*DrawTheSamePictureOnBothRenderers*'` | Colon-separated `project.json` paths drawn by both renderers in one harness (see below). Unset, the test skips |
 | `WE_TEST_COMPARE_SURFACE` | the same test | `<width>x<height>` of the layer both renderers draw into; default `960x540` |
 | `WE_TEST_COMPARE_NATIVE_ONLY` | the same test | Set (any value) to draw only the Native Metal picture of each project and compare nothing: only `<scene>-native.ppm` is written, for a comparison with a reference from outside the harness such as Wallpaper Engine's own frames |
+| `WE_TEST_COMPARE_RESOLUTION` | the same test | `display` rasterizes a 2D scene at the size it is presented at on the layer; `canvas`, the default, at the size it was authored at. Perspective scenes and videos ignore it |
+| `WE_TEST_COMPARE_SCALE_FACTOR` | the same test | The layer's backing scale, `1`–`4` (default `1`); with `WE_TEST_COMPARE_SURFACE` it makes a laptop-panel-sized layer |
 | `WE_TEST_SURFACE` | `offscreen_scene_probe` | `<width>x<height>` physical output extent; defaults to `1920x1080`. Perspective scenes use it as their full-scale raster; authored 2D canvases keep their size |
 | `WE_TEST_TEXTURE_SURFACE` | `offscreen_scene_probe` | `<width>x<height>` opts into the production display-sized texture mip policy without changing raster extent; unset retains all source levels for before/after image and allocation comparisons. Native Metal uses its surface size automatically |
 | `WE_TEST_METAL_SURFACE` | `metal_scene_draw_smoke` | `<width>x<height>` for the surface the native backend rasterizes; defaults to `960x540`. Screen-space shader inputs follow it, so comparing this backend's output with another's is only meaningful when both rasterize the same extent |
+| `WE_TEST_METAL_RESOLUTION`, `WE_TEST_METAL_SCALE_FACTOR` | `metal_scene_draw_smoke` | `display` rasterizes a 2D scene at the size it is presented at on that surface, `canvas` (the default) at the size it was authored at; the scale factor (`1`–`4`, default `1`) is the surface's backing scale. The `render target bytes` line and `WE_TEST_METAL_DUMP_TARGETS=*` then show what the choice costs |
 
 Allocation, optimisation and dumps:
 
@@ -685,7 +688,10 @@ renderer A/B: it skips unless `WE_TEST_ENERGY_PROJECT` names a local
 (`compatibility` or `native`) with its own 60 FPS clock into an unattached layer
 of `WE_TEST_ENERGY_WIDTH` x `WE_TEST_ENERGY_HEIGHT` (default 1920x1080), waits
 `WE_TEST_ENERGY_WARMUP` seconds (default 5) after the first frame and samples a
-`WE_TEST_ENERGY_SECONDS` window (default 20). It prints one `ENERGY {...}` line:
+`WE_TEST_ENERGY_SECONDS` window (default 20). `WE_TEST_ENERGY_RESOLUTION`
+(`canvas`, the default, or `display`) picks the 2D scene resolution the run draws
+at and `WE_TEST_ENERGY_SCALE_FACTOR` (default 1) the surface's backing scale, so a
+3456 x 2234 surface at 2 is a laptop panel. It prints one `ENERGY {...}` line:
 the backend actually used, this process's CPU seconds and CPU energy
 (`ri_energy_nj`), the GPU time of this process's own Metal command buffers and
 how many there were (`gpu_own_s`, `command_buffers`: the test wraps the device's

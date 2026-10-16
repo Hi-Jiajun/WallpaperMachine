@@ -13,6 +13,7 @@
 #include "SceneRenderTarget.h"
 #include "SceneNode.h"
 #include "SceneLight.hpp"
+#include "SceneResolution.hpp"
 
 #include "Core/NoCopyMove.hpp"
 
@@ -150,6 +151,12 @@ public:
     /// the camera frustum or the presentation viewport, so output size and
     /// composition are unchanged and only the sampled detail differs.
     double               render_scale { 1.0 };
+    /// How large the raster behind the canvas is before `render_scale` takes
+    /// its share: the canvas itself, or the size the canvas is presented at.
+    /// Like the scale it only changes the render targets; the canvas stays the
+    /// source extent of layout, cursor mapping and every coordinate a script
+    /// sees. A scene built without a host keeps the canvas.
+    SceneResolution      resolution { SceneResolution::Canvas };
     std::array<float, 3> clearColor { 1.0f, 1.0f, 1.0f };
     bool                 clearEnabled { true };
 

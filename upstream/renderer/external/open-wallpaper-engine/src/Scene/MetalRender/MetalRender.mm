@@ -213,6 +213,19 @@ double NormalizeScaleFactor(double value)
     return value;
 }
 
+/// The longest side of a 2D texture this device can create, from Apple's
+/// published feature-set limits: 16384 from the third GPU family on and on every
+/// Mac family, 8192 below that. The Metal API has no query for it, so this is
+/// the table the documentation gives.
+uint32_t MaxTextureDimension(id<MTLDevice> device)
+{
+    if (device != nil && ([device supportsFamily:MTLGPUFamilyApple3] ||
+                          [device supportsFamily:MTLGPUFamilyMac2])) {
+        return 16384;
+    }
+    return 8192;
+}
+
 MTLVertexFormat ToMetalVertexFormat(std::string_view name)
 {
     if (name == "r32_sfloat") return MTLVertexFormatFloat;
@@ -2334,7 +2347,10 @@ void MetalRender::Impl::resolveTargetSizes(Scene& scene)
 {
     const VkExtent2D fallback { std::max<uint32_t>(1, output_width),
                                 std::max<uint32_t>(1, output_height) };
-    const auto extents      = vulkan::ResolveScreenBoundRenderTargetSizes(scene, fallback);
+    const auto extents      = vulkan::ResolveScreenBoundRenderTargetSizes(
+        scene, fallback,
+        vulkan::SceneRasterSurface { .display_scale_factor = NormalizeScaleFactor(display_scale_factor),
+                                     .max_dimension        = MaxTextureDimension(device) });
     const auto render_scale = vulkan::ResolveSceneRenderScale(scene);
     raster_width            = std::max(1u, extents.raster.width);
     raster_height           = std::max(1u, extents.raster.height);
@@ -4553,7 +4569,8 @@ bool MetalRender::compileRenderGraph(Scene& scene, rg::RenderGraph& graph)
     }
 }
 
-bool MetalRender::ApplyRenderScale(Scene& scene, rg::RenderGraph& graph, double scale)
+bool MetalRender::ApplyRenderScale(Scene& scene, rg::RenderGraph& graph, double scale,
+                                   SceneResolution resolution)
 {
     // The same guard the compatibility backend has, and for a sharper reason
     // here: `compile` starts by releasing the graph, which closes every video
@@ -4565,9 +4582,17 @@ bool MetalRender::ApplyRenderScale(Scene& scene, rg::RenderGraph& graph, double 
     // every plug and unplug into exactly that.
     if (! std::isfinite(scale) || scale <= 0.0) return true;
     const double clamped = std::min(1.0, std::max(vulkan::kMinRenderScale, scale));
-    if (scene.render_scale == clamped) return true;
+    if (scene.render_scale == clamped && scene.resolution == resolution) return true;
 
+    // A resolution that this scene has no canvas to apply to changes nothing
+    // that is drawn, so it must not cost a perspective scene or a video its
+    // compiled graph either.
+    const bool resizes =
+        scene.render_scale != clamped ||
+        (scene.resolution != resolution && vulkan::SceneResolutionAffectsRaster(scene));
     scene.render_scale = clamped;
+    scene.resolution   = resolution;
+    if (! resizes) return true;
     @autoreleasepool {
         return pImpl->compile(scene, graph);
     }

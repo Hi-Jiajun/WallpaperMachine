@@ -12,7 +12,7 @@ use kameo::{
 };
 use wallpaper_core::{
     DisplayIdentity, DisplaySelector, DisplaySnapshotEntry, PropertyPreview,
-    SceneRendererPreference, WallpaperAssignment,
+    SceneRendererPreference, SceneResolution, WallpaperAssignment,
     media::audio::AudioVolume,
     project::{ScalingMode, SceneDesc, SceneFraming, SceneHandle, SerdeValudeExt},
     render::{
@@ -52,8 +52,8 @@ use crate::{
             SetRenderScale,
             SetRendererCountersEnabled, SetScalingFactor, SetScalingMode,
             SetSceneOnDemandEnabled, SetSceneOptimizationEnabled, SetSceneRenderer,
-            SetSceneVideoPlaneSamplingEnabled, SetSharedVideoDecodeEnabled, SetTargetFps,
-            SetVerboseLogging, SetVideoBackend, SetVolume, SetWebAudioSubscribed,
+            SetSceneResolution, SetSceneVideoPlaneSamplingEnabled, SetSharedVideoDecodeEnabled,
+            SetTargetFps, SetVerboseLogging, SetVideoBackend, SetVolume, SetWebAudioSubscribed,
             Shutdown,
         },
         state::BridgeActorState,
@@ -68,8 +68,8 @@ use crate::{
         BridgeWallpaperMutationBundle, BridgeWallpaperPreview, BridgeWebWallpaper, MousePollingControl,
     },
     config::{
-        AppConfig, ConfigStore, FramingCfg, SceneRendererModeCfg, SerializedSelector,
-        VideoBackendModeCfg, WallpaperConfig,
+        AppConfig, ConfigStore, FramingCfg, SceneRendererModeCfg, SceneResolutionCfg,
+        SerializedSelector, VideoBackendModeCfg, WallpaperConfig,
     },
     display::{DisplaySelectorExt, DisplaySnapshotExt},
     engine::{
@@ -2414,6 +2414,14 @@ impl<E: EngineFacade + Clone> Message<Bootstrap> for BridgeActor<E> {
         {
             self.state.errors.push(error.to_string());
         }
+        // Before any scene opens: a scene sizes its render targets from this
+        // when its graph is built, and the engine's own default is the canvas.
+        if let Err(error) = self
+            .engine
+            .set_scene_resolution(scene_resolution(self.state.app_config.quality.scene_resolution))
+        {
+            self.state.errors.push(error.to_string());
+        }
         if let Err(error) = self
             .engine
             .set_scene_video_plane_sampling_enabled(experimental.scene_video_plane_sampling)
@@ -3637,6 +3645,43 @@ fn scene_renderer_preference(mode: SceneRendererModeCfg) -> SceneRendererPrefere
     match mode {
         SceneRendererModeCfg::Compatibility => SceneRendererPreference::Compatibility,
         SceneRendererModeCfg::NativeMetalPreferred => SceneRendererPreference::NativeMetalPreferred,
+    }
+}
+
+fn scene_resolution(resolution: SceneResolutionCfg) -> SceneResolution {
+    match resolution {
+        SceneResolutionCfg::Canvas => SceneResolution::Canvas,
+        SceneResolutionCfg::Display => SceneResolution::Display,
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<SetSceneResolution> for BridgeActor<E> {
+    type Reply = messages::SetSceneResolutionReply;
+
+    async fn handle(
+        &mut self,
+        msg: SetSceneResolution,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        if self.state.app_config.quality.scene_resolution == msg.resolution {
+            return Ok(self.all_snapshots());
+        }
+        self.state.app_config.quality.scene_resolution = msg.resolution;
+        if let Some(store) = &self.config_store {
+            store.save_app_config(&self.state.app_config)?;
+        }
+        // The size the canvas is rasterized at, not what a scene is: the
+        // process switch is set, and every open scene is then handed the render
+        // scale it already has, which is when a running scene reads the switch
+        // and resizes its targets in place. Going through a reconcile instead
+        // would reparse every project and reopen every video for a quality
+        // choice.
+        self.engine
+            .set_scene_resolution(scene_resolution(msg.resolution))
+            .map_err(|error| BridgeError::engine(error.to_string()))?;
+        self.apply_effective_render_scale().await?;
+        self.bump_generation();
+        Ok(self.all_snapshots())
     }
 }
 

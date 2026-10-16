@@ -868,6 +868,24 @@ impl WallpaperEngine {
         self.backend.set_scene_renderer_preference(preference)
     }
 
+    /// Chooses how many pixels a 2D scene is rasterized with: the canvas it
+    /// was authored at, or the size it is presented at on the display.
+    ///
+    /// Process-wide. A scene opened afterwards takes it when its graph is
+    /// built; one already running takes it when its render scale is next
+    /// applied (see [`Self::set_render_scale`]), which resizes its targets in
+    /// place without reparsing the project or reopening a video.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the renderer rejects the call.
+    pub fn set_scene_resolution(
+        &self,
+        resolution: crate::SceneResolution,
+    ) -> Result<(), EngineError> {
+        self.backend.set_scene_resolution(resolution)
+    }
+
     /// Live update state and active backend for every open scene.
     ///
     /// Synchronous and infallible so it composes with a synchronous settings

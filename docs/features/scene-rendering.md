@@ -611,6 +611,31 @@ that decide what to reuse are skipped outright, since their only reachable answe
 "draw everything". The budget itself is unchanged; a target that cannot be pinned
 still redraws.
 
+### 2D scene resolution
+
+A scene with an authored canvas is rasterized at the size it is presented at on the
+display by default (**Display resolution**), or at the canvas's own size (**Canvas
+size**), and the internal render scale divides whichever is chosen. Both renderers
+size their render targets from one shared function
+(`ResolveScreenBoundRenderTargetSizes`): the default target and every target that
+follows the screen come from the raster, a target the author sized keeps scaling
+with the render scale alone, and the canvas stays the source extent of layout,
+cursor mapping and scripts. The raster is the Fill layout of the canvas over the
+output in whole points, at the display's backing scale, capped at the device's
+largest texture (Native Metal reads Apple's published limit for the GPU family,
+Compatibility the Vulkan device's `maxImageDimension2D`). A perspective scene and a
+plain video do not read it.
+
+The choice is process-wide, like [scene render optimisation](#scene-render-optimisation):
+a scene takes it when its render graph is built, and the host hands every open scene
+its render scale again when the choice changes, so a running scene resizes its
+targets in place (`ApplyRenderScale`), on the render thread and without a reparse.
+The resize is skipped for a scene that has no canvas to rasterize, so a perspective
+scene or a video does not pay a graph rebuild for it. A surface that is replaced (a
+display change) rebuilds the graph and with it the raster. What it costs, and why a
+bloom scene pays more than one with author-sized buffers, is under
+[Performance](performance.md#2d-scene-resolution).
+
 ### Frames that would repeat the picture
 
 With scene render optimisation on, a frame that would put back exactly the picture

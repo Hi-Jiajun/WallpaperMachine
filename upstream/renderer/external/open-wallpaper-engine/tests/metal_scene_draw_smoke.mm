@@ -334,7 +334,8 @@ struct RendererPicture
 /// each frame with its index, for a scene the world changes while it runs.
 RendererPicture DrawWithRenderer(Scene& scene, bool native, uint32_t width, uint32_t height,
                                  int frames, double step,
-                                 const std::function<void(int)>& before_frame = {})
+                                 const std::function<void(int)>& before_frame = {},
+                                 double display_scale_factor = 1.0)
 {
     RendererPicture picture;
     @autoreleasepool {
@@ -354,6 +355,7 @@ RendererPicture DrawWithRenderer(Scene& scene, bool native, uint32_t width, uint
         info.height        = static_cast<uint16_t>(height);
         info.render_width  = static_cast<uint16_t>(width);
         info.render_height = static_cast<uint16_t>(height);
+        info.display_scale_factor = display_scale_factor;
         info.surface_info.instanceExts = { VK_KHR_SURFACE_EXTENSION_NAME,
                                            VK_EXT_METAL_SURFACE_EXTENSION_NAME };
         info.surface_info.createSurfaceOp = [handle](VkInstance instance, VkSurfaceKHR* surface) {
@@ -1304,6 +1306,133 @@ TEST_F(MetalSceneDraw, UnreferencedTargetsStayUnallocatedAcrossOptimizationChang
             else EXPECT_EQ(pixels, reference);
         }
         render.destroy();
+    }
+}
+
+/// The fixture's tile grown to the whole 384 x 256 canvas, in a colour that
+/// spells out the raster it was drawn into: the shader reads the texel size the
+/// renderer reports for the raster, so the picture says how large the raster
+/// was, on whichever renderer drew it. Canvas-sized, the texel size times the
+/// canvas is exactly 1.
+std::filesystem::path WriteRasterProbeFixture(const std::filesystem::path& root)
+{
+    const auto project = WriteFixture(root);
+    std::ofstream(root / "models/tile.json")
+        << R"({"width":384,"height":256,"material":"materials/tile.json"})";
+    std::ofstream(root / "shaders/metal_probe.frag")
+        << "uniform vec2 g_TexelSize;\n"
+           "varying vec2 v_TexCoord;\n"
+           "void main() {\n"
+           "  gl_FragColor = vec4(g_TexelSize.x * 384.0, g_TexelSize.y * 256.0, 0.0, 1.0);\n"
+           "}\n";
+    return project;
+}
+
+TEST_F(MetalSceneDraw, A2DSceneIsRasterizedAtTheSizeItIsPresentedAtWhenTheHostAsksForTheDisplay)
+{
+    const auto project = WriteRasterProbeFixture(root_ / "project");
+    LoadedScene loaded;
+    std::string error;
+    ASSERT_TRUE(LoadScene(project, root_ / "cache", loaded, error)) << error;
+    @autoreleasepool {
+        // The 384 x 256 canvas on a 768 x 512 surface backed at 2x: laid over
+        // the whole 384 x 256 point panel, it covers 768 x 512 pixels.
+        CAMetalLayer* layer = [CAMetalLayer layer];
+        layer.device        = MTLCreateSystemDefaultDevice();
+        layer.pixelFormat   = MTLPixelFormatBGRA8Unorm;
+        layer.drawableSize  = CGSizeMake(768, 512);
+        MetalRender render;
+        MetalRenderInitInfo info {
+            .metal_layer = (__bridge void*)layer, .width = 768, .height = 512,
+            .render_width = 768, .render_height = 512, .display_scale_factor = 2.0,
+        };
+        ASSERT_TRUE(render.init(info));
+        auto graph = sceneToRenderGraph(*loaded.scene);
+        ASSERT_TRUE(render.compileRenderGraph(*loaded.scene, *graph)) << render.lastError();
+
+        using Size = std::pair<uint32_t, uint32_t>;
+        const std::string output = loaded.scene->ResolveRenderTargetName(SpecTex_Default);
+        const auto        raster = [&] {
+            EXPECT_TRUE(render.drawFrame(*loaded.scene)) << render.lastError();
+            std::vector<uint8_t> pixels;
+            uint32_t width = 0, height = 0;
+            EXPECT_TRUE(render.ReadRenderTargetForTests(output, pixels, width, height));
+            return Size { width, height };
+        };
+        const auto apply = [&](double scale, SceneResolution resolution) {
+            ASSERT_TRUE(render.ApplyRenderScale(*loaded.scene, *graph, scale, resolution))
+                << render.lastError();
+        };
+
+        // A scene nobody has asked about keeps the canvas it was authored at.
+        EXPECT_EQ(raster(), (Size { 384, 256 }));
+        // Asked for the display, a running scene is resized in place and then
+        // follows the render scale from there.
+        apply(1.0, SceneResolution::Display);
+        EXPECT_EQ(raster(), (Size { 768, 512 }));
+        apply(0.5, SceneResolution::Display);
+        EXPECT_EQ(raster(), (Size { 384, 256 }));
+        apply(0.25, SceneResolution::Display);
+        EXPECT_EQ(raster(), (Size { 192, 128 }));
+        // The canvas is the render scale alone, as it always was.
+        apply(0.5, SceneResolution::Canvas);
+        EXPECT_EQ(raster(), (Size { 192, 128 }));
+        apply(1.0, SceneResolution::Canvas);
+        EXPECT_EQ(raster(), (Size { 384, 256 }));
+        apply(1.0, SceneResolution::Display);
+        EXPECT_EQ(raster(), (Size { 768, 512 }));
+
+        // The display the scene is on changes: a 1000 x 500 panel at 1x, whose
+        // aspect is not the canvas's. The canvas is filled over it, and the
+        // raster keeps the canvas's shape rather than the panel's.
+        layer.drawableSize = CGSizeMake(1000, 500);
+        MetalRenderInitInfo moved {
+            .metal_layer = (__bridge void*)layer, .width = 1000, .height = 500,
+            .render_width = 1000, .render_height = 500, .display_scale_factor = 1.0,
+        };
+        ASSERT_TRUE(render.resetSurface(moved)) << render.lastError();
+        ASSERT_TRUE(render.clearLastRenderGraph());
+        graph = sceneToRenderGraph(*loaded.scene);
+        ASSERT_TRUE(render.compileRenderGraph(*loaded.scene, *graph)) << render.lastError();
+        EXPECT_EQ(raster(), (Size { 1000, 667 }));
+        render.destroy();
+    }
+}
+
+TEST_F(MetalSceneDraw, ASceneRasterizedForTheDisplayIsTheSamePictureOnBothRenderers)
+{
+    // The raster is measured by the scene's own shader, so what is compared is
+    // what each renderer rasterized, not what it was asked for: the canvas at
+    // 384 x 256 reads back as 1 on both axes, the display at 768 x 512 as one
+    // half. A backend that kept the canvas, or sized the display differently,
+    // paints another colour.
+    for (const auto resolution : { SceneResolution::Canvas, SceneResolution::Display }) {
+        const bool display = resolution == SceneResolution::Display;
+        SCOPED_TRACE(display ? "display resolution" : "canvas resolution");
+        std::map<bool, RendererPicture> pictures;
+        for (const bool native : { false, true }) {
+            const std::string name = std::string(display ? "display" : "canvas") +
+                                     (native ? "-native" : "-compat");
+            const auto  project = WriteRasterProbeFixture(root_ / ("raster-" + name));
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            if (native) {
+                const auto selection = SelectSceneBackend(*loaded.scene);
+                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            }
+            loaded.scene->resolution = resolution;
+            pictures[native] =
+                DrawWithRenderer(*loaded.scene, native, 768, 512, 1, 1.0 / 60.0, {}, 2.0);
+            ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+        }
+        const auto& rgb = pictures[true].rgb;
+        ASSERT_EQ(rgb.size(), 768u * 512u * 3u);
+        const std::size_t centre = (256u * 768u + 384u) * 3u;
+        EXPECT_NEAR(rgb[centre + 0], display ? 128 : 255, 1);
+        EXPECT_NEAR(rgb[centre + 1], display ? 128 : 255, 1);
+        EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
+            << "the two renderers rasterized the scene at different sizes";
     }
 }
 
@@ -7697,6 +7826,21 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                 surface_height = h;
             }
         }
+        // `WE_TEST_METAL_RESOLUTION=display` rasterizes a 2D scene at the size it
+        // is presented at on the surface (the canvas, the default, at the size it
+        // was authored at), and `WE_TEST_METAL_SCALE_FACTOR` is the surface's
+        // backing scale; the render target bytes printed below are then the cost
+        // of the choice.
+        const char* resolution_name = std::getenv("WE_TEST_METAL_RESOLUTION");
+        loaded.scene->resolution =
+            resolution_name != nullptr && std::string_view(resolution_name) == "display"
+                ? SceneResolution::Display
+                : SceneResolution::Canvas;
+        double scale_factor = 1.0;
+        if (const char* value = std::getenv("WE_TEST_METAL_SCALE_FACTOR")) {
+            scale_factor = std::strtod(value, nullptr);
+            ASSERT_TRUE(scale_factor >= 1.0 && scale_factor <= 4.0) << value;
+        }
         @autoreleasepool {
             id<MTLDevice> device       = MTLCreateSystemDefaultDevice();
             CAMetalLayer* layer        = [CAMetalLayer layer];
@@ -7712,7 +7856,7 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                 .height               = static_cast<uint16_t>(surface_height),
                 .render_width         = static_cast<uint16_t>(surface_width),
                 .render_height        = static_cast<uint16_t>(surface_height),
-                .display_scale_factor = 1.0,
+                .display_scale_factor = scale_factor,
             };
             ASSERT_TRUE(render.init(info)) << render.lastError();
             auto graph = sceneToRenderGraph(*loaded.scene);
@@ -7928,6 +8072,11 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawTheSamePictureOnBothRenderers)
     // `WE_TEST_COMPARE_NATIVE_ONLY` draws the native picture alone, for a
     // comparison with a reference from outside this harness (Wallpaper Engine's
     // own frames): nothing is compared and only `-native.ppm` is written.
+    // `WE_TEST_COMPARE_RESOLUTION=display` rasterizes a 2D scene at the size it
+    // is presented at (`canvas`, the default, at the size it was authored at) and
+    // `WE_TEST_COMPARE_SCALE_FACTOR` is the layer's backing scale (1), so a
+    // display-resolution picture can be compared across renderers and with the
+    // canvas one.
     const char* listed = std::getenv("WE_TEST_COMPARE_PROJECTS");
     const bool  native_only = std::getenv("WE_TEST_COMPARE_NATIVE_ONLY") != nullptr;
     const auto  assets = LocalSceneAssetsRoot();
@@ -7952,6 +8101,16 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawTheSamePictureOnBothRenderers)
         }
     }
     const char* output = std::getenv("WE_TEST_OUTPUT");
+    const char* resolution_name = std::getenv("WE_TEST_COMPARE_RESOLUTION");
+    const auto  resolution =
+        resolution_name != nullptr && std::string_view(resolution_name) == "display"
+            ? SceneResolution::Display
+            : SceneResolution::Canvas;
+    double scale_factor = 1.0;
+    if (const char* value = std::getenv("WE_TEST_COMPARE_SCALE_FACTOR")) {
+        scale_factor = std::strtod(value, nullptr);
+        ASSERT_TRUE(scale_factor >= 1.0 && scale_factor <= 4.0);
+    }
 
     std::vector<std::string> projects;
     for (std::string_view rest = listed; ! rest.empty();) {
@@ -8013,6 +8172,7 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawTheSamePictureOnBothRenderers)
                 }
             }
             auto& scene = *loaded.scene;
+            scene.resolution = resolution;
             if (scene.runtime != nullptr) {
                 for (int tick = 0; tick < warmup; ++tick) {
                     scene.runtime->Tick(1.0 / 60.0);
@@ -8022,7 +8182,8 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawTheSamePictureOnBothRenderers)
                 (void)scene.runtime->ConsumeSceneGraphMutationFlag();
             }
 
-            auto picture = DrawWithRenderer(scene, native, width, height, frame_count, frame_step);
+            auto picture = DrawWithRenderer(scene, native, width, height, frame_count, frame_step,
+                                            {}, scale_factor);
             if (! picture.error.empty()) {
                 std::cout << "[ COMPARE  ] " << scene_id << ": "
                           << (native ? "native" : "compatibility") << " -- " << picture.error

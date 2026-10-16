@@ -117,6 +117,42 @@ final class PanelPerformanceSettingsTests: PanelTestCase {
     }
   }
 
+  /// The choice is by the names the engine accepts, ships on the display and comes back as the engine
+  /// answered it. A name the typed choice cannot make is not offered, so the engine never has to refuse
+  /// one the panel sent.
+  func testSceneResolutionShipsOnTheDisplayAndRoundTripsThroughTheEngine() async throws {
+    for rejected in ["native", "Display", "canvas size", ""] {
+      XCTAssertNil(SceneResolutionMode(rawValue: rejected), rejected)
+    }
+    XCTAssertEqual(SceneResolutionMode.allCases.map(\.rawValue), ["display", "canvas"])
+
+    try await withRecordingPanel { panel, bridge in
+      panel.store.settingsSnapshot = BridgeSnapshotFixtures.settings()
+      XCTAssertEqual(
+        panel.controller.performanceSettings.sceneResolution, .display,
+        "It ships on the display; a view that rendered the canvas would invert the default")
+
+      try await panel.controller.setSceneResolution(.canvas)
+      XCTAssertEqual(bridge.sceneResolutionCalls, ["canvas"])
+      XCTAssertEqual(
+        panel.controller.performanceSettings.sceneResolution, .canvas,
+        "The state is the one the engine returned, not the click")
+
+      try await panel.controller.setSceneResolution(.display)
+      XCTAssertEqual(bridge.sceneResolutionCalls, ["canvas", "display"])
+      XCTAssertEqual(panel.controller.performanceSettings.sceneResolution, .display)
+    }
+  }
+
+  /// A name this build does not know, from a newer or hand-edited config, reads as the shipped default
+  /// rather than as a choice the user never made.
+  func testAnUnknownSceneResolutionNameReadsAsTheDisplay() async throws {
+    try await withRecordingPanel { panel, _ in
+      panel.store.settingsSnapshot = BridgeSnapshotFixtures.settings(sceneResolution: "supersampled")
+      XCTAssertEqual(panel.controller.performanceSettings.sceneResolution, .display)
+    }
+  }
+
   func testSceneOptimizationShipsOnAndRoundTripsThroughTheEngine() async throws {
     try await withRecordingPanel { panel, bridge in
       panel.store.settingsSnapshot = BridgeSnapshotFixtures.settings()

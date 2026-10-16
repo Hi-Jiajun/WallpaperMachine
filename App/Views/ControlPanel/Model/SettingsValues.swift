@@ -219,6 +219,7 @@ struct PerformanceSettings: Equatable {
   var sharedVideoDecode: Bool
   var sharedDecode: SharedDecodeReport
   var sceneRenderer: SceneRendererMode
+  var sceneResolution: SceneResolutionMode
   var sceneOptimization: Bool
   var sceneOnDemand: Bool
   var sceneVideoPlaneSampling: Bool

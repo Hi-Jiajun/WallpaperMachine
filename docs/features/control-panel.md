@@ -205,7 +205,7 @@ the rest opens in a popover from the ⓘ beside the title.
   lower quality instead of pausing, and the page names which one is lowering it. See
   [Performance settings](performance.md).
 - **Performance** opens with a live energy readout for the app, then quality
-  (presets, frame-rate limit, render scale) directly beneath it. Video backend,
+  (presets, frame-rate limit, render scale, 2D scene resolution) directly beneath it. Video backend,
   scene controls and the experimental switches stay under **Advanced**. See
   [Performance settings](performance.md). The inspector of an installed wallpaper
   adds its measured energy grade, and on a Mac with a battery its share of a charge

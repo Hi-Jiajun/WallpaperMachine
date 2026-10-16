@@ -571,6 +571,11 @@ pub struct BridgeSettingsSnapshot {
     /// which for a given scene may or may not be what `scene_renderers`
     /// reports. A saved preference, not a read-back.
     pub scene_renderer: String,
+    /// `"display"` or `"canvas"`: how many pixels a 2D scene is rasterized
+    /// with before the render scale divides them. The saved preference, which
+    /// every running 2D scene follows; perspective scenes and plain videos
+    /// ignore it.
+    pub scene_resolution: String,
     /// Live per-scene state read back from the renderer on this rebuild. One
     /// row per running scene wallpaper; an empty vector means no scene
     /// wallpaper is running, and a row reading `unknown` means one is running

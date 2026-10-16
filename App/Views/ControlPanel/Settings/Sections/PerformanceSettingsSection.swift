@@ -44,6 +44,12 @@ struct PerformanceSettingsSection: View {
   static let renderScaleEffective = SettingsItem(
     id: "performance.render-scale-effective", section: .performance, group: quality,
     title: "Effective now")
+  static let sceneResolution = SettingsItem(
+    id: "performance.scene-resolution", section: .performance, group: quality,
+    title: "2D scene resolution",
+    note:
+      "Display resolution draws a 2D scene at the size it covers on your display, as Wallpaper Engine does, which keeps it sharp on a high-resolution screen. Canvas size draws it at the size its author made it and stretches the result, which uses the least GPU and memory. Internal render scale applies on top. Perspective scenes and videos aren’t affected.",
+    keywords: ["Display resolution", "Canvas size"])
 
   // Advanced
   static let advanced = SettingsItem(
@@ -120,8 +126,8 @@ struct PerformanceSettingsSection: View {
   )
 
   static let items = [
-    energyUse, energyMethod, preset, frameRateLimit, renderScale, renderScaleEffective, advanced,
-    videoBackend, videoDiagnostics, videoInUse, sceneRenderer, sceneOptimization, sceneOnDemand,
+    energyUse, energyMethod, preset, frameRateLimit, renderScale, renderScaleEffective,
+    sceneResolution, advanced, videoBackend, videoDiagnostics, videoInUse, sceneRenderer, sceneOptimization, sceneOnDemand,
     sceneDiagnostics, sceneDrawnBy, sceneInForce, sceneUpdating, sceneCompatibility,
     contentPacing, sharedVideoDecode, sharedDecodeInUse, videoPlaneSampling,
   ]
@@ -179,6 +185,14 @@ struct PerformanceSettingsSection: View {
         }
         if let effective = performance.quality.effectiveText {
           SettingsRow(Self.renderScaleEffective) { SettingsStatusText(effective) }
+        }
+        SettingsRow(Self.sceneResolution) {
+          SettingsMenuControl(
+            key: "sceneResolution", saved: performance.sceneResolution,
+            options: SceneResolutionMode.allCases.map {
+              SettingsMenuOption(value: $0, title: $0.title)
+            }
+          ) { try await controller.setSceneResolution($0) }
         }
       }
       SettingsGroupDisclosure(Self.advanced) {

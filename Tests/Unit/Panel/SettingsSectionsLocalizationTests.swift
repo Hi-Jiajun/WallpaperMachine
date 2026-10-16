@@ -56,6 +56,8 @@ final class SettingsSectionsLocalizationTests: XCTestCase {
         (AppThemePreferences.Tone.warm.title, "Warm"), (AppThemePreferences.Icon.night.title, "Night"),
         (VideoBackendMode.nativePreferred.title, "Native video preferred"),
         (SceneRendererMode.nativeMetalPreferred.title, "Native Metal preferred"),
+        (SceneResolutionMode.display.title, "Display resolution"),
+        (SceneResolutionMode.canvas.title, "Canvas size"),
         (QualityCause.heat.statusText, "The Mac is hot. Reduced quality is in use."),
         (EnergyReadout.Caveat.nativeVideo.title, "Native video not counted"),
         (EnergyReadout.title(for: .high), "High energy use"),

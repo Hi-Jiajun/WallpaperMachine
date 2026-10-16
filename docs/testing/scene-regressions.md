@@ -988,6 +988,35 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   three-quarter scale rounds rather than truncates, returning to full scale
   restores the exact size) without changing 2D canvas behavior; a perspective
   raster follows the surface without changing the canvas fallback.
+- **2D scene resolution** — `RasterResolution.*` in `render_scale_test` (the
+  sizing every backend shares): Canvas mode ignores the display completely and
+  keeps the numbers `RenderScale.*` pins; Display mode makes the default target
+  and every screen-bound target the size the canvas is presented at (the FILL
+  layout in output pixels, so a 1920x1080 canvas on a 3456x2234 panel is
+  3972x2234, a canvas wider than the panel keeps its aspect and overshoots it, a
+  display smaller than the canvas rasterizes fewer pixels), while the canvas
+  stays the source extent (`scene_extent` and the authored sizes do not move)
+  and an author-sized target such as an effect's ping-pong buffer follows the
+  render scale alone. The render scale divides the display raster, the raster
+  never exceeds the device's longest texture side and keeps its aspect when it is
+  capped, Canvas to Display and back leaves no drift, and a perspective scene, a
+  plain video and a media-sized default target do not read the choice at all.
+  `MetalSceneDraw.A2DSceneIsRasterizedAtTheSizeItIsPresentedAtWhenTheHostAsksForTheDisplay`
+  pins the native glue by reading the scene's image back: the size follows the
+  choice and the render scale live through `ApplyRenderScale`, and a surface
+  that moves to another display re-sizes it at the next graph. `MetalSceneDraw.ASceneRasterizedForTheDisplayIsTheSamePictureOnBothRenderers`
+  makes the scene's own shader report the raster (the texel size the renderer
+  hands it times the canvas) and requires both renderers to paint the same
+  picture, so a backend that kept the canvas or sized the display differently
+  shows as another colour; `UnchangedPresent.ARunningSceneTakesTheResolutionTheHostChoosesOnBothRenderers`
+  does the same through a running `SceneWallpaper`, setting the process-wide
+  choice and re-sending the render scale as the host does, and reads the posters
+  of both renderers across Canvas, Display and a half render scale. The bridge's
+  `tests::scene_settings` and `config::store::tests` pin the saved choice (it
+  ships on the display, survives a restart under its own `[quality]` key, a name
+  that is neither is refused, the renderer is told at start-up and once per
+  change, and every open scene is handed the render scale in force without a
+  reconcile), and `PanelPerformanceSettingsTests` the panel's side.
 - **Random sprite-sheet frames** — `ParticleMouseControlpoint.SpawnedParticlesCarryAnIndependentFrameValueSpreadOverTheSheet`
   in `particle_mouse_controlpoint_test`. A `randomframe` particle keeps one frame
   for its life: the particle's own `seed`, one draw at spawn, so identical spawns

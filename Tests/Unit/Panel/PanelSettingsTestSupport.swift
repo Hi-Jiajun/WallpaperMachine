@@ -20,6 +20,7 @@ final class SettingsRecordingBridge: LayoutSnapshotBridge {
   var sceneOnDemandCalls: [Bool] = []
   var sceneVideoPlaneSamplingCalls: [Bool] = []
   var sceneRendererCalls: [String] = []
+  var sceneResolutionCalls: [String] = []
   var verboseLoggingCalls: [Bool] = []
   /// Counted off the main actor: the store reads these synchronously.
   let clearShaderCacheCalls = SettingsCallCounter()
@@ -78,6 +79,10 @@ final class SettingsRecordingBridge: LayoutSnapshotBridge {
 
   override func setSceneRenderer(mode: String) async throws -> BridgeSnapshotBundle {
     try await record({ $0.sceneRendererCalls.append(mode) }) { $0.sceneRenderer = mode }
+  }
+
+  override func setSceneResolution(mode: String) async throws -> BridgeSnapshotBundle {
+    try await record({ $0.sceneResolutionCalls.append(mode) }) { $0.sceneResolution = mode }
   }
 
   override func setVerboseLogging(enabled: Bool) async throws -> BridgeSnapshotBundle {

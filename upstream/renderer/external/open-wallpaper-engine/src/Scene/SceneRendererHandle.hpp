@@ -149,8 +149,9 @@ public:
         OWE_FORWARD(compileRenderGraph(scene, graph));
         return false;
     }
-    bool ApplyRenderScale(Scene& scene, rg::RenderGraph& graph, double scale) {
-        OWE_FORWARD(ApplyRenderScale(scene, graph, scale));
+    bool ApplyRenderScale(Scene& scene, rg::RenderGraph& graph, double scale,
+                          SceneResolution resolution) {
+        OWE_FORWARD(ApplyRenderScale(scene, graph, scale, resolution));
         return false;
     }
     /// How the scene's video textures reached their shaders on the last frame.

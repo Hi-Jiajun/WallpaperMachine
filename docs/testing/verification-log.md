@@ -25,6 +25,18 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-15 — 2D scene resolution: Display resolution by default
+
+Headless only: no desktop, no audio, no app launch, no Release build.
+
+- Renderer binaries rebuilt from the final tree and run whole: `render_scale_test` 23 passed (13 new `RasterResolution.*`), `wallpaper_scaling_test` 8, `metal_backend_test` 35, `unchanged_present_test` 11 (1 new, a running scene on both renderers), `metal_scene_draw_smoke` 86 (2 new). The picture test fails when the compatibility backend is made to ignore the choice.
+- `python3 scripts/check_rust.py` — exit 0: core 315, bridge 602 (5 new), core-integration, shader; the asset-dependent shader cases skipped as printed (no Wallpaper Engine assets directory, no unpacked corpus).
+- `python3 scripts/test.py --only` on the settings classes (PanelPerformanceSettingsTests, PanelEnergyRestartTests, SettingsSectionsLocalizationTests, SettingsSectionsRenderTests, SettingsControlsRenderTests, SettingsSearchOfferTests, PanelSettingsValuesTests, SettingsEditingModelTests) — 62 passed. All 113 panel classes at once: 994 passed, 27 failed, every failure a test that does not pin the language reading this Mac's saved app language (zh-Hans), and failing the same alone; not caused by this change.
+- The 21 Python script test modules (catalog and panel localization included) — passed.
+- Both renderers draw two local 1920x1080-canvas scenes byte for byte alike at 3456x2234 backed at 2x in both modes (`DrawTheSamePictureOnBothRenderers` with `WE_TEST_COMPARE_RESOLUTION`, 60 frames). Display mode crops show crisper edges and grain than Canvas at the same size; viewed offscreen, never on the desktop.
+- Cost, `LocalProjectEnergyIsMeasuredHeadlessly` (`WE_TEST_ENERGY_RESOLUTION`), 3456x2234 at 2x, 60 fps, 2 x 20 s per mode, canvas/display/display/canvas: a bloom and effect-chain scene on Native Metal 1.62 -> 3.42 ms own GPU time per frame, render targets 35 -> 94 MB, peak footprint 380 -> 455 MB; on Compatibility 1.91 -> 3.27 ms and 399 -> 480 MB; a 26-layer scene of mostly author-sized buffers 1.76 -> 2.33 ms, 132 -> 160 MB, 515 -> 555 MB. CPU time per frame unchanged; energy not measured; footprint carries about 30 MB of run-to-run noise.
+- Not run: the full `python3 scripts/test.py` and `python3 scripts/check_renderer.py` gates, a desktop run, the lock screen (it never sets the choice and keeps the canvas), a Release build.
+
 ## 2026-10-15 — Native SwiftUI control panel
 
 - Change: the WKWebView control panel (WebUI/) is replaced by a native SwiftUI window (b5722da7, 511e3a86, 4767f8b4); typed PanelController actions, live language via per-language catalogs, DesktopActions test guard.
@@ -134,14 +146,3 @@ Native Metal draws scene lights, previous-frame effects and steps with an unprod
 - Every commit's tree built and passed `metal_scene_draw_smoke`, `metal_backend_test`, `unchanged_present_test` and `layer_texture_reference_test`; after the rebase onto 18ddfbd8 the same four and `script_runtime_compat_test` pass.
 - `python3 scripts/check_rust.py` exit 0 (3 corpus/asset skips); `python3 scripts/check_renderer.py` exit 0 (env-gated local-project, energy, text-workshop and local-video skips); `python3 scripts/test.py` exit 0, 2564 passed, 45 skipped; all on 95dfb6bc plus this branch.
 - Not checked: a real display or the desktop, wallpapers outside the local library, the lock screen (still Compatibility). Seen only under parallel load and passing alone: `TextThatHasNotChangedIsNeitherLaidOutNorUploadedAgain`, `TheSkipPresentsTheSameVideoFramesInTheSameOrder`.
-
-## 2026-10-13 — One depth rule for both scene renderers
-
-Native Metal dropped depth writes for translucent and additive materials and depth-tested into targets with no depth attachment; both renderers now take a draw's depth state from ResolveSceneDepthState. Wallpaper Engine's own translucent depth-tested font materials write depth, as Compatibility already did.
-
-- `MetalSceneDraw.ADepthWritingDrawHidesLaterDrawsAsOnCompatibility` (seven authored blend/depth cases through both renderers): **failed** without the source change (translucent, additive and no-attachment opaque cases differ), **passed** with it
-- `python3 scripts/check_renderer.py`: **exit 0**; `metal_scene_draw_smoke` **57 passed**, `metal_backend_test` **35 passed**, generated cases pixel-equal with no diagnostics, reload probe 8 projects x2 clean; local-project tests skipped (no `WE_TEST_*` projects)
-- `python3 scripts/build.py --renderer-only` then `python3 scripts/test.py`: **2564 passed, 0 failed, 45 skipped**
-- After rebasing onto `b0f1a177`: `metal_scene_draw_smoke` **58 passed**, `metal_backend_test` **35 passed**
-- Renderer comparison (`LocalProjectsDrawTheSamePictureOnBothRenderers`, on the uncommitted Native Metal compatibility work, which draws model scenes natively) over 28 local model/perspective scenes plus Leon, baseline/fix/baseline: no change beyond run-to-run noise; 3675966045 differs by 0.417 mean in every run, unrelated
-- Not checked: the app on the desktop; the Release build follows the commit

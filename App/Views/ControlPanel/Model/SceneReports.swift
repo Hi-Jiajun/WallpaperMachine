@@ -32,6 +32,23 @@ enum SceneRendererMode: String, CaseIterable, Sendable {
   }
 }
 
+/// How many pixels a 2D scene is rasterized with, by the names the engine accepts.
+///
+/// Must stay identical to the Rust `set_scene_resolution` match arms. Display resolution is the
+/// default and comes first: it draws the canvas at the size it covers on the display, as Wallpaper
+/// Engine does. Canvas size draws at the size the author made it, which costs the least.
+enum SceneResolutionMode: String, CaseIterable, Sendable {
+  case display
+  case canvas
+
+  @MainActor var title: String {
+    switch self {
+    case .display: L("Display resolution")
+    case .canvas: L("Canvas size")
+    }
+  }
+}
+
 /// How a report line names the display and the wallpaper it is about: the display's own name, or
 /// "Display 7" when it has none, then the wallpaper's title, its id or a generic word.
 private enum ReportSubject {

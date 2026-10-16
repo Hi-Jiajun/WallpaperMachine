@@ -5225,6 +5225,18 @@
     "Effective now" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "現在の有効値"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "当前生效"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "目前生效"}}}
     },
+    "2D scene resolution" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "2Dシーンの解像度"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "2D 场景分辨率"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "2D 場景解析度"}}}
+    },
+    "Display resolution draws a 2D scene at the size it covers on your display, as Wallpaper Engine does, which keeps it sharp on a high-resolution screen. Canvas size draws it at the size its author made it and stretches the result, which uses the least GPU and memory. Internal render scale applies on top. Perspective scenes and videos aren’t affected." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "「ディスプレイの解像度」では、Wallpaper Engineと同様に、2Dシーンをディスプレイ上で占めるサイズで描画するため、高解像度の画面でも鮮明に表示されます。「キャンバスサイズ」では、制作者が作成したサイズで描画して結果を引き伸ばすため、GPUとメモリの使用量が最も少なくなります。内部レンダリングスケールはその上にさらに適用されます。透視投影のシーンとビデオは影響を受けません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "“显示器分辨率”会按 2D 场景在显示器上占据的大小来绘制，与 Wallpaper Engine 一致，在高分辨率屏幕上也能保持清晰。“画布尺寸”按作者制作时的大小绘制，再将结果拉伸，占用的 GPU 和内存最少。内部渲染比例会在此基础上再生效。透视场景和视频不受影响。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "「顯示器解析度」會依 2D 場景在顯示器上佔據的大小來繪製，與 Wallpaper Engine 一致，在高解析度螢幕上也能保持清晰。「畫布尺寸」依作者製作時的大小繪製，再將結果拉伸，使用的 GPU 與記憶體最少。內部渲染比例會在此基礎上再套用。透視場景與影片不受影響。"}}}
+    },
+    "Display resolution" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ディスプレイの解像度"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "显示器分辨率"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "顯示器解析度"}}}
+    },
+    "Canvas size" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "キャンバスサイズ"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "画布尺寸"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "畫布尺寸"}}}
+    },
     "%@ on battery. Your setting is %@." : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "バッテリー駆動中は%1$@です。設定値は%2$@です。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "使用电池时为 %1$@，你的设置是 %2$@。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "使用電池時為 %1$@。你的設定是 %2$@。"}}}
     },
