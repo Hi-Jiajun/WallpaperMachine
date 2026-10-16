@@ -60,7 +60,14 @@ struct TextLayerState {
     std::string          resolved_font_path;
     SharedFontData       resolved_font_data;
     float                point_size { 12.0f };
-    float                padding { 0.0f };
+    // The margin the card keeps clear around the text on each axis, in pixels.
+    // This is the authored `padding` where Wallpaper Engine applies it -- the
+    // layer has effect passes, a colour blend or an opaque background -- and
+    // zero on a plain text layer.
+    Eigen::Vector2f      padding { Eigen::Vector2f::Zero() };
+    // The authored `spacing`: pixels added to every glyph's advance (x) and to
+    // the line pitch (y), at the rasterised size.
+    Eigen::Vector2f      spacing { Eigen::Vector2f::Zero() };
     Eigen::Vector2f      explicit_size { Eigen::Vector2f::Zero() };
     Eigen::Vector3f      color { Eigen::Vector3f::Ones() };
     float                alpha { 1.0f };
@@ -73,6 +80,8 @@ struct TextLayerState {
     bool                 limit_width { false };
     bool                 limit_rows { false };
     bool                 use_ellipsis { false };
+    // `blockalign`: rows that end at a word wrap are justified to `max_width`.
+    bool                 block_align { false };
     bool                 dirty { false };
     bool                 cache_dirty { false };
     bool                 full_dirty { false };

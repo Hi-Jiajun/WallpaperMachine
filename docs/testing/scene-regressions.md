@@ -960,6 +960,61 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   and `.EllipsisFitsTheLastVisibleRowAndLimitFlagsRemainIndependent` compare the
   rendered pixels and layout bounds, and FreeType and fallback fonts share the
   same wrapping and truncation rules.
+- **Text as Wallpaper Engine sets it** — `text_object_runtime_test`.
+  `TextObjectRuntime.PointSizeIsRequestedFromTheFontAt300Dpi` asks FreeType for the
+  face the way Wallpaper Engine does (`FT_Set_Char_Size` at 300 dpi, whose line
+  height is one row's card height) and requires the layout to agree;
+  `.PointSizeIsClampedToTheRangeWallpaperEngineAccepts` pins the 1 through 256 clamp
+  for measurement and estimate alike. `.EmptyTextIsATwoByTwoCardPlusPadding`,
+  `.CardPaddingSizesTheCardAndNeverNarrowsTheWrap` (a limit that just fits keeps the
+  text on one row whatever the padding) and `.CardPaddingInsetsAlignedTextOnEachAxis`
+  cover the card; `.ANegativePaddingTakesTheCardInAndOnlyTheTopIsCapped` pins that
+  a lane is capped at 512 and not floored (a card never goes below a pixel);
+  `.PaddingAndSpacingReadTheFormsWallpaperEngineReads` (number, `"x y"`, a lone
+  `"x"`, a bound `value`, the 32-pixel default, the 512 cap, a negative lane, and a
+  JSON array, which the reference does not read and so leaves the default) and
+  `.CardPaddingAppliesOnlyToLayersWallpaperEnginePads` (effects, a visible effect
+  only, colour blend other than none and add, LED source, opaque background) cover
+  the parse and the gate, and `.ASceneWithFogPadsEveryTextLayerWhateverItsEffects`
+  the scene-wide fog flags (`fogdistance`, `fogheight`: the renderer composites every
+  text layer in such a scene, which is what pads it; the same two flags also add the
+  `FOG_COMPUTED` combo to its shader, which a text layer's own shader has no use for).
+  `.SpacingAddsToEveryAdvanceAndToTheLinePitch` requires a
+  row to be the pen at the glyph starts and the last glyph's ink, so `n` glyphs
+  widen by `n - 1` gaps, and rows to step by the line height plus `spacing` y;
+  `.SpacingMovesTheRowsOfRasterisedText` checks the pixels.
+  `.BlockAlignJustifiesOnlyRowsThatEndedAtAWordWrap` justifies the wrapped rows of
+  a paragraph to exactly `maxwidth` and leaves the paragraph's last row and the
+  next paragraph's rows pixel-identical to the unjustified layout;
+  `.BlockAlignNeedsAWidthLimitAndALineThatWraps` leaves unlimited and single-row
+  text alone. Where a row ends is pinned against the rule read from the reference:
+  `.TheLastRowTheLimitAllowsIsCutAtTheGlyphThatDidNotFit` (on the last row
+  `maxrows` allows nothing wraps; the row keeps every glyph before the one that did
+  not fit, inside a word if that is where it falls, and with two rows allowed the
+  first still wraps at its last space and only the second is cut),
+  `.AnEllipsisReplacesTheEndOfTheLastRowAtTheGlyphThatDidNotFit` (the marker
+  replaces the end of that row, glyphs dropped one at a time until it fits, never the
+  whole word before it),
+  `.ALineBreakWithNothingAfterItAddsNoRowAndNoEllipsis` (a break with nothing after
+  it ends the text; one with anything after it, a second break included, is cut)
+  and `.ARowThatWrapsAtADoubleSpaceKeepsAllButOneOfTheSpaces` (the break is at the
+  last space before the glyph, and the space before it stays in the row, where
+  `blockalign` has it to widen). Each fails against the rule it replaced (a
+  word-boundary cut on the last row, a row after a trailing break, every trailing
+  space dropped). `.TextMeasuresToTheCardsWallpaperEngineSaved` is ground truth: the
+  size of a text layer in a scene file is the card Wallpaper Engine laid the text out
+  in, and the five cards it saved for Arial text that the tests keep (with and
+  without a padding of 32, a lone full stop, a run of dashes, a long run of
+  underscores) are reproduced to the pixel with exact comparison, which is as far as
+  the claim goes: other fonts and scripts, and any other text, are not compared. They
+  are the metrics of the Arial of the machine that ran Wallpaper Engine, and a build
+  of the font with other metrics shows as a difference, not a skip.
+  `.PenAdvancesAreUnhintedWholePixelsKernedWithTheNextGlyph` states the kerning rule
+  against FreeType's own numbers. Two cards that were reproduced while the rule was
+  developed, one of wrapped text of 729 characters and one with a padding of 128, are
+  not kept: their text is private, so nothing re-checks them. The other fixtures use
+  a system font, so the tests state relations to the font's own metrics, not pixel
+  counts, and the ground-truth tests skip where Arial is not installed.
 - **Text colour blend** —
   `TextObjectRuntime.ColorBlendModeMixesTextWithTheScreenThroughThePassthroughPass`
   and `.AddColorBlendTextIsDrawnAdditivelyOntoTheScene` (CPU, in the gate) and

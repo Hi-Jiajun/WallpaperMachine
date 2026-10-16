@@ -26,6 +26,9 @@
 #include "WPSceneParser.hpp"
 #include "WPPkgFs.hpp"
 
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include FT_ADVANCES_H
 #include <gtest/gtest.h>
 #include <spirv_reflect.h>
 
@@ -1798,7 +1801,7 @@ TEST(TextObjectRuntime, ExplicitTextObjectSizeIsMinimumRuntimeTextureDimensions)
             "text": "12:34",
             "font": "Arial",
             "pointsize": 20,
-            "size": [320, 90],
+            "size": [320, 120],
             "visible": true
           }
         ])"),
@@ -1817,7 +1820,7 @@ TEST(TextObjectRuntime, ExplicitTextObjectSizeIsMinimumRuntimeTextureDimensions)
     auto image = scene->imageParser->Parse(material->textures.front());
     ASSERT_NE(image, nullptr);
     EXPECT_EQ(image->header.width, 320);
-    EXPECT_EQ(image->header.height, 90);
+    EXPECT_EQ(image->header.height, 120);
 
     ASSERT_TRUE(scene->runtime->SetNodeText("clock", "12:34:56 PM UTC"));
     PumpTextUntilClean(*scene->runtime);
@@ -1825,10 +1828,10 @@ TEST(TextObjectRuntime, ExplicitTextObjectSizeIsMinimumRuntimeTextureDimensions)
     auto updated = scene->imageParser->Parse(material->textures.front());
     ASSERT_NE(updated, nullptr);
     EXPECT_GT(updated->header.width, 320);
-    EXPECT_EQ(updated->header.height, 90);
+    EXPECT_EQ(updated->header.height, 120);
     const auto runtime_size = scene->runtime->NodeSize("clock");
     EXPECT_FLOAT_EQ(runtime_size.x(), 320.0f);
-    EXPECT_FLOAT_EQ(runtime_size.y(), 90.0f);
+    EXPECT_FLOAT_EQ(runtime_size.y(), 120.0f);
     const auto mesh_size = MeshSize(*node->Mesh());
     EXPECT_GT(mesh_size.x(), runtime_size.x());
     EXPECT_NEAR(mesh_size.y(), runtime_size.y(), 1.0f);
@@ -1908,7 +1911,7 @@ TEST(TextObjectRuntime, RasterizedTextUsesFontPixelSizeAndAntialiasesEdges) {
         .resolved_font_identity = "Helvetica",
         .resolved_font_path     = ResolveSystemFontPath("systemfont_Helvetica"),
         .point_size             = 40.0f,
-        .padding                = 4.0f,
+        .padding                = { 4.0f, 4.0f },
     };
 #ifdef __APPLE__
     ASSERT_FALSE(state.resolved_font_path.empty());
@@ -1945,7 +1948,7 @@ TEST(TextObjectRuntime, SansSerifAliasRasterizesClockDigits) {
         .resolved_font_identity = "sansserif",
         .resolved_font_path     = ResolveSystemFontPath("systemfont_sansserif"),
         .point_size             = 33.0f,
-        .padding                = 32.0f,
+        .padding                = { 32.0f, 32.0f },
         .explicit_size          = Eigen::Vector2f(342.0f, 156.0f),
         .color                  = Eigen::Vector3f(1.0f, 0.81176f, 0.87059f),
         .horizontal_align       = "center",
@@ -2071,7 +2074,7 @@ TEST(TextObjectRuntime, FreeTypeEstimatedSizeContainsTallGlyphs) {
         .resolved_font_identity = "Helvetica",
         .resolved_font_path     = ResolveSystemFontPath("systemfont_Helvetica"),
         .point_size             = 40.0f,
-        .padding                = 4.0f,
+        .padding                = { 4.0f, 4.0f },
     };
 #ifdef __APPLE__
     ASSERT_FALSE(state.resolved_font_path.empty());
@@ -2109,7 +2112,7 @@ TEST(TextObjectRuntime, TextRasterExpandsBeyondExplicitBoxWhenNeeded) {
         .resolved_font_identity = "Helvetica",
         .resolved_font_path     = ResolveSystemFontPath("systemfont_Helvetica"),
         .point_size             = 20.0f,
-        .padding                = 0.0f,
+        .padding                = { 0.0f, 0.0f },
         .explicit_size          = Eigen::Vector2f(180.0f, 60.0f),
         .horizontal_align       = "left",
         .vertical_align         = "top",
@@ -2152,7 +2155,7 @@ TEST(TextObjectRuntime, CenteredTextIsCenteredInsideWiderExplicitBox) {
         .resolved_font_identity = "Helvetica",
         .resolved_font_path     = ResolveSystemFontPath("systemfont_Helvetica"),
         .point_size             = 20.0f,
-        .padding                = 32.0f,
+        .padding                = { 32.0f, 32.0f },
         .explicit_size          = Eigen::Vector2f(1200.0f, 120.0f),
         .horizontal_align       = "center",
         .vertical_align         = "center",
@@ -2869,7 +2872,7 @@ TEST(TextObjectRuntime, RuntimeTextMutationUpdatesPersistentTextAndSize) {
                                    .text             = "a",
                                    .font_key         = "Arial",
                                    .point_size       = 10.0f,
-                                   .padding          = 2.0f,
+                                   .padding          = { 2.0f, 2.0f },
                                    .horizontal_align = "left",
                                    .vertical_align   = "top",
                                    .anchor           = "left top",
@@ -2917,7 +2920,7 @@ TEST(TextObjectRuntime, UnchangedRuntimeTextMutationSkipsDirtyAndCacheRevision) 
                                    .text             = "12:34",
                                    .font_key         = "systemfont_sansserif",
                                    .point_size       = 33.0f,
-                                   .padding          = 32.0f,
+                                   .padding          = { 32.0f, 32.0f },
                                    .explicit_size    = Eigen::Vector2f(342.0f, 156.0f),
                                    .horizontal_align = "center",
                                    .vertical_align   = "center",
@@ -3477,7 +3480,7 @@ TEST(TextObjectRuntime, RuntimeTextMutationDoesNotMeasureSynchronously) {
                                    .text          = "fps: 59",
                                    .font_key      = "Arial",
                                    .point_size    = 20.0f,
-                                   .padding       = 32.0f,
+                                   .padding       = { 32.0f, 32.0f },
                                    .explicit_size = Eigen::Vector2f(264.0f, 109.0f),
                                });
     runtime->ClearNodeTextDirty("caption");
@@ -3654,7 +3657,7 @@ TEST(TextObjectRuntime, ScriptThisLayerTextSetterMutatesRuntimeText) {
                                    .text       = "before",
                                    .font_key   = "Arial",
                                    .point_size = 12.0f,
-                                   .padding    = 0.0f,
+                                   .padding    = { 0.0f, 0.0f },
                                });
 
     auto program = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(),
@@ -3691,7 +3694,7 @@ TEST(TextObjectRuntime, FontFallbackHandlesFamiliesMissingFilesAndCorruptAssets)
         for (const auto* text : {"08:36", "Monday September", "Bonjour 你好"}) {
             TextLayerState reference {
                 .text = text, .font_key = family,
-                .resolved_font_path = ResolveSystemFontPath(family), .point_size = 20, .padding = 4,
+                .resolved_font_path = ResolveSystemFontPath(family), .point_size = 20, .padding = { 4.0f, 4.0f },
             };
             if (reference.resolved_font_path.empty()) reference.resolved_font_path = reference_path;
             const auto raster = [](const TextLayerState& state) {
@@ -3730,7 +3733,7 @@ TEST(TextObjectRuntime, MissingWindowsFontUsesRealGlyphsInsteadOfRectangles) {
         .font_key = "systemfont_consolas",
         .resolved_font_path = ResolveSystemFontPath("systemfont_consolas"),
         .point_size = 33.0f,
-        .padding = 32.0f,
+        .padding = { 32.0f, 32.0f },
     };
     ASSERT_FALSE(state.resolved_font_path.empty());
     EXPECT_TRUE(std::filesystem::exists(state.resolved_font_path));
@@ -3769,7 +3772,7 @@ TEST(TextObjectRuntime, FreeTypeRasterizationFallsBackForMissingPrimaryGlyph) {
         .resolved_font_identity = "Helvetica",
         .resolved_font_path     = ResolveSystemFontPath("systemfont_Helvetica"),
         .point_size             = 40.0f,
-        .padding                = 4.0f,
+        .padding                = { 4.0f, 4.0f },
     };
     ASSERT_FALSE(state.resolved_font_path.empty());
 
@@ -4001,6 +4004,406 @@ TEST(TextObjectRuntime, PreparedTextWakesWhoeverOwnsTheFrameClock) {
     runtime.SetContentWakeHandler({});
 }
 
+// ---------------------------------------------------------------------------
+// Text layout as Wallpaper Engine 2.8.42 sets it: point size at 300 dpi, the
+// card's padding, glyph and line spacing, and `blockalign`.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+TextLayerState HelveticaState(std::string text, float point_size) {
+    return TextLayerState {
+        .text                   = std::move(text),
+        .font_key               = "systemfont_Helvetica",
+        .resolved_font_kind     = "system",
+        .resolved_font_identity = "Helvetica",
+        .resolved_font_path     = ResolveSystemFontPath("systemfont_Helvetica"),
+        .point_size             = point_size,
+        .horizontal_align       = "left",
+        .vertical_align         = "top",
+    };
+}
+
+struct InkBox {
+    int  min_x { 1 << 30 };
+    int  max_x { -1 };
+    int  min_y { 1 << 30 };
+    int  max_y { -1 };
+    bool Any() const { return max_x >= min_x; }
+};
+
+InkBox InkBounds(const std::vector<uint8_t>& rgba, uint32_t width, uint32_t height,
+                 uint32_t first_row = 0, uint32_t end_row = 0xFFFFFFFFu) {
+    InkBox box;
+    for (uint32_t y = first_row; y < std::min(height, end_row); ++y) {
+        for (uint32_t x = 0; x < width; ++x) {
+            if (rgba[(static_cast<std::size_t>(y) * width + x) * 4u + 3u] == 0u) continue;
+            box.min_x = std::min(box.min_x, static_cast<int>(x));
+            box.max_x = std::max(box.max_x, static_cast<int>(x));
+            box.min_y = std::min(box.min_y, static_cast<int>(y));
+            box.max_y = std::max(box.max_y, static_cast<int>(y));
+        }
+    }
+    return box;
+}
+
+struct Rastered {
+    uint32_t             width { 0 };
+    uint32_t             height { 0 };
+    std::vector<uint8_t> rgba;
+};
+
+Rastered RasterOf(const TextLayerState& state) {
+    const auto size = TextLayerRasterSize(state);
+    Rastered   out;
+    out.width  = static_cast<uint32_t>(std::ceil(size.x()));
+    out.height = static_cast<uint32_t>(std::ceil(size.y()));
+    out.rgba.assign(static_cast<std::size_t>(out.width) * out.height * 4u, 0u);
+    RasterizeTextLayer(state, out.width, out.height, out.rgba);
+    return out;
+}
+
+} // namespace
+
+TEST(TextObjectRuntime, PointSizeIsRequestedFromTheFontAt300Dpi) {
+    auto state = HelveticaState("H", 32.0f);
+#ifdef __APPLE__
+    ASSERT_FALSE(state.resolved_font_path.empty());
+#endif
+
+    // The reference is the call Wallpaper Engine makes: the face sized in points
+    // at 300 dpi, whose line height is then the pitch of one row of text.
+    FT_Library library = nullptr;
+    ASSERT_EQ(FT_Init_FreeType(&library), 0);
+    FT_Face face = nullptr;
+    ASSERT_EQ(FT_New_Face(library, state.resolved_font_path.c_str(), 0, &face), 0);
+    ASSERT_EQ(FT_Set_Char_Size(face, 0, 32 * 64, 300, 300), 0);
+    const float line_height = static_cast<float>(face->size->metrics.height >> 6);
+    FT_Done_Face(face);
+    FT_Done_FreeType(library);
+
+    const auto size = MeasureTextLayerSize(state);
+    EXPECT_FLOAT_EQ(size.y(), line_height);
+    // 32 pt is 133 pixels of em, not the 128 a flat 4 pixels per point gives.
+    EXPECT_GT(line_height, 128.0f * 1.03f);
+}
+
+TEST(TextObjectRuntime, PointSizeIsClampedToTheRangeWallpaperEngineAccepts) {
+    const auto size_at = [](float point_size) {
+        return MeasureTextLayerSize(HelveticaState("Hg", point_size));
+    };
+    EXPECT_TRUE(size_at(0.1f).isApprox(size_at(1.0f)));
+    EXPECT_TRUE(size_at(-4.0f).isApprox(size_at(1.0f)));
+    EXPECT_TRUE(size_at(900.0f).isApprox(size_at(256.0f)));
+    EXPECT_GT(size_at(256.0f).y(), size_at(255.0f).y() - 1.0f);
+    // The fallback, estimate and measured sizes see the same clamp.
+    EXPECT_TRUE(EstimateTextLayerSize("Hg", 900.0f, 0.0f).isApprox(
+        EstimateTextLayerSize("Hg", 256.0f, 0.0f)));
+}
+
+TEST(TextObjectRuntime, EmptyTextIsATwoByTwoCardPlusPadding) {
+    auto state    = HelveticaState("", 20.0f);
+    state.padding = { 8.0f, 3.0f };
+    EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(Eigen::Vector2f(18.0f, 8.0f)));
+}
+
+TEST(TextObjectRuntime, CardPaddingSizesTheCardAndNeverNarrowsTheWrap) {
+    auto plain = HelveticaState("alpha beta gamma", 12.0f);
+    const auto natural = MeasureTextLayerSize(plain);
+
+    auto padded    = plain;
+    padded.padding = { 32.0f, 20.0f };
+    const auto card = MeasureTextLayerSize(padded);
+    EXPECT_FLOAT_EQ(card.x(), natural.x() + 64.0f);
+    EXPECT_FLOAT_EQ(card.y(), natural.y() + 40.0f);
+
+    // `maxwidth` is the row's width as authored. A limit that just fits the text
+    // keeps it on one row whatever the padding, and the card may be wider than
+    // the limit by the padding.
+    plain.limit_width  = true;
+    plain.max_width    = std::ceil(natural.x()) + 2.0f;
+    padded.limit_width = true;
+    padded.max_width   = plain.max_width;
+    EXPECT_FLOAT_EQ(MeasureTextLayerSize(plain).y(), natural.y());
+    EXPECT_FLOAT_EQ(MeasureTextLayerSize(padded).y(), natural.y() + 40.0f);
+    EXPECT_FLOAT_EQ(MeasureTextLayerSize(padded).x(), natural.x() + 64.0f);
+    EXPECT_GT(MeasureTextLayerSize(padded).x(), padded.max_width);
+}
+
+TEST(TextObjectRuntime, CardPaddingInsetsAlignedTextOnEachAxis) {
+    auto state             = HelveticaState("Hg", 20.0f);
+    state.padding          = { 24.0f, 10.0f };
+    state.explicit_size    = Eigen::Vector2f(400.0f, 200.0f);
+    state.horizontal_align = "right";
+    state.vertical_align   = "bottom";
+    const auto bottom_right = RasterOf(state);
+    const auto box          = InkBounds(bottom_right.rgba, bottom_right.width, bottom_right.height);
+    ASSERT_TRUE(box.Any());
+    EXPECT_LE(box.max_x, static_cast<int>(bottom_right.width) - 24);
+    EXPECT_GT(box.max_x, static_cast<int>(bottom_right.width) - 24 - 8);
+    EXPECT_LE(box.max_y, static_cast<int>(bottom_right.height) - 10);
+
+    state.horizontal_align = "left";
+    state.vertical_align   = "top";
+    const auto top_left    = RasterOf(state);
+    const auto top_box     = InkBounds(top_left.rgba, top_left.width, top_left.height);
+    ASSERT_TRUE(top_box.Any());
+    EXPECT_GE(top_box.min_x, 24);
+    EXPECT_GE(top_box.min_y, 10);
+}
+
+TEST(TextObjectRuntime, SpacingAddsToEveryAdvanceAndToTheLinePitch) {
+    auto base = HelveticaState("HHHH", 20.0f);
+    const auto natural = MeasureTextLayerSize(base);
+
+    // Three gaps between four glyphs: the advance after the last glyph carries
+    // no ink and is not part of the row.
+    auto wide       = base;
+    wide.spacing    = { 10.0f, 0.0f };
+    EXPECT_FLOAT_EQ(MeasureTextLayerSize(wide).x(), natural.x() + 30.0f);
+    EXPECT_FLOAT_EQ(MeasureTextLayerSize(wide).y(), natural.y());
+    auto tight    = base;
+    tight.spacing = { -3.0f, 0.0f };
+    EXPECT_FLOAT_EQ(MeasureTextLayerSize(tight).x(), natural.x() - 9.0f);
+
+    // The pixels agree with the measurement.
+    const auto plain_ink = InkBounds(RasterOf(base).rgba, RasterOf(base).width, RasterOf(base).height);
+    const auto wide_raster = RasterOf(wide);
+    const auto wide_ink    = InkBounds(wide_raster.rgba, wide_raster.width, wide_raster.height);
+    ASSERT_TRUE(plain_ink.Any());
+    ASSERT_TRUE(wide_ink.Any());
+    EXPECT_NEAR(static_cast<float>(wide_ink.max_x - wide_ink.min_x),
+                static_cast<float>(plain_ink.max_x - plain_ink.min_x) + 30.0f, 1.5f);
+
+    // Rows step by the line height plus `spacing.y`, with no lower bound of one pixel.
+    auto rows    = HelveticaState("H\nH\nH", 20.0f);
+    const auto three = MeasureTextLayerSize(rows);
+    rows.spacing     = { 0.0f, 7.0f };
+    EXPECT_FLOAT_EQ(MeasureTextLayerSize(rows).y(), three.y() + 21.0f);
+    rows.spacing = { 0.0f, -5.0f };
+    EXPECT_FLOAT_EQ(MeasureTextLayerSize(rows).y(), three.y() - 15.0f);
+    EXPECT_FLOAT_EQ(MeasureTextLayerSize(rows).x(), three.x());
+}
+
+TEST(TextObjectRuntime, SpacingMovesTheRowsOfRasterisedText) {
+    auto rows = HelveticaState("H\nH", 20.0f);
+    const auto first = RasterOf(rows);
+    rows.spacing     = { 0.0f, 12.0f };
+    const auto spread = RasterOf(rows);
+    const auto half_a = first.height / 2;
+    const auto half_b = spread.height / 2;
+    const auto a_top  = InkBounds(first.rgba, first.width, first.height, 0, half_a);
+    const auto a_low  = InkBounds(first.rgba, first.width, first.height, half_a);
+    const auto b_top  = InkBounds(spread.rgba, spread.width, spread.height, 0, half_b);
+    const auto b_low  = InkBounds(spread.rgba, spread.width, spread.height, half_b);
+    ASSERT_TRUE(a_top.Any() && a_low.Any() && b_top.Any() && b_low.Any());
+    EXPECT_EQ(a_top.min_y, b_top.min_y);
+    EXPECT_EQ((b_low.min_y - b_top.min_y) - (a_low.min_y - a_top.min_y), 12);
+}
+
+TEST(TextObjectRuntime, BlockAlignJustifiesOnlyRowsThatEndedAtAWordWrap) {
+    const std::string paragraph =
+        "one two three four five six seven eight nine ten eleven twelve thirteen fourteen";
+    auto plain = HelveticaState(paragraph + "\nshort words here", 10.0f);
+    plain.limit_width = true;
+    plain.max_width   = 400.0f;
+    auto justified        = plain;
+    justified.block_align = true;
+
+    const float pitch = MeasureTextLayerSize(HelveticaState("H", 10.0f)).y();
+    const auto  natural = MeasureTextLayerSize(plain);
+    ASSERT_GT(natural.y(), pitch * 3.5f) << "the paragraph must wrap onto at least two rows";
+    ASSERT_LT(natural.x(), 400.0f);
+    // The widest row fills the limit exactly once the wrapped rows are justified.
+    EXPECT_NEAR(MeasureTextLayerSize(justified).x(), 400.0f, 0.51f);
+    EXPECT_FLOAT_EQ(MeasureTextLayerSize(justified).y(), natural.y());
+
+    const auto before = RasterOf(plain);
+    const auto after  = RasterOf(justified);
+    ASSERT_EQ(after.height, before.height);
+    const auto rows = static_cast<uint32_t>(std::lround(natural.y() / pitch));
+    ASSERT_GE(rows, 4u);
+    const auto band = [&](const Rastered& image, uint32_t row) {
+        return InkBounds(image.rgba, image.width, image.height,
+                         static_cast<uint32_t>(std::lround(pitch * static_cast<float>(row))),
+                         static_cast<uint32_t>(std::lround(pitch * static_cast<float>(row + 1))));
+    };
+    for (uint32_t row = 0; row + 2u < rows; ++row) {
+        const auto j = band(after, row);
+        const auto p = band(before, row);
+        ASSERT_TRUE(j.Any() && p.Any());
+        // A wrapped row now reaches the limit; none was already there.
+        EXPECT_GE(j.max_x, 398) << "row " << row;
+        EXPECT_LT(p.max_x, 399) << "row " << row;
+    }
+    // The last row of the paragraph and the rows of the next one are untouched.
+    for (uint32_t row = rows - 2u; row < rows; ++row) {
+        const auto j = band(after, row);
+        const auto p = band(before, row);
+        EXPECT_EQ(j.min_x, p.min_x) << "row " << row;
+        EXPECT_EQ(j.max_x, p.max_x) << "row " << row;
+    }
+}
+
+TEST(TextObjectRuntime, BlockAlignNeedsAWidthLimitAndALineThatWraps) {
+    auto state = HelveticaState("one two three four five six", 10.0f);
+    state.block_align = true;
+    const auto unlimited = MeasureTextLayerSize(state);
+    state.block_align = false;
+    EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(unlimited));
+
+    // With `maxrows` 1 nothing wraps, so there is no row to justify.
+    state.limit_width = true;
+    state.max_width   = 90.0f;
+    state.limit_rows  = true;
+    state.max_rows    = 1;
+    const auto single = MeasureTextLayerSize(state);
+    state.block_align = true;
+    EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(single));
+}
+
+namespace
+{
+// The number of leading characters of the ASCII `text` whose card is no wider
+// than `limit`: where a row of that width ends in text that has no break.
+std::size_t LongestPrefixWithin(TextLayerState state, const std::string& text, float limit) {
+    state.limit_width = false;
+    state.limit_rows  = false;
+    std::size_t best  = 0;
+    for (std::size_t count = 1; count <= text.size(); ++count) {
+        state.text = text.substr(0, count);
+        if (MeasureTextLayerSize(state).x() > limit) break;
+        best = count;
+    }
+    return best;
+}
+
+bool SameRaster(const TextLayerState& a, const TextLayerState& b) {
+    const auto left = RasterOf(a);
+    const auto right = RasterOf(b);
+    return left.width == right.width && left.height == right.height && left.rgba == right.rgba;
+}
+} // namespace
+
+TEST(TextObjectRuntime, TheLastRowTheLimitAllowsIsCutAtTheGlyphThatDidNotFit) {
+    // Rows may wrap at a space while the row limit leaves another row. On the last
+    // row there is nothing to wrap to: the row keeps every glyph before the one that
+    // did not fit, even when that is part of a word, and the rest is dropped.
+    const std::string text = "alpha beta gammadelta epsilon zeta";
+    auto limited           = HelveticaState(text, 12.0f);
+    const float limit      = MeasureTextLayerSize(HelveticaState("alpha beta gamma", 12.0f)).x() + 0.5f;
+    const auto  cut        = LongestPrefixWithin(limited, text, limit);
+    ASSERT_GT(cut, std::string("alpha beta g").size());
+    ASSERT_NE(text[cut - 1], ' ');
+    ASSERT_NE(text[cut], ' ') << "the cut has to fall inside a word";
+    limited.limit_width = true;
+    limited.max_width   = limit;
+    limited.limit_rows  = true;
+    limited.max_rows    = 1;
+
+    auto reference = HelveticaState(text.substr(0, cut), 12.0f);
+    EXPECT_TRUE(MeasureTextLayerSize(limited).isApprox(MeasureTextLayerSize(reference)));
+    EXPECT_TRUE(SameRaster(limited, reference));
+
+    // With a second row allowed the first still wraps at the last space, and the
+    // second is the one that is cut inside its word.
+    limited.max_rows = 2;
+    const std::string rest = "gammadelta epsilon zeta";
+    const auto second_cut = LongestPrefixWithin(limited, rest, limit);
+    ASSERT_GT(second_cut, 0u);
+    ASSERT_LT(second_cut, rest.size());
+    ASSERT_NE(rest[second_cut], ' ');
+    ASSERT_NE(rest[second_cut - 1], ' ');
+    auto two_rows = HelveticaState("alpha beta\n" + rest.substr(0, second_cut), 12.0f);
+    EXPECT_TRUE(MeasureTextLayerSize(limited).isApprox(MeasureTextLayerSize(two_rows)));
+    EXPECT_TRUE(SameRaster(limited, two_rows));
+}
+
+TEST(TextObjectRuntime, AnEllipsisReplacesTheEndOfTheLastRowAtTheGlyphThatDidNotFit) {
+    const std::string text = "alpha beta gammadelta epsilon zeta";
+    auto limited           = HelveticaState(text, 12.0f);
+    const float limit      = MeasureTextLayerSize(HelveticaState("alpha beta gamm\xE2\x80\xA6", 12.0f)).x();
+    limited.limit_width    = true;
+    limited.max_width      = limit;
+    limited.limit_rows     = true;
+    limited.max_rows       = 1;
+    limited.use_ellipsis   = true;
+
+    // The text before the glyph that did not fit, and the marker, shrunk one
+    // character at a time until the marker is inside the limit.
+    const auto cut = LongestPrefixWithin(limited, text, limit);
+    ASSERT_GT(cut, std::string("alpha beta gamm").size()) << "the cut has to be inside the last word";
+    ASSERT_NE(text[cut], ' ');
+    std::size_t kept = cut;
+    while (kept > 0 && MeasureTextLayerSize(HelveticaState(text.substr(0, kept) + "\xE2\x80\xA6", 12.0f)).x() > limit) {
+        --kept;
+    }
+    ASSERT_GT(kept, std::string("alpha beta").size()) << "the whole word before it would not be kept";
+    ASSERT_NE(text[kept - 1], ' ');
+    const auto reference = HelveticaState(text.substr(0, kept) + "\xE2\x80\xA6", 12.0f);
+    EXPECT_TRUE(MeasureTextLayerSize(limited).isApprox(MeasureTextLayerSize(reference)));
+    EXPECT_TRUE(SameRaster(limited, reference));
+    EXPECT_LE(MeasureTextLayerSize(limited).x(), limit + 0.001f);
+}
+
+TEST(TextObjectRuntime, ALineBreakWithNothingAfterItAddsNoRowAndNoEllipsis) {
+    const auto size_of = [](std::string text, bool one_row, bool ellipsis) {
+        auto state         = HelveticaState(std::move(text), 14.0f);
+        state.limit_rows   = one_row;
+        state.max_rows     = 1;
+        state.use_ellipsis = ellipsis;
+        return state;
+    };
+    // The text ends with the break: there is no empty row after it.
+    EXPECT_TRUE(MeasureTextLayerSize(size_of("ab\n", false, false))
+                    .isApprox(MeasureTextLayerSize(size_of("ab", false, false))));
+    // And on the last row the limit allows, the break is not text that was cut.
+    EXPECT_TRUE(SameRaster(size_of("ab\n", true, true), size_of("ab", false, false)));
+    // More text after the break is cut, and the row ends in the marker. A second
+    // break counts as more text, an empty row after the first.
+    EXPECT_TRUE(SameRaster(size_of("ab\ncd", true, true), size_of("ab\xE2\x80\xA6", false, false)));
+    EXPECT_TRUE(SameRaster(size_of("ab\n\n", true, true), size_of("ab\xE2\x80\xA6", false, false)));
+    // Without the limit that empty row is a row.
+    EXPECT_GT(MeasureTextLayerSize(size_of("ab\n\n", false, false)).y(),
+              MeasureTextLayerSize(size_of("ab", false, false)).y() * 1.5f);
+}
+
+TEST(TextObjectRuntime, ARowThatWrapsAtADoubleSpaceKeepsAllButOneOfTheSpaces) {
+    // The break is at the last space before the glyph that did not fit; a space
+    // before that one stays in the row, where `blockalign` has it to widen.
+    auto state = HelveticaState("aaaa  bbbb", 14.0f);
+    const float limit = MeasureTextLayerSize(HelveticaState("aaaa  b", 14.0f)).x() - 2.0f;
+    state.limit_width = true;
+    state.max_width   = limit;
+    const auto ragged = MeasureTextLayerSize(state);
+    ASSERT_LT(ragged.x(), limit - 1.0f) << "the row has to wrap short of the limit";
+    ASSERT_GT(ragged.y(), MeasureTextLayerSize(HelveticaState("aaaa", 14.0f)).y() * 1.5f)
+        << "the text has to wrap onto a second row";
+    state.block_align = true;
+    // The first row has a space to widen, so it is stretched to the limit exactly.
+    EXPECT_NEAR(MeasureTextLayerSize(state).x(), limit, 0.51f);
+
+    // One space between the words leaves none in the row after the break.
+    auto single = HelveticaState("aaaa bbbb", 14.0f);
+    single.limit_width = true;
+    single.max_width   = MeasureTextLayerSize(HelveticaState("aaaa b", 14.0f)).x() - 2.0f;
+    single.block_align = true;
+    EXPECT_LT(MeasureTextLayerSize(single).x(), single.max_width - 1.0f);
+}
+
+TEST(TextObjectRuntime, ANegativePaddingTakesTheCardInAndOnlyTheTopIsCapped) {
+    auto state = HelveticaState("HHHH", 20.0f);
+    const auto natural = MeasureTextLayerSize(state);
+    state.padding      = { -6.0f, -4.0f };
+    EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(natural + Eigen::Vector2f(-12.0f, -8.0f)));
+    state.padding = { 900.0f, 600.0f };
+    EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(natural + Eigen::Vector2f(1024.0f, 1024.0f)));
+    // Taken in further than the text is wide, the card is a pixel, not nothing.
+    state.padding = { -4000.0f, -4000.0f };
+    EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(Eigen::Vector2f(1.0f, 1.0f)));
+}
+
+
 namespace
 {
 // A parsed scene of text layers with the files it needs. The file system, sound
@@ -4096,6 +4499,134 @@ bool SamplesScreen(const vulkan::CustomShaderPass& pass) {
 }
 } // namespace
 
+TEST(TextObjectRuntime, PaddingAndSpacingReadTheFormsWallpaperEngineReads) {
+    // `opaquebackground` makes every one of these a padded layer, so the state
+    // shows what was read.
+    TextSceneFixture fixture(R"([
+      {"id":1,"name":"number","text":"a","font":"Arial","opaquebackground":true,
+       "padding":8,"spacing":2,"visible":true},
+      {"id":2,"name":"pair","text":"a","font":"Arial","opaquebackground":true,
+       "padding":"6.00000 10.00000","spacing":"-3.58 1","visible":true},
+      {"id":3,"name":"lone","text":"a","font":"Arial","opaquebackground":true,
+       "padding":"5","spacing":"4","visible":true},
+      {"id":4,"name":"bound","text":"a","font":"Arial","opaquebackground":true,
+       "padding":{"user":"margin","value":"3 4"},"visible":true},
+      {"id":5,"name":"absent","text":"a","font":"Arial","opaquebackground":true,"visible":true},
+      {"id":6,"name":"huge","text":"a","font":"Arial","opaquebackground":true,
+       "padding":"900 -20","visible":true},
+      {"id":7,"name":"array","text":"a","font":"Arial","opaquebackground":true,
+       "padding":[6,10],"visible":true}
+    ])", "text-vec2-forms");
+    ASSERT_NE(fixture.scene, nullptr);
+    ASSERT_NE(fixture.scene->runtime, nullptr);
+
+    EXPECT_TRUE(fixture.State("number").padding.isApprox(Eigen::Vector2f(8.0f, 8.0f)));
+    EXPECT_TRUE(fixture.State("number").spacing.isApprox(Eigen::Vector2f(2.0f, 2.0f)));
+    EXPECT_TRUE(fixture.State("pair").padding.isApprox(Eigen::Vector2f(6.0f, 10.0f)));
+    EXPECT_TRUE(fixture.State("pair").spacing.isApprox(Eigen::Vector2f(-3.58f, 1.0f)));
+    // A string with one number sets only the x lane.
+    EXPECT_TRUE(fixture.State("lone").padding.isApprox(Eigen::Vector2f(5.0f, 0.0f)));
+    EXPECT_TRUE(fixture.State("lone").spacing.isApprox(Eigen::Vector2f(4.0f, 0.0f)));
+    // A binding is read through its value.
+    EXPECT_TRUE(fixture.State("bound").padding.isApprox(Eigen::Vector2f(3.0f, 4.0f)));
+    // No key: 32 on both axes. Each lane is capped at 512 and not floored: a
+    // negative padding stays negative.
+    EXPECT_TRUE(fixture.State("absent").padding.isApprox(Eigen::Vector2f(32.0f, 32.0f)));
+    EXPECT_TRUE(fixture.State("huge").padding.isApprox(Eigen::Vector2f(512.0f, -20.0f)));
+    // A JSON array is not a form the reference reads, so it leaves the default.
+    EXPECT_TRUE(fixture.State("array").padding.isApprox(Eigen::Vector2f(32.0f, 32.0f)));
+}
+
+TEST(TextObjectRuntime, CardPaddingAppliesOnlyToLayersWallpaperEnginePads) {
+    TextSceneFixture fixture(R"([
+      {"id":1,"name":"plain","text":"a","font":"Arial","padding":"32 32","visible":true},
+      {"id":2,"name":"effect","text":"a","font":"Arial","padding":"32 32","visible":true,
+       "effects":[{"file":"effects/tint/effect.json","id":10,"visible":true}]},
+      {"id":3,"name":"hidden effect","text":"a","font":"Arial","padding":"32 32","visible":true,
+       "effects":[{"file":"effects/tint/effect.json","id":11,"visible":false}]},
+      {"id":4,"name":"blend","text":"a","font":"Arial","padding":"32 32","colorBlendMode":12,
+       "visible":true},
+      {"id":5,"name":"add","text":"a","font":"Arial","padding":"32 32","colorBlendMode":31,
+       "visible":true},
+      {"id":6,"name":"led","text":"a","font":"Arial","padding":"32 32","ledsource":true,
+       "visible":true},
+      {"id":7,"name":"opaque","text":"a","font":"Arial","padding":"32 32",
+       "opaquebackground":true,"visible":true}
+    ])", "text-padded-layers", ColorBlendAssets());
+    ASSERT_NE(fixture.scene, nullptr);
+    ASSERT_NE(fixture.scene->runtime, nullptr);
+
+    const Eigen::Vector2f none = Eigen::Vector2f::Zero();
+    const Eigen::Vector2f pad(32.0f, 32.0f);
+    EXPECT_TRUE(fixture.State("plain").padding.isApprox(none));
+    EXPECT_TRUE(fixture.State("effect").padding.isApprox(pad));
+    EXPECT_TRUE(fixture.State("hidden effect").padding.isApprox(none));
+    EXPECT_TRUE(fixture.State("blend").padding.isApprox(pad));
+    // "Add" is drawn straight onto the scene and does not composite.
+    EXPECT_TRUE(fixture.State("add").padding.isApprox(none));
+    EXPECT_TRUE(fixture.State("led").padding.isApprox(pad));
+    EXPECT_TRUE(fixture.State("opaque").padding.isApprox(pad));
+
+    // The layer's card is its text plus the padding, only where it applies.
+    const auto plain = fixture.scene->runtime->NodeSize("plain");
+    EXPECT_TRUE(fixture.scene->runtime->NodeSize("effect").isApprox(plain + Eigen::Vector2f(64.0f, 64.0f)));
+    EXPECT_TRUE(fixture.scene->runtime->NodeSize("add").isApprox(plain));
+}
+
+TEST(TextObjectRuntime, ASceneWithFogPadsEveryTextLayerWhateverItsEffects) {
+    // The renderer composites every text layer of a scene that enables distance fog
+    // or height fog, so each is padded as a layer with effects is.
+    const std::string layers = R"([
+      {"id":1,"name":"plain","text":"a","font":"Arial","padding":"32 32","visible":true},
+      {"id":2,"name":"add","text":"a","font":"Arial","padding":"32 32","colorBlendMode":31,
+       "visible":true}
+    ])";
+    const Eigen::Vector2f none = Eigen::Vector2f::Zero();
+    const Eigen::Vector2f pad(32.0f, 32.0f);
+    {
+        TextSceneFixture clear(layers, "text-no-fog", ColorBlendAssets());
+        ASSERT_NE(clear.scene, nullptr);
+        EXPECT_TRUE(clear.State("plain").padding.isApprox(none));
+        EXPECT_TRUE(clear.State("add").padding.isApprox(none));
+    }
+    for (const char* flag : { R"("fogdistance":true,)", R"("fogheight":true,)" }) {
+        SCOPED_TRACE(flag);
+        TextSceneFixture fogged(layers, std::string("text-fog-") + flag, ColorBlendAssets(), {}, flag);
+        ASSERT_NE(fogged.scene, nullptr);
+        EXPECT_TRUE(fogged.State("plain").padding.isApprox(pad));
+        EXPECT_TRUE(fogged.State("add").padding.isApprox(pad));
+        const auto plain_card = fogged.scene->runtime->NodeSize("plain");
+        TextSceneFixture clear(layers, "text-fog-reference", ColorBlendAssets());
+        EXPECT_TRUE(plain_card.isApprox(clear.scene->runtime->NodeSize("plain") + Eigen::Vector2f(64.0f, 64.0f)));
+    }
+    // A flag that is false pads nothing.
+    TextSceneFixture off(layers, "text-fog-off", ColorBlendAssets(), {},
+                         R"("fogdistance":false,"fogheight":false,)");
+    ASSERT_NE(off.scene, nullptr);
+    EXPECT_TRUE(off.State("plain").padding.isApprox(none));
+}
+
+TEST(TextObjectRuntime, SpacingAndBlockAlignReachTheLayerState) {
+    TextSceneFixture fixture(R"([
+      {"id":1,"name":"set","text":"abc","font":"Arial","spacing":"6 0","blockalign":true,
+       "visible":true},
+      {"id":2,"name":"unset","text":"abc","font":"Arial","visible":true}
+    ])", "text-spacing-state");
+    ASSERT_NE(fixture.scene, nullptr);
+    ASSERT_NE(fixture.scene->runtime, nullptr);
+    EXPECT_TRUE(fixture.State("set").spacing.isApprox(Eigen::Vector2f(6.0f, 0.0f)));
+    EXPECT_TRUE(fixture.State("set").block_align);
+    EXPECT_TRUE(fixture.State("unset").spacing.isApprox(Eigen::Vector2f::Zero()));
+    EXPECT_FALSE(fixture.State("unset").block_align);
+    // Spacing is a property of the glyphs, not of the card: a plain layer keeps
+    // it. Three glyphs have two gaps between them, each 6 pixels wider.
+    EXPECT_NEAR(fixture.scene->runtime->NodeSize("set").x() -
+                    fixture.scene->runtime->NodeSize("unset").x(),
+                12.0f, 0.01f);
+    EXPECT_FLOAT_EQ(fixture.scene->runtime->NodeSize("set").y(),
+                    fixture.scene->runtime->NodeSize("unset").y());
+}
+
 TEST(TextObjectRuntime, ColorBlendModeMixesTextWithTheScreenThroughThePassthroughPass) {
     const std::string layer = R"([{"id":1,"name":"caption","text":"hello","font":"Arial",
         "pointsize":20,"colorBlendMode":12,"alpha":0.5,"visible":true}])";
@@ -4184,6 +4715,78 @@ TEST(TextObjectRuntime, AddColorBlendTextIsDrawnAdditivelyOntoTheScene) {
         EXPECT_EQ(material->blenmode, BlendMode::Additive);
     }
     EXPECT_EQ(onto_scene, 1u);
+}
+
+
+// The size of a text layer in a scene file is the card Wallpaper Engine laid the
+// text out in, so it is ground truth for the layout. These are five cards it saved
+// for text objects set in Arial: the text, the point size, the padding that
+// applied to the layer (none unless it had effects or a colour blend), and the size
+// it wrote. Kerned pairs, unhinted whole-pixel advances, the pen-and-ink width of a
+// row, the line gap in the height and the padding on both axes all have to agree.
+// They are the metrics of the Arial of the machine that ran Wallpaper Engine; a
+// build of the font with other metrics shows here as a difference, not a skip.
+TEST(TextObjectRuntime, TextMeasuresToTheCardsWallpaperEngineSaved) {
+    struct SavedCard {
+        const char* text;
+        float       point_size;
+        float       padding;
+        float       width;
+        float       height;
+    };
+    const SavedCard cards[] = {
+        { "Text Layer", 32.0f, 0.0f, 615.0f, 153.0f },
+        { "Text Layer", 32.0f, 32.0f, 679.0f, 217.0f },
+        { ".", 32.0f, 0.0f, 26.0f, 153.0f },
+        { "\xE2\x80\x94\xE2\x80\x94\xE2\x80\x94\xE2\x80\x94\xE2\x80\x94", 32.0f, 32.0f, 729.0f, 217.0f },
+        { "__________________________", 32.0f, 0.0f, 1929.0f, 153.0f },
+    };
+    for (const auto& card : cards) {
+        TextLayerState state {
+            .text                   = card.text,
+            .font_key               = "systemfont_arial",
+            .resolved_font_kind     = "system",
+            .resolved_font_identity = "arial",
+            .resolved_font_path     = ResolveSystemFontPath("systemfont_arial"),
+            .point_size             = card.point_size,
+            .padding                = { card.padding, card.padding },
+        };
+        if (state.resolved_font_path.empty()) GTEST_SKIP() << "no Arial on this system";
+        const auto size = MeasureTextLayerSize(state);
+        EXPECT_FLOAT_EQ(size.x(), card.width) << card.text;
+        EXPECT_FLOAT_EQ(size.y(), card.height) << card.text;
+    }
+}
+
+TEST(TextObjectRuntime, PenAdvancesAreUnhintedWholePixelsKernedWithTheNextGlyph) {
+    const auto path = ResolveSystemFontPath("systemfont_arial");
+    if (path.empty()) GTEST_SKIP() << "no Arial on this system";
+    FT_Library library = nullptr;
+    ASSERT_EQ(FT_Init_FreeType(&library), 0);
+    FT_Face face = nullptr;
+    ASSERT_EQ(FT_New_Face(library, path.c_str(), 0, &face), 0);
+    ASSERT_EQ(FT_Set_Char_Size(face, 0, 32 * 64, 300, 300), 0);
+    ASSERT_TRUE(FT_HAS_KERNING(face));
+    const FT_UInt capital = FT_Get_Char_Index(face, 'T');
+    const FT_UInt lower   = FT_Get_Char_Index(face, 'e');
+    FT_Fixed advance = 0;
+    ASSERT_EQ(FT_Get_Advance(face, capital, FT_LOAD_NO_HINTING, &advance), 0);
+    FT_Vector kern {};
+    ASSERT_EQ(FT_Get_Kerning(face, capital, lower, FT_KERNING_UNFITTED, &kern), 0);
+    FT_Done_Face(face);
+    FT_Done_FreeType(library);
+    ASSERT_LT(kern.x, -64 * 5) << "the pair should be kerned by several pixels";
+    const float pen = std::floor(static_cast<float>(((advance + 512) >> 10) + kern.x) / 64.0f);
+
+    const auto width_of = [&](const char* text) {
+        auto state = HelveticaState(text, 32.0f);
+        state.font_key               = "systemfont_arial";
+        state.resolved_font_identity = "arial";
+        state.resolved_font_path     = path;
+        return MeasureTextLayerSize(state).x();
+    };
+    // "Te": the pen steps by the kerned advance, then the 'e' adds its own ink.
+    EXPECT_FLOAT_EQ(width_of("Te"), pen + width_of("e"));
 }
 
 } // namespace wallpaper

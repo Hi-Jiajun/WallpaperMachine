@@ -17,13 +17,19 @@
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#include FT_ADVANCES_H
 
 namespace wallpaper
 {
 
 namespace
 {
-constexpr float kWallpaperEnginePointSizeToPx = 4.0f;
+// Wallpaper Engine sets a face's size in points at 300 dpi, so one point of
+// `pointsize` is 300 / 72 pixels, and clamps `pointsize` to 1..256 first.
+constexpr float kTextDpi       = 300.0f;
+constexpr float kPointsPerInch = 72.0f;
+constexpr float kMinPointSize  = 1.0f;
+constexpr float kMaxPointSize  = 256.0f;
 #ifdef WESCENE_BUILD_TESTS
 std::atomic_uint64_t g_measurement_count { 0 };
 #endif
@@ -59,33 +65,73 @@ struct FtFaceDeleter {
     }
 };
 
-FT_UInt FreeTypePixelSize(float point_size) {
-    if (! std::isfinite(point_size) || point_size <= 0.0f) point_size = 12.0f;
-    return static_cast<FT_UInt>(
-        std::clamp(std::lround(point_size * kWallpaperEnginePointSizeToPx), 1l, 1024l));
+float ClampedPointSize(float point_size) {
+    if (! std::isfinite(point_size)) point_size = 12.0f;
+    return std::clamp(point_size, kMinPointSize, kMaxPointSize);
 }
 
+// The size in whole pixels of a point size as the layout and fallback
+// estimates see it. A real face is sized by `FreeTypeCharHeight` instead, which
+// leaves the rounding to FreeType as Wallpaper Engine does.
+float PointSizeToPixels(float point_size) {
+    return ClampedPointSize(point_size) * kTextDpi / kPointsPerInch;
+}
+
+// The nominal height Wallpaper Engine requests from FreeType: `pointsize` in
+// 26.6 fixed point, truncated.
+FT_F26Dot6 FreeTypeCharHeight(float point_size) {
+    return static_cast<FT_F26Dot6>(static_cast<int>(ClampedPointSize(point_size) * 64.0f));
+}
+
+// One placed glyph. Distances are pixels, `advance` is the pen step including
+// the layer's `spacing.x`, and the ink box is relative to the pen and the
+// baseline (y up). A glyph without ink, a space, has an empty box at the pen.
 struct GlyphRun {
     uint32_t codepoint { 0 };
     float    advance { 0.0f };
     bool     fallback { false };
     float    left { 0.0f };
     float    right { 0.0f };
+    float    top { 0.0f };
+    float    bottom { 0.0f };
     bool     has_ink { false };
+    // What `advance` is made of: the glyph's unhinted advance and the kerning it
+    // takes against the glyph after it, in 26.6 fixed point.
+    uint32_t glyph_index { 0 };
+    int32_t  advance_26_6 { 0 };
+    int32_t  kerning_26_6 { 0 };
 };
 
+// One row of text. Its extents are those of the ink and of the pen at every
+// glyph start, always including the row origin, as Wallpaper Engine measures
+// them: a trailing advance that carries no ink is not part of the row.
 struct LineRun {
     std::vector<GlyphRun> glyphs;
     float                 advance_width { 0.0f };
     float                 bounds_left { 0.0f };
     float                 bounds_right { 0.0f };
-    bool                  has_bounds { false };
+    float                 bounds_top { 0.0f };
+    float                 bounds_bottom { 0.0f };
+    // The row ended at an automatic word wrap and a row follows it; the only
+    // kind of row `blockalign` justifies.
+    bool                  wrapped { false };
 
-    float ExtentLeft() const { return has_bounds ? std::min(0.0f, bounds_left) : 0.0f; }
-    float ExtentRight() const {
-        return has_bounds ? std::max(advance_width, bounds_right) : advance_width;
-    }
-    float LayoutWidth() const { return ExtentRight() - ExtentLeft(); }
+    float ExtentLeft() const { return bounds_left; }
+    float ExtentRight() const { return bounds_right; }
+    float LayoutWidth() const { return bounds_right - bounds_left; }
+};
+
+// A text block's box. `top` and `bottom` are heights above the first row's
+// baseline, y up; rows step down by `pitch`.
+struct TextBlock {
+    float min_x { 0.0f };
+    float max_x { 0.0f };
+    float top { 0.0f };
+    float bottom { 0.0f };
+    float pitch { 0.0f };
+
+    float Width() const { return max_x - min_x; }
+    float Height() const { return top - bottom; }
 };
 
 uint8_t ColorByte(float value) {
@@ -136,8 +182,8 @@ CreateFreeTypeFaceFromBytes(const std::vector<uint8_t>& data, float point_size) 
         return nullptr;
     }
 
-    const auto pixel_size = FreeTypePixelSize(point_size);
-    if (FT_Set_Pixel_Sizes(raw_face, 0, pixel_size) != 0) {
+    if (FT_Set_Char_Size(raw_face, 0, FreeTypeCharHeight(point_size),
+                         static_cast<FT_UInt>(kTextDpi), static_cast<FT_UInt>(kTextDpi)) != 0) {
         FT_Done_Face(raw_face);
         return nullptr;
     }
@@ -264,18 +310,11 @@ float HorizontalLineStart(const TextLayerState& state, float line_width, float p
 }
 
 void AppendGlyphMetrics(LineRun& line, const GlyphRun& glyph) {
-    if (glyph.has_ink) {
-        const auto left = line.advance_width + glyph.left;
-        const auto right = line.advance_width + glyph.right;
-        if (! line.has_bounds) {
-            line.bounds_left = left;
-            line.bounds_right = right;
-            line.has_bounds = true;
-        } else {
-            line.bounds_left = std::min(line.bounds_left, left);
-            line.bounds_right = std::max(line.bounds_right, right);
-        }
-    }
+    const float pen    = line.advance_width;
+    line.bounds_left   = std::min(line.bounds_left, pen + glyph.left);
+    line.bounds_right  = std::max(line.bounds_right, pen + glyph.right);
+    line.bounds_top    = std::max(line.bounds_top, glyph.top);
+    line.bounds_bottom = std::min(line.bounds_bottom, glyph.bottom);
     line.advance_width += glyph.advance;
 }
 
@@ -284,7 +323,34 @@ void AppendMeasuredGlyph(LineRun& line, const GlyphRun& glyph) {
     line.glyphs.push_back(glyph);
 }
 
-std::optional<GlyphRun> MeasureGlyph(FT_Face primary_face, FT_Face fallback_face, uint32_t codepoint) {
+// What the layer adds to every glyph's advance (`spacing.x`) and to every
+// line pitch (`spacing.y`), in pixels at the rasterised size.
+float GlyphSpacing(const TextLayerState& state) {
+    return std::isfinite(state.spacing.x()) ? state.spacing.x() : 0.0f;
+}
+
+float LineSpacing(const TextLayerState& state) {
+    return std::isfinite(state.spacing.y()) ? state.spacing.y() : 0.0f;
+}
+
+// The card's margin on each axis. Wallpaper Engine caps it at 512 pixels and
+// does not floor it: a negative padding takes the card in around the text.
+Eigen::Vector2f CardPadding(const TextLayerState& state) {
+    constexpr float kMaxCardPadding = 512.0f;
+    const auto lane = [=](float value) {
+        return std::isfinite(value) ? std::min(value, kMaxCardPadding) : 0.0f;
+    };
+    return { lane(state.padding.x()), lane(state.padding.y()) };
+}
+
+// A glyph's pen advance: its unhinted advance with its kerning, cut to whole
+// pixels, plus `spacing` x.
+float GlyphAdvance(const GlyphRun& glyph, float spacing_x) {
+    return std::floor(static_cast<float>(glyph.advance_26_6 + glyph.kerning_26_6) / 64.0f) + spacing_x;
+}
+
+std::optional<GlyphRun> MeasureGlyph(FT_Face primary_face, FT_Face fallback_face, uint32_t codepoint,
+                                     float spacing_x) {
     FT_Face face     = primary_face;
     bool    fallback = false;
     if (FT_Get_Char_Index(face, codepoint) == 0u && fallback_face != nullptr &&
@@ -295,17 +361,38 @@ std::optional<GlyphRun> MeasureGlyph(FT_Face primary_face, FT_Face fallback_face
     if (FT_Get_Char_Index(face, codepoint) == 0u) return std::nullopt;
     if (FT_Load_Char(face, codepoint, FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL) != 0) return std::nullopt;
 
-    const FT_GlyphSlot slot        = face->glyph;
-    const float        glyph_left  = static_cast<float>(slot->bitmap_left);
-    const float        glyph_right = glyph_left + static_cast<float>(slot->bitmap.width);
-    const float advance = static_cast<float>(slot->advance.x) / 64.0f;
-    return GlyphRun { codepoint, advance, fallback, glyph_left, glyph_right,
-                      slot->bitmap.width > 0u && slot->bitmap.rows > 0u };
+    const FT_GlyphSlot slot    = face->glyph;
+    const bool         has_ink = slot->bitmap.width > 0u && slot->bitmap.rows > 0u;
+    // Wallpaper Engine takes advances from its shaper, which reads them unhinted
+    // and cuts them to whole pixels, then adds the layer's `spacing`.
+    const FT_UInt glyph_index = FT_Get_Char_Index(face, codepoint);
+    FT_Fixed      unhinted    = 0;
+    int32_t       advance_26_6 = static_cast<int32_t>(slot->advance.x);
+    if (FT_Get_Advance(face, glyph_index, FT_LOAD_NO_HINTING, &unhinted) == 0) {
+        advance_26_6 = static_cast<int32_t>((unhinted + 512) >> 10); // 16.16 to 26.6
+    }
+    GlyphRun           glyph {
+                  .codepoint = codepoint,
+                  .fallback  = fallback,
+                  .has_ink   = has_ink,
+                  .glyph_index  = glyph_index,
+                  .advance_26_6 = advance_26_6,
+    };
+    glyph.advance = GlyphAdvance(glyph, spacing_x);
+    if (has_ink) {
+        glyph.left   = static_cast<float>(slot->bitmap_left);
+        glyph.right  = glyph.left + static_cast<float>(slot->bitmap.width);
+        glyph.top    = static_cast<float>(slot->bitmap_top);
+        glyph.bottom = glyph.top - static_cast<float>(slot->bitmap.rows);
+    }
+    return glyph;
 }
 
+// The width a row may fill: `maxwidth` as authored, with no allowance for the
+// card's padding, and only when the layer limits its width.
 float TextWidthLimit(const TextLayerState& state) {
     if (! state.limit_width || ! std::isfinite(state.max_width) || state.max_width <= 0.0f) return 0.0f;
-    return std::max(1.0f, state.max_width - 2.0f * std::max(0.0f, state.padding));
+    return state.max_width;
 }
 
 LineRun MakeLine(std::span<const GlyphRun> glyphs) {
@@ -316,151 +403,316 @@ LineRun MakeLine(std::span<const GlyphRun> glyphs) {
 
 bool BreakSpace(const GlyphRun& glyph) { return glyph.codepoint == ' ' || glyph.codepoint == '\t'; }
 
+// `blockalign`: a row that ended at a word wrap, with another row after it,
+// is stretched to exactly `width_limit` by spreading the slack over its spaces
+// and tabs. The last row of a paragraph, a row ended by a line break and a row
+// the row limit cut are left as they are, and so is a row with no space.
+void JustifyWrappedLines(std::vector<LineRun>& lines, float width_limit) {
+    for (auto& line : lines) {
+        if (! line.wrapped || line.glyphs.empty()) continue;
+        const auto spaces = static_cast<std::size_t>(
+            std::count_if(line.glyphs.begin(), line.glyphs.end(), BreakSpace));
+        if (spaces == 0u) continue;
+        const float extra = (width_limit - line.LayoutWidth()) / static_cast<float>(spaces);
+        for (auto& glyph : line.glyphs) {
+            if (BreakSpace(glyph)) glyph.advance += extra;
+        }
+        line               = MakeLine(std::span<const GlyphRun>(line.glyphs));
+        line.wrapped       = true;
+        line.bounds_right  = line.bounds_left + width_limit;
+    }
+}
+
+// The glyph as it stands before a glyph that does not kern with it: the pen
+// advance without the kerning its old neighbour asked for.
+GlyphRun WithoutKerning(GlyphRun glyph, float spacing_x) {
+    glyph.kerning_26_6 = 0;
+    glyph.advance      = GlyphAdvance(glyph, spacing_x);
+    return glyph;
+}
+
+// The last row `row_limit` allows ended in text that does not fit, and the
+// layer asks for an ellipsis: the row keeps as many glyphs as leave room for the
+// marker inside the width limit, dropping one glyph at a time from the end, and
+// the marker follows the last glyph kept that is not a space or a tab.
+// `trim_first` is the row of a line break that more text followed: its trailing
+// white space goes before anything is measured, where a row cut at a glyph is
+// measured with it and trimmed after.
 template<typename Measure>
-std::vector<LineRun> BuildLineRuns(const TextLayerState& state, Measure measure) {
+void EllipsizeLastRow(std::vector<LineRun>& lines, Measure measure, float width_limit,
+                      float spacing_x, bool trim_first) {
+    auto& line = lines.back();
+    if (trim_first) {
+        while (! line.glyphs.empty() && BreakSpace(line.glyphs.back())) line.glyphs.pop_back();
+    }
+    std::vector<GlyphRun> marker;
+    if (auto glyph = measure(0x2026)) marker.push_back(*glyph);
+    else if (auto dot = measure('.')) marker.assign(3, *dot);
+
+    // Prefix metrics make fitting a suffix linear even for a long row. Entry `n`
+    // holds the first `n` glyphs as they are laid out among their neighbours.
+    std::vector<LineRun> prefix(1);
+    for (const auto& glyph : line.glyphs) {
+        auto metrics = prefix.back();
+        AppendGlyphMetrics(metrics, glyph);
+        prefix.push_back(std::move(metrics));
+    }
+    size_t count = line.glyphs.size();
+    while (true) {
+        // The marker does not kern with the glyph before it.
+        LineRun candidate = prefix[count > 0 ? count - 1 : 0];
+        if (count > 0) AppendGlyphMetrics(candidate, WithoutKerning(line.glyphs[count - 1], spacing_x));
+        for (const auto& glyph : marker) AppendGlyphMetrics(candidate, glyph);
+        if (width_limit == 0.0f || candidate.ExtentRight() <= width_limit) break;
+        if (count == 0) { marker.clear(); break; }
+        --count;
+    }
+    std::vector<GlyphRun> kept(line.glyphs.begin(), line.glyphs.begin() + static_cast<std::ptrdiff_t>(count));
+    while (! kept.empty() && BreakSpace(kept.back())) kept.pop_back();
+    // A row that already ends in the marker is not given another.
+    if (! kept.empty() && kept.back().codepoint == 0x2026) marker.clear();
+    if (! kept.empty() && ! marker.empty()) kept.back() = WithoutKerning(kept.back(), spacing_x);
+    for (const auto& glyph : marker) kept.push_back(glyph);
+    line = MakeLine(std::span<const GlyphRun>(kept));
+}
+
+// `measure(codepoint)` gives a glyph; `kerning(left, right)` the 26.6 kerning of two
+// neighbouring glyphs of the same face, which narrows or widens the left one.
+//
+// Text is cut into paragraphs at line breaks, and a break with nothing after it
+// ends the text without a row of its own. A row wraps before a glyph whose ink
+// would end past the width limit. Where the row limit allows another row the
+// wrap is at the last space or tab before that glyph (the row keeps everything
+// up to it, the next row starts at the glyph with the white space before it
+// dropped), or at the glyph itself when the row holds none. On the last row the
+// limit allows, nothing wraps: the row keeps every glyph before the glyph that
+// did not fit, and the layer's ellipsis, if it asks for one, replaces the end.
+template<typename Measure, typename Kerning>
+std::vector<LineRun> BuildLineRuns(const TextLayerState& state, Measure measure, Kerning kerning) {
     std::vector<LineRun> lines;
     lines.emplace_back();
     const float width_limit = TextWidthLimit(state);
+    const float spacing_x   = GlyphSpacing(state);
     const size_t row_limit = state.limit_rows && state.max_rows != 0 ? state.max_rows : SIZE_MAX;
-    bool omitted = false;
-    for (uint32_t codepoint : DecodeUtf8(state.text)) {
+    bool omitted        = false;
+    bool omitted_by_break = false;
+    const auto codepoints = DecodeUtf8(state.text);
+    for (std::size_t at = 0; at < codepoints.size(); ++at) {
+        const uint32_t codepoint = codepoints[at];
         if (codepoint == '\n') {
-            if (lines.size() == row_limit) { omitted = true; break; }
+            // Nothing after the break: the text ends with the row before it.
+            if (at + 1 == codepoints.size()) break;
+            if (lines.size() == row_limit) { omitted = omitted_by_break = true; break; }
             lines.emplace_back();
             continue;
         }
         if (codepoint == '\r') continue;
         auto glyph = measure(codepoint);
         if (! glyph) continue;
-        AppendMeasuredGlyph(lines.back(), *glyph);
-        if (width_limit == 0.0f || lines.back().LayoutWidth() <= width_limit || lines.back().glyphs.size() == 1) continue;
-
-        auto& current = lines.back();
-        size_t split = current.glyphs.size() - 1;
-        if (! BreakSpace(current.glyphs.back())) {
-            for (size_t index = split; index > 0; --index) {
-                if (BreakSpace(current.glyphs[index - 1])) { split = index; break; }
+        if (! lines.back().glyphs.empty()) {
+            auto&         previous = lines.back().glyphs.back();
+            const int32_t kern     = kerning(previous, *glyph);
+            if (kern != previous.kerning_26_6) {
+                previous.kerning_26_6 = kern;
+                const float advance   = GlyphAdvance(previous, spacing_x);
+                lines.back().advance_width += advance - previous.advance;
+                previous.advance = advance;
             }
         }
-        std::vector<GlyphRun> carry(current.glyphs.begin() + split, current.glyphs.end());
+        // A row wraps before a glyph whose ink would end past the limit, once it
+        // holds a glyph already; a space or tab never starts a wrap.
+        const bool overflows = width_limit > 0.0f && ! lines.back().glyphs.empty() &&
+                               ! BreakSpace(*glyph) &&
+                               lines.back().advance_width + glyph->right > width_limit;
+        AppendMeasuredGlyph(lines.back(), *glyph);
+        if (! overflows) continue;
+
+        auto& current = lines.back();
+        if (lines.size() == row_limit) {
+            // The last row: cut before the glyph that did not fit, no search for
+            // a space.
+            current.glyphs.pop_back();
+            current = MakeLine(current.glyphs);
+            omitted = true;
+            break;
+        }
+        // Break at the last space or tab before the glyph, which stays out of the
+        // next row along with the white space that follows it; a row with none is
+        // cut at the glyph. Spaces before the break stay in the row.
+        size_t split = current.glyphs.size() - 1;
+        for (size_t index = split; index > 0; --index) {
+            if (BreakSpace(current.glyphs[index - 1])) { split = index - 1; break; }
+        }
+        std::vector<GlyphRun> carry(current.glyphs.begin() + static_cast<std::ptrdiff_t>(split),
+                                    current.glyphs.end());
         current.glyphs.resize(split);
-        while (! current.glyphs.empty() && BreakSpace(current.glyphs.back())) current.glyphs.pop_back();
-        current = MakeLine(current.glyphs);
-        if (lines.size() == row_limit) { omitted = true; break; }
+        current         = MakeLine(current.glyphs);
+        current.wrapped = true;
         while (! carry.empty() && BreakSpace(carry.front())) carry.erase(carry.begin());
         lines.push_back(MakeLine(carry));
     }
     if (omitted && state.use_ellipsis) {
-        auto& line = lines.back();
-        while (! line.glyphs.empty() && BreakSpace(line.glyphs.back())) line.glyphs.pop_back();
-        std::vector<GlyphRun> marker;
-        if (auto glyph = measure(0x2026)) marker.push_back(*glyph);
-        else if (auto dot = measure('.')) marker.assign(3, *dot);
-        // Prefix metrics make fitting a suffix linear even for a long row.
-        std::vector<LineRun> prefix(1);
-        for (const auto& glyph : line.glyphs) {
-            auto metrics = prefix.back();
-            AppendGlyphMetrics(metrics, glyph);
-            prefix.push_back(std::move(metrics));
-        }
-        size_t count = line.glyphs.size();
-        while (true) {
-            auto candidate = prefix[count];
-            for (const auto& glyph : marker) AppendGlyphMetrics(candidate, glyph);
-            if (width_limit == 0.0f || candidate.LayoutWidth() <= width_limit) break;
-            if (count == 0) { marker.clear(); break; }
-            --count;
-        }
-        line = MakeLine(std::span<const GlyphRun>(line.glyphs).first(count));
-        for (const auto& glyph : marker) AppendMeasuredGlyph(line, glyph);
+        EllipsizeLastRow(lines, measure, width_limit, spacing_x, omitted_by_break);
     }
+    if (state.block_align && width_limit > 0.0f) JustifyWrappedLines(lines, width_limit);
     return lines;
 }
 
 std::vector<LineRun> BuildFreeTypeLines(const TextLayerState& state, FT_Face face, FT_Face fallback) {
-    return BuildLineRuns(state, [&](uint32_t codepoint) { return MeasureGlyph(face, fallback, codepoint); });
+    const float spacing_x = GlyphSpacing(state);
+    return BuildLineRuns(
+        state,
+        [&](uint32_t codepoint) { return MeasureGlyph(face, fallback, codepoint, spacing_x); },
+        [&](const GlyphRun& left, const GlyphRun& right) -> int32_t {
+            // Neighbours of one face only, as a shaper kerns a run of one font.
+            FT_Face used = left.fallback ? fallback : face;
+            if (left.fallback != right.fallback || used == nullptr || ! FT_HAS_KERNING(used)) return 0;
+            FT_Vector kern {};
+            if (FT_Get_Kerning(used, left.glyph_index, right.glyph_index, FT_KERNING_UNFITTED, &kern) != 0) {
+                return 0;
+            }
+            return static_cast<int32_t>(kern.x);
+        });
 }
 
-float FirstBaselineY(const TextLayerState& state, FT_Face face, std::size_t line_count,
-                     float padding, uint32_t height) {
-    const auto  metrics     = face->size->metrics;
-    const float ascender    = static_cast<float>(metrics.ascender) / 64.0f;
-    const float descender   = static_cast<float>(metrics.descender) / 64.0f;
-    const float line_height = std::max(1.0f, static_cast<float>(metrics.height) / 64.0f);
-    const float text_height =
-        (ascender - descender) +
-        static_cast<float>(line_count > 0 ? line_count - 1u : 0u) * line_height;
-    const float content_height = std::max(0.0f, static_cast<float>(height) - padding * 2.0f);
+// The box of the rows, as Wallpaper Engine lays it out: from the first row's
+// ascender line, or the tallest ink above it, down to one line pitch below that
+// line for every row, or the lowest ink below it. The pitch is the face's line
+// height plus the layer's `spacing.y`.
+TextBlock MeasureTextBlock(const std::vector<LineRun>& lines, float ascender, float pitch) {
+    const auto rows = static_cast<float>(lines.size());
+    TextBlock  block {
+         .top    = ascender,
+         .bottom = ascender - rows * pitch,
+         .pitch  = pitch,
+    };
+    for (std::size_t index = 0; index < lines.size(); ++index) {
+        const auto& line = lines[index];
+        const float drop = static_cast<float>(index) * pitch;
+        block.min_x      = std::min(block.min_x, line.bounds_left);
+        block.max_x      = std::max(block.max_x, line.bounds_right);
+        block.top        = std::max(block.top, line.bounds_top - drop);
+        block.bottom     = std::min(block.bottom, line.bounds_bottom - drop);
+    }
+    return block;
+}
+
+// Where the block's top edge sits in a card `height` tall: under the padding,
+// or pushed down to the centre or the bottom of what the padding leaves.
+float BlockTopY(const TextLayerState& state, float padding_y, uint32_t height, float block_height) {
+    const float content_height = std::max(0.0f, static_cast<float>(height) - padding_y * 2.0f);
     const std::string_view align =
         state.vertical_align.empty() ? state.anchor : state.vertical_align;
 
-    float top = padding;
+    float top = padding_y;
     if (ContainsSubstring(align, "bottom")) {
-        top = padding + std::max(0.0f, content_height - text_height);
+        top = padding_y + std::max(0.0f, content_height - block_height);
     } else if (ContainsSubstring(align, "center") || ContainsSubstring(align, "middle")) {
-        top = padding + std::max(0.0f, (content_height - text_height) * 0.5f);
+        top = padding_y + std::max(0.0f, (content_height - block_height) * 0.5f);
     }
-
-    return top + ascender;
+    return top;
 }
 
+struct FaceLayoutMetrics {
+    float ascender { 0.0f };
+    float pitch { 0.0f };
+};
+
+FaceLayoutMetrics FaceMetrics(const TextLayerState& state, FT_Face face) {
+    const auto metrics = face->size->metrics;
+    return {
+        .ascender = static_cast<float>(metrics.ascender) / 64.0f,
+        .pitch    = static_cast<float>(metrics.height >> 6) + LineSpacing(state),
+    };
+}
+
+// Without a usable face the layout runs on boxes: 0.6 em advances, 0.9 em glyphs
+// and a 1.2 em line.
+constexpr float kFallbackAdvance = 0.6f;
+constexpr float kFallbackInk     = 0.45f;
+constexpr float kFallbackAscent  = 0.9f;
+constexpr float kFallbackLine    = 1.2f;
+
 std::vector<LineRun> BuildFallbackLines(const TextLayerState& state) {
-    const float pixels = static_cast<float>(FreeTypePixelSize(state.point_size));
-    return BuildLineRuns(state, [pixels](uint32_t codepoint) -> std::optional<GlyphRun> {
-        const float advance = std::max(1.0f, pixels * 0.6f);
-        const float ink = std::max(1.0f, pixels * 0.45f);
-        return GlyphRun {codepoint, codepoint == '\t' ? advance * 4.0f : advance, false,
-                         0.0f, ink, codepoint != ' ' && codepoint != '\t'};
-    });
+    const float pixels    = PointSizeToPixels(state.point_size);
+    const float spacing_x = GlyphSpacing(state);
+    return BuildLineRuns(
+        state,
+        [=](uint32_t codepoint) -> std::optional<GlyphRun> {
+            const float advance = std::max(1.0f, pixels * kFallbackAdvance);
+            const float ink     = std::max(1.0f, pixels * kFallbackInk);
+            const bool  has_ink = codepoint != ' ' && codepoint != '\t';
+            GlyphRun    glyph {
+                           .codepoint = codepoint,
+                           .advance   = (codepoint == '\t' ? advance * 4.0f : advance) + spacing_x,
+                           .has_ink   = has_ink,
+            };
+            if (has_ink) {
+                glyph.right = ink;
+                glyph.top   = pixels * kFallbackAscent;
+            }
+            return glyph;
+        },
+        [](const GlyphRun&, const GlyphRun&) -> int32_t { return 0; });
+}
+
+FaceLayoutMetrics FallbackMetrics(const TextLayerState& state) {
+    const float pixels = PointSizeToPixels(state.point_size);
+    return { .ascender = pixels * kFallbackAscent,
+             .pitch    = pixels * kFallbackLine + LineSpacing(state) };
+}
+
+// The card that holds a block: the block plus the padding on both sides, and
+// 2 by 2 plus the padding when there is no text to lay out.
+Eigen::Vector2f CardSizeForBlock(const TextLayerState& state, const TextBlock& block) {
+    const auto padding = CardPadding(state);
+    if (state.text.empty()) {
+        return { std::max(1.0f, 2.0f + padding.x() * 2.0f), std::max(1.0f, 2.0f + padding.y() * 2.0f) };
+    }
+    return { std::max(1.0f, block.Width() + padding.x() * 2.0f),
+             std::max(1.0f, block.Height() + padding.y() * 2.0f) };
 }
 
 Eigen::Vector2f MeasureFallbackText(const TextLayerState& state) {
-    const auto lines = BuildFallbackLines(state);
-    const float pixels = static_cast<float>(FreeTypePixelSize(state.point_size));
-    const float padding = std::max(0.0f, std::isfinite(state.padding) ? state.padding : 0.0f);
-    float width = 0.0f;
-    for (const auto& line : lines) width = std::max(width, line.LayoutWidth());
-    width += padding * 2.0f;
-    if (TextWidthLimit(state) > 0.0f) width = std::min(width, state.max_width);
-    return {std::max(1.0f, width), std::max(1.0f, float(lines.size()) * pixels * 1.2f + padding * 2.0f)};
+    const auto lines   = BuildFallbackLines(state);
+    const auto metrics = FallbackMetrics(state);
+    return CardSizeForBlock(state, MeasureTextBlock(lines, metrics.ascender, metrics.pitch));
 }
 
+// Paints the fallback's boxes, calling `plot(x, y, coverage)` for each pixel.
+template<typename Plot>
 void RasterizeFallbackText(const TextLayerState& state, uint32_t width, uint32_t height,
-                           std::vector<uint8_t>& rgba) {
-    const auto color = TextColorBytes(state);
-    const auto lines = BuildFallbackLines(state);
-    const float pixels = static_cast<float>(FreeTypePixelSize(state.point_size));
-    const float glyph_height = std::max(1.0f, pixels * 0.9f);
-    const float line_height = std::max(1.0f, pixels * 1.2f);
-    const float padding = std::max(0.0f, std::isfinite(state.padding) ? state.padding : 0.0f);
-    float top = padding;
-    const auto align = state.vertical_align.empty() ? state.anchor : state.vertical_align;
-    const float room = std::max(0.0f, float(height) - 2.0f * padding - float(lines.size()) * line_height);
-    if (ContainsSubstring(align, "bottom")) top += room;
-    else if (ContainsSubstring(align, "center") || ContainsSubstring(align, "middle")) top += room * 0.5f;
+                           Plot&& plot) {
+    const auto lines    = BuildFallbackLines(state);
+    const auto metrics  = FallbackMetrics(state);
+    const auto block    = MeasureTextBlock(lines, metrics.ascender, metrics.pitch);
+    const auto padding  = CardPadding(state);
+    const float glyph_height = std::max(1.0f, metrics.ascender);
+    float baseline = BlockTopY(state, padding.y(), height, block.Height()) + block.top;
     for (const auto& line : lines) {
-        const float limit = TextWidthLimit(state);
-        const float line_width = limit > 0.0f ? std::min(limit, line.LayoutWidth()) : line.LayoutWidth();
-        float pen = HorizontalLineStart(state, line_width, padding, width);
-        const float right_edge = limit > 0.0f ? std::min(float(width), pen + limit) : float(width);
+        float pen = HorizontalLineStart(state, line.LayoutWidth(), padding.x(), width) - line.ExtentLeft();
         for (const auto& glyph : line.glyphs) {
             if (glyph.has_ink) {
-                for (int y = std::max(0, int(std::floor(top))); y < std::min(int(height), int(std::ceil(top + glyph_height))); ++y) {
-                    for (int x = std::max(0, int(std::floor(pen))); x < std::min(int(std::ceil(right_edge)), int(std::ceil(pen + glyph.right))); ++x) {
-                        const size_t offset = (static_cast<size_t>(y) * width + static_cast<size_t>(x)) * 4;
-                        std::copy(color.begin(), color.end(), rgba.begin() + offset);
+                const float top = baseline - glyph_height;
+                for (int y = std::max(0, int(std::floor(top))); y < std::min(int(height), int(std::ceil(baseline))); ++y) {
+                    for (int x = std::max(0, int(std::floor(pen))); x < std::min(int(width), int(std::ceil(pen + glyph.right))); ++x) {
+                        plot(x, y, uint8_t { 255 });
                     }
                 }
             }
             pen += glyph.advance;
         }
-        top += line_height;
-        if (top >= height) break;
+        baseline += block.pitch;
+        if (block.pitch > 0.0f && baseline - glyph_height >= static_cast<float>(height)) break;
     }
 }
 
+// Paints the text with FreeType, calling `plot(x, y, coverage)` for each pixel a
+// glyph covers; the caller decides what a pixel of coverage becomes. False when
+// there is no face to paint with.
+template<typename Plot>
 bool RasterizeFreeTypeText(const TextLayerState& state, uint32_t width, uint32_t height,
-                           std::vector<uint8_t>& rgba) {
+                           Plot&& plot) {
     if (state.text.empty()) return true;
 
     std::vector<uint8_t> font_data;
@@ -471,18 +723,13 @@ bool RasterizeFreeTypeText(const TextLayerState& state, uint32_t width, uint32_t
     const auto lines =
         BuildFreeTypeLines(state, face.get(), fallback_face ? fallback_face->face.get() : nullptr);
 
-    const auto  metrics     = face->size->metrics;
-    const float line_height = std::max(1.0f, static_cast<float>(metrics.height) / 64.0f);
-    const float padding     = std::max(0.0f, std::isfinite(state.padding) ? state.padding : 0.0f);
-    const auto  color       = TextColorBytes(state);
-    const float alpha_scale = static_cast<float>(color[3]) / 255.0f;
+    const auto metrics = FaceMetrics(state, face.get());
+    const auto block   = MeasureTextBlock(lines, metrics.ascender, metrics.pitch);
+    const auto padding = CardPadding(state);
 
-    float baseline_y = FirstBaselineY(state, face.get(), lines.size(), padding, height);
+    float baseline_y = BlockTopY(state, padding.y(), height, block.Height()) + block.top;
     for (const auto& line : lines) {
-        const float limit = TextWidthLimit(state);
-        const float line_width = limit > 0.0f ? std::min(limit, line.LayoutWidth()) : line.LayoutWidth();
-        const float left_edge = HorizontalLineStart(state, line_width, padding, width);
-        const float right_edge = limit > 0.0f ? std::min(float(width), left_edge + limit) : float(width);
+        const float left_edge = HorizontalLineStart(state, line.LayoutWidth(), padding.x(), width);
         float pen_x = left_edge - line.ExtentLeft();
         for (const auto& glyph : line.glyphs) {
             FT_Face glyph_face =
@@ -506,29 +753,20 @@ bool RasterizeFreeTypeText(const TextLayerState& state, uint32_t width, uint32_t
 
                 for (uint32_t column = 0; column < bitmap.width; ++column) {
                     const int dest_x = left + static_cast<int>(column);
-                    if (dest_x < 0 || dest_x >= static_cast<int>(width) || dest_x >= right_edge) continue;
+                    if (dest_x < 0 || dest_x >= static_cast<int>(width)) continue;
 
                     const auto coverage =
                         bitmap.buffer[static_cast<std::size_t>(source_row) * pitch + column];
                     if (coverage == 0u) continue;
-
-                    const auto alpha = static_cast<uint8_t>(
-                        std::lround(static_cast<float>(coverage) * alpha_scale));
-                    const std::size_t offset = (static_cast<std::size_t>(dest_y) * width +
-                                                static_cast<std::size_t>(dest_x)) *
-                                               4u;
-                    rgba[offset + 0u] = color[0];
-                    rgba[offset + 1u] = color[1];
-                    rgba[offset + 2u] = color[2];
-                    rgba[offset + 3u] = std::max(rgba[offset + 3u], alpha);
+                    plot(dest_x, dest_y, coverage);
                 }
             }
 
             pen_x += glyph.advance;
             if (pen_x >= static_cast<float>(width)) break;
         }
-        baseline_y += line_height;
-        if (baseline_y >= static_cast<float>(height) + line_height) break;
+        baseline_y += block.pitch;
+        if (block.pitch > 0.0f && baseline_y >= static_cast<float>(height) + block.pitch) break;
     }
 
     return true;
@@ -542,33 +780,8 @@ std::optional<Eigen::Vector2f> MeasureFreeTypeText(const TextLayerState& state) 
 
     const auto lines =
         BuildFreeTypeLines(state, face.get(), fallback_face ? fallback_face->face.get() : nullptr);
-    float max_line_width = 0.0f;
-    bool  saw_glyph      = false;
-    for (const auto& line : lines) {
-        max_line_width = std::max(max_line_width, line.LayoutWidth());
-        saw_glyph      = saw_glyph || ! line.glyphs.empty();
-    }
-
-    const auto  metrics      = face->size->metrics;
-    const float ascender     = static_cast<float>(metrics.ascender) / 64.0f;
-    const float descender    = static_cast<float>(metrics.descender) / 64.0f;
-    const float line_height  = std::max(1.0f, static_cast<float>(metrics.height) / 64.0f);
-    const float glyph_height = std::max(1.0f, ascender - descender);
-    const float padding      = std::max(0.0f, std::isfinite(state.padding) ? state.padding : 0.0f);
-
-    if (! saw_glyph) {
-        return Eigen::Vector2f(std::max(1.0f, padding * 2.0f + line_height * 0.5f),
-                               std::max(1.0f, padding * 2.0f + glyph_height));
-    }
-
-    const float width = TextWidthLimit(state) > 0.0f
-        ? std::min(state.max_width, max_line_width + padding * 2.0f)
-        : max_line_width + padding * 2.0f;
-    return Eigen::Vector2f(std::max(1.0f, width),
-                           std::max(1.0f,
-                                    glyph_height +
-                                        static_cast<float>(lines.size() - 1u) * line_height +
-                                        padding * 2.0f));
+    const auto metrics = FaceMetrics(state, face.get());
+    return CardSizeForBlock(state, MeasureTextBlock(lines, metrics.ascender, metrics.pitch));
 }
 
 std::size_t LineCount(std::string_view text) {
@@ -596,10 +809,9 @@ bool HasExplicitTextLayerSize(const TextLayerState& state) {
 } // namespace
 
 Eigen::Vector2f EstimateTextLayerSize(std::string_view text, float point_size, float padding) {
-    if (! std::isfinite(point_size) || point_size <= 0.0f) point_size = 12.0f;
     if (! std::isfinite(padding) || padding < 0.0f) padding = 0.0f;
 
-    const float pixel_size  = point_size * kWallpaperEnginePointSizeToPx;
+    const float pixel_size  = PointSizeToPixels(point_size);
     const float glyph_width = std::max(1.0f, pixel_size * 0.6f);
     const float line_height = std::max(1.0f, pixel_size * 1.2f);
     const auto  columns     = std::max<std::size_t>(1u, LongestLineCodepoints(text));
@@ -740,14 +952,28 @@ std::string TextTextureName(std::string_view layer_key) {
 
 void RasterizeTextLayer(const TextLayerState& state, uint32_t width, uint32_t height,
                         std::vector<uint8_t>& rgba) {
-    bool rasterized = false;
-    {
-        const std::lock_guard lock { g_freetype_mutex };
-        rasterized = RasterizeFreeTypeText(state, width, height, rgba);
-    }
-    if (! rasterized) {
-        RasterizeFallbackText(state, width, height, rgba);
-    }
+    // Paints the text, FreeType's part under its lock, into `plot`.
+    const auto paint = [&](auto&& plot) {
+        bool rasterized = false;
+        {
+            const std::lock_guard lock { g_freetype_mutex };
+            rasterized = RasterizeFreeTypeText(state, width, height, plot);
+        }
+        if (! rasterized) RasterizeFallbackText(state, width, height, plot);
+    };
+
+    const auto  color       = TextColorBytes(state);
+    const float alpha_scale = static_cast<float>(color[3]) / 255.0f;
+    paint([&](int x, int y, uint8_t coverage) {
+        const auto alpha =
+            static_cast<uint8_t>(std::lround(static_cast<float>(coverage) * alpha_scale));
+        const std::size_t offset =
+            (static_cast<std::size_t>(y) * width + static_cast<std::size_t>(x)) * 4u;
+        rgba[offset + 0u] = color[0];
+        rgba[offset + 1u] = color[1];
+        rgba[offset + 2u] = color[2];
+        rgba[offset + 3u] = std::max(rgba[offset + 3u], alpha);
+    });
 }
 
 #ifdef WESCENE_BUILD_TESTS
@@ -822,7 +1048,12 @@ void TextLayer::EnsureCacheIdentity() {
                                  std::to_string(m_state.max_rows) + "|" +
                                  std::to_string(m_state.limit_width) + "|" +
                                  std::to_string(m_state.limit_rows) + "|" +
-                                 std::to_string(m_state.use_ellipsis);
+                                 std::to_string(m_state.use_ellipsis) + "|" +
+                                 std::to_string(m_state.block_align) + "|" +
+                                 std::to_string(m_state.padding.x()) + "|" +
+                                 std::to_string(m_state.padding.y()) + "|" +
+                                 std::to_string(m_state.spacing.x()) + "|" +
+                                 std::to_string(m_state.spacing.y());
     m_state.texture_cache_key = "textcache:" + std::to_string(std::hash<std::string> {}(material));
 }
 

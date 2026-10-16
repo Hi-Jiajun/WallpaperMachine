@@ -1890,16 +1890,43 @@ void AttachEffectsToNode(ParseContext& context,
                          bool preserve_effect_fbo_resolution,
                          const wpscene::WPImageEffect* screen_blend_effect = nullptr);
 
+/// The margin Wallpaper Engine keeps around a text card on each axis. It sizes the
+/// card by `2 * padding` and insets the text by `padding`, but only for a layer
+/// that draws through effect passes, composites with a colour blend (any mode
+/// but none and "add") or an LED source, or paints an opaque background, or in a
+/// scene that enables distance fog or height fog (the renderer then composites
+/// every text layer, to fog it); a plain text layer has no margin whatever its
+/// `padding` says. Each lane is capped at 512 pixels, and not floored.
+Eigen::Vector2f ResolveTextCardPadding(const wpscene::WPTextObject& obj, bool scene_fog) {
+    constexpr float kMaxCardPadding = 512.0f;
+    const bool has_effect_pass = std::any_of(
+        obj.effects.begin(), obj.effects.end(), [](const wpscene::WPImageEffect& effect) {
+            return effect.visible && ! effect.materials.empty();
+        });
+    const bool composites = (obj.colorBlendMode != 0 && obj.colorBlendMode != kAdditiveColorBlendMode) ||
+                            obj.ledsource;
+    if (! has_effect_pass && ! composites && ! obj.opaquebackground && ! scene_fog) {
+        return Eigen::Vector2f::Zero();
+    }
+    // Capped from above only: Wallpaper Engine lets a negative padding take the
+    // card in around the text.
+    const auto lane = [=](float value) {
+        return std::isfinite(value) ? std::min(value, kMaxCardPadding) : 0.0f;
+    };
+    return { lane(obj.padding[0]), lane(obj.padding[1]) };
+}
+
 TextLayerState ResolveTextLayerState(const wpscene::WPTextObject& obj, fs::VFS& vfs,
                                      std::string text, std::string font_key,
                                      Eigen::Vector2f explicit_size, std::string anchor,
-                                     std::string layer_key) {
+                                     std::string layer_key, bool scene_fog) {
     TextLayerState state {
         .text             = std::move(text),
         .layer_key        = std::move(layer_key),
         .font_key         = font_key,
         .point_size       = obj.pointsize,
-        .padding          = static_cast<float>(obj.padding),
+        .padding          = ResolveTextCardPadding(obj, scene_fog),
+        .spacing          = Eigen::Vector2f(obj.spacing[0], obj.spacing[1]),
         .explicit_size    = explicit_size,
         .color            = Eigen::Vector3f(obj.color.data()),
         .alpha            = obj.alpha,
@@ -1912,6 +1939,7 @@ TextLayerState ResolveTextLayerState(const wpscene::WPTextObject& obj, fs::VFS& 
         .limit_width      = obj.limitwidth,
         .limit_rows       = obj.limitrows,
         .use_ellipsis     = obj.limituseellipsis,
+        .block_align      = obj.blockalign,
     };
 
     constexpr std::string_view system_prefix = "systemfont_";
@@ -2018,7 +2046,8 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
                                             font_key,
                                             Eigen::Vector2f(obj.size[0], obj.size[1]),
                                             anchor,
-                                            runtime_name);
+                                            runtime_name,
+                                            context.scene->fog_distance || context.scene->fog_height);
     // Cache glyph coverage, not animated styling. A fade or colour change only
     // updates uniforms; it must never measure, rasterize or upload the text again.
     text_state.color = Eigen::Vector3f::Ones();

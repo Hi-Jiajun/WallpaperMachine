@@ -281,8 +281,11 @@ target_link_libraries(scene_reload_cycle_probe PRIVATE ${PROJECT_NAME} wpAudio w
 target_include_directories(scene_reload_cycle_probe PRIVATE . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/VulkanRender)
 target_compile_features(scene_reload_cycle_probe PRIVATE cxx_std_20)
 
+# The text tests measure a font with FreeType itself, as the reference for the
+# size the layout requests.
+find_package(Freetype REQUIRED)
 add_executable(text_object_runtime_test text_object_runtime_test.cpp)
-target_link_libraries(text_object_runtime_test PRIVATE ${PROJECT_NAME} wpAudio wpScene wpFs wpVulkan wpVulkanRender wpRGraph nlohmann_json::nlohmann_json GTest::gtest_main)
+target_link_libraries(text_object_runtime_test PRIVATE ${PROJECT_NAME} wpAudio wpScene wpFs wpVulkan wpVulkanRender wpRGraph Freetype::Freetype nlohmann_json::nlohmann_json GTest::gtest_main)
 target_include_directories(text_object_runtime_test PRIVATE . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/VulkanRender)
 target_compile_features(text_object_runtime_test PRIVATE cxx_std_20)
 gtest_discover_tests(

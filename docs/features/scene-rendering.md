@@ -158,8 +158,44 @@ uploaded again; a script that produces it still runs on its own schedule every
 frame. Effect and video output of Native Metal has not been compared against real
 wallpapers.
 
-A text layer's colour blend mode works as an image layer's
+Text is set the way Wallpaper Engine 2.8.42 sets it. `pointsize` is a size in
+points at 300 dpi, 4.17 pixels to the point, clamped to 1 through 256 and handed to
+FreeType as it is, which rounds the em to whole pixels only for the fonts that ask;
+a glyph's advance is its unhinted advance, kerned against the next glyph of the
+same face from the font's `kern` table and cut to whole pixels (Wallpaper Engine's
+shaper also reads OpenType kerning, ligatures and complex scripts, which this does
+not); the line pitch is the font's line height plus the layer's `spacing` y, its x
+adds to every glyph's advance, and a row is as wide as its ink and the pen at each
+glyph start (the advance after the last glyph is not part of it). Five cards that
+Wallpaper Engine saved for text in Arial in the local scenes (with and without
+padding, a lone full stop, a run of dashes, a long run of underscores) come out to
+the pixel; other fonts, scripts and the OpenType-only kerning of many fonts have not
+been compared. The card is the text plus `padding` on each axis, and the margin is
+there only for a layer that draws through effect passes, a colour blend, an LED
+source or an opaque background, or in a scene that enables distance fog or height
+fog (`fogdistance`, `fogheight`): a plain text layer has none, whatever its `padding`
+says. `padding` and `spacing` are two numbers, and `padding` is 32 on both axes where
+the scene leaves it out, each lane capped at 512 and not floored (a negative padding
+takes the card in around the text). A scene's authored `size` is not what sets the
+card as it is in Wallpaper Engine, which ignores it and sizes the card from the
+layout; here it stays the layout box and the smallest the card is (see the known
+limitations). `maxwidth` is the width a row may fill, as authored: padding is never
+taken from it, so a padded card can be wider than `maxwidth`. A row wraps before a
+glyph whose ink would end past that width, once it holds a glyph: at the last space
+or tab before it, where everything before that space stays in the row (a second space
+too) and the next row starts at the glyph, or at the glyph itself when the row has
+none to break at. A space never starts a wrap. The last row the row limit allows does
+not wrap: it is cut before the glyph that did not fit, inside a word if that is where
+it falls, and an ellipsis, where asked for, replaces its end by dropping glyphs one at
+a time until the marker fits. A line break with nothing after it ends the text
+without a row of its own and without an ellipsis. With
+`blockalign` on, a row that ended at a wrap, with another row after it, is stretched
+to exactly the width by spreading the slack over its spaces and tabs; the last row of
+a paragraph, a row a line break ended, a row the row limit cut and a row with no
+space are left alone. A text layer's colour blend mode works as an image layer's
 does, through the passthrough pass or, for mode 31, additively onto the scene.
+A text object that leaves keys out has Wallpaper Engine's defaults: 32 points,
+`maxwidth` 500 and `maxrows` 1.
 
 An image layer's own render targets, the pair its effects run through and the
 composite another layer reads, are point-sampled when the layer says

@@ -747,6 +747,27 @@ into private textures; the three that draw skip visibly without a Metal device.
   measurement before it lands. The exception is a texture whose header asks for
   point sampling: both backends sample it with the mip level picked by point, as the
   reference's sampler for that flag does.
+- **Text details not matched.** Wallpaper Engine shapes text with HarfBuzz (OpenType
+  kerning, ligatures, complex scripts) and draws colour glyphs from an RGBA atlas; the
+  layout kerns only from a font's legacy `kern` table (Arial has one, many OpenType
+  fonts have only GPOS kerning and so go unkerned), forms no ligatures, and colour
+  glyphs are monochrome or missing. **The authored
+  `size` of a text object is kept**: Wallpaper Engine ignores it and sets the card from
+  the layout every time the text is laid out (the text object's size function writes
+  the layout box plus twice the padding, and its guard byte only keeps it from
+  running while the object is still being built), so a scripted text that gets
+  shorter has a smaller card there. Here the authored size stays the layout box a
+  layer is aligned in and answers the cursor with, and the smallest the raster is, so
+  such text keeps the stale card and the card is `bounds + 2 * padding` only where the
+  authored size is not larger. The saved sizes of Arial text come out the same either
+  way, since Wallpaper Engine wrote them from the same layout; the difference is text
+  that changes. Changing it moves the placement of every text layer that has an
+  authored size and needs a picture comparison. The distance fog and height fog flags
+  of a scene, which make Wallpaper Engine pad and composite every text layer, are
+  modelled for the padding only: the composite itself and the `FOG_COMPUTED` combo
+  change nothing a text layer draws here. The text object's other layout keys
+  (`pointsize`, `padding`, `spacing`, `maxwidth`, `maxrows`, the limit flags) read the
+  scene file's value whatever property or script is bound to them.
 - **Model utility flags.** A project layer is sized by the canvas but still takes the
   passthrough path, not the compose one: it does not draw its children into a target of
   its own and has no composite-only mode (the 11 local scenes that use it hold layers of

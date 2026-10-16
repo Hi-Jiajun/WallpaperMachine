@@ -6,6 +6,8 @@
 
 #include <array>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <nlohmann/json.hpp>
 #include <sstream>
 #include <string>
@@ -56,6 +58,31 @@ inline void ReadMiscVec3Setting(const nlohmann::json& json, const char* key,
     if (source.is_string()) {
         std::istringstream stream(source.get<std::string>());
         stream >> (*destination)[0] >> (*destination)[1] >> (*destination)[2];
+    }
+}
+
+/// A two-lane setting as Wallpaper Engine's Vec2 properties read it. A number
+/// sets both lanes. A string is "x y": the first number is lane x and the one
+/// after the first space is lane y, so a lone "x" leaves y at 0. An object is
+/// read through its `value`, as a property or script binding wraps one. A JSON
+/// array is not a form the reference reads, and leaves the default.
+inline void ReadMiscVec2Setting(const nlohmann::json& json, const char* key,
+                                std::array<float, 2>& destination) {
+    if (! json.contains(key)) return;
+    const auto& source = UnwrapMiscSettingValue(json.at(key));
+    if (source.is_number()) {
+        const float scalar = source.get<float>();
+        destination        = { scalar, scalar };
+    } else if (source.is_string()) {
+        const auto  text  = source.get<std::string>();
+        const char* begin = text.c_str();
+        char*       end   = nullptr;
+        destination       = { std::strtof(begin, &end), 0.0f };
+        const char* space = std::strchr(begin, ' ');
+        if (space != nullptr) {
+            while (*space == ' ') ++space;
+            if (*space != '\0') destination[1] = std::strtof(space, nullptr);
+        }
     }
 }
 
@@ -111,17 +138,23 @@ struct WPMiscObjectBase {
 struct WPTextObject : WPMiscObjectBase {
     nlohmann::json       text;
     nlohmann::json       font;
-    float                pointsize { 12.0f };
-    uint32_t             padding { 0 };
+    // Wallpaper Engine's defaults for a text object that leaves these keys out.
+    float                pointsize { 32.0f };
+    // Wallpaper Engine's defaults for the key being absent: a 32 pixel margin
+    // on each axis and no extra glyph or line spacing. Whether the margin
+    // applies is the parser's decision; see `ResolveTextCardPadding`.
+    std::array<float, 2> padding { 32.0f, 32.0f };
+    std::array<float, 2> spacing { 0.0f, 0.0f };
     std::string          horizontalalign;
     std::string          verticalalign;
     std::string          anchor;
     std::string          alignment { "center" };
-    uint32_t             maxrows { 0 };
-    float                maxwidth { 0.0f };
+    uint32_t             maxrows { 1 };
+    float                maxwidth { 500.0f };
     bool                 limitrows { false };
     bool                 limitwidth { false };
     bool                 limituseellipsis { false };
+    bool                 blockalign { false };
     std::array<float, 3> color { 1.0f, 1.0f, 1.0f };
     float                alpha { 1.0f };
     float                brightness { 1.0f };
@@ -144,7 +177,8 @@ struct WPTextObject : WPMiscObjectBase {
         if (json.contains("text")) text = json.at("text");
         if (json.contains("font")) font = json.at("font");
         GET_JSON_NAME_VALUE_NOWARN(json, "pointsize", pointsize);
-        GET_JSON_NAME_VALUE_NOWARN(json, "padding", padding);
+        ReadMiscVec2Setting(json, "padding", padding);
+        ReadMiscVec2Setting(json, "spacing", spacing);
         GET_JSON_NAME_VALUE_NOWARN(json, "horizontalalign", horizontalalign);
         GET_JSON_NAME_VALUE_NOWARN(json, "verticalalign", verticalalign);
         GET_JSON_NAME_VALUE_NOWARN(json, "anchor", anchor);
@@ -154,6 +188,7 @@ struct WPTextObject : WPMiscObjectBase {
         GET_JSON_NAME_VALUE_NOWARN(json, "limitrows", limitrows);
         GET_JSON_NAME_VALUE_NOWARN(json, "limitwidth", limitwidth);
         GET_JSON_NAME_VALUE_NOWARN(json, "limituseellipsis", limituseellipsis);
+        GET_JSON_NAME_VALUE_NOWARN(json, "blockalign", blockalign);
         GET_JSON_NAME_VALUE_NOWARN(json, "color", color);
         GET_JSON_NAME_VALUE_NOWARN(json, "alpha", alpha);
         GET_JSON_NAME_VALUE_NOWARN(json, "brightness", brightness);
