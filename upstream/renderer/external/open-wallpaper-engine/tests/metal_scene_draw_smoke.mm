@@ -2063,6 +2063,64 @@ TEST_F(MetalSceneDraw, ADepthTestedDrawCullsTheSameFacesAsCompatibility)
     EXPECT_GT(card_pixels["away-back-no-depth"], 1000u);
 }
 
+/// The fixture's card in constant red times its `g_Color4`, over a scene
+/// cleared to green 0.25, with `object_fields` added to the card. The
+/// `effectpassthrough` material stands in for Wallpaper Engine's: its
+/// `genericimage3` takes the layer times `g_Color4` and, for a colour blend
+/// mode, mixes it over the screen it samples by the layer's alpha.
+std::filesystem::path WriteColorBlendFixture(const std::filesystem::path& root,
+                                             std::string_view            object_fields)
+{
+    const auto project = WriteFixture(root);
+    std::ofstream(root / "shaders/metal_probe.frag")
+        << "uniform vec4 g_Color4;\n"
+           "varying vec2 v_TexCoord;\n"
+           "void main() {\n"
+           "  gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0) * g_Color4;\n"
+           "}\n";
+    std::filesystem::create_directories(root / "materials/util");
+    std::ofstream(root / "materials/util/effectpassthrough.json")
+        << R"({"passes":[{"shader":"blend_probe","cullmode":"nocull","blending":"normal",)"
+           R"("depthwrite":"disabled","depthtest":"disabled"}]})";
+    std::ofstream(root / "shaders/blend_probe.vert")
+        << "uniform mat4 g_ModelViewProjectionMatrix;\n"
+           "attribute vec3 a_Position;\n"
+           "attribute vec2 a_TexCoord;\n"
+           "varying vec2 v_TexCoord;\n"
+           "varying vec3 v_ScreenPos;\n"
+           "void main() {\n"
+           "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+           "  v_TexCoord = a_TexCoord;\n"
+           "  v_ScreenPos = gl_Position.xyw;\n"
+           "}\n";
+    std::ofstream(root / "shaders/blend_probe.frag")
+        << "uniform sampler2D g_Texture0;\n"
+           "uniform vec4 g_Color4;\n"
+           "#if BLENDMODE\n"
+           "uniform sampler2D g_Texture4; // {\"hidden\":true,\"default\":\"_rt_FullFrameBuffer\"}\n"
+           "#endif\n"
+           "varying vec2 v_TexCoord;\n"
+           "varying vec3 v_ScreenPos;\n"
+           "void main() {\n"
+           "  vec4 color = texSample2D(g_Texture0, v_TexCoord) * g_Color4;\n"
+           "  gl_FragColor = color;\n"
+           "#if BLENDMODE\n"
+           "  vec2 screenUV = (v_ScreenPos.xy / v_ScreenPos.z) * 0.5 + 0.5;\n"
+           "  vec4 screen = texSample2D(g_Texture4, screenUV);\n"
+           "  gl_FragColor.rgb = mix(screen.rgb, color.rgb, color.a);\n"
+           "  gl_FragColor.a = screen.a;\n"
+           "#endif\n"
+           "}\n";
+    std::ofstream(root / "layout.json")
+        << R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+           R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0,0.25,0],)"
+           R"("cameraparallax":false,"orthogonalprojection":{"width":384,"height":256}},)"
+           R"("objects":[{"id":1,"name":"tile","image":"models/tile.json","origin":[192,128,0],)"
+           R"("scale":[1,1,1],"angles":[0,0,0],"visible":true,)"
+        << object_fields << "}]}";
+    return project;
+}
+
 TEST_F(MetalSceneDraw, ACompositingEffectSeesTheScreenUprightOnBothRenderers)
 {
     // An effect that composes a layer over the screen (Wallpaper Engine's
@@ -2148,6 +2206,52 @@ TEST_F(MetalSceneDraw, ACompositingEffectSeesTheScreenUprightOnBothRenderers)
         EXPECT_EQ(at(192, 186), at(20, 186)) << "the screen under the layer's bottom is not the screen's";
         EXPECT_NE(at(20, 70), at(20, 186)) << "the background has no up or down to get wrong";
     }
+}
+
+TEST_F(MetalSceneDraw, AScreenReadBeforeAnyDrawSeesTheBackgroundEveryFrameOnBothRenderers)
+{
+    // The only layer blends with the screen, so the first thing each frame
+    // does to the scene's image is copy it for that layer to read. The
+    // compatibility backend has cleared it to the background by then; here the
+    // blend adds a quarter of red to what it reads. Reading an image nothing
+    // cleared gives no background and no alpha, and reading the previous
+    // frame's picture adds the red up frame after frame.
+    std::map<bool, RendererPicture> pictures;
+    for (const bool native : { false, true }) {
+        const std::string name    = native ? "early-read-native" : "early-read-compat";
+        const auto        project = WriteColorBlendFixture(root_ / name, R"("colorBlendMode":2)");
+        std::ofstream(root_ / name / "shaders/blend_probe.frag")
+            << "uniform sampler2D g_Texture0;\n"
+               "#if BLENDMODE\n"
+               "uniform sampler2D g_Texture4; // {\"hidden\":true,\"default\":\"_rt_FullFrameBuffer\"}\n"
+               "#endif\n"
+               "varying vec2 v_TexCoord;\n"
+               "varying vec3 v_ScreenPos;\n"
+               "void main() {\n"
+               "  gl_FragColor = texSample2D(g_Texture0, v_TexCoord);\n"
+               "#if BLENDMODE\n"
+               "  vec2 screenUV = (v_ScreenPos.xy / v_ScreenPos.z) * 0.5 + 0.5;\n"
+               "  vec4 screen = texSample2D(g_Texture4, screenUV);\n"
+               "  gl_FragColor = vec4(screen.rgb + vec3(0.25, 0.0, 0.0), screen.a);\n"
+               "#endif\n"
+               "}\n";
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+        if (native) {
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+        }
+        pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+        ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+    }
+    const auto& rgb = pictures[true].rgb;
+    ASSERT_EQ(rgb.size(), 384u * 256u * 3u);
+    const std::size_t centre = (128u * 384u + 192u) * 3u;
+    EXPECT_NEAR(rgb[centre + 0], 64, 2) << "the blend read something other than the background";
+    EXPECT_NEAR(rgb[centre + 1], 64, 2) << "the blend did not read the background";
+    EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
+        << "the native renderer read another screen than the compatibility renderer";
 }
 
 TEST_F(MetalSceneDraw, AnIntermediateTargetIsDrawnCopiedAndResampledInOneFrame)
