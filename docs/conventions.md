@@ -122,6 +122,14 @@ How the panel runs (controller, actions, observation, window hosting) is in
   keeps the row drawn before, until the view is rebuilt. Build the order and the
   sections in the model; a `ForEach` nested in another one's rows is fine.
   `scripts/tests/test_panel_lazy_lists.py` enforces this.
+- **A choice says when something overrides it.** Where another setting or condition
+  can change what a choice does (a Reduced quality rule holding frames to 30 under a
+  **No limit** slider or a **Keep running** battery mode), every place that shows the
+  choice (its Quick Settings module, its full row, the Displays and inspector notes)
+  says so while it happens, names the setting that does it and opens that setting's
+  page. Never put an effect down to a setting that did not cause it. Work the reading
+  out once in the model from what the engine reports (`QualityReport`,
+  `FrameRateCeiling`), and test each surface with the overriding setting on.
 - **Untrusted text stays text.** Titles, descriptions, author and creator names,
   Steam and pixiv data and error details are `Text(verbatim:)`. An author's property
   label passes through the allowlist parser (`PropertyLabelDocument`) and never
