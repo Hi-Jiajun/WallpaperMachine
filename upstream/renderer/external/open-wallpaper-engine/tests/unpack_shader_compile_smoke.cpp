@@ -279,6 +279,13 @@ int32_t JsonIntValue(const nlohmann::json& json, std::string_view key, int32_t f
     return json.at(key).get<int32_t>();
 }
 
+/// Whether a layer's colour blend mode is drawn through the passthrough
+/// material: every mode but 0 and 31, which is drawn additively instead.
+bool ColorBlendNeedsPassthrough(const nlohmann::json& object) {
+    const auto mode = JsonIntValue(object, "colorBlendMode", 0);
+    return mode != 0 && mode != 31;
+}
+
 bool HasDynamicVisibility(const nlohmann::json& json) {
     if (! json.is_object() || ! json.contains("visible") || ! json.at("visible").is_object()) {
         return false;
@@ -676,7 +683,7 @@ void CollectImageExpectations(const std::filesystem::path& scene_dir, fs::VFS& v
             if (JsonBoolValue(effect_ref, "visible", true)) ++visible_effects;
         }
     }
-    if (JsonIntValue(object, "colorBlendMode", 0) != 0) ++visible_effects;
+    if (ColorBlendNeedsPassthrough(object)) ++visible_effects;
 
     const bool render_as_compose =
         is_compose && has_child_content && (! copy_background || visible_effects > 0);
@@ -787,7 +794,7 @@ void CollectImageExpectations(const std::filesystem::path& scene_dir, fs::VFS& v
                                       blockers);
             ++visible_effect_index;
         }
-        if (JsonIntValue(object, "colorBlendMode", 0) != 0) {
+        if (ColorBlendNeedsPassthrough(object)) {
             AddMaterialExpectation(scene_dir,
                                    "materials/util/effectpassthrough.json",
                                    context + "/effect:colorBlendMode/passthrough",
@@ -800,7 +807,7 @@ void CollectImageExpectations(const std::filesystem::path& scene_dir, fs::VFS& v
                                    expected,
                                    blockers);
         }
-    } else if (JsonIntValue(object, "colorBlendMode", 0) != 0) {
+    } else if (ColorBlendNeedsPassthrough(object)) {
         AddMaterialExpectation(scene_dir,
                                "materials/util/effectpassthrough.json",
                                context + "/effect:colorBlendMode/passthrough",
@@ -815,7 +822,7 @@ void CollectImageExpectations(const std::filesystem::path& scene_dir, fs::VFS& v
     if (render_as_compose &&
         (! object.contains("effects") || ! object.at("effects").is_array() ||
          object.at("effects").empty()) &&
-        JsonIntValue(object, "colorBlendMode", 0) == 0) {
+        ! ColorBlendNeedsPassthrough(object)) {
         AddMaterialExpectation(scene_dir,
                                "materials/util/effectpassthrough.json",
                                context + "/effect:compose-passthrough",

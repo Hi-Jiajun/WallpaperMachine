@@ -1846,6 +1846,29 @@ void BindOwnEffectChainInput(wpscene::WPMaterial& material, int32_t layer_id,
     }
 }
 
+/// The colour blend mode Wallpaper Engine draws additively onto the scene
+/// instead of blending in the passthrough shader.
+constexpr int32_t kAdditiveColorBlendMode = 31;
+
+/// The pass that mixes a layer with the screen behind it for a colour blend
+/// mode: Wallpaper Engine's passthrough material, `effectpassthrough`, with the
+/// mode as its `BLENDMODE`. It is appended as the layer's last effect, writes
+/// without blending, and a layer's own colour and alpha are already in what it
+/// blends (the caller binds a white `g_Color4`). Image and text layers share it.
+std::optional<wpscene::WPImageEffect> MakeColorBlendEffect(fs::VFS& vfs, int32_t color_blend_mode) {
+    wpscene::WPImageEffect effect;
+    wpscene::WPMaterial    material;
+    nlohmann::json         json;
+    if (! PARSE_JSON(fs::GetFileContent(vfs, "/assets/materials/util/effectpassthrough.json"), json))
+        return std::nullopt;
+    material.FromJson(json);
+    material.combos["BONECOUNT"] = 1;
+    material.combos["BLENDMODE"] = color_blend_mode;
+    material.blending            = "disabled";
+    effect.materials.push_back(material);
+    return effect;
+}
+
 void AttachEffectsToNode(ParseContext& context,
                          SceneNode& node,
                          int32_t layer_id,
@@ -3580,22 +3603,20 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     const bool isCompose = (wpimgobj.image == "models/util/composelayer.json");
     ResolveUserEffectVisibility(context, wpimgobj.effects, runtime_name);
 
-    // coloBlendMode load passthrough manaully
+    // A colour blend mode mixes the layer with the screen behind it through
+    // Wallpaper Engine's passthrough material, appended as the last effect.
+    // Mode 31 ("add") is the exception: Wallpaper Engine draws that layer with
+    // additive blending straight onto the scene, with no passthrough and no
+    // copy of the screen.
+    const bool additive_color_blend = wpimgobj.colorBlendMode == kAdditiveColorBlendMode;
     bool color_blend_passthrough = false;
-    if (wpimgobj.colorBlendMode != 0) {
-        wpscene::WPImageEffect colorEffect;
-        wpscene::WPMaterial    colorMat;
-        nlohmann::json         json;
-        if (! PARSE_JSON(fs::GetFileContent(vfs, "/assets/materials/util/effectpassthrough.json"),
-                         json))
-            return;
-        colorMat.FromJson(json);
-        colorMat.combos["BONECOUNT"] = 1;
-        colorMat.combos["BLENDMODE"] = wpimgobj.colorBlendMode;
-        colorMat.blending            = "disabled";
-        colorEffect.materials.push_back(colorMat);
-        wpimgobj.effects.push_back(colorEffect);
+    std::optional<usize> color_blend_effect;
+    if (wpimgobj.colorBlendMode != 0 && ! additive_color_blend) {
+        auto colorEffect = MakeColorBlendEffect(vfs, wpimgobj.colorBlendMode);
+        if (! colorEffect) return;
+        wpimgobj.effects.push_back(std::move(*colorEffect));
         color_blend_passthrough = true;
+        color_blend_effect      = wpimgobj.effects.size() - 1;
     }
 
     int32_t count_eff = 0;
@@ -3844,6 +3865,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                     // the whole screen squeezed into the layer's bounds.
                     if (color_blend_passthrough) {
                         wpimgobj.effects.pop_back();
+                        color_blend_effect.reset();
                         puppet_mat.combos["BLENDMODE"] = wpimgobj.colorBlendMode;
                     }
                     puppet_effect.materials.push_back(puppet_mat);
@@ -3886,13 +3908,16 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         }
     }
     // material blendmode for last step to use
-    auto imgBlendMode = material.blenmode;
+    auto imgBlendMode = additive_color_blend ? BlendMode::Additive : material.blenmode;
     // disable img material blend, as it's the first effect node now
     if (hasEffect) {
         material.blenmode = BlendMode::Normal;
+    } else if (additive_color_blend) {
+        material.blenmode = BlendMode::Additive;
     }
     if (puppet_material_slots.has_value()) {
         for (auto& slot : *puppet_material_slots) {
+            if (additive_color_blend) slot.material.blenmode = BlendMode::Additive;
             mesh.AddMaterial(std::move(slot.material));
             const auto material_slot_index = static_cast<uint32_t>(mesh.MaterialSlots().size() - 1);
             auto        material_slot      = mesh.MaterialSlotPtr(material_slot_index);
@@ -4029,6 +4054,11 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         int32_t i_eff = -1;
         for (const auto& wpeffobj : wpimgobj.effects) {
             i_eff++;
+            // Wallpaper Engine draws the passthrough that blends the layer
+            // onto the screen with a white colour: the layer's own colour and
+            // alpha are already in what it blends, from the layer's first pass.
+            const bool blends_onto_screen =
+                color_blend_effect.has_value() && &wpeffobj == &wpimgobj.effects[*color_blend_effect];
             if (! wpeffobj.visible) {
                 i_eff--;
                 continue;
@@ -4118,6 +4148,10 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                     ShaderValue::fromMatrix(Eigen::Matrix4f::Identity());
                 wpEffShaderInfo.baseConstSvs["g_EffectTextureProjectionMatrixInverse"] =
                     ShaderValue::fromMatrix(Eigen::Matrix4f::Identity());
+                if (blends_onto_screen) {
+                    wpEffShaderInfo.baseConstSvs["g_Color4"] =
+                        std::array<float, 4> { 1.0f, 1.0f, 1.0f, 1.0f };
+                }
                 SceneMaterial     material;
                 WPShaderValueData svData;
                 svData.effect_owner   = spImgNode.get();
@@ -4146,7 +4180,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 }
                 spMesh->AddMaterial(std::move(material));
                 RegisterMaterialConstants(context, spMesh->MaterialSlotPtr(), wpmat, wpEffShaderInfo, runtime_name);
-                registerImageLayerMaterial(spMesh->MaterialSlotPtr());
+                if (! blends_onto_screen) registerImageLayerMaterial(spMesh->MaterialSlotPtr());
                 spEffNode->AddMesh(spMesh);
 
                 context.shader_updater->SetNodeData(spEffNode.get(), svData);

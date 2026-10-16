@@ -985,6 +985,14 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   is neither multiplied twice nor baked into the separate cut-out pieces.
   Unskinned layers, effect-free puppets and unlit materials keep their lighting
   paths.
+- **Colour blend modes** — `MetalSceneDraw.AColorBlendLayersColourAndAlphaApplyOnceOnBothRenderers`
+  draws a tinted, half-transparent layer through a stand-in passthrough over a
+  coloured background: the tint and alpha are taken once, by the layer's own
+  pass. `MetalSceneDraw.AnAddColorBlendLayerIsAddedOntoTheSceneOnBothRenderers`
+  requires mode 31 to add the layer at its alpha, and
+  `RenderGraph.addColorBlendLayersAddOntoTheSceneWithoutSamplingIt` that a mode 31
+  layer, with and without an effect, draws additively onto the scene with no
+  passthrough, no screen copy and no pass sampling the screen.
 - **`colorBlendMode` on puppets** — `RenderGraph.puppetColorBlendModeSamplesTheScreenOnlyWhereItDrawsOnScreen`
   in `rendergraph_smoke`. A layer's `colorBlendMode` mixes it with the screen
   behind it, so only the pass that draws onto the screen may sample it. On a

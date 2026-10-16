@@ -2350,6 +2350,67 @@ TEST_F(MetalSceneDraw, AScreenReadBeforeAnyDrawSeesTheBackgroundEveryFrameOnBoth
         << "the native renderer read another screen than the compatibility renderer";
 }
 
+TEST_F(MetalSceneDraw, AnAddColorBlendLayerIsAddedOntoTheSceneOnBothRenderers)
+{
+    // Wallpaper Engine draws a layer whose colour blend mode is 31 ("add") with
+    // additive blending straight onto the scene, not through its blend shader:
+    // half-transparent red over green 0.25 adds half its red. Drawn through the
+    // passthrough it would instead be mixed over the green by its alpha.
+    std::map<bool, RendererPicture> pictures;
+    for (const bool native : { false, true }) {
+        const std::string name    = native ? "add-blend-native" : "add-blend-compat";
+        const auto        project = WriteColorBlendFixture(root_ / name,
+                                                          R"("colorBlendMode":31,"alpha":0.5)");
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+        if (native) {
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+        }
+        pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
+        ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+    }
+    const auto& rgb = pictures[true].rgb;
+    ASSERT_EQ(rgb.size(), 384u * 256u * 3u);
+    const std::size_t centre = (128u * 384u + 192u) * 3u;
+    EXPECT_NEAR(rgb[centre + 0], 128, 2) << "the layer's red was not added at its alpha";
+    EXPECT_NEAR(rgb[centre + 1], 64, 2) << "the layer covered the scene instead of adding to it";
+    EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
+        << "the native renderer added the layer differently from the compatibility renderer";
+}
+
+TEST_F(MetalSceneDraw, AColorBlendLayersColourAndAlphaApplyOnceOnBothRenderers)
+{
+    // A layer with a colour blend mode is drawn with its colour and alpha, then
+    // blended onto the screen by Wallpaper Engine's passthrough, which it hands
+    // a white `g_Color4`. Red tinted to half and at half alpha mixes a quarter
+    // red over green 0.25 at half; taking the tint and alpha a second time in
+    // the passthrough would leave a sixteenth of red at a quarter.
+    std::map<bool, RendererPicture> pictures;
+    for (const bool native : { false, true }) {
+        const std::string name    = native ? "color-blend-native" : "color-blend-compat";
+        const auto        project = WriteColorBlendFixture(
+            root_ / name, R"("colorBlendMode":2,"alpha":0.5,"color":"0.5 1 1")");
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+        if (native) {
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+        }
+        pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
+        ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+    }
+    const auto& rgb = pictures[true].rgb;
+    ASSERT_EQ(rgb.size(), 384u * 256u * 3u);
+    const std::size_t centre = (128u * 384u + 192u) * 3u;
+    EXPECT_NEAR(rgb[centre + 0], 64, 2) << "the layer's tint or alpha was not taken once";
+    EXPECT_NEAR(rgb[centre + 1], 32, 2) << "the layer's alpha was not taken once";
+    EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
+        << "the native renderer blended the layer differently from the compatibility renderer";
+}
+
 TEST_F(MetalSceneDraw, AnEffectsSwappedBuffersAccumulateAndItsFloatBuffersKeepTheirSignOnBothRenderers)
 {
     // Wallpaper Engine's fluid simulation keeps its state in buffers it swaps

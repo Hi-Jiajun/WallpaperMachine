@@ -128,7 +128,12 @@ buffers where it stands among the effect's passes, so a simulation carries its s
 next; when the effect draws into the second buffer before reading it again, one copy
 into the first is the whole exchange, otherwise it goes through a temporary buffer.
 A buffer's `clear` colour and `conditions` are not read: buffers start cleared to
-zero and are made whether or not the effect's combos use them. Translating to the
+zero and are made whether or not the effect's combos use them. A layer's colour blend
+mode mixes it with the screen behind it through Wallpaper Engine's passthrough
+material, the layer's last step; the passthrough takes the layer as its first pass
+drew it, colour and alpha included, and does not apply them again. Mode 31 ("add")
+has no passthrough: the layer, or its last effect, is drawn with additive blending
+straight onto the scene, so it costs neither the extra pass nor a copy of the screen. Translating to the
 Metal shading language
 turns GLSL's `inverse`, which Metal has no built-in for, into helper functions, so
 the stock perspective, reflection, water, light-shaft and cursor-ripple effects
