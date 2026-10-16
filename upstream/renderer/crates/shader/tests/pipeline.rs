@@ -2659,6 +2659,154 @@ fn pipeline_narrows_generated_vec4_fragment_coordinate_for_sampler2d() {
     );
 }
 
+/// The parts of Wallpaper Engine's `common_pbr_2.h` a generated lighting block
+/// calls, reduced to the same signatures.
+const PBR_LIGHTING_STUB: &str = concat!(
+    "#define CAST3(x) vec3(x)\n",
+    "vec3 PointSegmentDelta(vec3 pos, vec3 a, vec3 b) { return a - pos + (b - a) * 0.5; }\n",
+    "vec3 ComputePBRLightShadow(vec3 N, vec3 L, vec3 V, vec3 albedo, vec3 lightColor,\n",
+    "    float radius, float exponent, vec3 specularTint, vec3 baseReflectance, float roughness,\n",
+    "    float metallic, float shadowFactor) {\n",
+    "  float falloff = clamp(1.0 - length(L) / radius, 0.0, 1.0);\n",
+    "  return albedo * lightColor * pow(falloff, exponent) * max(dot(N, normalize(L)), 0.0) * shadowFactor;\n",
+    "}\n",
+    "vec3 ComputePBRLightShadowInfinite(vec3 N, vec3 L, vec3 V, vec3 albedo, vec3 lightColor,\n",
+    "    vec3 specularTint, vec3 baseReflectance, float roughness, float metallic, float shadowFactor) {\n",
+    "  return albedo * lightColor * max(dot(N, L), 0.0) * shadowFactor;\n",
+    "}\n",
+);
+
+fn lit_layer_request(target: ShaderTarget, combos: &[(&str, &str)]) -> ShaderProgramRequest {
+    let mut builder = ShaderProgramRequest::builder(ShaderName::new("lit_layer").unwrap())
+        .target(target)
+        .stage(ShaderStageSource::new(ShaderStageKind::Vertex, concat!(
+            "uniform mat4 g_ModelViewProjectionMatrix;\n",
+            "attribute vec3 a_Position;\n",
+            "varying vec3 v_WorldPos;\n",
+            "void main() { v_WorldPos = a_Position; gl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix); }\n",
+        )))
+        .stage(ShaderStageSource::new(ShaderStageKind::Fragment, concat!(
+            "// [COMBO] {\"material\":\"lighting\",\"combo\":\"LIGHTING\",\"default\":0}\n",
+            "#include \"common_pbr_2.h\"\n",
+            "varying vec3 v_WorldPos;\n",
+            "#require LightingV1\n",
+            "void main() {\n",
+            "  vec3 color = vec3(0.5);\n",
+            "#if LIGHTING\n",
+            "  color = PerformLighting_V1(v_WorldPos, color, vec3(0.0, 0.0, 1.0), vec3(0.0, 0.0, 1.0),\n",
+            "      CAST3(1.0), CAST3(0.04), 1.0, 0.0);\n",
+            "#endif\n",
+            "  gl_FragColor = vec4(color, 1.0);\n",
+            "}\n",
+        )));
+    for (name, value) in combos {
+        builder = builder.combo(ShaderComboValue::new(ComboName::new(*name).unwrap(), *value));
+    }
+    builder.build().unwrap()
+}
+
+fn lit_layer_pipeline() -> DefaultShaderPipeline<InMemoryShaderSourceProvider> {
+    DefaultShaderPipeline::new(
+        InMemoryShaderSourceProvider::new()
+            .with_source(IncludePath::new("common_pbr_2.h").unwrap(), PBR_LIGHTING_STUB),
+        NagaCompiler,
+    )
+}
+
+#[test]
+fn a_lit_pass_gets_wallpaper_engines_light_arrays_sized_by_the_scene_on_both_backends() {
+    for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+        let request = lit_layer_request(target, &[
+            ("LIGHTING", "1"),
+            ("LIGHTS_POINT", "3"),
+            ("LIGHTS_SPOT", "1"),
+            ("LIGHTS_TUBE", "2"),
+            ("LIGHTS_DIRECTIONAL", "1"),
+        ]);
+        let program = lit_layer_pipeline().compile(&request)
+            .unwrap_or_else(|error| panic!("lit pass should compile for {target:?}: {error}"));
+        let members: Vec<_> = program.reflection().uniform_blocks().iter()
+            .flat_map(|block| block.members())
+            .map(|member| (member.name().to_owned(), member.array_count()))
+            .collect();
+        for (name, count) in [
+            ("g_LPoint_Color", 3), ("g_LPoint_Origin", 3),
+            ("g_LSpot_Color", 1), ("g_LSpot_Origin", 1), ("g_LSpot_Direction", 1), ("g_LSpot_Exponent", 1),
+            ("g_LTube_Color", 2), ("g_LTube_OriginA", 2), ("g_LTube_OriginB", 2),
+            ("g_LDirectional_Color", 1), ("g_LDirectional_Direction", 1),
+        ] {
+            assert!(members.contains(&(name.to_owned(), count)),
+                "{target:?}: {name}[{count}] missing from {members:?}");
+        }
+    }
+}
+
+#[test]
+fn an_unlit_pass_declares_no_light_arrays() {
+    for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+        let request = lit_layer_request(target, &[("LIGHTS_POINT", "3")]);
+        let program = lit_layer_pipeline().compile(&request)
+            .unwrap_or_else(|error| panic!("unlit pass should compile for {target:?}: {error}"));
+        assert!(!program.reflection().uniform_blocks().iter()
+            .flat_map(|block| block.members())
+            .any(|member| member.name().starts_with("g_L")));
+    }
+}
+
+#[test]
+fn every_asset_shader_that_requires_lighting_compiles_lit_on_both_backends() {
+    let test = "every_asset_shader_that_requires_lighting_compiles_lit_on_both_backends";
+    let Some(root) = asset_shader_root() else {
+        eprintln!(
+            "skipping {test}: no Wallpaper Engine assets/shaders directory. Set \
+             WALLPAPER_MACHINE_ASSETS_ROOT to run it."
+        );
+        return;
+    };
+    // fur4 is left out: its instanced shells read `gl_InstanceID`, which the GLSL front end
+    // rejects, lit or unlit.
+    for shader in ["genericimage4", "generic4", "genericparticle", "genericropeparticle",
+                   "foliage4", "chroma4"] {
+        let (Some(vertex), Some(fragment)) = (
+            corpus_source_or_skip(&root.join(format!("{shader}.vert")), test),
+            corpus_source_or_skip(&root.join(format!("{shader}.frag")), test),
+        ) else {
+            continue;
+        };
+        for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+            let mut builder = ShaderProgramRequest::builder(ShaderName::new(shader).unwrap())
+                .target(target)
+                .stage(ShaderStageSource::new(ShaderStageKind::Vertex, vertex.clone()))
+                .stage(ShaderStageSource::new(ShaderStageKind::Fragment, fragment.clone()))
+                .texture(ShaderTextureInfo::new(
+                    TextureSlot::new(0).expect("valid texture slot"),
+                    true,
+                    TextureFormatHint::Rgba8,
+                ));
+            // Lit, as a scene with lights compiles them.
+            for (name, value) in [
+                ("LIGHTING", "1"), ("SCENE_ORTHO", "1"), ("HDR", "0"),
+                ("LIGHTS_POINT", "3"), ("LIGHTS_SPOT", "1"), ("LIGHTS_TUBE", "3"),
+                ("LIGHTS_DIRECTIONAL", "1"),
+            ] {
+                builder = builder.combo(ShaderComboValue::new(ComboName::new(name).unwrap(), value));
+            }
+            let request = builder.build().expect("lit request should be valid");
+            let program = ShaderPipeline::new(AssetShaderProvider, NagaCompiler)
+                .compile(&request)
+                .unwrap_or_else(|error| panic!("lit {shader} should compile for {target:?}: {error:?}"));
+            let members: Vec<_> = program.reflection().uniform_blocks().iter()
+                .flat_map(|block| block.members())
+                .map(|member| (member.name().to_owned(), member.array_count()))
+                .collect();
+            assert!(members.contains(&("g_LTube_OriginB".to_owned(), 3)),
+                "{shader} {target:?}: {members:?}");
+            assert!(members.contains(&("g_LPoint_Origin".to_owned(), 3)),
+                "{shader} {target:?}: {members:?}");
+        }
+    }
+}
+
 #[test]
 fn pipeline_compiles_asset_genericimage4_without_widening_rotate_vec2_helper() {
     let test = "pipeline_compiles_asset_genericimage4_without_widening_rotate_vec2_helper";

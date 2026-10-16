@@ -723,8 +723,18 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   shader's fixed view direction rather than a perspective eye on the layer's
   plane (which reduces its lighting to ambient-only). Material overrides cannot
   change this scene-owned switch, and the shader request/cache key includes it.
-  This fixes projection selection, not the approximate `PerformLighting_V1`
-  compatibility helper; full authored-light parity is unverified.
+  `PerformLighting_V1` itself is generated as Wallpaper Engine writes it, below.
+- **Scene lights (LightingV1)** — `cargo test -p shader --lib preprocess::lighting`
+  pins the generated block (arrays sized by the `LIGHTS_*` combos, nothing for an
+  unlit pass); `pipeline.rs`
+  `a_lit_pass_gets_wallpaper_engines_light_arrays_sized_by_the_scene_on_both_backends`
+  compiles it for SPIR-V and Metal, and
+  `every_asset_shader_that_requires_lighting_compiles_lit_on_both_backends`
+  does so for Wallpaper Engine's own lit shaders when
+  `WALLPAPER_MACHINE_ASSETS_ROOT` names them (`fur4` is excluded: its `gl_InstanceID` does not compile lit or unlit).
+  After a shader-crate change, rebuild
+  `target/release/libshader.a` (`cargo build -p shader --features ffi --release`)
+  before the CMake test binaries, or they link the old compiler.
 - **HDR, bloom and emissive masks** — an authored `hdr` scene uses RGBA16F color
   intermediates on both backends; masks and source media keep their formats and
   SDR scenes keep RGBA8. HDR shader combos are enabled before compilation, not
