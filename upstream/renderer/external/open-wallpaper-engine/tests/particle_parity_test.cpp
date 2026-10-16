@@ -576,6 +576,19 @@ std::vector<Particle> RunInitializer(json fields, std::size_t count,
     return particles;
 }
 
+/// The initializers of one file, applied in order to particles that have just
+/// been created.
+std::vector<Particle> RunInitializers(const std::vector<json>& chain, std::size_t count,
+                                      const ParticleParseContext& ctx = {}) {
+    std::vector<ParticleInitOp> ops;
+    for (const auto& fields : chain) ops.push_back(WPParticleParser::genParticleInitOp(fields, ctx));
+    std::vector<Particle> particles(count);
+    for (auto& particle : particles) {
+        for (const auto& op : ops) op(particle, 0.0);
+    }
+    return particles;
+}
+
 TEST(Initializers, ExponentCrowdsSizesTowardTheMinimum) {
     const auto flat    = RunInitializer({ { "name", "sizerandom" }, { "min", 0 }, { "max", 30 } }, 20000);
     const auto crowded = RunInitializer(
@@ -653,6 +666,74 @@ TEST(Initializers, SizeDefaultsFollowThePixelOrSceneUnitCanvas) {
         EXPECT_GE(p.size, 0.001f);
         EXPECT_LE(p.size, 1.0f);
     }
+}
+
+// Wallpaper Engine's size and alpha initializers scale the value the particle
+// has so far, as its colour initializers do; only the lifetime is replaced.
+// A particle file may therefore stack them: a size of 70 to 75, then a share
+// of 0.7 to 1 of it.
+TEST(Initializers, ASecondSizeInitializerScalesTheFirstInsteadOfReplacingIt) {
+    const auto particles = RunInitializers({ { { "name", "sizerandom" }, { "min", 70 }, { "max", 75 } },
+                                             { { "name", "sizerandom" }, { "min", 0.7 }, { "max", 1.0 } } },
+                                           4000);
+    std::vector<double> sizes;
+    for (const auto& p : particles) {
+        EXPECT_GE(p.size, 70.0f * 0.7f - 1.0e-3f);
+        EXPECT_LE(p.size, 75.0f + 1.0e-3f);
+        EXPECT_FLOAT_EQ(p.init.size, p.size) << "the base the size operators scale is the product";
+        sizes.push_back(p.size);
+    }
+    EXPECT_NEAR(Mean(sizes), 72.5 * 0.85, 0.5);
+}
+
+// A lone size initializer draws exactly the size it names: the start size a
+// particle scales from is the unit of the size held here.
+TEST(Initializers, ASizeInitializerAloneKeepsItsRange) {
+    const auto alone = RunInitializers({ { { "name", "sizerandom" }, { "min", 70 }, { "max", 75 } } }, 400);
+    for (const auto& p : alone) {
+        EXPECT_GE(p.size, 70.0f);
+        EXPECT_LE(p.size, 75.0f);
+        EXPECT_FLOAT_EQ(p.init.size, p.size);
+    }
+}
+
+TEST(Initializers, TwoSizeInitializersScaleInEitherOrder) {
+    const auto share_first = RunInitializers({ { { "name", "sizerandom" }, { "min", 0.5 }, { "max", 0.5 } },
+                                               { { "name", "sizerandom" }, { "min", 70 }, { "max", 70 } } },
+                                             4);
+    for (const auto& p : share_first) EXPECT_FLOAT_EQ(p.size, 35.0f);
+    const auto size_first = RunInitializers({ { { "name", "sizerandom" }, { "min", 70 }, { "max", 70 } },
+                                              { { "name", "sizerandom" }, { "min", 0.5 }, { "max", 0.5 } } },
+                                            4);
+    for (const auto& p : size_first) EXPECT_FLOAT_EQ(p.size, 35.0f);
+}
+
+TEST(Initializers, ASecondAlphaInitializerScalesTheFirstInsteadOfReplacingIt) {
+    const auto particles = RunInitializers({ { { "name", "alpharandom" }, { "min", 0.5 }, { "max", 1.0 } },
+                                             { { "name", "alpharandom" }, { "min", 0.4 }, { "max", 0.5 } } },
+                                           4000);
+    std::vector<double> alphas;
+    for (const auto& p : particles) {
+        EXPECT_GE(p.alpha, 0.5f * 0.4f - 1.0e-5f);
+        EXPECT_LE(p.alpha, 0.5f + 1.0e-5f);
+        EXPECT_FLOAT_EQ(p.init.alpha, p.alpha) << "the alpha fade starts from the product";
+        alphas.push_back(p.alpha);
+    }
+    EXPECT_NEAR(Mean(alphas), 0.75 * 0.45, 0.01);
+
+    const auto alone = RunInitializers({ { { "name", "alpharandom" }, { "min", 0.5 }, { "max", 1.0 } } }, 400);
+    for (const auto& p : alone) {
+        EXPECT_GE(p.alpha, 0.5f);
+        EXPECT_LE(p.alpha, 1.0f);
+        EXPECT_FLOAT_EQ(p.init.alpha, p.alpha);
+    }
+}
+
+TEST(Initializers, TheLifetimeStaysReplacedWhileSizeAndAlphaScale) {
+    const auto particles = RunInitializers({ { { "name", "lifetimerandom" }, { "min", 8 }, { "max", 8 } },
+                                             { { "name", "lifetimerandom" }, { "min", 2 }, { "max", 2 } } },
+                                           4);
+    for (const auto& p : particles) EXPECT_FLOAT_EQ(p.lifetime, 2.0f);
 }
 
 Eigen::Vector3f Hsv(const Eigen::Vector3f& c) {
@@ -1099,16 +1180,47 @@ TEST(SequenceInitializers, InheritInitialValueCopiesTheParentParticleOfAnEventCh
         EXPECT_FLOAT_EQ(p.velocity.z(), 3.0f);
     }
     {
+        // The engine multiplies its own start size by the parent's, both half of ours.
         Particle p;
         WPParticleParser::genParticleInitOp({ { "name", "inheritinitialvaluefromevent" }, { "input", "multiplysize" } },
                                             rig.ctx)(p, 0.0);
-        EXPECT_FLOAT_EQ(p.size, 20.0f * 7.0f);
+        EXPECT_FLOAT_EQ(p.size, kParticleStartSize * 7.0f / kParticleSizeOverEngine);
+        EXPECT_FLOAT_EQ(p.init.size, p.size);
+    }
+    {
+        Particle p;
+        WPParticleParser::genParticleInitOp({ { "name", "inheritinitialvaluefromevent" }, { "input", "setsize" } },
+                                            rig.ctx)(p, 0.0);
+        EXPECT_FLOAT_EQ(p.size, 7.0f);
     }
     // No parent, nothing to copy.
     rig.spawn->parent = nullptr;
     Particle alone;
     WPParticleParser::genParticleInitOp({ { "name", "inheritinitialvaluefromevent" } }, rig.ctx)(alone, 0.0);
     EXPECT_FLOAT_EQ(alone.color.x(), 1.0f);
+}
+
+// The engine multiplies its own child size (0.5 to start, then a draw) by its own
+// parent size. Both are half of the size held here, so a child that draws 10
+// beneath a parent held at 8 comes out at 10 * 4, in either order.
+TEST(SequenceInitializers, AnInheritedMultiplySizeScalesTheChildByHalfTheSizeHeldForTheParent) {
+    SpawnRig rig;
+    Particle parent;
+    parent.size       = 8.0f;
+    rig.spawn->parent = &parent;
+    const auto draw    = WPParticleParser::genParticleInitOp(
+        { { "name", "sizerandom" }, { "min", 10 }, { "max", 10 } }, rig.ctx);
+    const auto inherit = WPParticleParser::genParticleInitOp(
+        { { "name", "inheritinitialvaluefromevent" }, { "input", "multiplysize" } }, rig.ctx);
+    Particle draw_first;
+    draw(draw_first, 0.0);
+    inherit(draw_first, 0.0);
+    EXPECT_FLOAT_EQ(draw_first.size, 40.0f);
+    EXPECT_FLOAT_EQ(draw_first.init.size, 40.0f);
+    Particle inherit_first;
+    inherit(inherit_first, 0.0);
+    draw(inherit_first, 0.0);
+    EXPECT_FLOAT_EQ(inherit_first.size, 40.0f);
 }
 
 // ---------------------------------------------------------------------------
@@ -1429,7 +1541,7 @@ TEST(Oscillators, FrequencyMinimumDefaultsToOneNotZero) {
     particles[0].lifetime = 9.0f; // one second old
     RunOperator(op, particles, 0.01);
     const double expected = 0.8 + 0.5 * (std::sin(1.0 * 1.0) + 1.0) * 0.0 * 0.4;
-    EXPECT_NEAR(particles[0].size / 20.0f, expected, 1.0e-5);
+    EXPECT_NEAR(particles[0].size / kParticleStartSize, expected, 1.0e-5);
 }
 
 TEST(Oscillators, PositionMovesByTheDifferenceOfTwoEvaluationsAndZSharesXsWave) {
@@ -2480,6 +2592,31 @@ TEST(ParseLevel, StartTimeIsAFractionOfASecond) {
                         OneParticleObject());
     ASSERT_EQ(scene.scene->paritileSys->subsystems.size(), 1u);
     EXPECT_DOUBLE_EQ(scene.Sub().StartTime(), 0.5);
+}
+
+TEST(ParseLevel, TwoSizeInitializersOfOneFileScaleTheParticlesItSpawns) {
+    // The falling-leaf preset: a size of 70 to 75, then 0.7 to 1 of it.
+    ParticleScene scene({ { "/particle.json",
+                            ParticleFile(R"({"name":"boxrandom","id":1,"rate":0,"instantaneous":200,"directions":"0 0 0"})",
+                                         R"("maxcount":256,"flags":0)",
+                                         R"({"name":"lifetimerandom","min":100,"max":100},)"
+                                         R"({"name":"sizerandom","min":70,"max":75},)"
+                                         R"({"name":"sizerandom","min":0.7,"max":1.0},)"
+                                         R"({"name":"alpharandom","min":0.5,"max":0.5},)"
+                                         R"({"name":"alpharandom","min":0.5,"max":1.0})") } },
+                        OneParticleObject());
+    ASSERT_EQ(scene.scene->paritileSys->subsystems.size(), 1u);
+    scene.Step();
+    ASSERT_EQ(scene.Sub().Instances().size(), 1u);
+    const auto live = LiveParticles(*scene.Sub().Instances()[0]);
+    ASSERT_EQ(live.size(), 200u);
+    for (const auto& p : live) {
+        EXPECT_GE(p.size, 49.0f - 1.0e-3f);
+        EXPECT_LE(p.size, 75.0f + 1.0e-3f);
+        // Half, then 0.5 to 1 of that: replacing would leave 0.5 to 1.
+        EXPECT_GE(p.alpha, 0.25f - 1.0e-5f);
+        EXPECT_LE(p.alpha, 0.5f + 1.0e-5f);
+    }
 }
 
 TEST(ParseLevel, EmitterTimingKeysAreRead) {

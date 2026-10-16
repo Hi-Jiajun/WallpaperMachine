@@ -5,19 +5,33 @@
 namespace wallpaper
 {
 
+/// How many times the size a particle holds here is Wallpaper Engine's own for
+/// the same particle: the renderer draws half of `size`, so a size initializer's
+/// draw lands in the engine's array as half of it. A size taken from, or
+/// compared with, another particle's engine size is in this unit's half.
+inline constexpr float kParticleSizeOverEngine = 2.0f;
+
+/// What a particle is before its initializers run. Wallpaper Engine's size and
+/// alpha initializers (`sizerandom`, `alpharandom`) scale the value the particle
+/// has so far, as its colour initializers do, so a file may stack them; they
+/// start from the particle's own size (0.5 there) and alpha (1). The size here
+/// starts at the engine's 0.5 in this unit, which is 1.
+inline constexpr float kParticleStartSize  = 0.5f * kParticleSizeOverEngine;
+inline constexpr float kParticleStartAlpha = 1.0f;
+
 struct Particle {
     struct InitValue {
         Eigen::Vector3f color { 1.0f, 1.0f, 1.0f };
-        float           alpha { 1.0f };
-        float           size { 20 };
+        float           alpha { kParticleStartAlpha };
+        float           size { kParticleStartSize };
         float           lifetime { 1.0f };
         /// Fixed per particle, in [0, 1). Picks a `randomframe` sprite.
         float           frame { 0.0f };
     };
     Eigen::Vector3f position { 0.0f, 0.0f, 0.0f };
     Eigen::Vector3f color { 1.0f, 1.0f, 1.0f };
-    float           alpha { 1.0f };
-    float           size { 20 };
+    float           alpha { kParticleStartAlpha };
+    float           size { kParticleStartSize };
     float           lifetime { 1.0f };
 
     Eigen::Vector3f rotation { 0.0f, 0.0f, 0.0f }; // radian  z x y

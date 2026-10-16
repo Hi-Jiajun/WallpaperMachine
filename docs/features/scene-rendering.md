@@ -374,10 +374,12 @@ particle born exactly on the centre leaves along a random direction. An emitter'
 `delay`, `duration` and periodic windows (`flags` 4 with the four `*periodic*` keys and
 `maxtoemitperperiod`) are honoured, `flags` 2 means at most one particle a frame at the
 file's rate, and an `instantaneous` burst is paid for out of the rate's account. The
-random initializers take their `exponent`, a lifetime is never below a millisecond,
-and every particle carries one random number of its own that picks its oscillation
-phase and frequency, its turbulence speed and phase, and its `randomframe` sprite
-(which is never cross-faded with a neighbouring frame). `movement` and
+random initializers take their `exponent`, a lifetime is never below a millisecond, a
+`sizerandom` or `alpharandom` scales the size or alpha the particle has so far (as the
+colour initializers do, so a second `sizerandom` narrows the first one's draw; only the
+lifetime is replaced), and every particle carries one random number of its own that picks
+its oscillation phase and frequency, its turbulence speed and phase, and its
+`randomframe` sprite (which is never cross-faded with a neighbouring frame). `movement` and
 `angularmovement` advance the particle where they stand among the operators, with the
 damping `velocity * (1 - drag * dt)`, and nothing else does: a particle file without
 them keeps its particles where they were placed, whatever velocity they were given (a

@@ -1124,8 +1124,12 @@ into private textures; the three that draw skip visibly without a Metal device.
   emitters' burst and silence rules (a burst waits for sound and is scaled by it), the
   `turbulentvelocityrandom` initializer's different algorithm, the per-step time scale
   the drag uses, the half step at low frame rates, and an `eventspawn` child's emitters
-  outliving its particle are unchanged. Turbulence uses Perlin noise where the
-  engine's own noise function is not identified. `maxcount` is still capped at 20 000
+  outliving its particle are unchanged. A particle's size is held at twice Wallpaper
+  Engine's (the generators draw half of it, so the size initializers start from 1 where
+  the engine starts from 0.5). A single `sizerandom` and an inherited `setsize` come out
+  the same, and an inherited `multiplysize` multiplies by half of the parent's size, as
+  the engine multiplies its own (from the decompile; no frame shows it). Turbulence
+  uses Perlin noise where the engine's own noise function is not identified. `maxcount` is still capped at 20 000
   particles per file. A `worldspace` file is simulated and drawn in scene units from its
   layer's origin, as the binary's draw replaces the model matrix with the scene's own
   for it: the layer's turn and scale shape the offset an emitter or a control point

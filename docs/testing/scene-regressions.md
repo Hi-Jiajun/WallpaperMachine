@@ -1368,12 +1368,18 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   the loader spaces them (whole-turn and partial ranges, one step or none, a range of no
   width) and colour-list noise as a draw cut off at 0 and 1 with the override added
   after it; `exponent` on every random initializer, the
-  millisecond lifetime floor, pixel and scene-unit size defaults, the colour override
+  millisecond lifetime floor, pixel and scene-unit size defaults, `sizerandom` and
+  `alpharandom` scaling the value so far (two in a file narrow each other in either
+  order, one alone keeps its range, the lifetime stays replaced;
+  `Initializers.ASecondSizeInitializer...`, `.TwoSizeInitializersScaleInEitherOrder`,
+  `.ASecondAlphaInitializer...`, and `ParseLevel.TwoSizeInitializersOfOneFile...` through
+  the scene parser and a real spawn), the colour override
   re-tinting colours (spread kept, identity for the preset's own colour, white
   desaturating, plain tint without colours, HSV and list initializers, `colorchange`
   default and re-tint, brightness only in HDR). `SequenceInitializers.*`:
   `mapsequencearound`/`between`, `inheritcontrolpointvelocity`, `positionoffsetrandom`,
-  `inheritinitialvaluefromevent`. `Movement.*`, `AngularMovement.*`,
+  `inheritinitialvaluefromevent` (an inherited `multiplysize` scales by half of the
+  parent's size, in the engine's unit, `setsize` copies it). `Movement.*`, `AngularMovement.*`,
   `ControlpointAttract.*`, `Oscillators.*`, `Turbulence.*`, `Vortex.*`,
   `ControlpointOperators.*` and `Collision.*`: the integrators and damping, that only
   the movement operators advance a particle (a file without them keeps its particles

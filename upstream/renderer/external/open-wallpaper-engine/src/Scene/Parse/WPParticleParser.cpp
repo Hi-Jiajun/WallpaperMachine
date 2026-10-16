@@ -543,14 +543,17 @@ ParticleInitOp WPParticleParser::genParticleInitOp(const nlohmann::json&        
             // Wallpaper Engine's defaults: 5..50 in a pixel scene, 0.001..1 otherwise.
             SingleRandom r = ctx.ortho ? SingleRandom { 5.0f, 50.0f } : SingleRandom { 0.001f, 1.0f };
             SingleRandom::ReadFromJson(wpj, r);
+            // Scales the size the particle has so far, as Wallpaper Engine's does:
+            // a second `sizerandom` narrows the first's draw instead of replacing it.
             return [=](Particle& p, double) {
-                PM::InitSize(p, r.Draw());
+                PM::MutiplyInitSize(p, r.Draw());
             };
         } else if (name == "alpharandom") {
             SingleRandom r = { 0.05f, 1.0f };
             SingleRandom::ReadFromJson(wpj, r);
+            // Scales the alpha so far, like the size and the colour initializers.
             return [=](Particle& p, double) {
-                PM::InitAlpha(p, r.Draw());
+                PM::MutiplyInitAlpha(p, r.Draw());
             };
         } else if (name == "velocityrandom") {
             VecRandom r;
@@ -807,7 +810,10 @@ ParticleInitOp WPParticleParser::genParticleInitOp(const nlohmann::json&        
                 } else if (input == "setsize") {
                     PM::InitSize(p, parent->size);
                 } else if (input == "multiplysize") {
-                    PM::MutiplyInitSize(p, parent->size);
+                    // The engine multiplies its own size by the parent's own, each half of
+                    // the size held here; `setsize` copies the same unit, so it needs no
+                    // conversion.
+                    PM::MutiplyInitSize(p, parent->size / kParticleSizeOverEngine);
                 } else if (input == "setrotation") {
                     p.rotation = parent->rotation;
                 } else if (input == "addrotation") {
