@@ -230,7 +230,7 @@ python3 scripts/build.py --configuration Release   # 渲染器、绑定、Xcode 
 
 源代码以 GNU 通用公共许可证第 2 版（仅限该版本）提供（[LICENSE](LICENSE)）。内置的渲染器采用 GPL-2.0-only，应用外壳由它衍生而来；上游代码保留其各自的版权和许可声明，记录在 [upstream/provenance.json](upstream/provenance.json) 中。无论是否为支持者，每位接收者都享有 GPL 授予的全部权利。
 
-**目前还没有任何二进制文件获准分发。** Apache-2.0 组件（MoltenVK、Vulkan loader、SPIRV-Tools、部分 glslang 以及内置的 spirv_reflect）存在于每个构建的链接闭包中，与 GPLv2 不兼容。[LICENSING.md](LICENSING.md) 记录了相关政策、支持者模式、每个组件的许可证、尚未解决的障碍以及解决办法。创意工坊壁纸归其创作者所有，场景资源来自你所拥有的 Wallpaper Engine；应用两者都不附带。
+**目前还没有任何二进制文件获准分发。** Apache-2.0 组件（MoltenVK、Vulkan loader、SPIRV-Tools、部分 glslang、内置的 spirv_reflect，以及渲染器链接的若干 Rust crate，例如 codespan-reporting 和 miette）存在于每个构建的链接闭包中，与 GPLv2 不兼容。[LICENSING.md](LICENSING.md) 记录了相关政策、支持者模式、每个组件的许可证、尚未解决的障碍以及解决办法。创意工坊壁纸归其创作者所有，场景资源来自你所拥有的 Wallpaper Engine；应用两者都不附带。
 
 ## 友情链接
 

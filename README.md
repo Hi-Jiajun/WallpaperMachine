@@ -307,7 +307,8 @@ recorded in [upstream/provenance.json](upstream/provenance.json). Every recipien
 keeps every right the GPL grants, whether or not they are a Supporter.
 
 **No binary is cleared for distribution yet.** Apache-2.0 components (MoltenVK,
-the Vulkan loader, SPIRV-Tools, parts of glslang and the vendored spirv_reflect)
+the Vulkan loader, SPIRV-Tools, parts of glslang, the vendored spirv_reflect, and
+several Rust crates the renderer links, such as codespan-reporting and miette)
 are in every build's link closure and are not compatible with GPLv2.
 [LICENSING.md](LICENSING.md) records the policy, the Supporter model, each
 component's license, the open blockers and what would resolve them. Workshop
