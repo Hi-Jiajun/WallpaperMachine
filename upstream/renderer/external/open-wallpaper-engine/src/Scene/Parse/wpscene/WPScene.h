@@ -55,6 +55,11 @@ public:
     nlohmann::json       cameraparallaxdelay_setting;
     nlohmann::json       cameraparallaxmouseinfluence_setting;
     bool                 isOrtho { true };
+    /// Wallpaper Engine's "pixel canvas" flag: an orthogonal projection that is
+    /// automatic or has a nonzero width and height. It decides which defaults a
+    /// particle file's omitted keys take (pixel units or scene units). Without
+    /// an `orthogonalprojection` key it follows `isOrtho`.
+    bool                 pixelCanvas { true };
     Orthogonalprojection orthogonalprojection { 1920, 1080 };
     float                zoom { 1.0f };
     nlohmann::json       zoom_setting;

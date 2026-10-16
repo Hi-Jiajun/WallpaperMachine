@@ -6773,9 +6773,12 @@ TEST_F(MetalSceneDraw, TheShippedImageShaderSkinsAPuppetThroughTheNativeBackend)
 
 TEST_F(MetalSceneDraw, ARopeTrailPastTheOldSixteenBitIndexLimitStaysARopeTrail)
 {
-    // 5 000 particles x 10 segments x authored subdivision 3 is 150 000 quads,
-    // past the old packed 16-bit cap of 16 384. It must remain a rope trail
-    // with 32-bit indices, not a sprite trail and not a reduced subdivision.
+    // 5 000 particles x 10 segments x 4 pieces per segment (authored subdivision
+    // 3) is 200 000 quads, far past the old packed 16-bit cap of 16 384. It must
+    // remain a rope trail with 32-bit indices, not a sprite trail and not a
+    // reduced subdivision. The shipped preview leaves segments and subdivision to
+    // the renderer's defaults (4 segments of 2 pieces, 40 000 quads in all), so the
+    // fixture names them to keep the capacity well past the cap.
     const auto assets  = LocalSceneAssetsRoot();
     const auto preview = assets / "scenes/particleelementpreviews/ropetrail";
     if (assets.empty() || ! std::filesystem::is_regular_file(preview / "project.json")) {
@@ -6794,6 +6797,13 @@ TEST_F(MetalSceneDraw, ARopeTrailPastTheOldSixteenBitIndexLimitStaysARopeTrail)
         particle = nlohmann::json::parse(input);
     }
     particle["maxcount"] = 5000;
+    ASSERT_TRUE(particle.contains("renderer") && particle["renderer"].is_array());
+    for (auto& renderer : particle["renderer"]) {
+        if (renderer.value("name", "") == "ropetrail") {
+            renderer["segments"]    = 10;
+            renderer["subdivision"] = 3;
+        }
+    }
     std::ofstream(particle_path) << particle.dump();
 
     LoadedScene loaded;
@@ -6829,6 +6839,7 @@ TEST_F(MetalSceneDraw, ARopeTrailPastTheOldSixteenBitIndexLimitStaysARopeTrail)
     ASSERT_GT(node->Mesh()->IndexCount(), 0u);
     const auto& indices = node->Mesh()->GetIndexArray(0);
     EXPECT_EQ(indices.Width(), SceneIndexWidth::UInt32);
+    EXPECT_GE(indices.QuadCapacity(), 5000u * 10u * 4u) << "not a reduced subdivision";
     EXPECT_GT(indices.QuadCapacity(), kMaxPackedUInt16Quads);
 
     const auto selection = SelectSceneBackend(*loaded.scene);

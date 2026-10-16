@@ -17,6 +17,7 @@
 
 #include <cmath>
 #include <memory>
+#include <set>
 #include <vector>
 
 namespace wallpaper
@@ -234,7 +235,7 @@ TEST(ParticleMouseControlpoint, EmitterControlpointOffsetsBoxSpawnOrigin) {
 }
 
 // `randomframe` sprites read this value; an integral one always chose frame 0.
-TEST(ParticleMouseControlpoint, SpawnedParticlesCarryAStableFrameValueSpreadOverTheSheet) {
+TEST(ParticleMouseControlpoint, SpawnedParticlesCarryAnIndependentFrameValueSpreadOverTheSheet) {
     ParticleSphereEmitterArgs args {};
     args.directions    = { 1.0f, 1.0f, 1.0f };
     args.minDistance   = 3.0f;
@@ -254,18 +255,24 @@ TEST(ParticleMouseControlpoint, SpawnedParticlesCarryAStableFrameValueSpreadOver
     }
     for (const int count : frames) EXPECT_GT(count, 0);
 
-    // A value of the spawn state, not a draw from the random source: the same
-    // spawn gives the same frame, and seeded layouts are not shifted.
+    // A draw of its own for every particle: identical spawns still get
+    // different frames, so a sheet of identical sprites is not all one frame.
     ParticleBoxEmitterArgs fixed {};
     fixed.directions    = { 0.0f, 0.0f, 0.0f };
     fixed.emitSpeed     = 1.0f;
     fixed.orgin         = { 1.0f, 2.0f, 3.0f };
-    fixed.instantaneous = 1;
+    fixed.instantaneous = 64;
     std::array<ParticleControlpoint, 8> controlpoints {};
-    auto first  = ParticleBoxEmitterArgs::MakeEmittOp(fixed);
-    auto second = ParticleBoxEmitterArgs::MakeEmittOp(fixed);
-    EXPECT_EQ(FirstSpawnedParticle(first, controlpoints).init.frame,
-              FirstSpawnedParticle(second, controlpoints).init.frame);
+    auto                emitter_fixed = ParticleBoxEmitterArgs::MakeEmittOp(fixed);
+    std::vector<Particle>       identical;
+    std::vector<ParticleInitOp> none;
+    emitter_fixed(identical, none, 64, 0.0, controlpoints);
+    ASSERT_EQ(identical.size(), 64u);
+    std::set<float> distinct;
+    for (const auto& particle : identical) distinct.insert(particle.init.frame);
+    EXPECT_GT(distinct.size(), 32u);
+    // The same value serves every operator that varies a particle against its neighbours.
+    for (const auto& particle : identical) EXPECT_EQ(particle.seed, particle.init.frame);
 }
 
 class ParticleEmitterAudio : public testing::TestWithParam<const char*> {
@@ -332,14 +339,20 @@ TEST_P(ParticleEmitterAudio, SelectedInclusiveBandsApplyBoundsThenExponent) {
     spectrum.average16[4] = spectrum.average16[5] = 0.0f;
     Emit(emitter, 1.0);
     EXPECT_TRUE(particles.empty());
-    spectrum.average16[5] = 1.0f;
-    // Mean .5 -> bounds midpoint .5 -> smoothstep .5 -> exponent .25.
+    // The loudest selected band decides, not their mean: .5 -> bounds midpoint
+    // .5 -> smoothstep .5 -> exponent .25, so two of the eight a second.
+    spectrum.average16[4] = 0.25f;
+    spectrum.average16[5] = 0.5f;
     Emit(emitter, 1.0);
     EXPECT_EQ(particles.size(), 2u);
-    spectrum.average16[4] = 1.0f;
+    spectrum.average16[4] = 0.75f;
     Emit(emitter, 1.0);
     EXPECT_EQ(particles.size(), 10u);
     spectrum.average16[4] = spectrum.average16[5] = 0.25f;
+    Emit(emitter, 1.0);
+    EXPECT_EQ(particles.size(), 10u);
+    // A band outside the selection does not count however loud it is.
+    spectrum.average16[3] = spectrum.average16[6] = 1.0f;
     Emit(emitter, 1.0);
     EXPECT_EQ(particles.size(), 10u);
 }
@@ -513,12 +526,13 @@ TEST(ParticleMouseControlpoint, OverrideInitializerReadsRuntimeMutatedState) {
     EXPECT_FLOAT_EQ(second.velocity.x(), 1.0f);
 }
 
-TEST(ParticleMouseControlpoint, ControlpointAttractReadsThresholdAndOrigin) {
+TEST(ParticleMouseControlpoint, ControlpointAttractFallsOffLinearlyToTheThreshold) {
     nlohmann::json json {
         { "name", "controlpointattract" },
         { "controlpoint", 1 },
         { "scale", 10.0f },
         { "threshold", 4.0f },
+        // Wallpaper Engine's executor never reads the operator's own origin.
         { "origin", { 2.0f, 0.0f, 0.0f } },
     };
 
@@ -541,6 +555,14 @@ TEST(ParticleMouseControlpoint, ControlpointAttractReadsThresholdAndOrigin) {
     };
     op(info);
 
+    // Three away of a threshold of four: a quarter of the strength.
+    EXPECT_NEAR(particles[0].velocity.x(), 2.5f, 1.0e-5f);
+
+    // At the threshold and beyond there is no pull; at the control point the
+    // distance is zero and nothing is divided by it.
+    particles[0].velocity = Eigen::Vector3f::Zero();
+    ParticleModify::MoveTo(particles[0], -1.0, 0.0, 0.0);
+    op(info);
     EXPECT_FLOAT_EQ(particles[0].velocity.x(), 0.0f);
 
     json["threshold"] = 6.0f;
@@ -548,48 +570,54 @@ TEST(ParticleMouseControlpoint, ControlpointAttractReadsThresholdAndOrigin) {
         json,
         std::make_shared<wpscene::ParticleInstanceoverride>());
     particles[0].velocity = Eigen::Vector3f::Zero();
+    ParticleModify::MoveTo(particles[0], 0.0, 0.0, 0.0);
     op(info);
+    EXPECT_NEAR(particles[0].velocity.x(), 5.0f, 1.0e-5f);
 
-    EXPECT_FLOAT_EQ(particles[0].velocity.x(), 10.0f);
-
+    // The misspelt key some files carry is still read as the threshold.
+    json.erase("threshold");
     json["threadhold"] = 4.0f;
     op                 = parser.genParticleOperatorOp(
         json,
         std::make_shared<wpscene::ParticleInstanceoverride>());
     particles[0].velocity = Eigen::Vector3f::Zero();
     op(info);
-
-    EXPECT_FLOAT_EQ(particles[0].velocity.x(), 10.0f);
+    EXPECT_NEAR(particles[0].velocity.x(), 2.5f, 1.0e-5f);
 }
 
-TEST(ParticleMouseControlpoint, ControlpointAttractNormalizesNegativeIndexSafely) {
-    nlohmann::json json {
-        { "name", "controlpointattract" },
-        { "controlpoint", -1 },
-        { "scale", 10.0f },
-        { "threshold", 6.0f },
-    };
+TEST(ParticleMouseControlpoint, ControlpointAttractNamesTheLastControlpointForAnyIndexPastTheRange) {
+    // Wallpaper Engine keeps 0..6 and sends everything else, negative values
+    // included, to the last control point.
+    for (const int index : { -1, 7, 8, 100 }) {
+        nlohmann::json json {
+            { "name", "controlpointattract" },
+            { "controlpoint", index },
+            { "scale", 10.0f },
+            { "threshold", 20.0f },
+        };
 
-    WPParticleParser parser;
-    auto             op = parser.genParticleOperatorOp(
-        json,
-        std::make_shared<wpscene::ParticleInstanceoverride>());
+        WPParticleParser parser;
+        auto             op = parser.genParticleOperatorOp(
+            json,
+            std::make_shared<wpscene::ParticleInstanceoverride>());
 
-    std::array<ParticleControlpoint, 8> controlpoints {};
-    controlpoints[0].offset = Eigen::Vector3d(5.0, 0.0, 0.0);
+        std::array<ParticleControlpoint, 8> controlpoints {};
+        controlpoints[0].offset = Eigen::Vector3d(-10.0, 0.0, 0.0);
+        controlpoints[7].offset = Eigen::Vector3d(10.0, 0.0, 0.0);
 
-    std::array<Particle, 1> particles {};
-    ParticleModify::MoveTo(particles[0], 0.0, 0.0, 0.0);
+        std::array<Particle, 1> particles {};
+        ParticleModify::MoveTo(particles[0], 0.0, 0.0, 0.0);
 
-    ParticleInfo info {
-        .particles     = particles,
-        .controlpoints = controlpoints,
-        .time          = 0.0,
-        .time_pass     = 1.0,
-    };
-    op(info);
+        ParticleInfo info {
+            .particles     = particles,
+            .controlpoints = controlpoints,
+            .time          = 0.0,
+            .time_pass     = 1.0,
+        };
+        op(info);
 
-    EXPECT_FLOAT_EQ(particles[0].velocity.x(), 10.0f);
+        EXPECT_NEAR(particles[0].velocity.x(), 5.0f, 1.0e-5f) << "index " << index;
+    }
 }
 
 TEST(ParticleMouseControlpoint, ControlpointAttractSkipsZeroDistance) {
@@ -598,7 +626,6 @@ TEST(ParticleMouseControlpoint, ControlpointAttractSkipsZeroDistance) {
         { "controlpoint", 1 },
         { "scale", 10.0f },
         { "threshold", 6.0f },
-        { "origin", { 2.0f, 0.0f, 0.0f } },
     };
 
     WPParticleParser parser;
@@ -607,7 +634,7 @@ TEST(ParticleMouseControlpoint, ControlpointAttractSkipsZeroDistance) {
         std::make_shared<wpscene::ParticleInstanceoverride>());
 
     std::array<ParticleControlpoint, 8> controlpoints {};
-    controlpoints[1].offset = Eigen::Vector3d(3.0, 0.0, 0.0);
+    controlpoints[1].offset = Eigen::Vector3d(5.0, 0.0, 0.0);
 
     std::array<Particle, 1> particles {};
     ParticleModify::MoveTo(particles[0], 5.0, 0.0, 0.0);
@@ -979,7 +1006,7 @@ TEST(ParticleMouseControlpoint, RawGeneratorReceivesIndependentOwnerScaleAxes) {
     EXPECT_FLOAT_EQ(rawGener->last_render_scale.isotropic_inverse, 0.25f);
 }
 
-TEST(ParticleMouseControlpoint, MovementIntegratesAfterControlpointAttractUpdatesVelocity) {
+TEST(ParticleMouseControlpoint, MovementMovesTheParticleAtItsPlaceAmongTheOperators) {
     Scene scene;
     scene.frameTime = 1.0;
 
@@ -1032,9 +1059,65 @@ TEST(ParticleMouseControlpoint, MovementIntegratesAfterControlpointAttractUpdate
 
     subsystem.Emitt();
 
+    // Movement runs first: it carries the particle by its velocity of one,
+    // and the attract that follows (nine away of a threshold of twenty, scale
+    // two) only changes the velocity the next step starts with.
     ASSERT_EQ(rawGener->particles.size(), 1u);
-    EXPECT_FLOAT_EQ(rawGener->particles[0].velocity.x(), 3.0f);
-    EXPECT_FLOAT_EQ(rawGener->particles[0].position.x(), 3.0f);
+    EXPECT_NEAR(rawGener->particles[0].position.x(), 1.0f, 1.0e-5f);
+    EXPECT_NEAR(rawGener->particles[0].velocity.x(), 1.0f + 1.1f, 1.0e-5f);
+}
+
+TEST(ParticleMouseControlpoint, AttractBeforeMovementIsIntegratedTheSameStep) {
+    Scene scene;
+    scene.frameTime = 1.0;
+
+    auto* rawGener = new CapturingParticleRawGener();
+    auto  mesh     = std::make_shared<SceneMesh>(MeshUpdate::PerFrame);
+
+    ParticleSystem system(scene);
+    system.gener.reset(rawGener);
+
+    ParticleSubSystem subsystem(system,
+                                mesh,
+                                8,
+                                1.0,
+                                1,
+                                1.0,
+                                ParticleSubSystem::SpawnType::STATIC,
+                                [](const Particle&, const ParticleRawGenSpec&) {
+                                });
+    subsystem.Controlpoints()[0].offset = Eigen::Vector3d(10.0, 0.0, 0.0);
+    subsystem.AddEmitter([](std::vector<Particle>& particles,
+                            std::vector<ParticleInitOp>&,
+                            uint32_t,
+                            double,
+                            std::span<const ParticleControlpoint>) {
+        if (! particles.empty()) return;
+
+        Particle particle;
+        ParticleModify::InitVelocity(particle, 1.0, 0.0, 0.0);
+        ParticleModify::InitLifetime(particle, 2.0f);
+        particles.emplace_back(particle);
+    });
+    WPParticleParser parser;
+    subsystem.AddOperator(parser.genParticleOperatorOp(nlohmann::json {
+                            { "name", "controlpointattract" },
+                            { "controlpoint", 0 },
+                            { "scale", 2.0f },
+                            { "threshold", 20.0f },
+                        },
+                                                       std::make_shared<wpscene::ParticleInstanceoverride>()));
+    subsystem.AddOperator(parser.genParticleOperatorOp(nlohmann::json {
+                            { "name", "movement" },
+                            { "drag", 0.0f },
+                        },
+                                                       std::make_shared<wpscene::ParticleInstanceoverride>()));
+    subsystem.Emitt();
+
+    // Ten away of a threshold of twenty: half of scale two is added first.
+    ASSERT_EQ(rawGener->particles.size(), 1u);
+    EXPECT_NEAR(rawGener->particles[0].velocity.x(), 2.0f, 1.0e-5f);
+    EXPECT_NEAR(rawGener->particles[0].position.x(), 2.0f, 1.0e-5f);
 }
 
 TEST(ParticleMouseControlpoint, MovementOperatorReadsRuntimeMutatedSpeedOverride) {

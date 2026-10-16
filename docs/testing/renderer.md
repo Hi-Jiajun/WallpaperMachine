@@ -820,6 +820,41 @@ into private textures; the three that draw skip visibly without a Metal device.
   `Animation` reason already counts while it plays, so with on-demand rendering
   on, a scene whose only motion was such a single-play timeline keeps ticking
   after it ends.
+- **Particle differences from Wallpaper Engine 2.8.42 that remain.** Not
+  implemented: the operators `vortex_v2`, `boids`, `remapvalue`, `inheritvaluefromevent` and
+  the collision shapes `collisionbounds`, `collisionquad` and `collisionmodel`
+  (their kernels or input/output tables are not decoded), the `remapinitialvalue`
+  initializer, the `layerimage` emitter, the renderer `orientation`, `axis` and `flags`
+  keys (the orientation uniforms stay the screen-facing constants), the rope trail's
+  `fadealpha`/`fadesize` and the `uvscrolling` fade, a rope trail's thin vertex layout
+  (it stays in the thick layout), and the geometry-shader path: ribbons use the
+  vertex-shader fallback, which draws them with a fixed eye direction instead of
+  one per segment and, because the shipped shader applies its width factor to
+  the side offset before subtracting a constant (an operator-precedence slip in
+  the shader's source), a half ribbon width off centre. Child control point chaining (`parentcontrolpoint`,
+  flags 4 and 8), restarting flagged children at a periodic window, the audio
+  emitters' burst and silence rules (a burst waits for sound and is scaled by it), the
+  `turbulentvelocityrandom` initializer's different algorithm, the per-step time scale
+  the drag uses, the half step at low frame rates, and an `eventspawn` child's emitters
+  outliving its particle are unchanged. Turbulence uses Perlin noise where the
+  engine's own noise function is not identified. `maxcount` is still capped at 20 000
+  particles per file. A `worldspace` file keeps live particles in place when its layer moves;
+  its spawn-time matrix rules (emitter origin added unscaled, velocity not scaled by
+  the layer) are not reproduced. A sprite or rope keeps its authored pixel size when
+  its layer is scaled in a pixel scene: Wallpaper Engine's shader builds the billboard in
+  model space, which would scale it with the layer, but that policy is the authored
+  canvas's established one and changing it needs a reference render first. Emitter
+  defaults for a scene without a pixel canvas (sphere `distancemax`, box `directions`)
+  are still the pixel set. A scene that names no `orthogonalprojection` is still
+  drawn here as the default orthogonal canvas, while Wallpaper Engine's scene
+  starts without an orthogonal projection; its particle defaults follow what is
+  drawn (the pixel set), not the engine's scene-unit set. An event child's instance
+  is prewarmed at the moment it spawns, inside the frame, as Wallpaper Engine does:
+  a start time of 15 s costs about 300 steps of that child file's own system per
+  spawned instance (about a millisecond on the local library), so a burst of
+  many spawns with a long start time in one frame costs that many times as much;
+  spreading the work over frames is not done, because it would change what the
+  instance looks like when it first appears.
 - Unimplemented non-audio scene features, including some script outputs, can
   still affect wallpaper compatibility even when every renderer check passes.
 - No renderer check proves desktop presentation, AppKit behavior, live audio

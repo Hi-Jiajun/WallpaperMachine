@@ -330,6 +330,15 @@ gtest_discover_tests(
     PROPERTIES TIMEOUT 30
     DISCOVERY_TIMEOUT 60
 )
+add_executable(particle_parity_test particle_parity_test.cpp)
+target_link_libraries(particle_parity_test PRIVATE ${PROJECT_NAME} wpScene wpParticle wpAudio wpFs nlohmann_json::nlohmann_json GTest::gtest_main)
+target_include_directories(particle_parity_test PRIVATE .)
+target_compile_features(particle_parity_test PRIVATE cxx_std_20)
+gtest_discover_tests(
+    particle_parity_test
+    PROPERTIES TIMEOUT 60
+    DISCOVERY_TIMEOUT 60
+)
 add_executable(layer_texture_reference_test layer_texture_reference_test.cpp)
 target_link_libraries(layer_texture_reference_test PRIVATE ${PROJECT_NAME} wpVulkanRender wpVulkan wpRGraph wpScene wpAudio wpFs nlohmann_json::nlohmann_json GTest::gtest_main)
 target_include_directories(layer_texture_reference_test PRIVATE . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/VulkanRender ${CMAKE_SOURCE_DIR}/src/Scene/RenderGraph/include)

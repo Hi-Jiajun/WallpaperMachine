@@ -154,15 +154,26 @@ public:
 
 std::unique_ptr<ParticleSubSystem> MakeTestSubsystem(ParticleSystem&            system,
                                                      std::shared_ptr<SceneMesh> mesh) {
-    return std::make_unique<ParticleSubSystem>(system,
-                                               std::move(mesh),
-                                               8,
-                                               1.0,
-                                               1,
-                                               1.0,
-                                               ParticleSubSystem::SpawnType::STATIC,
-                                               [](const Particle&, const ParticleRawGenSpec&) {
-                                               });
+    auto subsystem = std::make_unique<ParticleSubSystem>(
+        system,
+        std::move(mesh),
+        8,
+        1.0,
+        1,
+        1.0,
+        ParticleSubSystem::SpawnType::STATIC,
+        [](const Particle&, const ParticleRawGenSpec&) {
+        });
+    // A particle only moves inside a movement operator, as in a particle file:
+    // this is the one the trail tests need to give their particles somewhere to go.
+    subsystem->AddOperator([](const ParticleInfo& info) {
+        for (auto& particle : info.particles) {
+            if (ParticleModify::LifetimeOk(particle)) {
+                ParticleModify::MoveByTime(particle, info.time_pass);
+            }
+        }
+    });
+    return subsystem;
 }
 
 TEST(ParticleRopeGeometry, ThreeLiveParticlesWithSubdivisionOneEmitTwoQuads) {

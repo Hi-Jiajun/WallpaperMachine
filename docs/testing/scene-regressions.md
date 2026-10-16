@@ -797,13 +797,76 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   three-quarter scale rounds rather than truncates, returning to full scale
   restores the exact size) without changing 2D canvas behavior; a perspective
   raster follows the surface without changing the canvas fallback.
-- **Random sprite-sheet frames** — `ParticleMouseControlpoint.SpawnedParticlesCarryAStableFrameValueSpreadOverTheSheet`
+- **Random sprite-sheet frames** — `ParticleMouseControlpoint.SpawnedParticlesCarryAnIndependentFrameValueSpreadOverTheSheet`
   in `particle_mouse_controlpoint_test`. A `randomframe` particle keeps one frame
-  for its life, derived from its spawn state rather than drawn from the random
-  source, so seeded particle layouts do not shift (an integral value would
-  always select frame 0).
-- **Rope and rope-trail geometry** — `particle_rope_geometry_test` (CPU, in the
-  gate): pieces per instance and never across instances, dead particles skipped
+  for its life: the particle's own `seed`, one draw at spawn, so identical spawns
+  still differ (a function of the spawn state gave identical particles one frame, and
+  an integral value would always select frame 0). `ParseLevel.RandomFrameNeverBlendsNeighbouringSpriteFrames`
+  in `particle_parity_test` checks the file-level rule, and
+  `Renderers.RandomFrameDropsTheSheetBlendFromTheShaderWhateverTheFileAsks` parses
+  scenes through the real scene parser with a probe shader and requires the
+  `SPRITESHEETBLEND`-gated uniform to be compiled out of a `randomframe` file and out
+  of one with the no-blending flag, and kept for a sequence.
+- **Particle behaviour against Wallpaper Engine 2.8.42** — `particle_parity_test`
+  (CPU, in the gate), every fixture built from JSON in the test. `ParticleSpawn.*`:
+  the sphere's distance distribution for a flat, an all-nonzero and a stretched
+  `directions` (mean and share inside half the radius against the closed forms),
+  minimum and maximum distance, away-from-centre velocity and the random direction of
+  a particle born on the centre, `cone`, `sign`; the box's fold of a negative minimum,
+  hollow centre for a positive one, control point orientation turning only an emitter
+  that names a later control point; one seed per particle. `EmitterSchedule.*`:
+  `flags` 2 against the rate, a burst paid out of the rate's account, `delay`,
+  `duration`, periodic windows with pauses, `maxtoemitperperiod`, a window re-arming
+  the burst, a lone burst firing once, and every instance running its own schedule.
+  `Initializers.*`, `ColourInitializers.*` and `ColourOverride.*`: hue steps spaced as
+  the loader spaces them (whole-turn and partial ranges, one step or none, a range of no
+  width) and colour-list noise as a draw cut off at 0 and 1 with the override added
+  after it; `exponent` on every random initializer, the
+  millisecond lifetime floor, pixel and scene-unit size defaults, the colour override
+  re-tinting colours (spread kept, identity for the preset's own colour, white
+  desaturating, plain tint without colours, HSV and list initializers, `colorchange`
+  default and re-tint, brightness only in HDR). `SequenceInitializers.*`:
+  `mapsequencearound`/`between`, `inheritcontrolpointvelocity`, `positionoffsetrandom`,
+  `inheritinitialvaluefromevent`. `Movement.*`, `AngularMovement.*`,
+  `ControlpointAttract.*`, `Oscillators.*`, `Turbulence.*`, `Vortex.*`,
+  `ControlpointOperators.*` and `Collision.*`: the integrators and damping, that only
+  the movement operators advance a particle (a file without them keeps its particles
+  still) and that they keep the previous position only while an operator asks for it,
+  gravity kept in screen axes with the layer's scale, falloff and flags, a delete
+  threshold tested on the path of the last step, the instance speed override on the
+  attract pull, turbulence speed and position-oscillation frequency (and the file flag
+  that ignores it), the oscillator formula and blend window, per-particle turbulence,
+  vortex centre/axis/flags/audio, the control point operators, and collision shapes
+  (the response given to every particle found inside whichever way it moves, the
+  default sphere origin of a pixel scene, and flag 1 carrying a plane or sphere with a
+  turned control point). `Prewarm.*`: a start time
+  populates the first frame, the 0.05/0.2 s step, the bound on a huge start time, an
+  event child's instance (and the number of steps it costs, capped at 6000) and a
+  static child. `EventFollow.*`: a follower keeps its
+  particles after the followed one ends and stays where it ended. `WorldSpace.*`:
+  live particles stay in the scene when the layer moves or turns. `ParseLevel.*`:
+  renderer defaults, truncation and clamps, smoothing only without scrolling,
+  override control points, pinned control points, the pixel-canvas flag and the
+  particle defaults a scene gets with and without a projection key. `InstanceOverride.*`:
+  a control point, its angle and the brightness bound to user properties follow them while
+  the scene runs, and the speed override with the file flag that ignores it.
+  `Renderers.*`: an empty `renderer` list draws nothing but the system still runs and
+  spawns its children, a missing or non-array key gets one sprite, and a 2D scene's eye
+  is 2000 in front of the canvas. `MultipleRenderers.*`: one mesh per `renderer` entry,
+  each with its own shader whatever order the entries are in, and live particles kept in
+  birth order for a plain rope in any position. `RopeGeometry.*`: a subdivided rope
+  trail, a plain rope's `subdivision + 1` pieces per pair in the thick layout, and a
+  trail's recorded points and strip length as the shader sees them. `ParticleCorpus.EveryLocalParticleFileSimulatesWithoutNonFiniteValues`
+  is opt-in (`WE_TEST_PARTICLE_DIR` names a directory of unpacked scenes): twenty
+  simulated seconds of every particle file there, no non-finite value, never more than
+  `maxcount`; `ParticleCorpus.PrewarmCostOfTheLocalLibraryIsReported` times the prewarm of
+  every file with its own start time and prints the slowest. `particle_mouse_controlpoint_test` keeps the audio-emitter,
+  override, mouse control point and size-compensation cases, with the attract,
+  movement and audio-band cases updated to the rules above.
+- **Rope and rope-trail geometry** — `particle_rope_geometry_test` and
+  `RopeGeometry.ATrailIsDrawnAsOnePiecePerSubdivisionBetweenItsRecordedPoints`
+  (CPU, in the gate; its subsystem fixtures carry a movement operator because a
+  particle only moves inside one): pieces per instance and never across instances, dead particles skipped
   and neighbours joined, subdivision through the particles, coincident points
   without `NaN`, the rope-trail head, tail shrink and per-slot separation, and the
   simulation's history — birth point, growth to capacity, zero time step, respawn

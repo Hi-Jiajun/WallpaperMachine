@@ -148,12 +148,24 @@ bool WPSceneGeneral::FromJson(const nlohmann::json& json, uint16_t pkg_version) 
     }
     if(json.contains("orthogonalprojection")) {
         const auto& ortho = json.at("orthogonalprojection");
-        if(ortho.is_null())
-            isOrtho = false;
-        else {
+        if(ortho.is_null()) {
+            isOrtho     = false;
+            pixelCanvas = false;
+        } else {
             isOrtho = true;
             orthogonalprojection.FromJson(ortho);
+            pixelCanvas = ortho.is_object() &&
+                          (orthogonalprojection.auto_ ||
+                           (orthogonalprojection.width != 0 && orthogonalprojection.height != 0));
         }
+    } else {
+        // Wallpaper Engine's scene starts without an orthogonal projection and
+        // fills particle defaults in scene units. This loader still draws a
+        // scene without the key as its default orthogonal canvas, and a canvas
+        // that is drawn in pixels takes the pixel defaults, so the particle
+        // defaults follow what is drawn rather than flipping a pixel scene to
+        // scene units. A change of projection for a missing key moves both.
+        pixelCanvas = isOrtho;
     }
     return true;
 }

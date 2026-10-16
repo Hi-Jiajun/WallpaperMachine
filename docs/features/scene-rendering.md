@@ -147,8 +147,8 @@ by its author's own skinning shader, and its pose comes from the one animation
 system the scene already has (animation layers, their play, pause, stop, rate,
 blend and visibility, and any script or user property driving them); the renderer
 only uploads the resulting bone matrices. Rope and rope-trail geometry is generated
-once by the shared particle simulation. The rope renderers' *UV scale* is not
-implemented on either renderer, and a puppet model whose animation block the model
+once by the shared particle simulation, with the rope renderers' *UV scale*, scrolling
+and smoothing; a puppet model whose animation block the model
 parser cannot read is drawn in its bind pose on both, with a log line when it
 loads. A text layer is an ordinary layer: it takes its place in the layer order and
 carries its transform, opacity, blend, effect chain, camera and the final
@@ -157,6 +157,75 @@ both renderers. Text whose content has not changed is not laid out, rasterised o
 uploaded again; a script that produces it still runs on its own schedule every
 frame. Effect and video output of Native Metal has not been compared against real
 wallpapers.
+
+Particle systems follow Wallpaper Engine 2.8's own rules, on both renderers, because
+one simulation feeds both. A system is simulated for its file's `starttime` before the
+first frame (steps of 0.05 s, or 0.2 s once the file holds 500 or more particles; at most
+6000 steps are run, and an even longer start time only advances the system clock), so
+it opens populated; an event child's instance does the same with the child file's own
+start time. A `sphererandom` spawn is a uniform point of the unit ball stretched by
+`directions` (a flat `directions` fills toward the middle, `cone` narrows it about +x), a
+`boxrandom` spawn folds each axis' signed draw onto `distancemin`..`distancemax`, and a
+particle born exactly on the centre leaves along a random direction. An emitter's
+`delay`, `duration` and periodic windows (`flags` 4 with the four `*periodic*` keys and
+`maxtoemitperperiod`) are honoured, `flags` 2 means at most one particle a frame at the
+file's rate, and an `instantaneous` burst is paid for out of the rate's account. The
+random initializers take their `exponent`, a lifetime is never below a millisecond,
+and every particle carries one random number of its own that picks its oscillation
+phase and frequency, its turbulence speed and phase, and its `randomframe` sprite
+(which is never cross-faded with a neighbouring frame). `movement` and
+`angularmovement` advance the particle where they stand among the operators, with the
+damping `velocity * (1 - drag * dt)`, and nothing else does: a particle file without
+them keeps its particles where they were placed, whatever velocity they were given (a
+movement operator with `flags` 1 keeps gravity in screen axes by multiplying it with the
+layer's transposed matrix, scale included); `controlpointattract` pulls hardest at the
+control point and not at all at its threshold, and with `flags` 1 removes a particle
+whose path over the last step, from where the movement operator found it, came within
+`deletethreshold` of the control point; `vortex` swirls about the control point
+plus its offset; `turbulence`, the oscillators, the vortex and `capvelocity` take the
+blend window (`blendin*`, `blendout*`), and `turbulence` and the vortex an
+`audioprocessing*` level (the loudest selected band), which makes a scene that has
+either of them need audio capture like an audio-driven emitter does. `capvelocity`,
+`reducemovementnearcontrolpoint`, `maintaindistancetocontrolpoint`,
+`maintaindistancebetweencontrolpoints`, `collisionplane` and `collisionsphere` work on the
+control points' motion and orientation (every particle found inside a collision shape
+takes its response, a bounce or a slide, whichever way it is moving; a sphere without an
+`origin` is centred 200 below the origin in a pixel scene; with `flags` 1 a sphere is centred
+on its control point and a plane passes through it, turned by the control point's
+orientation, and neither reads its own `origin` or `distance`), and the `hsvcolorrandom`
+(its hue steps spaced as the loader spaces them), `colorlist` (its noise a draw over the
+entry's value plus and minus the noise, cut off at 0 and 1), `inheritcontrolpointvelocity`,
+`positionoffsetrandom`, `mapsequencearoundcontrolpoint`,
+`mapsequencebetweencontrolpoints` and `inheritinitialvaluefromevent` initializers are
+implemented. A scene object's `instanceoverride` colour re-tints the preset's own colours
+by the difference between the override and the preset's representative colour, keeping
+their spread, and is a plain tint only for a preset without colours; its
+`controlpoint0`..`7` and `controlpointangle0`..`7` replace the preset's control points
+(a control point flagged 2 is held at its scene position as the layer moves), and
+`brightness` multiplies the tint in an HDR scene, and each of them follows a user
+property while the scene runs. Its `speed` scales the emitters' and velocity
+initializers' speeds, `movement` gravity, `angularmovement` force, the vortex and turbulence
+speeds, the pull of `controlpointattract` and the frequency of `oscillateposition`, unless the
+particle file sets the "ignore speed override" flag (16). An `eventfollow` child whose bound
+particle ends stops emitting but keeps the particles it already emitted until they die.
+A file with the `worldspace` flag leaves its live particles where they are in the scene
+when the layer moves. A file that lists several `renderer` entries draws the same
+particles through a mesh and material for each entry (each entry has its own copy of
+the file's material, so a rope entry's shader never reaches a sprite entry, and the
+particles stay in birth order for a rope entry in any position); a file whose `renderer`
+list is an empty array draws nothing, though the system still runs and still spawns its
+children, while a file that leaves the key out gets one sprite renderer. A `rope` renderer
+is drawn as `subdivision + 1` pieces per pair of particles in the per-segment (thick) vertex layout,
+and a `ropetrail` records `segments` points of its path and draws `subdivision + 1`
+pieces between them; the renderers fill the keys a file omits with their own defaults
+(rope: subdivision 4; rope trail: length 1, 4 segments, subdivision 1), truncating and
+clamping what they read. What a file omits in an operator or initializer takes the
+pixel-canvas defaults in a scene drawn with an orthogonal projection of a size (a scene
+that names none is drawn as the default canvas) and the scene-unit defaults otherwise.
+The known differences, among them the operators
+(`vortex_v2`, `boids`, `remapvalue`) and the renderer `orientation`, `fadealpha` and
+`fadesize` keys that are not implemented, are listed under
+[Known limitations](../testing/renderer.md#known-limitations).
 
 Text is set the way Wallpaper Engine 2.8.42 sets it. `pointsize` is a size in
 points at 300 dpi, 4.17 pixels to the point, clamped to 1 through 256 and handed to
