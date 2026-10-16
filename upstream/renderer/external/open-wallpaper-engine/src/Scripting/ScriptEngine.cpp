@@ -1058,10 +1058,13 @@ void AppendCommonHostBootstrap(std::ostringstream& wrapper) {
         << "  globalThis.shared = globalThis.shared || {};\n"
         << "  globalThis.shared.STARTS_WITH = 0;\n"
         << "  globalThis.shared.END_WITH = 1;\n"
+        // The numbers are Wallpaper Engine's own, and what a host sends as
+        // `event.state`: 0 stopped, 1 playing, 2 paused. Scripts compare against
+        // the literals as often as against the names.
         << "  globalThis.MediaPlaybackEvent = globalThis.MediaPlaybackEvent || {\n"
-        << "    PLAYBACK_PLAYING: 0,\n"
-        << "    PLAYBACK_PAUSED: 1,\n"
-        << "    PLAYBACK_STOPPED: 2\n"
+        << "    PLAYBACK_STOPPED: 0,\n"
+        << "    PLAYBACK_PLAYING: 1,\n"
+        << "    PLAYBACK_PAUSED: 2\n"
         << "  };\n"
         << "  globalThis.shared.userPropertyCategories = globalThis.shared.userPropertyCategories "
            "|| new Map();\n"
@@ -1103,8 +1106,8 @@ void AppendCommonHostBootstrap(std::ostringstream& wrapper) {
         << "    };\n"
         << "  }\n"
         << "  globalThis.isRunningInEditor = false;\n"
-        << "  globalThis.MediaPlaybackEvent = Object.freeze({ PLAYBACK_PLAYING: 0, "
-           "PLAYBACK_PAUSED: 1, PLAYBACK_STOPPED: 2 });\n"
+        << "  globalThis.MediaPlaybackEvent = Object.freeze({ PLAYBACK_STOPPED: 0, "
+           "PLAYBACK_PLAYING: 1, PLAYBACK_PAUSED: 2 });\n"
         << "  engine.isScreensaver = engine.isScreensaver || function() { return false; };\n"
         << "  engine.isWallpaper = engine.isWallpaper || "
            "function() { return !engine.isScreensaver(); };\n"

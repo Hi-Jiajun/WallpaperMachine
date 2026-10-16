@@ -84,8 +84,15 @@ is on. `SceneMediaSink` forwards SceneScript `mediaStatusChanged`,
 `mediaPropertiesChanged`, `mediaPlaybackChanged`, `mediaTimelineChanged` and
 `mediaThumbnailChanged`. JSON is forwarded verbatim so `subTitle`, `albumArtist`,
 `genres` and `contentType` are not dropped.
-`MediaPlaybackEvent.PLAYBACK_PLAYING` / `PAUSED` / `STOPPED` are 0 / 1 / 2. Color
-arrays are exposed as `Vec3` (`.x` / `.y` / `.z`). Artwork is uploaded as RGBA
+`MediaPlaybackEvent.PLAYBACK_STOPPED` / `PLAYING` / `PAUSED` are 0 / 1 / 2, as in
+Wallpaper Engine, and `event.state` carries the same numbers: scripts compare it
+with those literals as often as with the names, so a host that sends another
+numbering makes a paused player look like a playing one. The Swift codec
+(`SystemMediaEventCodec.sceneScriptPlaybackState`) and the Rust bridge's typed
+path (`MediaPlaybackState`, which serializes those numbers) both send them; the
+bridge's own input, `BridgeMediaSnapshot.playback_state`, keeps the host's
+numbering (playing 0, paused 1, stopped 2) and is mapped to the states by name.
+Color arrays are exposed as `Vec3` (`.x` / `.y` / `.z`). Artwork is uploaded as RGBA
 before `mediaThumbnailChanged` so `$mediaThumbnail` is valid when the script reads
 it.
 

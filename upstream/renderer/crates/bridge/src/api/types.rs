@@ -4,6 +4,9 @@ pub struct BridgeMediaSnapshot {
     pub title: String,
     pub artist: String,
     pub album: String,
+    // The host's numbering: 0 playing, 1 paused, 2 stopped. Mapped to the
+    // scene's own (stopped 0, playing 1, paused 2) by name in `into_state`.
+    // A plain comment: a doc comment would change the generated bindings.
     pub playback_state: u8,
     pub position: f64,
     pub duration: f64,

@@ -5601,7 +5601,7 @@ TEST(SceneSchema, MediaStateSurvivesTheSceneItArrivedBefore) {
     ASSERT_TRUE(wallpaper.init());
     wallpaper.setPropertyBool(wallpaper::PROPERTY_MEDIA_INTEGRATION_ENABLED, true);
     wallpaper.setPropertyString(wallpaper::PROPERTY_MEDIA_EVENT_JSON,
-                                R"({"type":"mediaPlaybackChanged","state":0})");
+                                R"({"type":"mediaPlaybackChanged","state":1})");
 
     std::shared_ptr<wallpaper::SceneNode> probe;
     auto scene = MakeMediaProbeScene(probe);
@@ -5670,7 +5670,7 @@ TEST(SceneSchema, WithdrawingConsentDropsWhatWasRetained) {
     ASSERT_TRUE(wallpaper.init());
     wallpaper.setPropertyBool(wallpaper::PROPERTY_MEDIA_INTEGRATION_ENABLED, true);
     wallpaper.setPropertyString(wallpaper::PROPERTY_MEDIA_EVENT_JSON,
-                                R"({"type":"mediaPlaybackChanged","state":0})");
+                                R"({"type":"mediaPlaybackChanged","state":1})");
     wallpaper.setPropertyBool(wallpaper::PROPERTY_MEDIA_INTEGRATION_ENABLED, false);
     wallpaper.setPropertyBool(wallpaper::PROPERTY_MEDIA_INTEGRATION_ENABLED, true);
 

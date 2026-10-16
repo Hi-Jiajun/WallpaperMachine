@@ -51,7 +51,7 @@ function mediaPlaybackChanged(event) {
 }
 
 scene.on('mediaPlaybackChanged', function(event) {
-  if (event.state === 0) {
+  if (event.state === 1) {
     scene.getObject('callbackProbe').visible = true;
   }
 });
@@ -60,7 +60,7 @@ scene.on('mediaPlaybackChanged', function(event) {
     ASSERT_EQ(fixture.runtime->sceneScriptCount(), 1u);
 
     fixture.runtime->SetMediaIntegrationEnabled(true);
-    fixture.runtime->DispatchMediaEventJson(R"({"type":"mediaPlaybackChanged","state":0})");
+    fixture.runtime->DispatchMediaEventJson(R"({"type":"mediaPlaybackChanged","state":1})");
 
     EXPECT_TRUE(fixture.runtime->NodeVisible("exportedProbe"));
     EXPECT_TRUE(fixture.runtime->NodeVisible("callbackProbe"));
@@ -85,7 +85,7 @@ scene.on('mediaPlaybackChanged', function(event) {
     ASSERT_EQ(fixture.runtime->sceneScriptCount(), 1u);
 
     fixture.runtime->SetMediaIntegrationEnabled(false);
-    fixture.runtime->DispatchMediaEventJson(R"({"type":"mediaPlaybackChanged","state":0})");
+    fixture.runtime->DispatchMediaEventJson(R"({"type":"mediaPlaybackChanged","state":1})");
 
     EXPECT_FALSE(fixture.runtime->NodeVisible("exportedProbe"));
     EXPECT_FALSE(fixture.runtime->NodeVisible("callbackProbe"));
@@ -117,12 +117,50 @@ function mediaThumbnailChanged(event) {
     ASSERT_EQ(fixture.runtime->sceneScriptCount(), 1u);
 
     fixture.runtime->SetMediaIntegrationEnabled(true);
-    fixture.runtime->DispatchMediaEventJson(R"({"type":"mediaPlaybackChanged","state":0})");
+    fixture.runtime->DispatchMediaEventJson(R"({"type":"mediaPlaybackChanged","state":1})");
     fixture.runtime->DispatchMediaEventJson(
         R"({"type":"mediaThumbnailChanged","hasThumbnail":true,"primaryColor":[1,0,0],"secondaryColor":[0,0.5,0],"tertiaryColor":[0,0,0.25],"textColor":[1,1,1],"highContrastColor":[0,0,0]})");
 
     EXPECT_TRUE(fixture.runtime->NodeVisible("exportedProbe"));
     EXPECT_TRUE(fixture.runtime->NodeVisible("callbackProbe"));
+    EXPECT_EQ(fixture.runtime->scriptErrorCount(), 0u);
+}
+
+// Wallpaper Engine numbers the playback states 0 stopped, 1 playing, 2 paused.
+// Scripts compare `event.state` against those literals as often as against the
+// named constants, so the host's number and the constant have to be the same
+// number: a paused player must not look like a playing one.
+TEST(SceneScriptMediaEventSmoke, PlaybackStatesAreNumberedAsWallpaperEngineNumbersThem) {
+    auto fixture = CreateRuntimeWithProbeNodes();
+    ASSERT_NE(fixture.runtime, nullptr);
+
+    fixture.runtime->RegisterSceneScript(
+        R"JS(
+function mediaPlaybackChanged(event) {
+  var literal = event.state === 0 ? 'stopped' : event.state === 1 ? 'playing' : 'paused';
+  var named = event.state === MediaPlaybackEvent.PLAYBACK_STOPPED ? 'stopped'
+            : event.state === MediaPlaybackEvent.PLAYBACK_PLAYING ? 'playing' : 'paused';
+  // Both spellings must agree, whatever the host sent.
+  if (literal !== named) throw new Error('literal and constant disagree');
+  scene.getObject('exportedProbe').visible = literal === 'playing';
+  scene.getObject('callbackProbe').visible = literal === 'paused';
+}
+)JS",
+        "");
+    ASSERT_EQ(fixture.runtime->sceneScriptCount(), 1u);
+    fixture.runtime->SetMediaIntegrationEnabled(true);
+
+    fixture.runtime->DispatchMediaEventJson(R"({"type":"mediaPlaybackChanged","state":1})");
+    EXPECT_TRUE(fixture.runtime->NodeVisible("exportedProbe")) << "1 is playing";
+    EXPECT_FALSE(fixture.runtime->NodeVisible("callbackProbe"));
+
+    fixture.runtime->DispatchMediaEventJson(R"({"type":"mediaPlaybackChanged","state":2})");
+    EXPECT_FALSE(fixture.runtime->NodeVisible("exportedProbe")) << "2 is paused, not playing";
+    EXPECT_TRUE(fixture.runtime->NodeVisible("callbackProbe"));
+
+    fixture.runtime->DispatchMediaEventJson(R"({"type":"mediaPlaybackChanged","state":0})");
+    EXPECT_FALSE(fixture.runtime->NodeVisible("exportedProbe")) << "0 is stopped, not playing";
+    EXPECT_FALSE(fixture.runtime->NodeVisible("callbackProbe"));
     EXPECT_EQ(fixture.runtime->scriptErrorCount(), 0u);
 }
 
@@ -606,7 +644,7 @@ scene.on('mediaPlaybackChanged', function() {
 )JS",
         "");
     runtime->SetMediaIntegrationEnabled(true);
-    runtime->DispatchMediaEventJson(R"({"type":"mediaPlaybackChanged","state":0})");
+    runtime->DispatchMediaEventJson(R"({"type":"mediaPlaybackChanged","state":1})");
     EXPECT_EQ(runtime->scriptErrorCount(), 0u);
 
     const auto requests = runtime->TakeUserShortcutRequests();
@@ -630,7 +668,7 @@ scene.on('mediaPlaybackChanged', function() {
 )JS",
         "");
     runtime->SetMediaIntegrationEnabled(true);
-    runtime->DispatchMediaEventJson(R"({"type":"mediaPlaybackChanged","state":0})");
+    runtime->DispatchMediaEventJson(R"({"type":"mediaPlaybackChanged","state":1})");
 
     EXPECT_TRUE(runtime->TakeUserShortcutRequests().empty());
     EXPECT_GT(runtime->scriptErrorCount(), 0u)
