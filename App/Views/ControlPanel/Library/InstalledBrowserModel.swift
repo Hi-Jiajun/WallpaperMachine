@@ -247,6 +247,36 @@ final class InstalledBrowserModel {
     filtersChanged(immediately: true)
   }
 
+  /// How the chip of `tag` stands: selected (required), hidden (excluded) or neither.
+  func chipSelection(_ tag: String) -> TagChip.Selection {
+    if filter.requiredTags.contains(tag) { return .required }
+    return filter.excludedTags.contains(tag) ? .excluded : .plain
+  }
+
+  /// Selects, hides or lets go of a chip; a tag is never both required and excluded.
+  func setChip(_ tag: String, _ selection: TagChip.Selection) {
+    filter.requiredTags.removeAll { $0 == tag }
+    filter.excludedTags.removeAll { $0 == tag }
+    switch selection {
+    case .plain: break
+    case .required: filter.requiredTags.append(tag)
+    case .excluded: filter.excludedTags.append(tag)
+    }
+    filtersChanged(immediately: true)
+  }
+
+  /// Reset of a chip section: no chip of it selected or hidden.
+  func resetChips(in section: LibraryFilterCatalog.Section) {
+    let tags = Set(section.tags)
+    filter.requiredTags.removeAll { tags.contains($0) }
+    filter.excludedTags.removeAll { tags.contains($0) }
+    filtersChanged(immediately: true)
+  }
+
+  func chipsAreAtDefaults(in section: LibraryFilterCatalog.Section) -> Bool {
+    section.tags.allSatisfy { chipSelection($0) == .plain }
+  }
+
   /// Ticks or unticks an exclusion box: unticked tags are the ones no shown wallpaper may carry.
   func setIncluded(_ tag: String, _ isIncluded: Bool) {
     if isIncluded {

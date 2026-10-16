@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// The Filters sidebar of the Installed page: the collections, one of which can be on show, the tags
-/// a wallpaper must have (Show only), and the boxes whose unticking hides every wallpaper that
-/// carries the tag.
+/// a wallpaper must have (Show only), the boxes whose unticking hides every wallpaper that carries
+/// the tag, and the Tags chips, which a click selects (`FilterTagChip`).
 /// Nothing is sent anywhere: the grid narrows as the boxes change.
 struct InstalledFilters: View {
   @Environment(PanelController.self) private var controller
@@ -12,7 +12,9 @@ struct InstalledFilters: View {
     FilterPanel(count: model.filterCount, onClear: { model.clearFilters() }) {
       CollectionsFilterGroup(isExpanded: expansion("collections"))
       FilterGroup(
-        "Show only", count: model.filter.requiredTags.count, isExpanded: expansion("show-only")
+        "Show only",
+        count: model.filter.requiredTags.filter { !LibraryFilterCatalog.chipTags.contains($0) }.count,
+        isExpanded: expansion("show-only")
       ) {
         ForEach(LibraryFilterCatalog.showOnly) { entry in
           RequiredTagToggle(entry: entry)
@@ -20,6 +22,7 @@ struct InstalledFilters: View {
         }
         let others = model.filter.requiredTags.filter { tag in
           !LibraryFilterCatalog.showOnly.contains { $0.tag == tag }
+            && !LibraryFilterCatalog.chipTags.contains(tag)
         }
         if !others.isEmpty {
           Text("Other selected tags")
@@ -40,7 +43,7 @@ struct InstalledFilters: View {
       }
       ForEach(LibraryFilterCatalog.installedGroups) { group in
         FilterGroup(
-          group.title, count: model.filter.excludedCount(among: group.tags),
+          group.title, count: model.filter.count(among: group.tags),
           isExpanded: expansion(group.key)
         ) {
           ForEach(group.sections) { section in
@@ -92,7 +95,8 @@ private struct RequiredTagToggle: View {
   }
 }
 
-/// One run of exclusion boxes: an optional heading with All and None, then the tags as chips.
+/// One section of a group: an optional heading with All and None, then a box to a line; or the Tags
+/// chips under a Reset link.
 private struct ExclusionSection: View {
   let section: LibraryFilterCatalog.Section
 
@@ -100,25 +104,20 @@ private struct ExclusionSection: View {
 
   var body: some View {
     let model = controller.library
-    let included = model.includedCount(in: section)
     VStack(alignment: .leading, spacing: 6) {
-      if section.title != nil || section.hasQuickLinks {
-        HStack(spacing: 10) {
-          if let title = section.title {
-            title.font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-          }
-          Spacer(minLength: 8)
-          if section.hasQuickLinks {
-            Button("All") { model.setSection(section.key, included: true) }
-              .disabled(included == section.entries.count)
-            Button("None") { model.setSection(section.key, included: false) }
-              .disabled(included == 0)
+      if section.title != nil || section.hasQuickLinks { heading(model) }
+      if section.isChips {
+        TagFlow(spacing: 6) {
+          ForEach(section.entries) { entry in
+            FilterTagChip(
+              selection: model.chipSelection(entry.tag),
+              onChange: { model.setChip(entry.tag, $0) }
+            ) {
+              entry.label
+            }
           }
         }
-        .buttonStyle(.link)
-        .font(.system(size: 12))
-      }
-      TagFlow(spacing: 6) {
+      } else {
         ForEach(section.entries) { entry in
           Toggle(
             isOn: Binding(
@@ -126,54 +125,32 @@ private struct ExclusionSection: View {
           ) {
             entry.label
           }
-          .toggleStyle(FilterChipToggleStyle())
+          .toggleStyle(.checkbox)
+          .font(.system(size: 13))
         }
       }
     }
     .padding(.bottom, 4)
   }
-}
 
-/// A tag of the filters as a capsule that is on while wallpapers with it are shown, and struck
-/// through in red once it is off, which is how a wallpaper carrying it gets hidden.
-private struct FilterChipToggleStyle: ToggleStyle {
-  func makeBody(configuration: Configuration) -> some View {
-    FilterChip(configuration: configuration)
-  }
-}
-
-private struct FilterChip: View {
-  let configuration: ToggleStyleConfiguration
-
-  @Environment(\.panelTheme) private var theme
-  @State private var isHovering = false
-
-  var body: some View {
-    let isOn = configuration.isOn
-    Button {
-      configuration.isOn.toggle()
-    } label: {
-      configuration.label
-        .font(.system(size: 11, weight: .medium))
-        .strikethrough(!isOn)
-        .foregroundStyle(isOn ? theme.surface.tagInk.color : theme.surface.danger.color)
-        .lineLimit(1)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background(background(isOn), in: Capsule())
+  private func heading(_ model: InstalledBrowserModel) -> some View {
+    HStack(spacing: 10) {
+      if let title = section.title {
+        title.font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+      }
+      Spacer(minLength: 8)
+      if section.isChips {
+        Button("Reset") { model.resetChips(in: section) }
+          .disabled(model.chipsAreAtDefaults(in: section))
+      } else if section.hasQuickLinks {
+        let included = model.includedCount(in: section)
+        Button("All") { model.setSection(section.key, included: true) }
+          .disabled(included == section.entries.count)
+        Button("None") { model.setSection(section.key, included: false) }
+          .disabled(included == 0)
+      }
     }
-    .buttonStyle(.plain)
-    .onHover { isHovering = $0 }
-    // VoiceOver meets a checkbox, as the web panel's chips were, which it reads as checked or
-    // unchecked in the listener's language.
-    .accessibilityRepresentation {
-      Toggle(isOn: configuration.$isOn) { configuration.label }
-        .toggleStyle(.checkbox)
-    }
-  }
-
-  private func background(_ isOn: Bool) -> Color {
-    if isOn { return isHovering ? theme.surface.selected.color : theme.surface.badge.color }
-    return theme.surface.danger.color.opacity(isHovering ? 0.2 : 0.14)
+    .buttonStyle(.link)
+    .font(.system(size: 12))
   }
 }

@@ -599,7 +599,12 @@ filters, and waits out Settings, which has none. In a window under 960 points
 there is no room for it beside the inspector, so opening one of them closes the
 other. It is not a popover: it holds neither the support prompt nor other popovers
 back. It starts closed and nothing is stored; closing never changes the search or
-the filters. Each page's groups are listed below; Tags render as chips.
+the filters. Each page's groups are listed below. Tags render as chips that start
+out filtering nothing: a click selects one (accent fill and a check) so only
+wallpapers carrying that tag are shown, several selected must all be carried, and a
+second click lets it go. Option-click, or **Hide this tag** in the chip's context
+menu, hides every wallpaper carrying it instead (struck through in red); a click
+lets that go too. The Tags group's **Reset** puts its chips back.
 Groups fold open and shut with a short animation (none under Reduce Motion).
 Collapsed groups retain their state and show their own active count:
 Show only counts selected tags, and exclude groups count visible boxes that differ
@@ -617,8 +622,8 @@ tags are not claimed to be represented by the sum of visible group counts.
   `general.supportsaudioprocessing` and `Customizable` for user properties beyond
   `schemecolor`); a wallpaper without a genre counts as Unspecified. A manifest
   carries no resolution or Workshop category, so those boxes are Discover-only.
-  The Show only boxes start unticked and a ticked one requires its tag; every other
-  box starts ticked (a library hides nothing by default) and an unticked box hides
+  The Show only boxes start unticked and a ticked one requires its tag; Type and Age
+  rating are boxes that start ticked (a library hides nothing by default) and an unticked box hides
   every wallpaper carrying that tag, case-insensitively. Search matches titles and
   tags, and filtering never activates a wallpaper. The header's sort menu offers
   Name, Type, Favorites, File size and Date added, with a direction button beside
@@ -629,8 +634,8 @@ tags are not claimed to be represented by the sum of visible group counts.
   `LibraryMetricsService` and re-checked only after a library reload; wallpapers
   not yet measured sort last.
 - **Discover:** the sidebar is Wallpaper Engine's own filter list — Show only
-  (required tags), then Type, Age rating, Resolution and Tags as tick boxes whose
-  unticked entries are excluded (see [workshop-downloads](workshop-downloads.md)).
+  (required tags), then Type, Age rating and Resolution as tick boxes whose
+  unticked entries are excluded, and the Tags chips (see [workshop-downloads](workshop-downloads.md)).
   Sort opens on Most popular this year; the other orders are listed there too.
 - **pixiv:** the sidebar starts with the pixiv account (sign in, or who is signed
   in and **Log out**), then Orientation, Minimum size, Age rating and

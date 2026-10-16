@@ -4,7 +4,8 @@ import SwiftUI
 /// sidebar lists them.
 ///
 /// "Show only" boxes start unticked, and ticking one sends its tag to Steam as a required tag.
-/// Every other box starts ticked, and unticking it sends its tag as an excluded one, so a group
+/// Chips start out filtering nothing (`FilterTagChip`): a selected one is required too and a
+/// hidden one excluded. Every other box starts ticked, and unticking it sends its tag as an excluded one, so a group
 /// with everything ticked filters nothing. Tags travel to Steam in English; only their labels are
 /// translated. The boxes Wallpaper Engine leaves unticked by default (`isOffByDefault`) and the two
 /// tags that are never offered (`hiddenExcludedTags`) make up the default excluded list, which
@@ -182,6 +183,9 @@ enum WorkshopFilterCatalog {
   ]
 
   static var sections: [Section] { groups.flatMap(\.sections) }
+  /// The tags offered as chips, whose required ones the chips show rather than "Show only".
+  static let chipTags: Set<String> = Set(
+    groups.flatMap(\.sections).filter { $0.style == .chips }.flatMap(\.tags))
   static var entries: [Entry] { sections.flatMap(\.entries) }
 
   /// What Wallpaper Engine excludes until the user says otherwise: the tags that are never offered,
@@ -193,10 +197,9 @@ enum WorkshopFilterCatalog {
 /// The Workshop filters as the page edits them before and after asking Steam: the tags an item
 /// must carry and the tags that hide it.
 ///
-/// A tag both required and excluded is a contradiction Steam resolves for the required one, so a
-/// box that is ticked in "Show only" needs no care here. The count the Filter button shows is
-/// every required tag plus every box whose state differs from its default, so it reads zero right
-/// after **Clear**.
+/// A tag is never both required and excluded: requiring one stops excluding it and the other way
+/// round. The count the Filter button shows is every required tag plus every box or chip whose
+/// state differs from its default, so it reads zero right after **Clear**.
 struct WorkshopFilterDraft: Equatable {
   var tags: [String]
   var excludedTags: [String]
@@ -211,34 +214,59 @@ struct WorkshopFilterDraft: Equatable {
   /// How many filters are in effect.
   var count: Int {
     let defaults = Self.defaultExcludedTags
-    return tags.count + defaults.filter { !excludedTags.contains($0) }.count
+    return tags.count + defaults.filter { !excludedTags.contains($0) && !tags.contains($0) }.count
       + excludedTags.filter { !defaults.contains($0) }.count
   }
 
-  /// Boxes of `group` whose state differs from its default.
+  /// Boxes and chips of `group` whose state differs from its default.
   func count(in group: WorkshopFilterCatalog.Group) -> Int {
-    let defaults = Self.defaultExcludedTags
-    return group.tags.filter { excludedTags.contains($0) != defaults.contains($0) }.count
+    group.tags.filter { chipSelection($0) != Self.defaultSelection($0) }.count
   }
 
-  /// "Show only" boxes that are ticked, plus the tags that are required without having a box.
-  var requiredCount: Int { tags.count }
+  /// "Show only" boxes that are ticked, plus the tags that are required without a box or chip.
+  var requiredCount: Int { tags.filter { !WorkshopFilterCatalog.chipTags.contains($0) }.count }
 
   /// Whether the box of `tag` is ticked: not excluded.
   func isIncluded(_ tag: String) -> Bool { !excludedTags.contains(tag) }
 
   func isRequired(_ tag: String) -> Bool { tags.contains(tag) }
 
-  /// Required tags the "Show only" boxes do not offer, which the popover lists as ticked boxes of
+  /// How the chip of `tag` stands: selected (required), hidden (excluded) or neither.
+  func chipSelection(_ tag: String) -> TagChip.Selection {
+    if isRequired(tag) { return .required }
+    return excludedTags.contains(tag) ? .excluded : .plain
+  }
+
+  private static func defaultSelection(_ tag: String) -> TagChip.Selection {
+    defaultExcludedTags.contains(tag) ? .excluded : .plain
+  }
+
+  mutating func setChip(_ tag: String, _ selection: TagChip.Selection) {
+    setRequired(tag, selection == .required)
+    setExcluded([tag], selection == .excluded)
+  }
+
+  /// **Reset** of a chip section: each chip back to how it starts.
+  mutating func resetChips(in section: WorkshopFilterCatalog.Section) {
+    for tag in section.tags { setChip(tag, Self.defaultSelection(tag)) }
+  }
+
+  /// Every chip of the section stands as it starts, so **Reset** has nothing to do.
+  func chipsAreAtDefaults(in section: WorkshopFilterCatalog.Section) -> Bool {
+    section.tags.allSatisfy { chipSelection($0) == Self.defaultSelection($0) }
+  }
+
+  /// Required tags the "Show only" boxes and the chips do not offer, which the popover lists as ticked boxes of
   /// their own so they can be unticked (a tag restored from an earlier session, say).
   var otherRequiredTags: [String] {
-    let offered = Set(WorkshopFilterCatalog.showOnly.map(\.tag))
+    let offered = Set(WorkshopFilterCatalog.showOnly.map(\.tag)).union(WorkshopFilterCatalog.chipTags)
     return tags.filter { !offered.contains($0) }
   }
 
   mutating func setRequired(_ tag: String, _ required: Bool) {
     if required {
       if !tags.contains(tag) { tags.append(tag) }
+      excludedTags.removeAll { $0 == tag }
     } else {
       tags.removeAll { $0 == tag }
     }
@@ -254,6 +282,7 @@ struct WorkshopFilterDraft: Equatable {
     for tag in tagsToSet {
       if excluded {
         if !set.contains(tag) { set.append(tag) }
+        tags.removeAll { $0 == tag }
       } else {
         set.removeAll { $0 == tag }
       }

@@ -42,6 +42,9 @@ was run.
       and scroll down a long library, then close the panel and reopen it from the status
       menu: the search, sort, boxes and scroll position are as left. Quit and relaunch:
       Installed starts unfiltered at the top.
+- [ ] In Filters → Tags, click a chip: it fills with the accent and a check and only
+      wallpapers with that tag stay; click it again and they all return. Option-click
+      (or right-click → Hide this tag) strikes it through and hides them.
 - [ ] With the app running, `open -n` the same app: no second copy appears and the
       first shows its panel. Run a copy from another folder: an alert says another
       copy is using the library, and the running copy is untouched. After an in-app

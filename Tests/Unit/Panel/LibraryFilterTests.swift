@@ -97,11 +97,19 @@ final class LibraryFilterTests: XCTestCase {
     let filter = LibraryFilter(excludedTags: ["Anime", "Web", "Mature"])
     let groups = LibraryFilterCatalog.installedGroups
     func count(_ key: String) -> Int {
-      filter.excludedCount(among: groups.first { $0.key == key }!.tags)
+      filter.count(among: groups.first { $0.key == key }!.tags)
     }
     XCTAssertEqual(count("type"), 1)
     XCTAssertEqual(count("rating"), 1)
     XCTAssertEqual(count("genre"), 1)
+  }
+
+  func testGroupCountsCountSelectedChipsToo() {
+    let filter = LibraryFilter(requiredTags: ["Approved", "Anime"], excludedTags: ["Nature"])
+    let genre = LibraryFilterCatalog.installedGroups.first { $0.key == "genre" }!
+    XCTAssertEqual(filter.count(among: genre.tags), 2)
+    XCTAssertTrue(LibraryFilterCatalog.chipTags.contains("Anime"))
+    XCTAssertFalse(LibraryFilterCatalog.chipTags.contains("Scene"), "Type stays a list of boxes")
   }
 
   func testRestoredRequiredTagsNoWallpaperCarriesAreStaleAndExcludedOnesAreNot() {

@@ -1,6 +1,21 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Show only this tag" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "このタグのみ表示"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "仅显示此标签"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "僅顯示此標籤"}}}
+    },
+    "Hide this tag" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "このタグを非表示"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "隐藏此标签"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "隱藏此標籤"}}}
+    },
+    "Don't filter by this tag" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "このタグで絞り込まない"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "不按此标签筛选"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "不依此標籤篩選"}}}
+    },
+    "Hidden" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "非表示"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "已隐藏"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "已隱藏"}}}
+    },
+    "Click to show only wallpapers with this tag. Option-click to hide them." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "クリックでこのタグの壁紙のみ表示。Option キーを押しながらクリックで非表示。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "点按以仅显示带此标签的壁纸。按住 Option 键点按以隐藏它们。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "按一下以僅顯示帶有此標籤的桌布。按住 Option 鍵按一下以隱藏它們。"}}}
+    },
     "Details" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "詳細"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "详细信息"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "詳細資訊"}}}
     },

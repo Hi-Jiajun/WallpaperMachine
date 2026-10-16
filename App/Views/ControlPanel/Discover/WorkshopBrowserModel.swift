@@ -128,6 +128,16 @@ final class WorkshopBrowserModel {
     search()
   }
 
+  func setChip(_ tag: String, _ selection: TagChip.Selection) {
+    filters.setChip(tag, selection)
+    search()
+  }
+
+  func resetChips(in section: WorkshopFilterCatalog.Section) {
+    filters.resetChips(in: section)
+    search()
+  }
+
   func includeAll(in section: WorkshopFilterCatalog.Section) {
     filters.includeAll(in: section)
     search()

@@ -3,8 +3,9 @@ import SwiftUI
 /// The Workshop's Filters sidebar: the boxes Wallpaper Engine's own sidebar offers, in the groups it
 /// groups them in.
 ///
-/// Each change searches at once. "Show only" boxes require a tag; every other box is ticked unless it
-/// hides what carries its tag, so a fresh sidebar with everything ticked filters nothing. A group's
+/// Each change searches at once. "Show only" boxes require a tag; the Tags chips start plain and a
+/// click selects one (`FilterTagChip`); every other box is ticked unless it hides what carries its
+/// tag, so a fresh sidebar filters nothing. A group's
 /// title carries how many of its boxes differ from their defaults, the header carries the total,
 /// and Clear puts the defaults back.
 struct WorkshopFilters: View {
@@ -105,17 +106,12 @@ struct WorkshopFilters: View {
         case .chips:
           TagFlow(spacing: 6) {
             ForEach(section.entries) { entry in
-              Button {
-                model.setIncluded(entry.tag, !model.filters.isIncluded(entry.tag))
-              } label: {
-                // A chip that is on is plain; one that hides its tag is struck through.
-                ChipLabel(
-                  name: entry.name,
-                  selection: model.filters.isIncluded(entry.tag) ? .plain : .excluded)
+              FilterTagChip(
+                selection: model.filters.chipSelection(entry.tag),
+                onChange: { model.setChip(entry.tag, $0) }
+              ) {
+                entry.name.text
               }
-              .buttonStyle(.plain)
-              .accessibilityAddTraits(
-                model.filters.isIncluded(entry.tag) ? .isSelected : [])
             }
           }
         }
@@ -131,7 +127,12 @@ struct WorkshopFilters: View {
             .foregroundStyle(theme.surface.muted.color)
         }
         Spacer(minLength: 8)
-        if section.hasQuickLinks {
+        if section.style == .chips {
+          Button("Reset") { model.resetChips(in: section) }
+            .disabled(model.filters.chipsAreAtDefaults(in: section))
+            .buttonStyle(.panelLink)
+            .font(.system(size: 11.5))
+        } else if section.hasQuickLinks {
           HStack(spacing: 10) {
             Button("All") { model.includeAll(in: section) }
               .disabled(model.filters.includesAll(in: section))
@@ -142,27 +143,6 @@ struct WorkshopFilters: View {
           .font(.system(size: 11.5))
         }
       }
-    }
-  }
-
-  /// `TagChip` with a name that is either catalog wording or a value.
-  private struct ChipLabel: View {
-    let name: WorkshopFilterCatalog.Name
-    let selection: TagChip.Selection
-
-    @Environment(\.panelTheme) private var theme
-
-    var body: some View {
-      name.text
-        .font(.system(size: 11, weight: .medium))
-        .strikethrough(selection == .excluded)
-        .foregroundStyle(selection == .excluded ? theme.surface.danger.color : theme.surface.tagInk.color)
-        .lineLimit(1)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background(
-          selection == .excluded
-            ? theme.surface.danger.color.opacity(0.14) : theme.surface.badge.color, in: Capsule())
     }
   }
 }

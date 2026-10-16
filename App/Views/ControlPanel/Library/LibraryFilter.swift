@@ -94,8 +94,8 @@ struct LibraryFilter: Equatable, Sendable {
     return requiredTags.filter { !carried.contains($0.lowercased()) }
   }
 
-  /// How many boxes of `tags` are unticked, for a group's count.
-  func excludedCount(among tags: [String]) -> Int {
-    tags.filter { tag in excludedTags.contains(tag) }.count
+  /// How many boxes of `tags` are unticked or chips selected or hidden, for a group's count.
+  func count(among tags: [String]) -> Int {
+    tags.filter { tag in excludedTags.contains(tag) || requiredTags.contains(tag) }.count
   }
 }

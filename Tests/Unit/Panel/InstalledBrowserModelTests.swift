@@ -424,6 +424,24 @@ final class InstalledBrowserModelTests: PanelTestCase {
     XCTAssertEqual(model.emptyState, .emptyLibrary)
   }
 
+  func testSelectingAChipRequiresItsTagAndHidingItExcludesIt() async throws {
+    let panel = try makeController()
+    defer { Task { await panel.shutdown() } }
+    let model = panel.controller.library
+    let genre = try XCTUnwrap(LibraryFilterCatalog.section(key: "genre"))
+    XCTAssertEqual(model.chipSelection("Anime"), .plain)
+    model.setChip("Anime", .required)
+    XCTAssertEqual(model.filter.requiredTags, ["Anime"])
+    XCTAssertEqual(model.chipSelection("Anime"), .required)
+    model.setChip("Anime", .excluded)
+    XCTAssertEqual(model.filter.requiredTags, [], "a tag is never both required and excluded")
+    XCTAssertEqual(model.filter.excludedTags, ["Anime"])
+    XCTAssertFalse(model.chipsAreAtDefaults(in: genre))
+    model.resetChips(in: genre)
+    XCTAssertTrue(model.chipsAreAtDefaults(in: genre))
+    XCTAssertFalse(model.filter.hasFilters)
+  }
+
   func testATenThousandWallpaperLibraryFiltersAsTheUserTypes() async throws {
     let panel = try makeController()
     defer { Task { await panel.shutdown() } }

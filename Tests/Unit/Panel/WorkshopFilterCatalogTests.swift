@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 
 @testable import WallpaperMachine
@@ -125,6 +126,43 @@ final class WorkshopFilterCatalogTests: XCTestCase {
     XCTAssertEqual(draft.otherRequiredTags, ["Hand-picked"], "a required tag no box offers is listed under Other selected tags")
     draft.setRequired("Hand-picked", false)
     XCTAssertEqual(draft.tags, ["Approved"])
+  }
+
+  func testAClickSelectsAChipAndOptionClickHidesIt() {
+    typealias Chip = FilterTagChip<EmptyView>
+    XCTAssertEqual(Chip.selection(after: .plain, hiding: false), .required, "a click selects")
+    XCTAssertEqual(Chip.selection(after: .required, hiding: false), .plain, "a second click lets go")
+    XCTAssertEqual(Chip.selection(after: .excluded, hiding: false), .plain)
+    XCTAssertEqual(Chip.selection(after: .plain, hiding: true), .excluded, "Option-click hides")
+    XCTAssertEqual(Chip.selection(after: .required, hiding: true), .excluded)
+    XCTAssertEqual(Chip.selection(after: .excluded, hiding: true), .plain)
+  }
+
+  func testASelectedChipRequiresItsTagAndCountsInItsGroupNotInShowOnly() throws {
+    let genre = try XCTUnwrap(Catalog.groups.first { $0.id == "genre" })
+    let section = try XCTUnwrap(Catalog.sections.first { $0.id == "genre" })
+    var draft = WorkshopFilterDraft.cleared
+    XCTAssertEqual(draft.chipSelection("Anime"), .plain, "chips start out filtering nothing")
+    XCTAssertEqual(draft.chipSelection("Unspecified"), .excluded, "Wallpaper Engine hides it by default")
+    XCTAssertTrue(draft.chipsAreAtDefaults(in: section))
+
+    draft.setChip("Anime", .required)
+    XCTAssertEqual(draft.tags, ["Anime"], "a selected chip is sent as a required tag")
+    XCTAssertEqual(draft.count, 1)
+    XCTAssertEqual(draft.count(in: genre), 1)
+    XCTAssertEqual(draft.requiredCount, 0, "Show only counts only its own boxes")
+    XCTAssertEqual(draft.otherRequiredTags, [], "the chip shows it, so Show only does not list it")
+
+    draft.setChip("Unspecified", .required)
+    XCTAssertFalse(draft.excludedTags.contains("Unspecified"), "a tag is never both required and excluded")
+    XCTAssertEqual(draft.count, 2, "selecting a chip that starts hidden is one change")
+    draft.setChip("Anime", .excluded)
+    XCTAssertFalse(draft.tags.contains("Anime"))
+    XCTAssertTrue(draft.excludedTags.contains("Anime"))
+
+    draft.resetChips(in: section)
+    XCTAssertTrue(draft.chipsAreAtDefaults(in: section))
+    XCTAssertEqual(draft, .cleared)
   }
 
   func testTheDraftTravelsToSteamAsTheTagsTheBoxesNameInEnglish() {

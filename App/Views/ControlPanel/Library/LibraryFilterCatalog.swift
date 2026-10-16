@@ -5,8 +5,9 @@ import SwiftUI
 /// Steam. Tags are Steam's English names and are never translated when matched or sent: only the
 /// labels are.
 ///
-/// Two families. A "Show only" box starts unticked, and ticking it *requires* the tag. Every other
-/// box starts ticked, and unticking it *excludes* the tag, so a group with everything ticked
+/// Three families. A "Show only" box starts unticked, and ticking it *requires* the tag. A Tags
+/// chip starts out filtering nothing: selecting it requires its tag and hiding it excludes the tag
+/// (`FilterTagChip`). Every other box starts ticked, and unticking it *excludes* the tag, so a group with everything ticked
 /// filters nothing.
 enum LibraryFilterCatalog {
   /// One box.
@@ -21,11 +22,14 @@ enum LibraryFilterCatalog {
     var id: String { tag }
   }
 
-  /// A run of boxes with an optional heading and All / None links.
+  /// A run of boxes with an optional heading and All / None links, or of chips with Reset.
   struct Section: Identifiable {
     let key: String
     let title: Text?
     let hasQuickLinks: Bool
+    /// The tags are chips, which select rather than untick: a long list of tags a wallpaper can
+    /// carry several of.
+    let isChips: Bool
     /// What Steam knows and a wallpaper's manifest does not carry (its Workshop category and
     /// resolution), so Installed leaves it out.
     let isDiscoverOnly: Bool
@@ -74,12 +78,12 @@ enum LibraryFilterCatalog {
   }
 
   private static func section(
-    _ key: String, title: LocalizedStringKey? = nil, quick: Bool = false,
+    _ key: String, title: LocalizedStringKey? = nil, quick: Bool = false, chips: Bool = false,
     discoverOnly: Bool = false, _ entries: [Entry]
   ) -> Section {
     Section(
-      key: key, title: title.map { Text($0) }, hasQuickLinks: quick, isDiscoverOnly: discoverOnly,
-      entries: entries)
+      key: key, title: title.map { Text($0) }, hasQuickLinks: quick, isChips: chips,
+      isDiscoverOnly: discoverOnly, entries: entries)
   }
 
   // MARK: Show only
@@ -163,7 +167,7 @@ enum LibraryFilterCatalog {
       key: "genre", title: "Tags", isDiscoverOnly: false,
       sections: [
         section(
-          "genre", quick: true,
+          "genre", quick: true, chips: true,
           [
             entry("Abstract", "Abstract"), entry("Animal", "Animal"), entry("Anime", "Anime"),
             entry("Cartoon", "Cartoon"), entry("CGI", "CGI"), entry("Cyberpunk", "Cyberpunk"),
@@ -187,6 +191,9 @@ enum LibraryFilterCatalog {
   }
 
   static let sections: [Section] = groups.flatMap(\.sections)
+
+  /// The tags offered as chips, whose required ones the chips show rather than "Show only".
+  static let chipTags: Set<String> = Set(sections.filter(\.isChips).flatMap(\.tags))
 
   /// Steam's own words for "no genre was tagged": every genre but Unspecified, lower-cased for
   /// matching. A wallpaper carrying none of them counts as Unspecified.

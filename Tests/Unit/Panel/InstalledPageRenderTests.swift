@@ -286,12 +286,14 @@ final class InstalledPageRenderTests: PanelTestCase {
     hosted.close()
   }
 
-  func testFilterChipsReachVoiceOverAsCheckboxes() async throws {
+  func testFilterBoxesReachVoiceOverAsCheckboxesAndTagChipsAsButtons() async throws {
     let panel = try makeController()
     defer { Task { await panel.shutdown() } }
     try await prepare(panel)
     let model = panel.controller.library
     model.setIncluded("Web", false)
+    model.setChip("Anime", .required)
+    model.setChip("Nature", .excluded)
     let controller = panel.controller
     let hosting = NSHostingView(
       rootView: InstalledFilters()
@@ -314,13 +316,21 @@ final class InstalledPageRenderTests: PanelTestCase {
     let checkboxes = accessibilityElements(in: hosting).filter {
       $0.role == NSAccessibility.Role.checkBox.rawValue
     }
-    let chips = LibraryFilterCatalog.installedGroups.flatMap(\.sections).flatMap(\.entries).count
+    let sections = LibraryFilterCatalog.installedGroups.flatMap(\.sections)
+    let boxes = sections.filter { !$0.isChips }.flatMap(\.entries).count
     let showOnly = LibraryFilterCatalog.showOnly.count
     XCTAssertEqual(
-      checkboxes.count, showOnly + chips, "every chip is a checkbox, as the Show only boxes are")
+      checkboxes.count, showOnly + boxes, "every box is a checkbox; the Tags chips are not")
     let values = checkboxes.compactMap { ($0.value as? NSNumber)?.intValue }
-    XCTAssertTrue(values.contains(0), "an unticked chip reads as unchecked, not as a digit in a label")
+    XCTAssertTrue(values.contains(0), "an unticked box reads as unchecked, not as a digit in a label")
     XCTAssertTrue(values.contains(1))
+
+    let buttons = accessibilityElements(in: hosting).filter {
+      $0.role == NSAccessibility.Role.button.rawValue
+    }
+    XCTAssertTrue(buttons.contains { $0.label == "Anime" }, "a chip is a button a click selects")
+    let hidden = try XCTUnwrap(buttons.first { $0.label == "Nature" })
+    XCTAssertEqual(hidden.value as? String, "Hidden", "a hidden chip says so")
   }
 
   func testTheImportPopoverKeepsTheImportsStatusAboveItsReport() async throws {
