@@ -1059,6 +1059,9 @@ never to `.shared`.
   `WorkshopBrowserRenderTests` (the page, inspector, empty states, dialog stages and Downloads list
   in every language at both sizes, shrinking with the inspector open, a tile's VoiceOver label, a
   download that resumes or pauses with the Downloads list open redrawn in place).
+- Lazy lists: `scripts/tests/test_panel_lazy_lists.py` fails for a `LazyVStack`, `LazyHStack`,
+  `LazyVGrid`, `LazyHGrid` or `List` that draws more than one top-level `ForEach`, the shape that
+  kept a resumed download's row stale; a `ForEach` inside a separate subview is not seen by it.
 - pixiv: `PanelPixivActionsTests`, `PixivPanelStateTests`, `PixivBrowserModelTests`,
   `PixivListSummaryTests` and `PixivBrowserRenderTests`; see [Pixiv](#pixiv).
 - Settings: `SettingsSearchTests` (matches, counts, folding disclosures, the panel's language, the

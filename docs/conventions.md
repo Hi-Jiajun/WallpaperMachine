@@ -115,6 +115,13 @@ How the panel runs (controller, actions, observation, window hosting) is in
 - **Area views take no arguments.** A page, an inspector or a toolbar item reads
   `@Environment(PanelController.self)`; its state lives in the controller or its area
   model, which outlive a view that SwiftUI rebuilds.
+- **One `ForEach` per lazy list.** A `LazyVStack`, `LazyHStack`, `LazyVGrid`,
+  `LazyHGrid` or `List` draws its rows through a single `ForEach` over one ordered
+  list of stable ids (`DownloadQueue.entries`), never one `ForEach` per state or
+  section: an item that moves from one sibling `ForEach` to another under the same id
+  keeps the row drawn before, until the view is rebuilt. Build the order and the
+  sections in the model; a `ForEach` nested in another one's rows is fine.
+  `scripts/tests/test_panel_lazy_lists.py` enforces this.
 - **Untrusted text stays text.** Titles, descriptions, author and creator names,
   Steam and pixiv data and error details are `Text(verbatim:)`. An author's property
   label passes through the allowlist parser (`PropertyLabelDocument`) and never
