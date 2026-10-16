@@ -107,6 +107,11 @@ struct ReleaseNotes: Equatable, Sendable {
     struct Section: Equatable, Sendable {
         let title: String
         let items: [String]
+        /// Bullet items, as opposed to a paragraph such as a release's summary.
+        var isList = false
+
+        /// The section `scripts/release_notes.py` heads Highlights / 亮点 in feature releases.
+        var isHighlights: Bool { title == "Highlights" || title == "亮点" }
     }
 
     static let boundary = "<!-- release-notes-end -->"
@@ -128,7 +133,7 @@ struct ReleaseNotes: Equatable, Sendable {
         var items: [String] = []
         var bullets = false
         func flush(into next: String) {
-            if !items.isEmpty { sections.append(Section(title: title, items: items)) }
+            if !items.isEmpty { sections.append(Section(title: title, items: items, isList: bullets)) }
             title = next
             items = []
         }

@@ -17,9 +17,9 @@ is cut. The app bundles both languages. `--release-body` publishes only the Engl
 part and the compare link on GitHub, then adds the install footer. A hand-pushed
 tag with no section is written once, into the working tree, before the build.
 A recorded bilingual section is reused without another model request.
-A version with a banner picture in Resources/ReleaseBanners/ (named `x.y.z.png` or
-`x.y.z.jpg`) gets it as an image line above both languages; the app and the
-release page show it over the notes.
+A version with a banner picture in Resources/ReleaseBanners/ (`x.y.z.jpg` or `.png`,
+and optionally a Chinese `x.y.z.zh-Hans.jpg` or `.png`) gets an image line at the top
+of each language block; the app and the release page show it over the notes.
 A `##` heading that is not `x.y.z` — `## Unreleased`, a prerelease token, or a
 heading inside the notes — stops publishing. The app rejects that whole file, so
 the heading is not kept and not dropped.
@@ -57,6 +57,8 @@ CHANGELOG = ROOT / "CHANGELOG.md"
 # A version's banner picture, bundled with the app and committed before the version is cut.
 BANNERS = Path("Resources") / "ReleaseBanners"
 BANNER_TYPES = (".png", ".jpg")
+# The file name each language block's banner takes after `x.y.z`; Chinese falls back to English's.
+BANNER_SUFFIXES = {"english": "", "chinese": ".zh-Hans"}
 BANNER = re.compile(r"^!\[(?P<alt>[^\]\n]*)\]\((?P<path>Resources/ReleaseBanners/(?P<name>[^/)\s]+))\)[ \t]*$", re.MULTILINE)
 APPLICATION = "WallpaperMachine"
 
@@ -378,26 +380,30 @@ def compare_link(previous, tag, repo):
     return f"**Full changelog**: https://github.com/{repo}/commits/{tag}"
 
 
-def banner_path(version, root=ROOT):
-    """The version's banner picture relative to `root`, as a POSIX path, or None."""
-    for suffix in BANNER_TYPES:
-        candidate = BANNERS / f"{display_version(version)}{suffix}"
-        if (Path(root) / candidate).is_file():
-            return candidate.as_posix()
+def banner_path(version, root=ROOT, code="english"):
+    """A language's banner picture relative to `root`, as a POSIX path, or None.
+
+    A language without its own picture shares the English one.
+    """
+    for suffix in dict.fromkeys((BANNER_SUFFIXES[code], "")):
+        for kind in BANNER_TYPES:
+            candidate = BANNERS / f"{display_version(version)}{suffix}{kind}"
+            if (Path(root) / candidate).is_file():
+                return candidate.as_posix()
     return None
 
 
-def banner_line(version, root=ROOT):
-    """The image line a section opens with when the version has a banner, or None."""
-    path = banner_path(version, root)
+def banner_line(version, root=ROOT, code="english"):
+    """The image line a language block opens with when the version has a banner, or None."""
+    path = banner_path(version, root, code)
     return f"![{APPLICATION} {display_version(version)}]({path})" if path else None
 
 
-def recorded_banner(notes):
-    """`(alt, path)` of the banner line above the language blocks, or None."""
-    blocks = re.search(r"^### English[ \t]*$", notes, re.MULTILINE)
-    match = BANNER.search(notes, 0, blocks.start() if blocks else len(notes))
-    return (match.group("alt"), match.group("path")) if match else None
+def banner_names(version):
+    """Every banner file name a section of `version` may point at."""
+    number = display_version(version)
+    return {(BANNERS / f"{number}{suffix}{kind}").as_posix()
+            for suffix in BANNER_SUFFIXES.values() for kind in BANNER_TYPES}
 
 
 def nothing_to_say(previous):
@@ -457,12 +463,15 @@ def release_body(notes, version, built_from=None, repo=None):
     repository; without a repository there is no address for it, and it is left out.
     """
     english, chinese = language_blocks(require_bilingual(notes))
-    parts = []
-    banner = recorded_banner(notes)
-    if banner and repo:
-        alt, path = banner
-        parts.append(f"![{alt}](https://raw.githubusercontent.com/{repo}/v{display_version(version)}/{path})")
-    parts.append(f"### English\n\n{english.strip()}")
+
+    def published(match):
+        if not repo:
+            return ""
+        address = f"https://raw.githubusercontent.com/{repo}/v{display_version(version)}/{match.group('path')}"
+        return f"![{match.group('alt')}]({address})"
+
+    english = BANNER.sub(published, english)
+    parts = [f"### English\n\n{english.strip()}"]
     parts.extend(line for line in chinese.splitlines() if line.startswith("**Full changelog**:"))
     parts.append(install_footer(version, deployment_target(), built_from))
     return "\n\n".join(parts) + "\n"
@@ -706,27 +715,29 @@ def empty_notes():
     return {"summary": ("", ""), **{key: [] for key, _ in MODEL_SECTIONS}}
 
 
-def render_language(code, heading, notes, previous):
-    """One language block: optional summary, then `####` categories, or the empty line."""
+def render_language(code, heading, notes, previous, banner=None):
+    """One language block: its banner, optional summary, then `####` categories, or the empty line."""
     index = 0 if code == "english" else 1
-    parts = [notes["summary"][index]] if notes["summary"][index] else []
+    parts = [banner] if banner else []
+    if notes["summary"][index]:
+        parts.append(notes["summary"][index])
     for key, _ in MODEL_SECTIONS:
         items = [item[index] for item in notes[key] if item[index]]
         if items:
             parts.append(f"#### {LANGUAGE_HEADINGS[code][key]}\n\n" + "\n".join(f"- {item}" for item in items))
-    if not parts:
+    if len(parts) == (1 if banner else 0):
         parts.append(nothing_to_say(previous) if code == "english" else nothing_to_say_zh(previous))
     return f"### {heading}\n\n" + "\n\n".join(parts)
 
 
-def render_model_notes(version, notes, previous=None, repo=None, banner=None):
-    """Bilingual notes: the banner line, `### English`, then `### 简体中文`, categories at `####`.
+def render_model_notes(version, notes, previous=None, repo=None, banners=None):
+    """Bilingual notes: `### English`, then `### 简体中文`, categories at `####`.
 
-    The banner belongs to both languages, so it stands above them. The compare link
+    `banners` maps a language to the image line its block opens with. The compare link
     follows both blocks, outside either language's prose.
     """
-    parts = [banner] if banner else []
-    parts += [render_language(code, heading, notes, previous) for code, heading in LANGUAGE_BLOCKS]
+    banners = banners or {}
+    parts = [render_language(code, heading, notes, previous, banners.get(code)) for code, heading in LANGUAGE_BLOCKS]
     link = compare_link(previous, f"v{display_version(version)}", repo)
     if link:
         parts.append(link)
@@ -762,9 +773,11 @@ def require_bilingual(text):
     blocks = language_blocks(body)
     if blocks is None:
         raise NotesError("Release notes are missing a language block")
+    # Headings, the compare link and banner pictures are not translated content.
     prose = [
         "\n".join(line for line in block.splitlines()
-                  if not line.startswith("#") and not line.startswith("**Full changelog**")).strip()
+                  if not line.startswith("#") and not line.startswith("**Full changelog**")
+                  and not BANNER.fullmatch(line)).strip()
         for block in blocks
     ]
     english, chinese = prose
@@ -816,10 +829,11 @@ def require_bundled_history(text):
             raise NotesError(f"Changelog repeats {'.'.join(str(part) for part in version)}.")
         seen.add(version)
         require_bilingual(body)
-        banner = recorded_banner(body)
         number = ".".join(str(part) for part in version)
-        if banner and banner[1] not in {(BANNERS / f"{number}{suffix}").as_posix() for suffix in BANNER_TYPES}:
-            raise NotesError(f"The banner of {number} must be {BANNERS.as_posix()}/{number}.png or .jpg, not {banner[1]}.")
+        for match in BANNER.finditer(body):
+            if match.group("path") not in banner_names(number):
+                raise NotesError(f"The banner of {number} must be {BANNERS.as_posix()}/{number}.jpg, "
+                                 f"{number}.zh-Hans.jpg or their .png, not {match.group('path')}.")
     return text
 
 
@@ -831,9 +845,9 @@ def write_with_model(version, previous, revision, repo=None, cwd=ROOT, transport
         change = classify(sha, subject, body)
         if change is not None:
             entries.append((sha, " ".join(subject.split()), body, change.group == "internal"))
-    banner = banner_line(version, cwd)
+    banners = {code: banner_line(version, cwd, code) for code, _ in LANGUAGE_BLOCKS}
     if not entries:
-        return render_model_notes(version, empty_notes(), previous, repo, banner)
+        return render_model_notes(version, empty_notes(), previous, repo, banners)
     url, model, key = model_settings(environ)
     payload = {
         "model": model,
@@ -843,7 +857,7 @@ def write_with_model(version, previous, revision, repo=None, cwd=ROOT, transport
         "messages": [{"role": "user", "content": model_prompt(version, previous, entries)}],
     }
     text = streamed_text((transport or stream)(url, key, payload))
-    return render_model_notes(version, parse_notes(text), previous, repo, banner)
+    return render_model_notes(version, parse_notes(text), previous, repo, banners)
 
 
 def notes_for(version, previous, revision, repo=None, ai=False, cwd=ROOT, transport=None, environ=None):

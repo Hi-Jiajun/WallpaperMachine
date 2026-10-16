@@ -6,8 +6,11 @@ struct AppReleaseHistory {
         let version: SemanticVersion
         let english: ReleaseNotes
         let chinese: ReleaseNotes
-        /// The picture above both translations, if the release has one.
-        var banner: Banner? = nil
+        /// The picture each translation opens with, if the release has one.
+        var englishBanner: Banner? = nil
+        var chineseBanner: Banner? = nil
+
+        func banner(chinese: Bool) -> Banner? { chinese ? chineseBanner : englishBanner }
     }
 
     /// A file in the bundle's `ReleaseBanners` folder, and what it shows.
@@ -36,7 +39,8 @@ struct AppReleaseHistory {
         var english = ""
         var chinese = ""
         var language = ""
-        var banner: Banner?
+        var englishBanner: Banner?
+        var chineseBanner: Banner?
         func finish() throws {
             guard let version else { return }
             guard !entries.contains(where: { $0.version == version }) else {
@@ -46,7 +50,8 @@ struct AppReleaseHistory {
                   let zh = ReleaseNotes(version: version.display, body: chinese) else {
                 throw InvalidHistory.missingTranslation
             }
-            entries.append(Entry(version: version, english: en, chinese: zh, banner: banner))
+            entries.append(Entry(version: version, english: en, chinese: zh,
+                                 englishBanner: englishBanner, chineseBanner: chineseBanner))
         }
         for line in markdown.components(separatedBy: .newlines) {
             if line.hasPrefix("## ") {
@@ -61,14 +66,16 @@ struct AppReleaseHistory {
                 english = ""
                 chinese = ""
                 language = ""
-                banner = nil
+                englishBanner = nil
+                chineseBanner = nil
             } else if line == "### English" {
                 language = "en"
             } else if line == "### 简体中文" {
                 language = "zh-Hans"
-            } else if version != nil, language.isEmpty {
-                // Above both languages only the banner line is read.
-                banner = Self.banner(line) ?? banner
+            } else if version != nil, !language.isEmpty, let banner = Self.banner(line) {
+                // A banner is shown above the notes, not read as one of them.
+                if language == "en" { englishBanner = englishBanner ?? banner }
+                if language == "zh-Hans" { chineseBanner = chineseBanner ?? banner }
             } else if version != nil {
                 if language == "en" { english += line + "\n" }
                 if language == "zh-Hans" { chinese += line + "\n" }

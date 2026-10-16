@@ -82,7 +82,7 @@ Shared/                            contracts compiled into both targets: lock-sc
                                    lifecycle, web-wallpaper protocol and screen-saver surface, RuntimeCounters,
                                    WallpaperPresentationAuthority, display power and its re-check burst
 Resources/StarterWallpaper/        bundled sample wallpaper (Aurora.mp4, preview.jpg, project.json)
-Resources/ReleaseBanners/          bundled release banners, x.y.z.jpg or .png, shown by What's New and the release page
+Resources/ReleaseBanners/          bundled release banners, x.y.z.jpg and x.y.z.zh-Hans.jpg (or .png), shown by What's New and the release page
 Tests/Unit/<Domain>/               WallpaperMachineTests, one folder per App/Services domain plus Panel for
                                    Views/ControlPanel; hosted in the app binary
 Tests/UI/                          WallpaperMachineUITests; desktop-driving XCUITest suite

@@ -68,13 +68,13 @@ does both halves; GitHub's auto-generated notes are not used. Once a version's
 tag exists, its section is not extended: the tag's build already bundled it, so
 a change that lands later belongs in the next release's notes.
 
-A bundled changelog section is an optional banner line, then both languages, in
-this order, and nothing else at `###`:
+A bundled changelog section is both languages, in this order, and nothing else at
+`###`; each language may open with its banner line:
 
 ```markdown
-![WallpaperMachine 0.2.0](Resources/ReleaseBanners/0.2.0.jpg)
-
 ### English
+
+![WallpaperMachine 0.2.0](Resources/ReleaseBanners/0.2.0.jpg)
 
 One or two sentences on what the release means, omitted when the lists say it.
 
@@ -83,6 +83,8 @@ One or two sentences on what the release means, omitted when the lists say it.
 - One change, one line
 
 ### 简体中文
+
+![WallpaperMachine 0.2.0](Resources/ReleaseBanners/0.2.0.zh-Hans.jpg)
 
 同样的一两句。
 
@@ -109,19 +111,23 @@ define the release, which the other sections still list.
 
 ### Release banners
 
-A feature release can carry a banner: a 3:1 picture (2400 × 800 pixels, JPEG or PNG)
-committed as `Resources/ReleaseBanners/x.y.z.jpg` or `.png` before the commit with the
-`release:` line. When the section is written, the script puts its image line above
-both languages, so the banner belongs to both translations:
+A feature release can carry a banner in each language: a 3:1 picture (2400 × 800
+pixels, JPEG or PNG) committed as `Resources/ReleaseBanners/x.y.z.jpg` (English) and
+`x.y.z.zh-Hans.jpg` (Simplified Chinese), or `.png`, before the commit with the
+`release:` line. Each banner carries its own language's words; without a Chinese file
+the Chinese notes share the English banner. When the section is written, the script
+opens each language block with its image line:
 
-- `CHANGELOG.md` on GitHub shows it from the repository path.
-- The release page shows it from the version's tag on `raw.githubusercontent.com`,
-  above the English notes.
+- `CHANGELOG.md` on GitHub shows both from the repository path.
+- The release page shows the English one from the version's tag on
+  `raw.githubusercontent.com`, at the top of the English notes.
 - The app bundles the folder; the What's New window shows the banner of the version
-  it announces above its header, not those of skipped versions.
+  it announces above its header, in the selected translation, not those of skipped
+  versions.
 
-Publishing refuses a banner line that names another version's file. Above
-`### English` only the image line is read; other text there is not shown.
+Publishing refuses a banner line that names another version's file, and a banner
+line is not translated prose: a language block holding only a picture is missing its
+translation.
 Banners are drawn for the product, not taken from Workshop wallpapers: their art
 belongs to their authors. Sections whose tag exists keep the banner they shipped
 with, so a banner never goes back into an older release.
