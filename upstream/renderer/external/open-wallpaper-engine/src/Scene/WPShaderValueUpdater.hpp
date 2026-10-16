@@ -67,6 +67,7 @@ struct WPUniformInfo {
     struct Tex {
         bool has_resolution { false };
         bool has_mipmap { false };
+        bool has_texel { false };
     };
     std::array<Tex, 12> texs;
 };

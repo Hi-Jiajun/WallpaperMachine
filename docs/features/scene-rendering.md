@@ -75,7 +75,9 @@ light's radius.
 
 Scene lighting is the author's own shader reading the light positions and
 premultiplied colours, which both renderers fill from the scene's lights the same
-way. Both renderers apply a material's depth state and cull mode the same way: a
+way. `g_Texture<N>Texel` is the step of
+the texture a slot samples, as for Wallpaper Engine's morph-target and downsample
+shaders. Both renderers apply a material's depth state and cull mode the same way: a
 pass into a depth-attached target (a model, a skybox, a scene with a perspective
 camera) takes its material's depth test, depth write and cull mode, against the same
 front faces, and every other pass draws in painter's order and culls nothing. A pass

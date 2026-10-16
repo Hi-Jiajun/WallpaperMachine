@@ -1212,10 +1212,21 @@ void RegisterMaterialTexture(Scene& scene, fs::VFS& vfs, SceneMaterial& material
             }
         }
     }
+    const std::string gTexel = WE_GLTEX_TEXEL_NAMES[slot];
     if (resolution.has_value()) {
         materialShader.constValues[gResolution] = array_cast<float>(*resolution);
+        // The texture's own size, which is what a tap one texel over steps.
+        const float width  = static_cast<float>((*resolution)[2]);
+        const float height = static_cast<float>((*resolution)[3]);
+        if (width > 0.0f && height > 0.0f) {
+            materialShader.constValues[gTexel] =
+                std::array { 1.0f / width, 1.0f / height, width, height };
+        } else {
+            materialShader.constValues.erase(gTexel);
+        }
     } else {
         materialShader.constValues.erase(gResolution);
+        materialShader.constValues.erase(gTexel);
     }
 }
 

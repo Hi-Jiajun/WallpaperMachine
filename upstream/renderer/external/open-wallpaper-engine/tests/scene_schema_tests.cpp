@@ -2047,6 +2047,34 @@ TEST(SceneSchema, ParserKeepsSceneLightsAndUpdatesViewUniforms) {
     EXPECT_NEAR(captured["g_LightsPosition"][2], 33.0f, 1e-3f);
 }
 
+TEST(SceneSchema, ATextureSlotsTexelIsTheStepOfTheTextureItSamples) {
+    std::map<std::string, std::string> files;
+    AddLeafModelSceneFiles(files);
+    files["/mat/head.json"] =
+        R"({"passes":[{"shader":"genericimage","textures":["_rt_4FrameBuffer"]}]})";
+    fs::VFS vfs;
+    ASSERT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+    audio::SoundManager sound_manager;
+    WPSceneParser       parser;
+    auto scene = parser.Parse("texel", PerspectiveSceneJson(R"([
+      {"id":1,"name":"planet","model":"planet.mdl"}
+    ])"), vfs, sound_manager);
+    ASSERT_NE(scene, nullptr);
+    auto node = FindRootChildByName(*scene, "planet");
+    ASSERT_NE(node, nullptr);
+    const auto* target = scene->FindRenderTarget("_rt_4FrameBuffer");
+    ASSERT_NE(target, nullptr);
+    ASSERT_GT(target->width, 0);
+    const auto& values = node->Mesh()->MaterialSlotPtr(0)->customShader.constValues;
+    ASSERT_TRUE(values.contains("g_Texture0Texel"));
+    const auto& texel = values.at("g_Texture0Texel");
+    ASSERT_EQ(texel.size(), 4u);
+    EXPECT_FLOAT_EQ(texel[0], 1.0f / float(target->width));
+    EXPECT_FLOAT_EQ(texel[1], 1.0f / float(target->height));
+    EXPECT_FLOAT_EQ(texel[2], float(target->width));
+    EXPECT_FLOAT_EQ(texel[3], float(target->height));
+}
+
 TEST(SceneSchema, ParserKeepsInvisibleImageDependencySources) {
     fs::VFS vfs;
     MountSceneFiles(vfs);

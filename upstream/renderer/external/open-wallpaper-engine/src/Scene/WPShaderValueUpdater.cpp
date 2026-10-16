@@ -202,6 +202,7 @@ void WPShaderValueUpdater::InitUniforms(SceneNode* pNode, uint32_t material_slot
     std::accumulate(begin(info.texs), end(info.texs), 0, [&existsOp](uint index, auto& value) {
         value.has_resolution = existsOp(WE_GLTEX_RESOLUTION_NAMES[index]);
         value.has_mipmap     = existsOp(WE_GLTEX_MIPMAPINFO_NAMES[index]);
+        value.has_texel      = existsOp(WE_GLTEX_TEXEL_NAMES[index]);
         return index + 1;
     });
 }
@@ -287,6 +288,12 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, uint32_t material_sl
             }
             if (unifrom_tex.has_mipmap) {
                 updateOp(WE_GLTEX_MIPMAPINFO_NAMES[el.first], (float)rt.mipmap_level);
+            }
+            if (unifrom_tex.has_texel && rt.width > 0 && rt.height > 0) {
+                const float width  = static_cast<float>(rt.width);
+                const float height = static_cast<float>(rt.height);
+                updateOp(WE_GLTEX_TEXEL_NAMES[el.first],
+                         std::array { 1.0f / width, 1.0f / height, width, height });
             }
         }
         if (nodeData->puppet_layer.hasPuppet() && info.has_BONES) {

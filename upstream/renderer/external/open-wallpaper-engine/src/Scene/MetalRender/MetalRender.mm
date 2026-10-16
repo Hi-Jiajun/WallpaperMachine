@@ -3705,6 +3705,14 @@ void MetalRender::Impl::writeUniforms(Scene& scene, const ScenePassDescription& 
         };
         write(WE_GLTEX_RESOLUTION_NAMES[i],
               ShaderValue(std::span<const float>(resolution.data(), resolution.size())));
+        if (width > 0 && height > 0) {
+            const std::array<float, 4> texel {
+                1.0f / static_cast<float>(width), 1.0f / static_cast<float>(height),
+                static_cast<float>(width), static_cast<float>(height),
+            };
+            write(WE_GLTEX_TEXEL_NAMES[i],
+                  ShaderValue(std::span<const float>(texel.data(), texel.size())));
+        }
     }
 
 }

@@ -741,7 +741,9 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   does so for Wallpaper Engine's own lit shaders when
   `WALLPAPER_MACHINE_ASSETS_ROOT` names them (`fur4` is excluded: its instanced shells read the
   dialect's `CASTF` cast macro, which the compiler does not supply, lit or unlit).
-  After a shader-crate change, rebuild
+  `SceneSchema.ATextureSlotsTexelIsTheStepOfTheTextureItSamples` checks that
+  `g_Texture<N>Texel` is (1 / width, 1 / height, width, height) of the sampled
+  texture. After a shader-crate change, rebuild
   `target/release/libshader.a` (`cargo build -p shader --features ffi --release`)
   before the CMake test binaries, or they link the old compiler.
 - **HDR, bloom and emissive masks** — an authored `hdr` scene uses RGBA16F color
