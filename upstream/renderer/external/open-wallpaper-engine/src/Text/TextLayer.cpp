@@ -90,7 +90,9 @@ FT_F26Dot6 FreeTypeCharHeight(float point_size) {
 struct GlyphRun {
     uint32_t codepoint { 0 };
     float    advance { 0.0f };
-    bool     fallback { false };
+    // The face that draws the glyph: 0 is the layer's font, then the faces of the
+    // fallback chain in the order the layout opened them (`FaceChain`).
+    uint8_t  face { 0 };
     float    left { 0.0f };
     float    right { 0.0f };
     float    top { 0.0f };
@@ -369,20 +371,54 @@ FT_Face OpenInstalledFace(const std::string& path, const std::string& postscript
     return face != nullptr && SetFaceSize(face, point_size) ? face : nullptr;
 }
 
-// What draws a glyph the layer's font does not have: the first of these that is
-// installed. Wallpaper Engine tries up to eight faces in a fixed order.
-constexpr std::string_view kFallbackFonts[] = { "systemfont_PingFang SC", "systemfont_Arial Unicode MS",
-                                                "systemfont_Helvetica" };
-// A layout touches its font (two stand-ins at most, when the layer's cannot be
-// opened) and each of these, so what it uses is never the face the cache drops.
-static_assert(std::size(kFallbackFonts) + 2 < FaceCache::kCapacity);
+// What draws a glyph the layer's font does not have: Wallpaper Engine tries a fixed list of
+// fonts for it, opening each only when no face it holds has the glyph, and draws the glyph
+// from the first that does. Its list is Arial, Segoe UI Emoji, Arial Unicode MS, Segoe UI,
+// Twemoji, Segoe UI Symbol, Microsoft YaHei and Malgun Gothic, each from the Windows Fonts
+// folder (or, for Twemoji, its own assets). The faces here are the ones that stand for them.
+//
+//  - Colour emoji (Segoe UI Emoji, Twemoji) are colour bitmaps, which FreeType's monochrome
+//    glyphs do not draw (docs/features/scene-rendering.md), so neither has a face here.
+//  - Arial Unicode MS is last, not third: it ships with Microsoft Office and not with Windows,
+//    so Wallpaper Engine on a stock install draws Chinese in Microsoft YaHei, and PingFang SC
+//    is the face that sets Simplified Chinese punctuation as it does. The scripts no other face
+//    has (Thai, Hebrew with points, ...) still draw from it.
+//  - Apple Symbols stands for Segoe UI Symbol but is not asked for the CJK punctuation and
+//    fullwidth forms (U+3000-303F, U+FF00-FFEF): it has some of them, set centred in the cell,
+//    where Microsoft YaHei, whose stand-in is the next face, sets them as Simplified Chinese
+//    does, so a string would otherwise mix the two (a centred fullwidth comma beside a
+//    left-set ideographic one). That Segoe UI Symbol does not have them is inferred.
+struct ChainFace {
+    // A scene font key (`ResolveSceneFont`), or an installed family (`ResolveInstalledFamily`).
+    std::string_view name;
+    bool             scene_key;
+    // The face is not asked for CJK punctuation and fullwidth forms (`IsCjkPunctuation`).
+    bool             not_for_cjk_punctuation { false };
+};
+constexpr ChainFace kFallbackChain[] = {
+    { "systemfont_arial", true },   // arial.ttf
+    { "systemfont_segoe", true },   // segoeui.ttf
+    { "Apple Symbols", false, true }, // seguisym.ttf
+    { "PingFang SC", false },       // msyh.ttc
+    { "Apple SD Gothic Neo", false }, // Malgun.ttf
+    { "Arial Unicode MS", false },  // arialuni.ttf
+};
 
-// The faces one layout draws with: the layer's own font, and a face for the glyphs
-// that font lacks, which is not looked for until a glyph needs it. Both are sized
-// for the layout and only good while the caller holds `g_freetype_mutex`.
+// CJK Symbols and Punctuation, and Halfwidth and Fullwidth Forms.
+constexpr bool IsCjkPunctuation(uint32_t codepoint) {
+    return (codepoint >= 0x3000u && codepoint <= 0x303Fu) ||
+           (codepoint >= 0xFF00u && codepoint <= 0xFFEFu);
+}
+// A layout holds its font, a face standing in for it when it cannot be opened, and the chain,
+// so none of what it holds is the face the cache drops.
+static_assert(std::size(kFallbackChain) + 2 <= FaceCache::kCapacity);
+
+// The faces one layout draws with: the layer's own font, and the fallback chain's, none of
+// which is opened until a glyph needs it. All are sized for the layout and only good while the
+// caller holds `g_freetype_mutex`.
 class FaceChain {
 public:
-    explicit FaceChain(const TextLayerState& state): m_point_size(state.point_size) {
+    explicit FaceChain(const TextLayerState& state): m_point_size(ClampedPointSize(state.point_size)) {
         FaceCache::Get().Refresh();
         // Keep an authored, usable font first. A package can also contain a broken
         // font, or a previously resolved file can disappear before rasterization.
@@ -390,45 +426,80 @@ public:
         // the same real face in all of these cases, not placeholder rectangles.
         if (! state.resolved_font_data.empty()) {
             m_owned = CreateFreeTypeFaceFromBytes(state.resolved_font_data.bytes(), state.point_size);
-            m_primary = m_owned.get();
+            Hold(m_owned.get());
         } else if (! state.resolved_font_path.empty()) {
-            m_primary =
-                OpenInstalledFace(state.resolved_font_path, state.resolved_font_face, state.point_size);
+            m_fit = state.resolved_font_fit;
+            Hold(OpenFitted(state.resolved_font_path, state.resolved_font_face, m_fit));
         }
-        if (m_primary != nullptr) return;
-        for (const auto& key : { state.font_key, std::string("systemfont_sansserif") }) {
-            const auto font = ResolveSystemFont(key);
-            m_primary       = OpenInstalledFace(font.path, font.postscript_name, state.point_size);
-            if (m_primary != nullptr) return;
+        if (primary() != nullptr) return;
+        // Wallpaper Engine draws what it cannot load in Arial.
+        for (const auto& key : { state.font_key, std::string(kDefaultSceneFontKey) }) {
+            const auto font = ResolveSceneFont(key);
+            m_fit           = font.fit;
+            Hold(OpenFitted(font.path, font.postscript_name, m_fit));
+            if (primary() != nullptr) return;
         }
+        m_fit = {};
     }
 
-    FT_Face primary() const { return m_primary; }
+    FT_Face primary() const { return m_held.empty() ? nullptr : m_held.front(); }
+    // How the primary face stands in for the font the layer names, if it does.
+    const SystemFontFit& primaryFit() const { return m_fit; }
+    FT_Face              face(uint8_t index) const { return m_held[index]; }
 
-    // The face behind a glyph the font lacks, null where none is installed. Asked
-    // for once per layout, and not before a glyph needs it.
-    FT_Face fallback() {
-        if (m_fallback_looked_up) return m_fallback;
-        m_fallback_looked_up = true;
-#ifdef WESCENE_BUILD_TESTS
-        ++g_fallback_requests;
-#endif
-        for (const auto key : kFallbackFonts) {
-            const auto font = ResolveSystemFont(key);
-            FT_Face    face = OpenInstalledFace(font.path, font.postscript_name, m_point_size);
-            if (face == nullptr || face == m_primary) continue;
-            m_fallback = face;
-            break;
+    // The index of the face that draws `codepoint` -- the layer's font if it has the glyph,
+    // else the first face of the chain that does, opened now if it has not been -- or -1 when
+    // no face has it. A face is only looked for once the faces held lack the glyph.
+    int FaceFor(uint32_t codepoint) {
+        for (std::size_t index = 0; index < m_held.size(); ++index) {
+            if (Declines(index, codepoint)) continue;
+            if (FT_Get_Char_Index(m_held[index], codepoint) != 0u) return static_cast<int>(index);
         }
-        return m_fallback;
+        while (m_next_in_chain < std::size(kFallbackChain)) {
+#ifdef WESCENE_BUILD_TESTS
+            if (m_next_in_chain == 0) ++g_fallback_requests;
+#endif
+            const auto& entry = kFallbackChain[m_next_in_chain++];
+            const auto  font  = entry.scene_key ? ResolveSceneFont(entry.name)
+                                                : ResolveInstalledFamily(entry.name);
+            FT_Face     other = FaceCache::Get().Acquire(font.path, font.postscript_name);
+            // A face that is held already has been asked for the glyph, and is sized for the
+            // layer's font: the cache hands out one face per file, so it is left alone.
+            if (other == nullptr || std::ranges::find(m_held, other) != m_held.end()) continue;
+            if (! SetFaceSize(other, m_point_size * font.fit.size_adjust)) continue;
+            Hold(other, entry.not_for_cjk_punctuation);
+            if (Declines(m_held.size() - 1, codepoint)) continue;
+            if (FT_Get_Char_Index(other, codepoint) != 0u) return static_cast<int>(m_held.size() - 1);
+        }
+        return -1;
     }
 
 private:
-    float     m_point_size { 12.0f };
-    FT_Face   m_primary { nullptr };
-    OwnedFace m_owned;
-    FT_Face   m_fallback { nullptr };
-    bool      m_fallback_looked_up { false };
+    // The installed face, sized for the layout at the point size its fit gives it.
+    FT_Face OpenFitted(const std::string& path, const std::string& postscript_name,
+                       const SystemFontFit& fit) const {
+        return OpenInstalledFace(path, postscript_name, m_point_size * fit.size_adjust);
+    }
+
+    void Hold(FT_Face face, bool not_for_cjk_punctuation = false) {
+        if (face == nullptr) return;
+        m_held.push_back(face);
+        m_not_for_cjk_punctuation.push_back(not_for_cjk_punctuation);
+    }
+
+    // Whether the face held at `index` is one that is not asked for `codepoint`.
+    bool Declines(std::size_t index, uint32_t codepoint) const {
+        return m_not_for_cjk_punctuation[index] && IsCjkPunctuation(codepoint);
+    }
+
+    float                m_point_size { 12.0f };
+    // The faces held, the layer's font first.
+    std::vector<FT_Face> m_held;
+    // For each face held: whether it is not asked for CJK punctuation.
+    std::vector<bool>    m_not_for_cjk_punctuation;
+    OwnedFace            m_owned;
+    SystemFontFit        m_fit;
+    std::size_t          m_next_in_chain { 0 };
 };
 
 std::vector<uint32_t> DecodeUtf8(std::string_view text) {
@@ -537,17 +608,10 @@ float GlyphAdvance(const GlyphRun& glyph, float spacing_x) {
 }
 
 std::optional<GlyphRun> MeasureGlyph(FaceChain& faces, uint32_t codepoint, float spacing_x) {
-    FT_Face face     = faces.primary();
-    bool    fallback = false;
-    if (FT_Get_Char_Index(face, codepoint) == 0u) {
-        // Only a glyph the font lacks looks for the second face.
-        FT_Face other = faces.fallback();
-        if (other != nullptr && FT_Get_Char_Index(other, codepoint) != 0u) {
-            face     = other;
-            fallback = true;
-        }
-    }
-    if (FT_Get_Char_Index(face, codepoint) == 0u) return std::nullopt;
+    // Only a glyph the font lacks looks for another face, and a glyph no face has is skipped.
+    const int face_index = faces.FaceFor(codepoint);
+    if (face_index < 0) return std::nullopt;
+    FT_Face face = faces.face(static_cast<uint8_t>(face_index));
     if (FT_Load_Char(face, codepoint, FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL) != 0) return std::nullopt;
 
     const FT_GlyphSlot slot    = face->glyph;
@@ -562,7 +626,7 @@ std::optional<GlyphRun> MeasureGlyph(FaceChain& faces, uint32_t codepoint, float
     }
     GlyphRun           glyph {
                   .codepoint = codepoint,
-                  .fallback  = fallback,
+                  .face      = static_cast<uint8_t>(face_index),
                   .has_ink   = has_ink,
                   .glyph_index  = glyph_index,
                   .advance_26_6 = advance_26_6,
@@ -754,8 +818,8 @@ std::vector<LineRun> BuildFreeTypeLines(const TextLayerState& state, FaceChain& 
         [&](uint32_t codepoint) { return MeasureGlyph(faces, codepoint, spacing_x); },
         [&](const GlyphRun& left, const GlyphRun& right) -> int32_t {
             // Neighbours of one face only, as a shaper kerns a run of one font.
-            FT_Face used = left.fallback ? faces.fallback() : faces.primary();
-            if (left.fallback != right.fallback || used == nullptr || ! FT_HAS_KERNING(used)) return 0;
+            FT_Face used = faces.face(left.face);
+            if (left.face != right.face || used == nullptr || ! FT_HAS_KERNING(used)) return 0;
             FT_Vector kern {};
             if (FT_Get_Kerning(used, left.glyph_index, right.glyph_index, FT_KERNING_UNFITTED, &kern) != 0) {
                 return 0;
@@ -791,15 +855,47 @@ TextBlock MeasureTextBlock(const std::vector<LineRun>& lines, const FaceLayoutMe
     return block;
 }
 
-// Wallpaper Engine reads the size metrics FreeType has rounded (the ascender up, the
-// descender down, the height to the nearest) and cuts them to whole pixels.
-FaceLayoutMetrics FaceMetrics(const TextLayerState& state, FT_Face face) {
-    const auto metrics = face->size->metrics;
-    return {
-        .ascender  = static_cast<float>(metrics.ascender >> 6),
-        .descender = static_cast<float>(-(metrics.descender >> 6)),
-        .pitch     = static_cast<float>(metrics.height >> 6) + LineSpacing(state),
+// The size metrics of a scalable face of `units` at the layer's point size, as FreeType
+// makes them (`FT_Request_Metrics`): the requested height at 300 dpi gives the scale from
+// font units, and the ascender is rounded up, the descender down and the height to the
+// nearest whole pixel.
+FaceLayoutMetrics LineMetricsOf(const TextLayerState& state, const FontLineMetrics& units) {
+    const FT_Pos   scaled = (static_cast<FT_Pos>(FreeTypeCharHeight(state.point_size)) *
+                               static_cast<FT_Pos>(kTextDpi) + 36) / static_cast<FT_Pos>(kPointsPerInch);
+    const FT_Fixed scale  = FT_DivFix(scaled, static_cast<FT_Long>(units.units_per_em));
+    const auto     px_up  = [&](FT_Long font_units) {
+        return static_cast<float>((FT_MulFix(font_units, scale) + 63) >> 6);
     };
+    const auto px_near = [&](FT_Long font_units) {
+        return static_cast<float>((FT_MulFix(font_units, scale) + 32) >> 6);
+    };
+    return {
+        .ascender  = px_up(units.ascender),
+        .descender = px_up(units.descender),
+        .pitch     = px_near(static_cast<FT_Long>(units.ascender) + units.descender + units.line_gap),
+    };
+}
+
+// Wallpaper Engine reads the size metrics FreeType has rounded (the ascender up, the
+// descender down, the height to the nearest) and cuts them to whole pixels. A face that
+// stands in for a font Wallpaper Engine has and this machine lacks is measured in that
+// font's line metrics instead, so that the card and the place the text lies in it come out
+// as they do there.
+FaceLayoutMetrics FaceMetrics(const TextLayerState& state, const FaceChain& faces) {
+    FaceLayoutMetrics metrics;
+    const auto&       fit = faces.primaryFit();
+    if (fit.line_metrics.has_value() && fit.line_metrics->units_per_em > 0) {
+        metrics = LineMetricsOf(state, *fit.line_metrics);
+    } else {
+        const auto size = faces.primary()->size->metrics;
+        metrics         = {
+            .ascender  = static_cast<float>(size.ascender >> 6),
+            .descender = static_cast<float>(-(size.descender >> 6)),
+            .pitch     = static_cast<float>(size.height >> 6),
+        };
+    }
+    metrics.pitch += LineSpacing(state);
+    return metrics;
 }
 
 // Without a usable face the layout runs on boxes: 0.6 em advances, 0.9 em glyphs
@@ -1204,7 +1300,7 @@ bool RasterizeFreeTypeText(const TextLayerState& state, uint32_t width, uint32_t
 
     const auto lines = BuildFreeTypeLines(state, faces);
 
-    const auto metrics = FaceMetrics(state, faces.primary());
+    const auto metrics = FaceMetrics(state, faces);
     const auto block   = MeasureTextBlock(lines, metrics);
     // The style's margin is clear room around the card the text is laid out in.
     const Eigen::Vector2f padding =
@@ -1217,8 +1313,7 @@ bool RasterizeFreeTypeText(const TextLayerState& state, uint32_t width, uint32_t
     for (const auto& line : lines) {
         float pen_x = padding.x() - block.min_x + RowOffset(state, block.widest_row, line.LayoutWidth());
         for (const auto& glyph : line.glyphs) {
-            FT_Face glyph_face = glyph.fallback ? faces.fallback() : nullptr;
-            if (glyph_face == nullptr) glyph_face = faces.primary();
+            FT_Face glyph_face = faces.face(glyph.face);
             if (FT_Load_Char(glyph_face, glyph.codepoint, FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL) !=
                 0) {
                 pen_x += glyph.advance;
@@ -1262,7 +1357,7 @@ std::optional<TextLayerLayout> MeasureFreeTypeText(const TextLayerState& state) 
     if (faces.primary() == nullptr) return std::nullopt;
 
     const auto lines   = BuildFreeTypeLines(state, faces);
-    const auto metrics = FaceMetrics(state, faces.primary());
+    const auto metrics = FaceMetrics(state, faces);
     return LayoutOfBlock(state, MeasureTextBlock(lines, metrics));
 }
 
@@ -1291,6 +1386,12 @@ std::size_t LongestLineCodepoints(std::string_view text) {
 Eigen::Vector2f TextLayerRasterSizeForLayout(const TextLayerState& state,
                                              const TextLayerLayout& layout) {
     return layout.card + Eigen::Vector2f::Constant(2.0f * TextStyleMargin(state));
+}
+
+Eigen::Vector2f TextCardInsetInRaster(const TextLayerState& state, const TextLayerLayout& layout) {
+    const auto raster = TextLayerRasterSizeForLayout(state, layout);
+    const float margin = TextStyleMargin(state);
+    return { raster.x() > 0.0f ? margin / raster.x() : 0.0f, raster.y() > 0.0f ? margin / raster.y() : 0.0f };
 }
 
 bool TextStyleActive(const TextStyle& style) { return style.outline || style.blur || style.drop_shadow; }
@@ -1545,9 +1646,24 @@ void ResetTextFontCacheForTests() {
 }
 #endif
 
+namespace
+{
+// What a face's fit adds to the identity of the glyphs drawn with it.
+std::string FontFitIdentity(const SystemFontFit& fit) {
+    std::string identity = std::to_string(fit.size_adjust);
+    if (fit.line_metrics.has_value()) {
+        identity += ":" + std::to_string(fit.line_metrics->units_per_em) + "/" +
+                    std::to_string(fit.line_metrics->ascender) + "/" +
+                    std::to_string(fit.line_metrics->descender) + "/" +
+                    std::to_string(fit.line_metrics->line_gap);
+    }
+    return identity;
+}
+} // namespace
+
 TextLayer::TextLayer(TextLayerState state): m_state(std::move(state)) {
     if (m_state.resolved_font_identity.empty()) m_state.resolved_font_identity = m_state.font_key;
-    if (m_state.resolved_font_kind.empty()) m_state.resolved_font_kind = "family";
+    if (m_state.resolved_font_kind.empty()) m_state.resolved_font_kind = "system";
     EnsureCacheIdentity();
     Relayout();
     MarkCacheDirty();
@@ -1557,7 +1673,7 @@ TextLayer::TextLayer(TextLayerState state): m_state(std::move(state)) {
 TextLayer::TextLayer(TextLayerState state, TextLayerLayout layout)
     : m_state(std::move(state)), m_layout(std::move(layout)) {
     if (m_state.resolved_font_identity.empty()) m_state.resolved_font_identity = m_state.font_key;
-    if (m_state.resolved_font_kind.empty()) m_state.resolved_font_kind = "family";
+    if (m_state.resolved_font_kind.empty()) m_state.resolved_font_kind = "system";
     EnsureCacheIdentity();
     MarkCacheDirty();
     m_state.dirty = false;
@@ -1580,10 +1696,11 @@ void TextLayer::SetPointSize(float point_size) {
 }
 
 void TextLayer::SetFont(std::string font_key, std::string kind, std::string identity,
-                        std::string path, std::string face, SharedFontData data) {
+                        std::string path, std::string face, SystemFontFit fit,
+                        SharedFontData data) {
     if (m_state.font_key == font_key && m_state.resolved_font_kind == kind &&
         m_state.resolved_font_identity == identity && m_state.resolved_font_path == path &&
-        m_state.resolved_font_face == face) {
+        m_state.resolved_font_face == face && m_state.resolved_font_fit == fit) {
         return;
     }
     m_state.font_key               = std::move(font_key);
@@ -1591,6 +1708,7 @@ void TextLayer::SetFont(std::string font_key, std::string kind, std::string iden
     m_state.resolved_font_identity = std::move(identity);
     m_state.resolved_font_path     = std::move(path);
     m_state.resolved_font_face     = std::move(face);
+    m_state.resolved_font_fit      = std::move(fit);
     m_state.resolved_font_data     = std::move(data);
     m_state.dirty                  = true;
     m_state.layout_pending         = true;
@@ -1648,6 +1766,7 @@ void TextLayer::EnsureCacheIdentity() {
                                  m_state.resolved_font_kind + "|" + m_state.resolved_font_identity +
                                  "|" + m_state.resolved_font_path + "|" +
                                  m_state.resolved_font_face + "|" +
+                                 FontFitIdentity(m_state.resolved_font_fit) + "|" +
                                  std::to_string(m_state.point_size) + "|" +
                                  std::to_string(m_state.max_width) + "|" +
                                  std::to_string(m_state.max_rows) + "|" +

@@ -60,12 +60,13 @@ folder work, and `location.protocol` is `file:`. The top frame cannot navigate a
 from the entry page; subframes and network requests are unrestricted (macOS ATS
 applies, so plain `http://` requests fail).
 
-Two scripts are installed at document start, built in one place
+Three scripts are installed at document start, built in one place
 (`Shared/WebWallpaperUserScripts.swift`) for the desktop page, the preview and the
 screen-saver web surface alike; desktop and preview pages get a copy built for each
 document. The host script (`Shared/WebWallpaperProtocol.swift`) is the author API and
-everything in the table below, and runs in the main frame only. The other script
-closes one gap between WebKit and Chromium. WebKit
+everything in the table below, and runs in the main frame only. The other two close
+gaps between WebKit and Chromium: one in file requests, one in fonts
+([below](#windows-fonts)). The first one is described here. WebKit
 answers a `fetch()` or `XMLHttpRequest` of a project file with status 0 and no
 headers, where Chromium answers 200 with a `Content-Type` taken from the extension. The script gives a found `file://` GET/HEAD response that status and
 type, so loaders that check `ok`, and WebGL exports (Unity, Emscripten) that call
@@ -77,13 +78,40 @@ bodies stay native: nothing is copied, retried or run per frame.
 That file-request script runs in every frame, so a page that hosts its player in an
 iframe of a project file, or in a `srcdoc` or script-created frame, gets the same
 answers as the page itself; it installs once per document and marks it with a
-non-enumerable `window.__mweFileCompat`. A subframe gets nothing else: no
+non-enumerable `window.__mweFileCompat`. A subframe gets nothing else but the
+[font aliases](#windows-fonts): no
 `wallpaperPropertyListener` delivery, no audio, media or random-file registration,
 and the host drops any message on the host channel that does not come from the main
 frame, so a frame (a remote embed included) cannot subscribe to audio or ask for
 files on the wallpaper's behalf. A frame served over http(s) keeps its own `fetch` and `XMLHttpRequest`.
 Web workers are out of reach of a user script, so a worker's own `fetch` of a project
 file still sees WebKit's status 0.
+
+### Windows fonts
+
+Wallpaper Engine runs a web wallpaper in Chromium on Windows, which finds the fonts a stock
+Windows has; WebKit on a Mac finds none of them, so a family it lacks falls to the page's
+next family or the standard font, and CoreText's cascade takes Chinese from Songti, a serif
+capped at bold. A heading set in `900 26pt SimHei` was a thin Song face where Wallpaper
+Engine draws a heavy sans, and a stack that starts with `Segoe UI` set its separators a third
+wider. The font script (`Shared/WebWallpaperFontAliases.swift`) runs in every frame of a
+page served from a file or the app, before the page's own style, and declares for each
+Windows font this Mac does not have an `@font-face` per name of the font that maps it to the
+macOS face standing in for it: `SimHei`, `Microsoft YaHei` and `DengXian` (and their Chinese
+names) to PingFang SC, `Microsoft JhengHei` to PingFang TC, `SimSun` to Songti SC, `KaiTi` to
+Kaiti SC, `Yu Gothic`, `Meiryo` and `MS Gothic` to Hiragino Sans, `MS Mincho` to Hiragino Mincho
+ProN and `Malgun Gothic` to Apple SD Gothic Neo, regular for weights below 550 and the heavy
+face from there (`SimHei` and `KaiTi` answer the Han range only, since stock Windows has
+neither and their Latin goes to the page's next family); `Segoe UI`, `Calibri`, `Cambria` and
+`Consolas` to PT Sans, PT Sans, Charter and Andale Mono, scaled by `size-adjust` (98.7, 93,
+99.6 and 91.6 percent) to the real fonts' digit advance, the same stand-ins and numbers
+as the scene renderer's text. A font is left alone when it is installed, which is told for
+the four Latin fonts by the width of their digits (macOS answers `Calibri` with a
+Helvetica-width substitute of its own, and Office for Mac installs the real fonts) and for
+the others by text set in the name measuring other than the fallback; a font the page
+declares for the same name later in its own style takes precedence, since the script's
+style is first in the document, and a page served over http(s) is left as it is. The script
+installs once per document and marks it with a non-enumerable `window.__mweFontAliases`.
 
 | Call into the page | When |
 |---|---|
@@ -465,6 +493,18 @@ never substitutes Pause for an unavailable mute.
 - The `fetch`/`XMLHttpRequest` fixes for project files reach the page and every frame
   it embeds, not web workers: a `fetch` made inside a worker still gets WebKit's
   status 0 and no `Content-Type` for a local file.
+- The [Windows font names](#windows-fonts) are a table of the families the local wallpapers
+  name, not every Windows font. The generic families (`sans-serif`, `monospace`, `system-ui`),
+  which differ between Chromium on Windows and WebKit, and the real fonts' line metrics
+  (`ascent-override` and its siblings, whose support in the shipped WebKit is not
+  established) are not matched, so a stand-in's lines can stand a little apart from the
+  real font's. A page that ships only a regular face under a Windows name and asks for bold
+  draws the stand-in's bold, since the script's heavy face matches that weight better than
+  the page's one face does. Only the digit advance of the Latin fonts is fitted, so a heading
+  in one is a few percent off; no frame of Wallpaper Engine's of a Latin interface font was
+  compared. The Chinese families were checked in a page, canvas text at weight 900 equal to
+  PingFang SC Semibold, and PingFang SC, Kaiti SC and the Hiragino faces are downloadable
+  system assets that a Mac may not have (the alias then does nothing).
 - Inspection covers the desktop pages and the live preview only. The screen saver
   and the lock-screen extension are never attachable through this setting, and an inspected page's JavaScript is open to anyone using this Mac's
   Safari while it is on.
@@ -503,7 +543,11 @@ cadence and in a real page with the rate a slow or full-refresh page draws at, t
 rebuilt when a frame rate crosses a fast display's refresh with its render scale, pause,
 limit and pointer rate carried over, render scale on `devicePixelRatio` including the
 resize rebuild of a canvas page, the audio pump with its silence cadence on a
-hand-moved clock, the inspection switch on running, new and preview pages) and the bridge contract in
+hand-moved clock, the inspection switch on running, new and preview pages, and
+`WebWallpaperFontAliasTests`: SimHei and Microsoft YaHei draw their Han in PingFang SC
+and not Songti, Segoe UI's digits are PT Sans's at 98.7 percent and the four Latin fonts have the
+real fonts' digit advance, a page's own `@font-face` of the same name wins, the style comes first in the
+document, subframes get it, an https document does not, and every surface's user scripts hold it) and the bridge contract in
 `upstream/renderer/crates/bridge/src/tests/` (`apply_options.rs`,
 `quality_settings.rs`, `web_audio_media.rs`); file and directory properties are
 covered under [user files](user-files.md#verification), and the domain inventory is in

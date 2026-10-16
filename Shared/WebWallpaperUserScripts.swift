@@ -12,11 +12,17 @@ extension WebWallpaperProtocol {
     /// timing hooks, goes into the main frame only: a subframe is not the
     /// wallpaper, and must neither answer the host nor be asked by it.
     ///
+    /// The font aliases (`WebWallpaperFontAliases`) go into every frame of a local page too,
+    /// since a subframe sets text in the fonts it names as the wallpaper does.
+    ///
     /// Web workers are out of reach of a user script, so a worker's own `fetch`
     /// keeps WebKit's behaviour.
     static func userScripts(seed: Seed = Seed()) -> [WKUserScript] {
         [
             WKUserScript(source: compatScript, injectionTime: .atDocumentStart, forMainFrameOnly: false),
+            WKUserScript(
+                source: WebWallpaperFontAliases.script, injectionTime: .atDocumentStart,
+                forMainFrameOnly: false),
             WKUserScript(
                 source: makeHostScript(seed: seed), injectionTime: .atDocumentStart, forMainFrameOnly: true),
         ]

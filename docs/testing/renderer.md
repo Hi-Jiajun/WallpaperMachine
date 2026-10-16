@@ -924,17 +924,38 @@ into private textures; the three that draw skip visibly without a Metal device.
   kerning, ligatures, complex scripts) and draws colour glyphs from an RGBA atlas; the
   layout kerns only from a font's legacy `kern` table (Arial has one, many OpenType
   fonts have only GPOS kerning and so go unkerned), forms no ligatures, and colour
-  glyphs are monochrome or missing. A glyph the layer's font lacks is drawn from one
-  installed face (PingFang SC, else Arial Unicode MS, else Helvetica), where Wallpaper
-  Engine tries up to eight faces in a fixed order (Arial, Segoe UI Emoji, Arial
-  Unicode, Segoe UI, Twemoji, Segoe UI Symbol, Microsoft YaHei, Malgun Gothic), so a
-  Latin glyph the font lacks comes from PingFang here and from Arial there. The font
-  files themselves are macOS's, not the Windows fonts a scene was authored with.
-  It draws one quad per glyph from a distance-field atlas, so the outline of
+  glyphs are monochrome or missing. A glyph the layer's font lacks is drawn from the first
+  face of a list that has it, as Wallpaper Engine does (Arial, Segoe UI Emoji, Arial
+  Unicode, Segoe UI, Twemoji, Segoe UI Symbol, Microsoft YaHei, Malgun Gothic), with two
+  differences that are not worked around: the colour emoji faces have no stand-in, since
+  FreeType's monochrome glyphs do not draw a colour bitmap, so an emoji the font and the
+  other faces lack is skipped, and Arial Unicode MS is last and not third, because that
+  font is Office's and not Windows' (on a stock install the reference draws Chinese in
+  Microsoft YaHei, whose Simplified Chinese punctuation PingFang SC shares; Arial
+  Unicode MS in the third place would draw it in its own forms). That order of the
+  reference is read from the decompile; what a Windows machine with Office does with it
+  is not. The font files are macOS's, not the Windows fonts a scene was authored with: of
+  the eight keys a text object honours, four are on every Mac as the same fonts (Arial,
+  Comic Sans MS, Microsoft Sans Serif, Verdana) and four are stood in for, fitted to the
+  real font's digit advance and line. Consolas is Andale Mono, whose digits stand 0.643 em
+  tall as Consolas's do (87 of 87 pixel rows in the clock of 3299228616 against
+  Wallpaper Engine's frame, and the digits within a pixel of its baseline). Cambria is
+  Charter (lining digits, the same cap height) and Segoe UI and Calibri are PT Sans:
+  their glyph shapes and widths other than the digits are those of the stand-in, so a
+  heading in them is a few percent off, and the ascender and descender of those three
+  are the fonts' as remembered, with only the sum of the two (the saved cards' line)
+  checked. The web host has the same fonts under the same names and the same fits, set
+  per page (see [web wallpapers](../features/web-wallpapers.md)), but its generic families
+  and its line metrics are not. It draws one quad per glyph from a distance-field atlas, so the outline of
   a glyph that overlaps its neighbour's fill is drawn over it there, and the outline,
   blur and shadow are made here from the union of the glyphs, at their reach but not
-  clipped to the atlas margin. `msdf` alone, `opaquebackground`, `backgroundcolor` and
-  `backgroundbrightness` are read and draw nothing. The screen `anchor` of a text layer
+  clipped to the atlas margin. `msdf` alone is read and draws nothing. An `opaquebackground`
+  is the card's rectangle in `backgroundcolor` times `backgroundbrightness` at the layer's
+  alpha, with the glyphs over it in one pass: for the colour blend "add" that is the glyph
+  over the fill and then added, where the reference adds the two quads separately, which
+  differs where they overlap (no local scene sets the key, and none has been compared with
+  a frame of the reference), and what the reference's clear covers where a layer has no
+  composite target of its own is not known. The screen `anchor` of a text layer
   shifts its draw by the margins of the area the display shows, as a translation in the
   scene's axes that its children do not inherit; that the shift is made in the scene's
   axes is read from the decompile, and that its margins are those of the visible area

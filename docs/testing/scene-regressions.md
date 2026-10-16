@@ -1612,7 +1612,7 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
 ## Text, fonts and clocks
 
 - **Fonts and limits** — `text_object_runtime_test`. Font decoding prefers valid
-  authored bytes, then a usable installed family, then a platform fallback;
+  authored bytes, then the installed face of the font the scene names, then Arial;
   missing paths and malformed embedded fonts use the same fallback for both
   measurement and rasterization. Coverage spans seven font choices and three
   text samples including Chinese, plus missing/corrupt sources and valid assets,
@@ -1625,7 +1625,8 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   same wrapping and truncation rules. A layout runs for every change of a text
   layer, so the faces are kept and not read each time:
   `TextObjectRuntime.ASystemFontIsOpenedOnceAndNotForEveryLayout` counts the font
-  files a layer's layouts open (one for the font, one more for a glyph it lacks; the
+  files a layer's layouts open (one for the font, then the faces of the list down to
+  the one that has a glyph it lacks, all on the first layout and none after; the
   faces read from their files, not from a copy of the font in memory),
   `.AFallbackFaceIsOpenedOnlyWhenAGlyphIsMissing` that text the font can draw asks for
   no second face, `.AFontTheWallpaperShipsIsNotOpenedFromAFile` that an authored font
@@ -1644,6 +1645,43 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   `.ANewFaceOfTheSameFileLaysTheTextOutAgain` cover how the name gets to the layer.
   They need the fonts macOS ships; the Han test skips where PingFang SC is not
   installed, and the eight-face test where fewer than ten of the fonts it names are.
+- **Scene fonts** — `text_object_runtime_test`. `TextObjectRuntime.SceneFontKeysAreTheEightWallpaperEngineKeys`
+  requires the eight `systemfont_` keys as the whole lower-case string and nothing near them
+  (`systemfont_Arial`, `fonts/systemfont_arial`, `systemfont_Helvetica`, `systemfont_serif`, a bare
+  family) to be a key, and everything that is not one to resolve to Arial;
+  `.AMissingFontFileDrawsInArial` parses a missing file, a bare family, a wrong-cased key and an
+  unknown key and requires Arial's face and Arial's pixels for each, with the font the scene named
+  still what a script reads back; `.ATextObjectWithoutAFontKeyIsArial` that a text object with no
+  `font` is in Arial and has Arial's line (153 pixels at 32 points, ascender 121, where a
+  Helvetica's is 1.0 em); `.AMissingWindowsFontIsSetInThatFontsAdvancesAndLine` that
+  Consolas, Cambria, Segoe UI and Calibri have the line the cards Wallpaper Engine saved pin (161
+  and 171 pixels at 33 and 35 points, 156 at 32, 538 and 222 for Segoe UI at 97 and 40, 163 for
+  Calibri at 32), their digits and for Consolas every glyph the real advance (75, 80, 73, 217, 89
+  and 67 pixels), Consolas's digits 0.643 em tall within 0.03 and its ascender 103 and descender 36
+  pixels at 33 points, and the clocks' cards within 5 percent of the saved ones;
+  `.AStandInSetsTheBaselineByTheRealFontsAscenderAndDescender` that the rows are set in the real
+  font's units and not the stand-in's; `.AGlyphTheFontLacksComesFromTheFirstFaceOfWallpaperEnginesList`
+  with Apple Braille as the font, which has no letters and no Han: an `A` is Arial's pixels
+  (PingFang SC and Helvetica have one too and differ), a Han character PingFang SC's and not Arial
+  Unicode MS's, a glyph no face has is skipped without moving its neighbours, and a glyph the font
+  has is the font's; `.EachFaceOfTheFallbackListDrawsWhatTheFacesBeforeItLack` finds, for each face
+  of the list after Arial, a glyph none of the faces before it has and requires a layer whose
+  font has nothing of it to draw it as that face alone does (it needs at least three faces of the
+  list that can be told apart, and logs the ones it cannot); `.CjkPunctuationIsNotDrawnByTheSymbolFace`
+  that the fullwidth and ideographic marks come from PingFang SC and not from Apple Symbols (which
+  draws some of them centred), and that a symbol both have, which Arial and Segoe UI's stand-in
+  lack, is still Apple Symbols'; `.AFamilyThatMovedOrAppearedIsFoundAgain` that a family not
+  found is asked for again after the retry time, a found one is kept while its file is there and
+  looked up again when the file is gone. The migrated tests: the scene-font parse tests now expect the kind `system`
+  and the identity of the key (`arial` for a family and a font that cannot be loaded),
+  `.ParserResolvesSceneFontsForFreeTypeRasterization` (renamed from the family test) and
+  `.TheFaceTheSystemNamesReachesTheLayerFromTheSceneAndFromAScript` use the keys,
+  `.FontFallbackHandlesFamiliesMissingFilesAndCorruptAssets` builds its reference through
+  `ResolveSceneFont`, and the tests that wanted Helvetica's metrics ask for the installed family
+  (`ResolveInstalledFamily`). The Consolas ascender is the one number checked against a frame of
+  the reference: the clock of 3299228616 has digit rows 87 pixels tall in both and within a pixel
+  of each other's place; the other three stand-ins' ascender and descender are the fonts' own as
+  remembered and only their sum is pinned.
 - **Text as Wallpaper Engine sets it** — `text_object_runtime_test`.
   `TextObjectRuntime.PointSizeIsRequestedFromTheFontAt300Dpi` asks FreeType for the
   face the way Wallpaper Engine does (`FT_Set_Char_Size` at 300 dpi, whose line
@@ -1778,6 +1816,23 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   compatibility renderer draw one picture, and
   `.EnablingAnEffectDoesNotMoveAnAlignedTextLayerOnBothRenderers` that padding moves
   nothing.
+- **Opaque background** — `opaquebackground` fills the card's rectangle, and not the room a style
+  needs around it, with `backgroundcolor` times `backgroundbrightness` at the layer's alpha, the
+  brightness only in the HDR pipeline.
+  `MetalSceneDraw.AnOpaqueBackgroundFillsTheCardAtTheLayersAlphaOnBothRenderers` draws a caption
+  in each quadrant of a four-coloured backdrop and requires the quadrant's colour mixed towards the
+  plate by the alpha at every corner of the card and the backdrop untouched just outside it, with
+  the stem of the glyph over the fill when the card is drawn directly and blended into the cleared
+  composite when it goes through an effect (the expectations come from the blend equations and
+  `kTextCompositeAlphaExponent`); `.AnOpaqueBackgroundFillsTheCardAndNotTheRoomAStyleNeedsAroundItOnBothRenderers`
+  gives the text an outline and a shadow and requires the fill to stop at the card; both fail with
+  the fill off. `TextObjectRuntime.AnOpaqueBackgroundsColourBrightnessAndInsetReachTheCardsMaterial`
+  requires the colour, the brightness in each pipeline (and a bound one following its property), no
+  constant at all on a card without a background, and the card's inset in its raster following a
+  relayout (`g_CardInset`, a `DynamicValue` the text effect gate holds). The fill is one pass with the
+  glyphs, the glyph over the fill as the two quads one after the other, or the composite cleared to
+  the fill; for the colour blend "add" that is the two added as one value, which differs from adding
+  them where they overlap.
 - **Text composite and live padding** — a text layer that draws through a visible effect
   is drawn through a composite of its own, as Wallpaper Engine draws it: the card starts as
   the scene behind it with no alpha, the glyphs are blended into it by their alpha on

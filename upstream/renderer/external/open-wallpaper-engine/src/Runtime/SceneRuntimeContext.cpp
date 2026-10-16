@@ -1147,6 +1147,14 @@ bool SceneRuntimeContext::ApplyPreparedTextLayer(const RuntimePreparedTextLayerI
         }
     }
 
+    if (card_changed) {
+        // The card of an opaque background lies this far in from the raster's edges.
+        if (const auto gate = m_text_effect_gates.find(prepared.name);
+            gate != m_text_effect_gates.end() && gate->second.card_inset != nullptr) {
+            gate->second.card_inset->update(TextCardInsetInRaster(prepared.state, prepared.layout));
+        }
+    }
+
     RegisterNodeSize(prepared.name, prepared.layout.card);
     ApplyNodeTransform(prepared.name);
 
@@ -3932,15 +3940,19 @@ bool SceneRuntimeContext::SetNodeTextStyle(std::string_view name, std::string_vi
         if (m_text_font_resolver) {
             m_text_font_resolver(resolved, std::string(value));
         } else {
-            resolved.resolved_font_kind     = "family";
-            resolved.resolved_font_identity = value.empty() ? "default" : std::string(value);
-            resolved.resolved_font_path.clear();
-            resolved.resolved_font_face.clear();
-            resolved.resolved_font_data = SharedFontData {};
+            // No wallpaper files to look in: one of Wallpaper Engine's font keys, or Arial.
+            const auto face = ResolveSceneFont(value);
+            resolved.resolved_font_kind     = "system";
+            resolved.resolved_font_identity = std::string(value);
+            resolved.resolved_font_path     = face.path;
+            resolved.resolved_font_face     = face.postscript_name;
+            resolved.resolved_font_fit      = face.fit;
+            resolved.resolved_font_data     = SharedFontData {};
         }
         layer->second.SetFont(std::string(value), resolved.resolved_font_kind,
                               resolved.resolved_font_identity, resolved.resolved_font_path,
-                              resolved.resolved_font_face, resolved.resolved_font_data);
+                              resolved.resolved_font_face, resolved.resolved_font_fit,
+                              resolved.resolved_font_data);
         return true;
     }
     if (property == "horizontalalign" || property == "verticalalign") {

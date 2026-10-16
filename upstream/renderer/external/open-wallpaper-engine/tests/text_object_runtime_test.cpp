@@ -584,7 +584,7 @@ ShaderDescriptorBindings(const SceneShader& shader) {
 TEST(TextObjectRuntime, WidthAndRowLimitsProduceTheSamePixelsAsExplicitLineBreaks) {
     TextLayerState state {
         .font_key = "systemfont_sansserif",
-        .resolved_font_path = ResolveSystemFontPath("systemfont_sansserif"),
+        .resolved_font_path = ResolveSceneFont("systemfont_sansserif").path,
         .point_size = 10.0f,
         .horizontal_align = "left",
         .vertical_align = "top",
@@ -618,7 +618,7 @@ TEST(TextObjectRuntime, EllipsisFitsTheLastVisibleRowAndLimitFlagsRemainIndepend
     TextLayerState expected {
         .text = "WW…",
         .font_key = "systemfont_sansserif",
-        .resolved_font_path = ResolveSystemFontPath("systemfont_sansserif"),
+        .resolved_font_path = ResolveSceneFont("systemfont_sansserif").path,
         .point_size = 10.0f,
         .horizontal_align = "left",
         .vertical_align = "top",
@@ -2160,7 +2160,7 @@ TEST(TextObjectRuntime, RasterizedTextUsesFontPixelSizeAndAntialiasesEdges) {
         .font_key               = "systemfont_Helvetica",
         .resolved_font_kind     = "system",
         .resolved_font_identity = "Helvetica",
-        .resolved_font_path     = ResolveSystemFontPath("systemfont_Helvetica"),
+        .resolved_font_path     = ResolveInstalledFamily("Helvetica").path,
         .point_size             = 40.0f,
         .padding                = { 4.0f, 4.0f },
     };
@@ -2197,7 +2197,7 @@ TEST(TextObjectRuntime, SansSerifAliasRasterizesClockDigits) {
         .font_key               = "systemfont_sansserif",
         .resolved_font_kind     = "system",
         .resolved_font_identity = "sansserif",
-        .resolved_font_path     = ResolveSystemFontPath("systemfont_sansserif"),
+        .resolved_font_path     = ResolveSceneFont("systemfont_sansserif").path,
         .point_size             = 33.0f,
         .padding                = { 32.0f, 32.0f },
         .color                  = Eigen::Vector3f(1.0f, 0.81176f, 0.87059f),
@@ -2230,7 +2230,7 @@ TEST(TextObjectRuntime, SansSerifAliasRasterizesClockDigits) {
     EXPECT_GT(max_alpha, 128);
 }
 
-TEST(TextObjectRuntime, ParserResolvesFamilyFontsForFreeTypeRasterization) {
+TEST(TextObjectRuntime, ParserResolvesSceneFontsForFreeTypeRasterization) {
     fs::VFS vfs;
     MountAssets(vfs);
     audio::SoundManager sound_manager;
@@ -2247,7 +2247,7 @@ TEST(TextObjectRuntime, ParserResolvesFamilyFontsForFreeTypeRasterization) {
             "id": 1,
             "name": "caption",
             "text": "Hg",
-            "font": "Helvetica",
+            "font": "systemfont_verdana",
             "pointsize": 40,
             "visible": true
           }
@@ -2259,7 +2259,8 @@ TEST(TextObjectRuntime, ParserResolvesFamilyFontsForFreeTypeRasterization) {
     ASSERT_NE(scene->runtime, nullptr);
     const auto state = scene->runtime->NodeTextState("caption");
     ASSERT_TRUE(state.has_value());
-    EXPECT_EQ(state->resolved_font_kind, "family");
+    EXPECT_EQ(state->resolved_font_kind, "system");
+    EXPECT_EQ(state->resolved_font_identity, "verdana");
 #ifdef __APPLE__
     EXPECT_FALSE(state->resolved_font_path.empty());
 #endif
@@ -2322,7 +2323,7 @@ TEST(TextObjectRuntime, FreeTypeEstimatedSizeContainsTallGlyphs) {
         .font_key               = "systemfont_Helvetica",
         .resolved_font_kind     = "system",
         .resolved_font_identity = "Helvetica",
-        .resolved_font_path     = ResolveSystemFontPath("systemfont_Helvetica"),
+        .resolved_font_path     = ResolveInstalledFamily("Helvetica").path,
         .point_size             = 40.0f,
         .padding                = { 4.0f, 4.0f },
     };
@@ -2361,7 +2362,7 @@ TEST(TextObjectRuntime, CenteredTextIsCenteredInItsCard) {
         .font_key               = "systemfont_Helvetica",
         .resolved_font_kind     = "system",
         .resolved_font_identity = "Helvetica",
-        .resolved_font_path     = ResolveSystemFontPath("systemfont_Helvetica"),
+        .resolved_font_path     = ResolveInstalledFamily("Helvetica").path,
         .point_size             = 20.0f,
         .padding                = { 32.0f, 32.0f },
         .horizontal_align       = "center",
@@ -2671,7 +2672,7 @@ TEST(TextObjectRuntime, ParserResolvesFontFamiliesAssetsAndSystemFontAliases) {
                               MinimalSceneObjects(R"([
           {"id": 1, "name": "family", "text": "a", "font": "Arial", "visible": true},
           {"id": 2, "name": "asset", "text": "a", "font": "fonts/asset.ttf", "visible": true},
-          {"id": 3, "name": "system", "text": "a", "font": "systemfont_Helvetica", "visible": true},
+          {"id": 3, "name": "system", "text": "a", "font": "systemfont_consolas", "visible": true},
           {"id": 4, "name": "provided", "text": "a", "font": "/provided/absolute.otf", "visible": true},
           {"id": 5, "name": "prefixed", "text": "a", "font": "assets/fonts/prefixed.ttf", "visible": true}
         ])"),
@@ -2681,10 +2682,13 @@ TEST(TextObjectRuntime, ParserResolvesFontFamiliesAssetsAndSystemFontAliases) {
     ASSERT_NE(scene, nullptr);
     ASSERT_NE(scene->runtime, nullptr);
 
+    // A family named by its name alone is a path to a font file that is not there, and a
+    // font that cannot be loaded is drawn in Arial.
     auto family = scene->runtime->NodeTextState("family");
     ASSERT_TRUE(family.has_value());
-    EXPECT_EQ(family->resolved_font_kind, "family");
-    EXPECT_EQ(family->resolved_font_identity, "Arial");
+    EXPECT_EQ(family->font_key, "Arial");
+    EXPECT_EQ(family->resolved_font_kind, "system");
+    EXPECT_EQ(family->resolved_font_identity, "arial");
 
     auto asset = scene->runtime->NodeTextState("asset");
     ASSERT_TRUE(asset.has_value());
@@ -2696,7 +2700,7 @@ TEST(TextObjectRuntime, ParserResolvesFontFamiliesAssetsAndSystemFontAliases) {
     auto system = scene->runtime->NodeTextState("system");
     ASSERT_TRUE(system.has_value());
     EXPECT_EQ(system->resolved_font_kind, "system");
-    EXPECT_EQ(system->resolved_font_identity, "Helvetica");
+    EXPECT_EQ(system->resolved_font_identity, "consolas");
 
     auto provided = scene->runtime->NodeTextState("provided");
     ASSERT_TRUE(provided.has_value());
@@ -2737,7 +2741,7 @@ TEST(TextObjectRuntime, ParserMapsSystemFontAliasesToPlatformFontPath) {
 
     auto scene = parser.Parse(request,
                               MinimalSceneObjects(R"([
-          {"id": 1, "name": "system", "text": "a", "font": "systemfont_Helvetica", "visible": true}
+          {"id": 1, "name": "system", "text": "a", "font": "systemfont_verdana", "visible": true}
         ])"),
                               vfs,
                               sound_manager);
@@ -2748,7 +2752,7 @@ TEST(TextObjectRuntime, ParserMapsSystemFontAliasesToPlatformFontPath) {
     auto system = scene->runtime->NodeTextState("system");
     ASSERT_TRUE(system.has_value());
     EXPECT_EQ(system->resolved_font_kind, "system");
-    EXPECT_EQ(system->resolved_font_identity, "Helvetica");
+    EXPECT_EQ(system->resolved_font_identity, "verdana");
 #ifdef __APPLE__
     EXPECT_FALSE(system->resolved_font_path.empty());
 #else
@@ -4164,7 +4168,7 @@ export function update(value) {
 
 TEST(TextObjectRuntime, FontFallbackHandlesFamiliesMissingFilesAndCorruptAssets) {
 #ifdef __APPLE__
-    const auto reference_path = ResolveSystemFontPath("systemfont_sansserif");
+    const auto reference_path = ResolveSceneFont("systemfont_sansserif").path;
     ASSERT_FALSE(reference_path.empty());
     std::ifstream font_file(reference_path, std::ios::binary);
     const std::vector<uint8_t> valid_font((std::istreambuf_iterator<char>(font_file)), {});
@@ -4172,9 +4176,13 @@ TEST(TextObjectRuntime, FontFallbackHandlesFamiliesMissingFilesAndCorruptAssets)
     for (const auto* family : {"systemfont_consolas", "systemfont_Segoe UI", "Arial",
                               "systemfont_serif", "systemfont_monospace", "missing-font-98765", ""}) {
         for (const auto* text : {"08:36", "Monday September", "Bonjour 你好"}) {
+            // As the parser fills a layer's font: a key that is not one of Wallpaper Engine's is
+            // Arial, as is a font that cannot be loaded.
+            const auto font = ResolveSceneFont(family);
             TextLayerState reference {
                 .text = text, .font_key = family,
-                .resolved_font_path = ResolveSystemFontPath(family), .point_size = 20, .padding = { 4.0f, 4.0f },
+                .resolved_font_path = font.path, .resolved_font_face = font.postscript_name,
+                .resolved_font_fit = font.fit, .point_size = 20, .padding = { 4.0f, 4.0f },
             };
             if (reference.resolved_font_path.empty()) reference.resolved_font_path = reference_path;
             const auto raster = [](const TextLayerState& state) {
@@ -4200,6 +4208,10 @@ TEST(TextObjectRuntime, FontFallbackHandlesFamiliesMissingFilesAndCorruptAssets)
             embedded.resolved_font_data = valid_font;
             auto installed = reference;
             installed.resolved_font_path = reference_path;
+            // The embedded face is the file as it is, not a stand-in fitted to another font.
+            installed.resolved_font_face.clear();
+            installed.resolved_font_fit = {};
+            embedded.resolved_font_fit  = {};
             EXPECT_EQ(raster(embedded), raster(installed));
         }
     }
@@ -4208,16 +4220,19 @@ TEST(TextObjectRuntime, FontFallbackHandlesFamiliesMissingFilesAndCorruptAssets)
 
 TEST(TextObjectRuntime, MissingWindowsFontUsesRealGlyphsInsteadOfRectangles) {
 #ifdef __APPLE__
+    const auto consolas = ResolveSceneFont("systemfont_consolas");
     TextLayerState state {
         .text = "08:36",
         .font_key = "systemfont_consolas",
-        .resolved_font_path = ResolveSystemFontPath("systemfont_consolas"),
+        .resolved_font_path = consolas.path,
+        .resolved_font_face = consolas.postscript_name,
+        .resolved_font_fit = consolas.fit,
         .point_size = 33.0f,
         .padding = { 32.0f, 32.0f },
     };
     ASSERT_FALSE(state.resolved_font_path.empty());
     EXPECT_TRUE(std::filesystem::exists(state.resolved_font_path));
-    EXPECT_FALSE(ResolveSystemFontPath("systemfont_missing-workshop-font-12345").empty());
+    EXPECT_FALSE(ResolveSceneFont("systemfont_missing-workshop-font-12345").path.empty());
     const auto size = TextLayerRasterSize(state);
     const auto width = static_cast<uint32_t>(std::ceil(size.x()));
     const auto height = static_cast<uint32_t>(std::ceil(size.y()));
@@ -4239,7 +4254,7 @@ TEST(TextObjectRuntime, MissingWindowsFontUsesRealGlyphsInsteadOfRectangles) {
 
 TEST(TextObjectRuntime, ResolvesWallpaperEngineSansSerifSystemFontAlias) {
 #ifdef __APPLE__
-    EXPECT_FALSE(ResolveSystemFontPath("systemfont_sansserif").empty());
+    EXPECT_FALSE(ResolveSceneFont("systemfont_sansserif").path.empty());
 #endif
 }
 
@@ -4250,7 +4265,7 @@ TEST(TextObjectRuntime, FreeTypeRasterizationFallsBackForMissingPrimaryGlyph) {
         .font_key               = "systemfont_Helvetica",
         .resolved_font_kind     = "system",
         .resolved_font_identity = "Helvetica",
-        .resolved_font_path     = ResolveSystemFontPath("systemfont_Helvetica"),
+        .resolved_font_path     = ResolveInstalledFamily("Helvetica").path,
         .point_size             = 40.0f,
         .padding                = { 4.0f, 4.0f },
     };
@@ -4497,7 +4512,7 @@ TextLayerState HelveticaState(std::string text, float point_size) {
         .font_key               = "systemfont_Helvetica",
         .resolved_font_kind     = "system",
         .resolved_font_identity = "Helvetica",
-        .resolved_font_path     = ResolveSystemFontPath("systemfont_Helvetica"),
+        .resolved_font_path     = ResolveInstalledFamily("Helvetica").path,
         .point_size             = point_size,
         .horizontal_align       = "left",
         .vertical_align         = "top",
@@ -5586,6 +5601,84 @@ TEST(TextObjectRuntime, ABrightnessScriptStillRunsWhereBrightnessDoesNothing) {
     }
 }
 
+// The background of an opaque card is the layer's `backgroundcolor` times its
+// `backgroundbrightness`, the brightness only in the HDR pipeline as the text's is, and the
+// card lies in its raster by the room the style needs around it, which follows the text.
+TEST(TextObjectRuntime, AnOpaqueBackgroundsColourBrightnessAndInsetReachTheCardsMaterial) {
+    struct Pipeline {
+        const char* general;
+        bool        hdr;
+    };
+    for (const auto& pipeline : { Pipeline { "", false }, Pipeline { R"("hdr":true,"bloom":true,)", true } }) {
+        SCOPED_TRACE(pipeline.general);
+        TextSceneFixture fixture(R"([
+          {"id":1,"name":"plate","text":"a","font":"Arial","pointsize":20,"opaquebackground":true,
+           "backgroundcolor":"0.2 0.4 0.6","backgroundbrightness":2,"visible":true},
+          {"id":2,"name":"plain","text":"a","font":"Arial","pointsize":20,"visible":true},
+          {"id":3,"name":"bound","text":"a","font":"Arial","pointsize":20,"opaquebackground":true,
+           "backgroundbrightness":{"user":"glow","value":0.5},"visible":true},
+          {"id":4,"name":"styled","text":"a","font":"Arial","pointsize":20,"opaquebackground":true,
+           "outline":true,"outlinethickness":4,"visible":true}
+        ])", "text-plate-constants", HdrBloomAssets(),
+                                 ProjectProperties { { "glow", RuntimeScalarValue::Float(3.0f) } },
+                                 pipeline.general);
+        ASSERT_NE(fixture.scene, nullptr);
+        ASSERT_NE(fixture.scene->runtime, nullptr);
+        EXPECT_EQ(fixture.scene->hdr, pipeline.hdr);
+        auto& runtime = *fixture.scene->runtime;
+        const auto constants = [&](const char* name) -> const ShaderValues& {
+            static const ShaderValues none;
+            auto* node = FindRootChild(*fixture.scene, name);
+            EXPECT_NE(node, nullptr);
+            if (node == nullptr || node->Mesh() == nullptr || node->Mesh()->Material() == nullptr) return none;
+            return node->Mesh()->Material()->customShader.constValues;
+        };
+
+        const auto& plate = constants("plate");
+        ASSERT_TRUE(plate.contains("g_Background"));
+        EXPECT_FLOAT_EQ(plate.at("g_Background")[0], 0.2f);
+        EXPECT_FLOAT_EQ(plate.at("g_Background")[1], 0.4f);
+        EXPECT_FLOAT_EQ(plate.at("g_Background")[2], 0.6f);
+        EXPECT_FLOAT_EQ(plate.at("g_BackgroundBrightness")[0], pipeline.hdr ? 2.0f : 1.0f);
+        // A card with no background has nothing of the kind, and costs nothing for it.
+        EXPECT_FALSE(constants("plain").contains("g_Background"));
+        EXPECT_FALSE(constants("plain").contains("g_CardInset"));
+        EXPECT_FLOAT_EQ(constants("bound").at("g_BackgroundBrightness")[0], pipeline.hdr ? 3.0f : 1.0f);
+
+        // A text with no style fills its raster, and a styled one leaves the room around the card.
+        EXPECT_FLOAT_EQ(plate.at("g_CardInset")[0], 0.0f);
+        EXPECT_FLOAT_EQ(plate.at("g_CardInset")[1], 0.0f);
+        const auto inset_of = [&](const char* name) {
+            const auto state = fixture.State(name);
+            return TextCardInsetInRaster(state, MeasureTextLayerLayout(state));
+        };
+        EXPECT_GT(inset_of("styled").x(), 0.0f);
+        EXPECT_GT(inset_of("styled").y(), 0.0f);
+        EXPECT_NEAR(constants("styled").at("g_CardInset")[0], inset_of("styled").x(), 1.0e-5f);
+        EXPECT_NEAR(constants("styled").at("g_CardInset")[1], inset_of("styled").y(), 1.0e-5f);
+
+        // The raster grows with the text and the room around the card does not, so the card's
+        // inset shrinks: the constant follows the layout.
+        const auto before = inset_of("styled");
+        ASSERT_TRUE(runtime.SetNodeText("styled", "a much longer caption\nover two rows"));
+        for (int attempt = 0; attempt < 200 && runtime.NodeTextDirty("styled"); ++attempt) {
+            runtime.PumpTextLayerCache();
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        runtime.Tick(1.0 / 60.0);
+        const auto after = inset_of("styled");
+        EXPECT_LT(after.x(), before.x());
+        EXPECT_LT(after.y(), before.y());
+        EXPECT_NEAR(constants("styled").at("g_CardInset")[0], after.x(), 1.0e-5f);
+        EXPECT_NEAR(constants("styled").at("g_CardInset")[1], after.y(), 1.0e-5f);
+
+        // The bound brightness follows its property where it counts.
+        runtime.ApplyProjectPropertyOverride({ { "glow", RuntimeScalarValue::Float(0.25f) } });
+        runtime.Tick(1.0 / 60.0);
+        EXPECT_FLOAT_EQ(constants("bound").at("g_BackgroundBrightness")[0], pipeline.hdr ? 0.25f : 1.0f);
+    }
+}
+
 TEST(TextObjectRuntime, SpacingAndBlockAlignReachTheLayerState) {
     TextSceneFixture fixture(R"([
       {"id":1,"name":"set","text":"abc","font":"Arial","spacing":"6 0","blockalign":true,
@@ -6165,7 +6258,7 @@ TEST(TextObjectRuntime, TextMeasuresToTheCardsWallpaperEngineSaved) {
             .font_key               = "systemfont_arial",
             .resolved_font_kind     = "system",
             .resolved_font_identity = "arial",
-            .resolved_font_path     = ResolveSystemFontPath("systemfont_arial"),
+            .resolved_font_path     = ResolveSceneFont("systemfont_arial").path,
             .point_size             = card.point_size,
             .padding                = { card.padding, card.padding },
         };
@@ -6593,7 +6686,7 @@ TEST(TextObjectRuntime, ArialAtThirtyTwoPointsHangsFromTheOriginByTheReferenceLi
         .font_key               = "systemfont_arial",
         .resolved_font_kind     = "system",
         .resolved_font_identity = "arial",
-        .resolved_font_path     = ResolveSystemFontPath("systemfont_arial"),
+        .resolved_font_path     = ResolveSceneFont("systemfont_arial").path,
         .point_size             = 32.0f,
         .horizontal_align       = "left",
     };
@@ -7233,7 +7326,7 @@ TEST(TextObjectRuntime, ScreenAnchorMovesTheFinalCardOfALayerWithAnEffectChain) 
 }
 
 TEST(TextObjectRuntime, PenAdvancesAreUnhintedWholePixelsKernedWithTheNextGlyph) {
-    const auto path = ResolveSystemFontPath("systemfont_arial");
+    const auto path = ResolveSceneFont("systemfont_arial").path;
     if (path.empty()) GTEST_SKIP() << "no Arial on this system";
     FT_Library library = nullptr;
     ASSERT_EQ(FT_Init_FreeType(&library), 0);
@@ -7304,8 +7397,8 @@ TEST(TextObjectRuntime, AFallbackFaceIsOpenedOnlyWhenAGlyphIsMissing) {
     EXPECT_EQ(TextFallbackFaceRequestsForTests(), 0u)
         << "text the font can draw asked for a second face";
 
-    // Helvetica has no Han glyphs: the layout that meets one asks for a face for it,
-    // once per layout, however many such glyphs it holds.
+    // Helvetica has no Han glyphs: the layout that meets one goes down the list of faces
+    // for it, once per layout, however many such glyphs it holds.
     const auto han = HelveticaState("08:36 \xE4\xB8\xAD\xE6\x96\x87\xE5\xAD\x97", 24.0f);
     (void)MeasureTextLayerSize(han);
     EXPECT_EQ(TextFallbackFaceRequestsForTests(), 1u);
@@ -7324,17 +7417,22 @@ TEST(TextObjectRuntime, ASystemFontIsOpenedOnceAndNotForEveryLayout) {
     // The face reads from its file; the font is not held in memory as a copy of it.
     EXPECT_TRUE(TextFontFacesAreReadFromFilesForTests());
 
-    // The face for a glyph the font lacks is kept the same way.
+    // The faces for a glyph the font lacks are kept the same way: the list is gone down to the
+    // face that has it on the first layout, and no layout after opens another file.
     const auto mixed = HelveticaState("08:36 \xE4\xB8\xAD", 24.0f);
+    LayOutAndRaster(mixed);
+    const auto opened = TextFontFilesOpenedForTests();
+    EXPECT_GE(opened, 2u);
+    EXPECT_LE(opened, 1u + 6u);
     for (int tick = 0; tick < 10; ++tick) LayOutAndRaster(mixed);
-    EXPECT_EQ(TextFontFilesOpenedForTests(), 2u);
-    EXPECT_EQ(TextFontFacesCachedForTests(), 2u);
+    EXPECT_EQ(TextFontFilesOpenedForTests(), opened);
+    EXPECT_EQ(TextFontFacesCachedForTests(), opened);
 #endif
 }
 
 TEST(TextObjectRuntime, AFontTheWallpaperShipsIsNotOpenedFromAFile) {
 #ifdef __APPLE__
-    const auto path = ResolveSystemFontPath("systemfont_Helvetica");
+    const auto path = ResolveInstalledFamily("Helvetica").path;
     ASSERT_FALSE(path.empty());
     std::ifstream file(path, std::ios::binary);
     const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)), {});
@@ -7357,7 +7455,7 @@ TEST(TextObjectRuntime, TheFaceCacheKeepsEightFacesAndDropsTheOneUnusedLongest) 
     for (const char* family : {"Arial", "Courier New", "Georgia", "Impact", "Tahoma", "Trebuchet MS",
                                "Times New Roman", "Verdana", "Comic Sans MS", "Andale Mono",
                                "Arial Black", "Menlo", "Monaco", "Optima", "Futura"}) {
-        const auto font = ResolveSystemFont(FaceKey(family));
+        const auto font = ResolveInstalledFamily(family);
         const bool seen = std::ranges::any_of(fonts, [&](const SystemFontFace& other) {
             return other.path == font.path && other.postscript_name == font.postscript_name;
         });
@@ -7389,8 +7487,8 @@ TEST(TextObjectRuntime, TheFaceCacheKeepsEightFacesAndDropsTheOneUnusedLongest) 
 // short under it, so a file that has changed is opened again before it is used.
 TEST(TextObjectRuntime, AFontFileThatChangedIsOpenedAgainBeforeItsCachedFaceIsUsed) {
 #ifdef __APPLE__
-    const auto courier = ResolveSystemFont("Courier New");
-    const auto arial   = ResolveSystemFont("Arial");
+    const auto courier = ResolveInstalledFamily("Courier New");
+    const auto arial   = ResolveInstalledFamily("Arial");
     if (courier.path.empty() || arial.path.empty() || courier.path == arial.path ||
         std::filesystem::path(courier.path).extension() != std::filesystem::path(arial.path).extension()) {
         GTEST_SKIP() << "no two single-face fonts of one kind to stand for the font and its replacement";
@@ -7431,7 +7529,7 @@ TEST(TextObjectRuntime, AFaceOfACollectionIsChosenByItsPostScriptName) {
 #ifdef __APPLE__
     // Songti.ttc holds four weights of one family, and its first face is not the
     // regular one. The weight shows in how much ink a glyph has.
-    const auto songti = ResolveSystemFont(FaceKey("Songti SC"));
+    const auto songti = ResolveInstalledFamily("Songti SC");
     ASSERT_FALSE(songti.path.empty());
     ASSERT_EQ(songti.postscript_name, "STSongti-SC-Regular")
         << "the system does not name the regular weight for the family";
@@ -7469,7 +7567,7 @@ TEST(TextObjectRuntime, AFaceOfACollectionIsChosenByItsPostScriptName) {
 // cut, which is the first face of PingFang.ttc.
 TEST(TextObjectRuntime, HanFallbackUsesTheSimplifiedFace) {
 #ifdef __APPLE__
-    const auto pingfang = ResolveSystemFont(FaceKey("PingFang SC"));
+    const auto pingfang = ResolveInstalledFamily("PingFang SC");
     if (pingfang.postscript_name != "PingFangSC-Regular") GTEST_SKIP() << "no PingFang SC installed";
 
     constexpr float kPointSize = 40.0f;
@@ -7495,43 +7593,611 @@ TEST(TextObjectRuntime, HanFallbackUsesTheSimplifiedFace) {
 TEST(TextObjectRuntime, TheFaceTheSystemNamesReachesTheLayerFromTheSceneAndFromAScript) {
 #ifdef __APPLE__
     TextSceneFixture fixture(R"([
-      {"id":1,"name":"system","text":"a","font":"systemfont_Songti SC","visible":true},
-      {"id":2,"name":"family","text":"a","font":"Songti SC","visible":true},
+      {"id":1,"name":"comic","text":"a","font":"systemfont_comicsans","visible":true},
+      {"id":2,"name":"mono","text":"a","font":"systemfont_consolas","visible":true},
       {"id":3,"name":"asset","text":"a","font":"fonts/asset.ttf","visible":true},
-      {"id":4,"name":"scripted","text":"a","font":"systemfont_Helvetica","visible":true}
+      {"id":4,"name":"scripted","text":"a","font":"systemfont_arial","visible":true}
     ])", "text-font-face", { { "/fonts/asset.ttf", "fake-font-bytes" } });
     ASSERT_NE(fixture.scene, nullptr);
     auto& runtime = *fixture.scene->runtime;
 
-    EXPECT_EQ(fixture.State("system").resolved_font_face, "STSongti-SC-Regular");
-    EXPECT_EQ(fixture.State("family").resolved_font_face, "STSongti-SC-Regular");
-    EXPECT_EQ(fixture.State("system").resolved_font_path, fixture.State("family").resolved_font_path);
+    // The face is named by the system, so that a font file that holds several is opened at
+    // the one meant.
+    const auto comic = ResolveInstalledFamily("Comic Sans MS");
+    ASSERT_FALSE(comic.postscript_name.empty());
+    EXPECT_EQ(fixture.State("comic").resolved_font_face, comic.postscript_name);
+    EXPECT_EQ(fixture.State("comic").resolved_font_path, comic.path);
     EXPECT_TRUE(fixture.State("asset").resolved_font_face.empty());
-    EXPECT_EQ(fixture.State("scripted").resolved_font_face, "Helvetica");
+    EXPECT_FALSE(fixture.State("mono").resolved_font_face.empty());
+    EXPECT_EQ(fixture.State("scripted").resolved_font_face, ResolveSceneFont("systemfont_arial").postscript_name);
 
-    // A script that sets `font` is resolved the way the scene file's is.
-    ASSERT_TRUE(runtime.SetNodeTextStyle("scripted", "font", "systemfont_Songti SC"));
-    EXPECT_EQ(fixture.State("scripted").resolved_font_face, "STSongti-SC-Regular");
-    EXPECT_EQ(fixture.State("scripted").resolved_font_path, fixture.State("system").resolved_font_path);
-    ASSERT_TRUE(runtime.SetNodeTextStyle("scripted", "font", "systemfont_Helvetica"));
-    EXPECT_EQ(fixture.State("scripted").resolved_font_face, "Helvetica");
+    // A script that sets `font` is resolved the way the scene file's is, and reads back
+    // what it wrote.
+    ASSERT_TRUE(runtime.SetNodeTextStyle("scripted", "font", "systemfont_comicsans"));
+    EXPECT_EQ(fixture.State("scripted").resolved_font_face, comic.postscript_name);
+    EXPECT_EQ(fixture.State("scripted").resolved_font_path, fixture.State("comic").resolved_font_path);
+    EXPECT_EQ(runtime.NodeTextStyle("scripted", "font").value_or(""), "systemfont_comicsans");
+    ASSERT_TRUE(runtime.SetNodeTextStyle("scripted", "font", "systemfont_consolas"));
+    EXPECT_EQ(fixture.State("scripted").resolved_font_fit, fixture.State("mono").resolved_font_fit);
+    EXPECT_EQ(fixture.State("scripted").resolved_font_path, fixture.State("mono").resolved_font_path);
 #endif
 }
 
 TEST(TextObjectRuntime, ANewFaceOfTheSameFileLaysTheTextOutAgain) {
-    TextLayerState state { .text = "a", .font_key = "systemfont_Songti SC",
-                           .resolved_font_kind = "system", .resolved_font_identity = "Songti SC",
+    TextLayerState state { .text = "a", .font_key = "systemfont_comicsans",
+                           .resolved_font_kind = "system", .resolved_font_identity = "comicsans",
                            .resolved_font_path = "/fonts/Songti.ttc",
                            .resolved_font_face = "STSongti-SC-Regular" };
     TextLayer layer(state);
     layer.ClearDirty();
     layer.SetFont(state.font_key, state.resolved_font_kind, state.resolved_font_identity,
-                  state.resolved_font_path, state.resolved_font_face, state.resolved_font_data);
+                  state.resolved_font_path, state.resolved_font_face, state.resolved_font_fit,
+                  state.resolved_font_data);
     EXPECT_FALSE(layer.dirty()) << "the same font was set again";
     layer.SetFont(state.font_key, state.resolved_font_kind, state.resolved_font_identity,
-                  state.resolved_font_path, "STSongti-SC-Black", state.resolved_font_data);
+                  state.resolved_font_path, "STSongti-SC-Black", state.resolved_font_fit,
+                  state.resolved_font_data);
     EXPECT_TRUE(layer.dirty());
     EXPECT_TRUE(layer.layoutPending());
+
+    // The same face fitted to another font sets the text in other numbers.
+    layer.ClearDirty();
+    SystemFontFit fit { .size_adjust = 0.9f };
+    layer.SetFont(state.font_key, state.resolved_font_kind, state.resolved_font_identity,
+                  state.resolved_font_path, "STSongti-SC-Black", fit, state.resolved_font_data);
+    EXPECT_TRUE(layer.dirty());
+    EXPECT_TRUE(layer.layoutPending());
+}
+
+// ---------------------------------------------------------------------------
+// Scene fonts: Wallpaper Engine honours eight `systemfont_` keys and draws anything it
+// cannot load in Arial. The Windows fonts among them that a Mac lacks are stood in for
+// by an installed face, set to the real font's advances and line metrics.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+constexpr std::string_view kSceneFontKeys[] = {
+    "systemfont_arial",  "systemfont_calibri", "systemfont_cambria", "systemfont_comicsans",
+    "systemfont_consolas", "systemfont_sansserif", "systemfont_segoe", "systemfont_verdana",
+};
+
+// A layer set in a scene font key, filled as the parser fills it.
+TextLayerState StateInSceneFont(std::string_view key, std::string text, float point_size) {
+    const auto font = ResolveSceneFont(key);
+    return TextLayerState {
+        .text                   = std::move(text),
+        .font_key               = std::string(key),
+        .resolved_font_kind     = "system",
+        .resolved_font_identity = std::string(key.substr(std::string_view("systemfont_").size())),
+        .resolved_font_path     = font.path,
+        .resolved_font_face     = font.postscript_name,
+        .resolved_font_fit      = font.fit,
+        .point_size             = point_size,
+        .horizontal_align       = "left",
+        .vertical_align         = "top",
+    };
+}
+
+// How far apart the pen puts two glyphs of `glyph` in a font: the width of a row of
+// `count` of them against `count - 1`.
+float AdvanceOf(std::string_view key, char glyph, float point_size) {
+    const auto width = [&](int count) {
+        return MeasureTextLayerLayout(
+                   StateInSceneFont(key, std::string(static_cast<std::size_t>(count), glyph), point_size))
+            .BlockSize().x();
+    };
+    return width(5) - width(4);
+}
+} // namespace
+
+TEST(TextObjectRuntime, SceneFontKeysAreTheEightWallpaperEngineKeys) {
+    for (const auto key : kSceneFontKeys) EXPECT_TRUE(IsSceneFontKey(key)) << key;
+    // The whole string, in lower case: nothing else is a key, however much it looks like one.
+    for (const auto* other : { "systemfont_Arial", "SYSTEMFONT_ARIAL", "systemfont_arial ",
+                               " systemfont_arial", "fonts/systemfont_arial", "systemfont_Helvetica",
+                               "systemfont_serif", "systemfont_monospace", "systemfont_segoeui",
+                               "systemfont_", "systemfont", "Arial", "Segoe UI", "" }) {
+        EXPECT_FALSE(IsSceneFontKey(other)) << '"' << other << '"';
+    }
+#ifdef __APPLE__
+    // Anything else is a font Wallpaper Engine cannot load, and is Arial.
+    const auto arial = ResolveSceneFont("systemfont_arial");
+    ASSERT_FALSE(arial.path.empty());
+    EXPECT_EQ(arial.fit, SystemFontFit {});
+    for (const auto* other : { "systemfont_Arial", "systemfont_Helvetica", "systemfont_serif",
+                               "fonts/missing.ttf", "Arial", "" }) {
+        SCOPED_TRACE(other);
+        const auto font = ResolveSceneFont(other);
+        EXPECT_EQ(font.path, arial.path);
+        EXPECT_EQ(font.postscript_name, arial.postscript_name);
+        EXPECT_EQ(font.fit, arial.fit);
+    }
+    // Four of the fonts are on every Mac as the very fonts Windows has, and stand for
+    // themselves; the others are another face, fitted.
+    struct Twin {
+        std::string_view key;
+        std::string_view family;
+    };
+    for (const auto& [key, family] : { Twin { "systemfont_arial", "Arial" },
+                                       Twin { "systemfont_comicsans", "Comic Sans MS" },
+                                       Twin { "systemfont_sansserif", "Microsoft Sans Serif" },
+                                       Twin { "systemfont_verdana", "Verdana" } }) {
+        SCOPED_TRACE(key);
+        const auto twin = ResolveInstalledFamily(family);
+        ASSERT_FALSE(twin.path.empty()) << family << " is not installed";
+        EXPECT_EQ(ResolveSceneFont(key).path, twin.path);
+        EXPECT_EQ(ResolveSceneFont(key).postscript_name, twin.postscript_name);
+        EXPECT_EQ(ResolveSceneFont(key).fit, SystemFontFit {});
+    }
+    for (const auto key : { "systemfont_calibri", "systemfont_cambria", "systemfont_consolas",
+                            "systemfont_segoe" }) {
+        SCOPED_TRACE(key);
+        const auto font = ResolveSceneFont(key);
+        EXPECT_FALSE(font.path.empty());
+        EXPECT_NE(font.fit.size_adjust, 1.0f);
+        EXPECT_TRUE(font.fit.line_metrics.has_value());
+    }
+#endif
+}
+
+TEST(TextObjectRuntime, AMissingFontFileDrawsInArial) {
+#ifdef __APPLE__
+    TextSceneFixture fixture(R"([
+      {"id":1,"name":"arial","text":"Aa 08:36","font":"systemfont_arial","pointsize":24,"visible":true},
+      {"id":2,"name":"missing","text":"Aa 08:36","font":"fonts/missing.ttf","pointsize":24,"visible":true},
+      {"id":3,"name":"family","text":"Aa 08:36","font":"Helvetica","pointsize":24,"visible":true},
+      {"id":4,"name":"cased","text":"Aa 08:36","font":"systemfont_Arial","pointsize":24,"visible":true},
+      {"id":5,"name":"unknown key","text":"Aa 08:36","font":"systemfont_serif","pointsize":24,"visible":true}
+    ])", "text-missing-font");
+    ASSERT_NE(fixture.scene, nullptr);
+    const auto arial = ResolveSceneFont("systemfont_arial");
+    ASSERT_FALSE(arial.path.empty());
+    const auto reference = RasterOf(fixture.State("arial"));
+    ASSERT_GT(InkMass(reference), 0u);
+    for (const auto* name : { "missing", "family", "cased", "unknown key" }) {
+        SCOPED_TRACE(name);
+        const auto state = fixture.State(name);
+        EXPECT_EQ(state.resolved_font_kind, "system");
+        EXPECT_EQ(state.resolved_font_identity, "arial");
+        EXPECT_EQ(state.resolved_font_path, arial.path);
+        EXPECT_EQ(state.resolved_font_face, arial.postscript_name);
+        EXPECT_EQ(state.font_key.empty(), false) << "a script reads back the font the scene named";
+        const auto raster = RasterOf(state);
+        EXPECT_EQ(raster.width, reference.width);
+        EXPECT_EQ(raster.height, reference.height);
+        EXPECT_EQ(raster.rgba, reference.rgba);
+    }
+    EXPECT_EQ(fixture.State("missing").font_key, "fonts/missing.ttf");
+#endif
+}
+
+TEST(TextObjectRuntime, ATextObjectWithoutAFontKeyIsArial) {
+#ifdef __APPLE__
+    TextSceneFixture fixture(R"([
+      {"id":1,"name":"bare","text":"08:36","pointsize":32,"visible":true},
+      {"id":2,"name":"arial","text":"08:36","font":"systemfont_arial","pointsize":32,"visible":true}
+    ])", "text-no-font-key");
+    ASSERT_NE(fixture.scene, nullptr);
+    const auto bare = fixture.State("bare");
+    EXPECT_EQ(bare.resolved_font_kind, "system");
+    EXPECT_EQ(bare.resolved_font_identity, "arial");
+    EXPECT_EQ(bare.resolved_font_path, fixture.State("arial").resolved_font_path);
+    // Arial's line at 32 points, which the card of a text it saved shows: 153 pixels of line
+    // (1.15 em, where a Helvetica's is 1.0), the baseline 121 below the top of the line.
+    const auto layout = MeasureTextLayerLayout(bare);
+    EXPECT_FLOAT_EQ(layout.pitch, 153.0f);
+    EXPECT_FLOAT_EQ(layout.ascender, 121.0f);
+#endif
+}
+
+// A Windows font that is not on this Mac is drawn in a face that stands in for it, set to the
+// advance of the real font's digits (a clock's width is its digits) and to the real font's
+// line, which the cards Wallpaper Engine saved pin: Consolas 161 pixels at 33 points and 171
+// at 35, Cambria 156 at 32, Segoe UI 538 at 97 points and 222 at 40, whose digits are 75 (at 33
+// points), 73 (at 32), 217 (at 97) and 89 (at 40) pixels apart.
+TEST(TextObjectRuntime, AMissingWindowsFontIsSetInThatFontsAdvancesAndLine) {
+#ifdef __APPLE__
+    struct Expectation {
+        std::string_view key;
+        float            point_size;
+        float            digit_advance;
+        float            line;
+    };
+    const Expectation expectations[] = {
+        { "systemfont_consolas", 33.0f, 75.0f, 161.0f },
+        { "systemfont_consolas", 35.0f, 80.0f, 171.0f },
+        { "systemfont_cambria", 32.0f, 73.0f, 156.0f },
+        { "systemfont_segoe", 97.0f, 217.0f, 538.0f },
+        { "systemfont_segoe", 40.0f, 89.0f, 222.0f },
+        // Calibri's digits are 0.5068 em wide and its line 1.2207 em: 67 and 163 pixels at 32 points.
+        { "systemfont_calibri", 32.0f, 67.0f, 163.0f },
+    };
+    for (const auto& expected : expectations) {
+        SCOPED_TRACE(std::string(expected.key) + " at " + std::to_string(expected.point_size));
+        const auto font = ResolveSceneFont(expected.key);
+        ASSERT_FALSE(font.path.empty());
+        EXPECT_FLOAT_EQ(MeasureTextLayerLayout(StateInSceneFont(expected.key, "0", expected.point_size)).pitch,
+                        expected.line);
+        for (const char digit : { '0', '2', '4', '7' }) {
+            EXPECT_FLOAT_EQ(AdvanceOf(expected.key, digit, expected.point_size), expected.digit_advance)
+                << "digit " << digit;
+        }
+        // The colon is no wider than a digit in the clock fonts that set digits and a colon.
+        EXPECT_LE(AdvanceOf(expected.key, ':', expected.point_size), expected.digit_advance);
+    }
+
+    // Consolas's ascender is 0.743 em, not the 0.92 of its Windows line: Wallpaper Engine's frame
+    // of a centred Consolas clock puts the digits where a baseline half of that below the origin
+    // does (the whole line is 1.171 em).
+    const auto consolas = MeasureTextLayerLayout(StateInSceneFont("systemfont_consolas", "0", 33.0f));
+    EXPECT_FLOAT_EQ(consolas.ascender, 103.0f);
+    EXPECT_FLOAT_EQ(consolas.descender, 36.0f);
+    // Consolas is monospaced: every glyph steps by the digit's advance.
+    for (const char glyph : { 'i', 'W', ':', ' ' }) {
+        EXPECT_FLOAT_EQ(AdvanceOf("systemfont_consolas", glyph, 33.0f), 75.0f) << glyph;
+    }
+    // And its digits stand about 0.643 em tall, as they do in Wallpaper Engine's frames, with
+    // the round ones' overshoot above and below the line (the digits of Menlo, the first
+    // stand-in tried, fitted to the same advance, stand 0.676 em tall in the same count).
+    const auto digits = RasterOf(StateInSceneFont("systemfont_consolas", "0123456789", 33.0f));
+    int first_row = -1, last_row = -1;
+    for (uint32_t y = 0; y < digits.height; ++y) {
+        for (uint32_t x = 0; x < digits.width; ++x) {
+            if (digits.rgba[(static_cast<std::size_t>(y) * digits.width + x) * 4u + 3u] < 128u) continue;
+            if (first_row < 0) first_row = static_cast<int>(y);
+            last_row = static_cast<int>(y);
+            break;
+        }
+    }
+    ASSERT_GE(first_row, 0);
+    EXPECT_NEAR(static_cast<float>(last_row - first_row + 1) / (33.0f * 300.0f / 72.0f), 0.643f, 0.03f);
+    // The clocks' saved cards were as wide as the digits and the colon are: "12:34" in Consolas
+    // at 33 points 375, "04:47" in Cambria at 32 points 327, "22:22" in Segoe UI at 97 points
+    // 955. The stand-ins have the digits' advance and glyphs of their own, so the last glyph's
+    // ink ends a few pixels from where the real font's does and Charter's colon is wider than
+    // Cambria's; Menlo unfitted is 8 percent too wide here.
+    const auto width_of = [](std::string_view key, const char* text, float point_size) {
+        return MeasureTextLayerLayout(StateInSceneFont(key, text, point_size)).BlockSize().x();
+    };
+    EXPECT_NEAR(width_of("systemfont_consolas", "12:34", 33.0f), 375.0f, 375.0f * 0.05f);
+    EXPECT_NEAR(width_of("systemfont_cambria", "04:47", 32.0f), 327.0f, 327.0f * 0.05f);
+    EXPECT_NEAR(width_of("systemfont_segoe", "22:22", 97.0f), 955.0f, 955.0f * 0.05f);
+#endif
+}
+
+// The text of a layer lies in its card by the line metrics of the font Wallpaper Engine draws it
+// in: a centred line has its baseline half the ascender below the origin, a bottom-aligned one the
+// descender above it, whatever face stands in for the font. It pins that the table's units
+// are what the layout uses, with the formula the layout uses; the numbers themselves are
+// anchored to Wallpaper Engine only for Consolas (`AMissingWindowsFontIsSetInThatFontsAdvancesAndLine`),
+// and for Cambria, Segoe UI and Calibri they are the fonts' tables as remembered.
+TEST(TextObjectRuntime, AStandInSetsTheBaselineByTheRealFontsAscenderAndDescender) {
+#ifdef __APPLE__
+    for (const auto key : { "systemfont_consolas", "systemfont_cambria", "systemfont_segoe" }) {
+        SCOPED_TRACE(key);
+        auto state = StateInSceneFont(key, "H", 40.0f);
+        const auto font = ResolveSceneFont(key);
+        ASSERT_TRUE(font.fit.line_metrics.has_value());
+        const auto layout = MeasureTextLayerLayout(state);
+        const auto& units = *font.fit.line_metrics;
+        const float ppem  = 40.0f * 300.0f / 72.0f;
+        // Whole pixels: the ascender rounded up and the descender down, as FreeType does.
+        EXPECT_NEAR(layout.ascender, std::ceil(units.ascender * ppem / units.units_per_em - 1.0e-3f), 1.0f);
+        EXPECT_NEAR(layout.descender, std::ceil(units.descender * ppem / units.units_per_em - 1.0e-3f), 1.0f);
+        // And the face's own ascender and descender are not what the layout uses.
+        const auto own = MeasureTextLayerLayout(
+            TextLayerState { .text = "H", .font_key = "systemfont_arial",
+                             .resolved_font_path = font.path, .resolved_font_face = font.postscript_name,
+                             .point_size = 40.0f });
+        EXPECT_NE(layout.pitch, own.pitch);
+    }
+#endif
+}
+
+// A glyph the layer's font lacks is drawn by the first of the faces Wallpaper Engine tries that
+// has it: Arial, then Segoe UI, Segoe UI Symbol, Microsoft YaHei and Malgun Gothic, and Arial
+// Unicode MS last. Apple Braille has no letters and no Han, so everything here is the fallback's.
+TEST(TextObjectRuntime, AGlyphTheFontLacksComesFromTheFirstFaceOfWallpaperEnginesList) {
+#ifdef __APPLE__
+    const std::string braille_path = "/System/Library/Fonts/Apple Braille.ttf";
+    if (! std::filesystem::exists(braille_path)) GTEST_SKIP() << "no Apple Braille on this system";
+    const auto in_braille = [&](std::string text) {
+        TextLayerState state = HelveticaState(std::move(text), 40.0f);
+        state.resolved_font_path = braille_path;
+        state.resolved_font_face.clear();
+        return state;
+    };
+    const auto ink = [](const TextLayerState& state) { return InkMass(RasterOf(state)); };
+
+    // A Latin letter comes from Arial, not from PingFang or Helvetica, which have it too.
+    auto latin_in_arial = StateInSceneFont("systemfont_arial", "A", 40.0f);
+    const auto arial_a  = ink(latin_in_arial);
+    ASSERT_GT(arial_a, 0u);
+    EXPECT_EQ(ink(in_braille("A")), arial_a);
+    auto latin_in_pingfang = HelveticaState("A", 40.0f);
+    const auto pingfang    = ResolveInstalledFamily("PingFang SC");
+    if (! pingfang.path.empty()) {
+        latin_in_pingfang.resolved_font_path = pingfang.path;
+        latin_in_pingfang.resolved_font_face = pingfang.postscript_name;
+        ASSERT_NE(ink(latin_in_pingfang), arial_a) << "PingFang's A is no different from Arial's";
+    }
+
+    // A Han character comes from PingFang SC (Wallpaper Engine's Microsoft YaHei) and not from
+    // Arial Unicode MS, which has it too, since that face is Office's and not Windows'.
+    if (pingfang.postscript_name == "PingFangSC-Regular") {
+        auto han_in_pingfang = HelveticaState("\xE4\xB8\xAD", 40.0f);
+        han_in_pingfang.resolved_font_path = pingfang.path;
+        han_in_pingfang.resolved_font_face = pingfang.postscript_name;
+        const auto pingfang_han = ink(han_in_pingfang);
+        ASSERT_GT(pingfang_han, 0u);
+        EXPECT_EQ(ink(in_braille("\xE4\xB8\xAD")), pingfang_han);
+        const auto unicode = ResolveInstalledFamily("Arial Unicode MS");
+        if (! unicode.path.empty()) {
+            auto han_in_unicode = HelveticaState("\xE4\xB8\xAD", 40.0f);
+            han_in_unicode.resolved_font_path = unicode.path;
+            han_in_unicode.resolved_font_face = unicode.postscript_name;
+            EXPECT_NE(ink(han_in_unicode), pingfang_han);
+        }
+    }
+
+    // A glyph none of them has is skipped, and the glyphs around it are not disturbed.
+    EXPECT_EQ(MeasureTextLayerLayout(in_braille("A\xF4\x8F\xBF\xBF" "A")).BlockSize().x(),
+              MeasureTextLayerLayout(in_braille("AA")).BlockSize().x());
+    // The glyph the font has is the font's.
+    EXPECT_GT(ink(in_braille("\xE2\xA0\x81")), 0u);
+#endif
+}
+
+namespace
+{
+// A font face opened straight from its file, to ask which code points it has.
+class ProbeFace {
+public:
+    ProbeFace(FT_Library library, const SystemFontFace& font) {
+        if (font.path.empty() || FT_New_Face(library, font.path.c_str(), 0, &m_face) != 0) {
+            m_face = nullptr;
+            return;
+        }
+        if (font.postscript_name.empty()) return;
+        for (FT_Long index = 0; index < m_face->num_faces; ++index) {
+            FT_Face candidate = nullptr;
+            if (FT_New_Face(library, font.path.c_str(), index, &candidate) != 0) continue;
+            const char* name = FT_Get_Postscript_Name(candidate);
+            if (name != nullptr && font.postscript_name == name) {
+                FT_Done_Face(m_face);
+                m_face = candidate;
+                return;
+            }
+            FT_Done_Face(candidate);
+        }
+    }
+    ~ProbeFace() {
+        if (m_face != nullptr) FT_Done_Face(m_face);
+    }
+    ProbeFace(const ProbeFace&)            = delete;
+    ProbeFace& operator=(const ProbeFace&) = delete;
+
+    bool Has(uint32_t codepoint) const {
+        return m_face != nullptr && FT_Get_Char_Index(m_face, codepoint) != 0u;
+    }
+    explicit operator bool() const { return m_face != nullptr; }
+
+private:
+    FT_Face m_face { nullptr };
+};
+
+std::string Utf8Of(uint32_t codepoint) {
+    std::string text;
+    if (codepoint < 0x80u) {
+        text += static_cast<char>(codepoint);
+    } else if (codepoint < 0x800u) {
+        text += static_cast<char>(0xC0u | (codepoint >> 6u));
+        text += static_cast<char>(0x80u | (codepoint & 0x3Fu));
+    } else if (codepoint < 0x10000u) {
+        text += static_cast<char>(0xE0u | (codepoint >> 12u));
+        text += static_cast<char>(0x80u | ((codepoint >> 6u) & 0x3Fu));
+        text += static_cast<char>(0x80u | (codepoint & 0x3Fu));
+    } else {
+        text += static_cast<char>(0xF0u | (codepoint >> 18u));
+        text += static_cast<char>(0x80u | ((codepoint >> 12u) & 0x3Fu));
+        text += static_cast<char>(0x80u | ((codepoint >> 6u) & 0x3Fu));
+        text += static_cast<char>(0x80u | (codepoint & 0x3Fu));
+    }
+    return text;
+}
+
+// The six faces that stand for the ones after the layer's own in Wallpaper Engine's glyph
+// list, in the order they are tried, and the state that draws `text` in one of them alone.
+struct ChainSlot {
+    std::string    label;
+    SystemFontFace font;
+    std::string    scene_key;
+
+    TextLayerState StateOf(std::string text, float point_size) const {
+        if (! scene_key.empty()) return StateInSceneFont(scene_key, std::move(text), point_size);
+        return StateInFace(font, std::move(text), point_size);
+    }
+};
+
+std::vector<ChainSlot> FallbackChainSlots() {
+    std::vector<ChainSlot> slots;
+    for (const char* key : { "systemfont_arial", "systemfont_segoe" }) {
+        slots.push_back({ key, ResolveSceneFont(key), key });
+    }
+    for (const char* family : { "Apple Symbols", "PingFang SC", "Apple SD Gothic Neo", "Arial Unicode MS" }) {
+        slots.push_back({ family, ResolveInstalledFamily(family), {} });
+    }
+    return slots;
+}
+} // namespace
+
+// Each face of the list draws what the faces before it lack: for every face there is a glyph
+// that none of the earlier ones has, and a layer whose own font has nothing of it draws that
+// glyph exactly as the face does on its own. Apple Braille has no letters and no ideographs,
+// so every glyph here is the list's.
+TEST(TextObjectRuntime, EachFaceOfTheFallbackListDrawsWhatTheFacesBeforeItLack) {
+#ifdef __APPLE__
+    const std::string braille_path = "/System/Library/Fonts/Apple Braille.ttf";
+    if (! std::filesystem::exists(braille_path)) GTEST_SKIP() << "no Apple Braille on this system";
+    FT_Library library = nullptr;
+    ASSERT_EQ(FT_Init_FreeType(&library), 0);
+    {
+        const auto slots = FallbackChainSlots();
+        std::vector<std::unique_ptr<ProbeFace>> faces;
+        for (const auto& slot : slots) faces.push_back(std::make_unique<ProbeFace>(library, slot.font));
+        const ProbeFace braille(library, SystemFontFace { .path = braille_path });
+        ASSERT_TRUE(braille);
+        const auto ink = [](const TextLayerState& state) { return InkMass(RasterOf(state)); };
+        const auto in_braille = [&](std::string text) {
+            TextLayerState state = HelveticaState(std::move(text), 40.0f);
+            state.resolved_font_path = braille_path;
+            state.resolved_font_face.clear();
+            return state;
+        };
+
+        std::size_t tested = 0;
+        for (std::size_t slot = 1; slot < slots.size(); ++slot) {
+            SCOPED_TRACE(slots[slot].label);
+            if (! *faces[slot]) continue;
+            uint32_t found = 0;
+            for (uint32_t codepoint = 0xA0u; codepoint < 0x20000u && found == 0u; ++codepoint) {
+                if (braille.Has(codepoint) || ! faces[slot]->Has(codepoint)) continue;
+                // The symbol face is not asked for CJK punctuation (below).
+                if (slots[slot].label == "Apple Symbols" &&
+                    ((codepoint >= 0x3000u && codepoint <= 0x303Fu) ||
+                     (codepoint >= 0xFF00u && codepoint <= 0xFFEFu))) {
+                    continue;
+                }
+                bool earlier = false;
+                for (std::size_t before = 0; before < slot && ! earlier; ++before) {
+                    if (*faces[before] && faces[before]->Has(codepoint)) earlier = true;
+                }
+                if (earlier || ink(slots[slot].StateOf(Utf8Of(codepoint), 40.0f)) == 0u) continue;
+                found = codepoint;
+            }
+            if (found == 0u) {
+                GTEST_LOG_(INFO) << slots[slot].label << " has no glyph the faces before it lack";
+                continue;
+            }
+            ++tested;
+            const auto text = Utf8Of(found);
+            EXPECT_EQ(ink(in_braille(text)), ink(slots[slot].StateOf(text, 40.0f)))
+                << "U+" << std::hex << found << " is not drawn by " << slots[slot].label;
+        }
+        EXPECT_GE(tested, 3u) << "too few faces of the list could be told apart on this machine";
+    }
+    FT_Done_FreeType(library);
+#endif
+}
+
+// Apple Symbols stands for the symbol face of Windows, which is not asked for CJK punctuation
+// and fullwidth forms: they are drawn as Microsoft YaHei's stand-in draws them, so a string does
+// not mix a centred fullwidth comma with a left-set ideographic one. A symbol both faces have
+// is still the symbol face's.
+TEST(TextObjectRuntime, CjkPunctuationIsNotDrawnByTheSymbolFace) {
+#ifdef __APPLE__
+    const std::string braille_path = "/System/Library/Fonts/Apple Braille.ttf";
+    const auto        pingfang     = ResolveInstalledFamily("PingFang SC");
+    const auto        symbols      = ResolveInstalledFamily("Apple Symbols");
+    if (! std::filesystem::exists(braille_path) || pingfang.path.empty() || symbols.path.empty()) {
+        GTEST_SKIP() << "no Apple Braille, PingFang SC or Apple Symbols on this system";
+    }
+    FT_Library library = nullptr;
+    ASSERT_EQ(FT_Init_FreeType(&library), 0);
+    {
+        const ProbeFace symbol_face(library, symbols);
+        const ProbeFace pingfang_face(library, pingfang);
+        const ProbeFace arial_face(library, ResolveSceneFont("systemfont_arial"));
+        const ProbeFace segoe_face(library, ResolveSceneFont("systemfont_segoe"));
+        const auto ink = [](const TextLayerState& state) { return InkMass(RasterOf(state)); };
+        const auto in_braille = [&](std::string text) {
+            TextLayerState state = HelveticaState(std::move(text), 40.0f);
+            state.resolved_font_path = braille_path;
+            state.resolved_font_face.clear();
+            return state;
+        };
+        const auto alone = [&](const SystemFontFace& font, const std::string& text) {
+            return ink(StateInFace(font, text, 40.0f));
+        };
+
+        std::size_t punctuation = 0;
+        for (const uint32_t codepoint : { 0xFF0Cu, 0xFF01u, 0xFF1Au, 0xFF1Fu, 0xFF08u, 0xFF09u, 0x3001u, 0x3002u }) {
+            if (! pingfang_face.Has(codepoint)) continue;
+            const auto text = Utf8Of(codepoint);
+            // Only a mark the two faces draw differently says which one a layer used.
+            if (symbol_face.Has(codepoint) && alone(symbols, text) == alone(pingfang, text)) continue;
+            ++punctuation;
+            EXPECT_EQ(ink(in_braille(text)), alone(pingfang, text)) << "U+" << std::hex << codepoint;
+        }
+        EXPECT_GT(punctuation, 0u);
+
+        // A symbol that Arial and Segoe UI's stand-in lack, so that the choice is between the two
+        // faces, and that they draw differently.
+        std::size_t symbol_marks = 0;
+        for (uint32_t codepoint = 0x2100u; codepoint <= 0x2BFFu; ++codepoint) {
+            if (! symbol_face.Has(codepoint) || ! pingfang_face.Has(codepoint)) continue;
+            if (arial_face.Has(codepoint) || segoe_face.Has(codepoint)) continue;
+            const auto text = Utf8Of(codepoint);
+            if (alone(symbols, text) == 0u || alone(symbols, text) == alone(pingfang, text)) continue;
+            ++symbol_marks;
+            EXPECT_EQ(ink(in_braille(text)), alone(symbols, text)) << "U+" << std::hex << codepoint;
+        }
+        EXPECT_GT(symbol_marks, 0u) << "no symbol told the two faces apart";
+    }
+    FT_Done_FreeType(library);
+#endif
+}
+
+// The faces found for a family are kept, but not past the file they were found at, and a family
+// that was not found is looked for again after a while: some system faces are downloadable
+// assets, whose path changes with an update and which may not be on the disk the first time.
+TEST(TextObjectRuntime, AFamilyThatMovedOrAppearedIsFoundAgain) {
+    struct RestoreLookup {
+        ~RestoreLookup() { SetInstalledFamilyLookupForTests({}); }
+    } restore;
+    const auto directory = std::filesystem::temp_directory_path() /
+                           ("family-lookup-" + std::to_string(::getpid()));
+    std::filesystem::create_directories(directory);
+    const auto first  = directory / "first.ttf";
+    const auto second = directory / "second.ttf";
+    std::ofstream(first) << "x";
+    std::ofstream(second) << "x";
+
+    int         calls = 0;
+    std::string path;
+    SetInstalledFamilyLookupForTests([&](std::string_view family) {
+        ++calls;
+        return family == "Downloaded Family" ? SystemFontFace { .path = path } : SystemFontFace {};
+    });
+
+    // Not there at first: asked once, and not again until the retry time has passed.
+    EXPECT_TRUE(ResolveInstalledFamily("Downloaded Family").path.empty());
+    EXPECT_TRUE(ResolveInstalledFamily("Downloaded Family").path.empty());
+    EXPECT_EQ(calls, 1);
+    ExpireMissingInstalledFamiliesForTests();
+    EXPECT_TRUE(ResolveInstalledFamily("Downloaded Family").path.empty());
+    EXPECT_EQ(calls, 2);
+
+    // It appears: found at the next retry, and kept while its file is there.
+    path = first.string();
+    ExpireMissingInstalledFamiliesForTests();
+    EXPECT_EQ(ResolveInstalledFamily("Downloaded Family").path, first.string());
+    EXPECT_EQ(calls, 3);
+    for (int layout = 0; layout < 5; ++layout) {
+        EXPECT_EQ(ResolveInstalledFamily("Downloaded Family").path, first.string());
+    }
+    EXPECT_EQ(calls, 3);
+
+    // An update moves it: the file under the path found is gone, so the family is looked up
+    // again at once and the new path is the answer.
+    path = second.string();
+    std::filesystem::remove(first);
+    EXPECT_EQ(ResolveInstalledFamily("Downloaded Family").path, second.string());
+    EXPECT_EQ(calls, 4);
+    EXPECT_EQ(ResolveInstalledFamily("Downloaded Family").path, second.string());
+    EXPECT_EQ(calls, 4);
+    std::filesystem::remove_all(directory);
 }
 
 TEST(TextObjectRuntime, StyledTextKeepsItsMarginWhenItsTextChanges) {

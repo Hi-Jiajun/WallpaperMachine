@@ -450,9 +450,39 @@ names, by PostScript name, so `PingFang SC` is the Simplified Chinese cut and no
 Hong Kong cut that starts `PingFang.ttc`. The faces stay open for the next layout, at most
 eight, the one unused longest dropped first, because a layer lays its text out again for
 every change of it, and a face whose file has changed since it was opened (a font replaced
-in place) is dropped and opened again, because FreeType reads the file through a mapping. A glyph the font lacks is drawn from one more face (PingFang SC,
-else Arial Unicode MS, else Helvetica) that is looked up when a layout meets such a
-glyph, never otherwise; Wallpaper Engine's list of up to eight faces is not followed.
+in place) is dropped and opened again, because FreeType reads the file through a mapping.
+
+A text object's `font` is read as Wallpaper Engine reads it: eight
+keys, matched as the whole string in lower case, are fonts of the Windows Fonts folder
+(`systemfont_arial`, `_calibri`, `_cambria`, `_comicsans`, `_consolas`, `_sansserif`,
+`_segoe` and `_verdana`), any other string is the path of a font file the wallpaper ships,
+and a font that cannot be loaded, which a family named by its name alone (`Arial`,
+`Helvetica`, `systemfont_Helvetica`) is, is drawn in Arial; a text object with no `font`
+is in Arial, whose line is 1.15 em (a Helvetica's is 1.0). Arial, Comic Sans MS, Microsoft
+Sans Serif and Verdana are on every Mac as the same fonts. Consolas, Cambria, Segoe UI and
+Calibri are not: Andale Mono, Charter, PT Sans and PT Sans stand in for them, drawn at the
+size that gives the digits the real font's advance (0.916, 0.996, 0.987 and 0.93 of the
+point size, which a clock's width is made of) and with their rows set in the real font's
+line, the one the cards Wallpaper Engine saved have (1.1709 em for Consolas, 1.170 for
+Cambria, 1.331 for Segoe UI, 1.2207 for Calibri); Consolas's digits then stand 0.643 em
+tall as in Wallpaper Engine's frame, where Menlo fitted the same way would stand 0.676,
+and its ascender is 0.743 em, which puts the digits of a centred clock where Wallpaper
+Engine's are. The glyphs of those four are the stand-ins' own. A glyph the font lacks is
+drawn from the first face of Wallpaper Engine's list that has it (Arial, Segoe UI's
+stand-in, Apple Symbols for Segoe UI Symbol, which is not asked for CJK punctuation and
+fullwidth forms (inferred: they go to the next face, so a string does not mix a centred
+fullwidth comma with a left-set ideographic one), PingFang SC for Microsoft YaHei, Apple SD
+Gothic Neo for Malgun Gothic, and Arial Unicode MS last), each opened only when no face
+already held has the glyph, so the list is gone down as far as the text needs, once for
+a layout, and a glyph that none has is skipped; colour emoji have no face.
+
+An
+`opaquebackground` fills the card's rectangle (not the room a style needs around it) with
+`backgroundcolor` times `backgroundbrightness`, the brightness only in the HDR pipeline as
+the text's is, at the layer's alpha: a layer drawn straight onto the scene draws the fill and
+the glyphs over it as the two quads Wallpaper Engine draws one after the other, and a
+composite starts as the fill's colour at the layer's alpha where it would start as the scene
+behind the card. The colour and the brightness follow a property or script bound to them.
 
 The card is the text plus `padding` on each axis, and the margin is
 there only for a layer that has a visible effect pass, a colour blend, an LED

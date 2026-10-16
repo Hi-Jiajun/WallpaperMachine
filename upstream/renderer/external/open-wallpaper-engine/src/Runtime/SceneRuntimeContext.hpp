@@ -263,9 +263,10 @@ public:
     /// effects that run and rebuilds the render graph before the next frame.
     void          RegisterEffectVisibility(std::shared_ptr<SceneImageEffect> effect,
                                            std::unique_ptr<DynamicValue> value);
-    /// What follows a text layer's effects as a script switches them. Wallpaper Engine counts the
-    /// visible effect passes of a text layer afresh whenever an effect's visibility changes: the
-    /// card is padded, and drawn as a composite, only while one is visible.
+    /// What follows a text layer's effects as a script switches them, and what follows its card.
+    /// Wallpaper Engine counts the visible effect passes of a text layer afresh whenever an
+    /// effect's visibility changes: the card is padded, and drawn as a composite, only while one
+    /// is visible.
     struct TextEffectGate {
         /// The layer is padded whatever its effects do: a colour blend, an LED source, an opaque
         /// background, or fog in the scene.
@@ -276,6 +277,10 @@ public:
         /// (some effect is visible) and 0 while the glyphs go straight onto the scene. Null for
         /// a card that never composites.
         DynamicValue*                                  composite { nullptr };
+        /// The `g_CardInset` constant of the material of a card with an opaque background: where
+        /// the card lies in the raster, as the fraction of the raster outside it on each side. It
+        /// moves with the text, so a relayout updates it. Null for a card with no background.
+        DynamicValue*                                  card_inset { nullptr };
     };
     /// Registers the gate of the text layer `name` and applies it: the layer's padding and
     /// composite follow its effects from here on.

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Text/SystemFontResolver.hpp"
+
 #include <Eigen/Dense>
 
 #include <array>
@@ -103,12 +105,16 @@ struct TextLayerState {
     std::string          text;
     std::string          layer_key;
     std::string          font_key;
-    std::string          resolved_font_kind { "family" };
+    std::string          resolved_font_kind { "system" };
     std::string          resolved_font_identity;
     std::string          resolved_font_path;
     // The PostScript name of the face to open in `resolved_font_path`, for a file
     // that holds several (a collection). Empty opens the file's first face.
     std::string          resolved_font_face;
+    // How the face stands in for the font the scene names, for a stand-in of a Windows
+    // font that is not installed: the size its glyphs are drawn at and the line metrics
+    // its rows are set in. A face that is what it says it is leaves this alone.
+    SystemFontFit        resolved_font_fit;
     SharedFontData       resolved_font_data;
     float                point_size { 12.0f };
     // The margin the card keeps clear around the text on each axis, in pixels.
@@ -265,7 +271,7 @@ public:
     // changes anything schedules a new layout and raster, as new text does.
     void SetPointSize(float point_size);
     void SetFont(std::string font_key, std::string kind, std::string identity, std::string path,
-                 std::string face, SharedFontData data);
+                 std::string face, SystemFontFit fit, SharedFontData data);
     void SetAlignment(std::string horizontal, std::string vertical);
     /// Gives the card its authored padding or takes it away, as Wallpaper Engine does when
     /// the layer's effects are switched on or off: the card is laid out again. Nothing
@@ -319,6 +325,10 @@ constexpr int32_t kTextEffectExtentLimit = 4096;
 /// the final card that puts the chain's result on the scene is this frame with the whole of
 /// the buffer on it.
 TextLayerRenderFrame TextLayerEffectFrame(const TextLayerRenderFrame& card);
+/// Where the card lies in the raster of a laid-out text, as the fraction of the raster that lies
+/// outside the card on each side: the raster holds the card with the room the style reaches on
+/// every side, so the card begins that far in. Zero for a text with no style.
+Eigen::Vector2f TextCardInsetInRaster(const TextLayerState& state, const TextLayerLayout& layout);
 std::string     TextTextureName(std::string_view layer_key);
 void            RasterizeTextLayer(const TextLayerState& state, uint32_t width, uint32_t height,
                                    std::vector<uint8_t>& rgba);

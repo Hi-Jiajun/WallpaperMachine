@@ -1696,9 +1696,18 @@ std::string TextRuntimeName(const ParseContext& context, const wpscene::WPTextOb
 /// the screen position of the fragment) and writes `mix(scene, glyph, alpha)` with alpha
 /// `alpha ^ kTextCompositeAlphaExponent`. While `g_Composite` is 0 -- every effect switched
 /// off -- it writes the glyph and its alpha as a card that is drawn directly does.
+///
+/// `filled` is the card of a text object with an opaque background. Wallpaper Engine paints
+/// the card's rectangle with the background colour at the layer's alpha before the glyphs, or,
+/// when the card is a composite, clears the composite to that colour and alpha where it would
+/// otherwise seed it from the scene. The card here covers the rectangle and the room the style
+/// reaches around it, so this paints inside `g_CardInset` (the fraction of the card that lies
+/// outside the rectangle, on each side) the glyph over the fill as the two quads one after the
+/// other would leave the scene -- straight "over", colour and alpha -- or, for a composite, the
+/// glyph blended into the cleared card.
 std::shared_ptr<SceneShader> BuildTextSceneShader(fs::VFS& vfs, std::string_view scene_id,
                                                   const std::string& texture_key, bool styled,
-                                                  bool outlined, bool composite) {
+                                                  bool outlined, bool composite, bool filled) {
     std::string vertex_src =
         "layout(binding = 1) uniform mat4 g_ModelViewProjectionMatrix;\n"
         "in vec3 a_Position;\n"
@@ -1759,21 +1768,46 @@ std::shared_ptr<SceneShader> BuildTextSceneShader(fs::VFS& vfs, std::string_view
                "  vec4 result = vec4(rgb, alpha);\n";
     }
     std::string varyings = "in vec2 v_TexCoord;\n";
-    std::string finish   = "  gl_FragColor = result;\n";
+    // What the card writes where it is drawn straight onto the scene (or, off a composite, into
+    // a layer's target to be put there): the glyph, over the fill where there is one.
+    std::string direct = "result";
+    if (filled) {
+        uniforms += "uniform vec3 g_Background;\n"
+                    "uniform float g_BackgroundBrightness;\n"
+                    "uniform vec2 g_CardInset;\n";
+        body += "  vec2 within = step(g_CardInset, v_TexCoord) * step(v_TexCoord, 1.0 - g_CardInset);\n"
+                "  float fill = within.x * within.y;\n"
+                "  vec3 plate = g_Background * g_BackgroundBrightness;\n"
+                "  float plate_alpha = fill * g_Alpha;\n"
+                "  float over_alpha = result.a + plate_alpha * (1.0 - result.a);\n"
+                "  vec4 over = vec4(over_alpha > 0.0\n"
+                "                       ? (result.rgb * result.a + plate * plate_alpha * (1.0 - result.a)) / over_alpha\n"
+                "                       : result.rgb,\n"
+                "                   over_alpha);\n";
+        direct = "over";
+    }
+    std::string finish = "  gl_FragColor = " + direct + ";\n";
     if (composite) {
         uniforms += "uniform sampler2D g_Texture1;\n"
                     "uniform float g_Composite;\n";
         varyings += "in vec3 v_ScreenCoord;\n";
+        // The composite starts as the scene behind the card with no alpha, or as the fill's colour
+        // and the layer's alpha inside the fill; the glyph is blended into it on colour and on alpha.
         finish = "  vec2 screen = v_ScreenCoord.xy / v_ScreenCoord.z * 0.5 + 0.5;\n"
-                 "  vec3 behind = texture(g_Texture1, screen).rgb;\n"
-                 "  vec4 composed = vec4(mix(behind, result.rgb, result.a),\n"
-                 "                       pow(result.a, " + std::to_string(kTextCompositeAlphaExponent) + "));\n"
-                 "  gl_FragColor = g_Composite > 0.5 ? composed : result;\n";
+                 "  vec3 behind = texture(g_Texture1, screen).rgb;\n" +
+                 std::string(filled ? "  vec3 below = mix(behind, plate, fill);\n"
+                                      "  float below_alpha = plate_alpha;\n"
+                                    : "  vec3 below = behind;\n"
+                                      "  float below_alpha = 0.0;\n") +
+                 "  vec4 composed = vec4(mix(below, result.rgb, result.a),\n"
+                 "                       pow(result.a, " + std::to_string(kTextCompositeAlphaExponent) +
+                 ") + below_alpha * (1.0 - result.a));\n"
+                 "  gl_FragColor = g_Composite > 0.5 ? composed : " + direct + ";\n";
     }
     std::string fragment_src = uniforms + varyings + "void main() {\n" + body + finish + "}\n";
-    const char* shader_name = composite ? (! styled ? "text_composite" : outlined ? "text_composite_styled_outline"
-                                                                                  : "text_composite_styled")
-                                        : (! styled ? "text" : outlined ? "text_styled_outline" : "text_styled");
+    std::string shader_name = composite ? "text_composite" : "text";
+    if (styled) shader_name += outlined ? "_styled_outline" : "_styled";
+    if (filled) shader_name += "_filled";
 
     WPShaderInfo                 shader_info;
     std::vector<WPShaderTexInfo> tex_infos(composite ? 2 : 1);
@@ -1976,19 +2010,26 @@ AttachEffectsToNode(ParseContext& context,
                     const wpscene::WPImageEffect* screen_blend_effect = nullptr,
                     std::optional<BlendMode> idle_final_blend = std::nullopt);
 
-// Fills the font fields of `state` for the font the scene (or a script) names:
-// a system font, a font the wallpaper ships, or a family by name.
+// The font fields of `state` for an installed face.
+void SetSystemFont(TextLayerState& state, const SystemFontFace& face, std::string identity) {
+    state.resolved_font_kind     = "system";
+    state.resolved_font_identity = std::move(identity);
+    state.resolved_font_path     = face.path;
+    state.resolved_font_face     = face.postscript_name;
+    state.resolved_font_fit      = face.fit;
+    state.resolved_font_data     = SharedFontData {};
+}
+
+// Fills the font fields of `state` for the font the scene (or a script) names, as
+// Wallpaper Engine finds it: one of its eight `systemfont_` keys, the whole string and in
+// lower case, is a font of the Windows Fonts folder; anything else is a path to a font file,
+// which the wallpaper ships; and a font it cannot load is drawn in Arial. A family named by
+// its name alone ("Arial", "Helvetica") is a path to a file that is not there.
 void ResolveTextLayerFont(TextLayerState& state, fs::VFS& vfs, const std::string& font_key) {
     state.font_key = font_key;
     constexpr std::string_view system_prefix = "systemfont_";
-    const auto                 filename      = std::filesystem::path(font_key).filename().string();
-    if (filename.starts_with(system_prefix)) {
-        const auto face              = ResolveSystemFont(font_key);
-        state.resolved_font_kind     = "system";
-        state.resolved_font_identity = filename.substr(system_prefix.size());
-        state.resolved_font_path     = face.path;
-        state.resolved_font_face     = face.postscript_name;
-        state.resolved_font_data     = SharedFontData {};
+    if (IsSceneFontKey(font_key)) {
+        SetSystemFont(state, ResolveSceneFont(font_key), font_key.substr(system_prefix.size()));
         return;
     }
 
@@ -2001,6 +2042,7 @@ void ResolveTextLayerFont(TextLayerState& state, fs::VFS& vfs, const std::string
             state.resolved_font_identity = font_key;
             state.resolved_font_path     = candidate;
             state.resolved_font_face.clear();
+            state.resolved_font_fit      = {};
             state.resolved_font_data     = ReadVfsBytes(vfs, candidate);
             return;
         }
@@ -2009,17 +2051,14 @@ void ResolveTextLayerFont(TextLayerState& state, fs::VFS& vfs, const std::string
             state.resolved_font_identity = font_key;
             state.resolved_font_path     = font_key;
             state.resolved_font_face.clear();
+            state.resolved_font_fit      = {};
             state.resolved_font_data     = ReadVfsBytes(vfs, font_key);
             return;
         }
     }
 
-    const auto face              = ResolveSystemFont(font_key.empty() ? "default" : font_key);
-    state.resolved_font_kind     = "family";
-    state.resolved_font_identity = font_key.empty() ? "default" : font_key;
-    state.resolved_font_path     = face.path;
-    state.resolved_font_face     = face.postscript_name;
-    state.resolved_font_data     = SharedFontData {};
+    SetSystemFont(state, ResolveSceneFont(kDefaultSceneFontKey),
+                  std::string(kDefaultSceneFontKey).substr(system_prefix.size()));
 }
 
 // Whether an effect is part of the chain a layer is built with: one that is
@@ -2312,9 +2351,12 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
                                                    : BlendMode::Translucent;
         const bool styled   = TextStyleActive(text_state.style);
         const bool outlined = styled && text_state.style.outline;
+        // An opaque background fills the card's rectangle with the background colour at the layer's
+        // alpha (`BuildTextSceneShader`).
+        const bool filled = obj.opaquebackground;
         material.customShader.shader = BuildTextSceneShader(
             *context.vfs, context.scene->scene_id, texture_name, styled, outlined,
-            composites_over_scene);
+            composites_over_scene, filled);
         material.customShader.constValues["g_Color"] = obj.color;
         material.customShader.constValues["g_Alpha"] = obj.alpha;
         // Wallpaper Engine multiplies the colour by the brightness only in its HDR
@@ -2322,6 +2364,14 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         // other scene.
         const bool brightness_applies = context.scene->hdr;
         material.customShader.constValues["g_Brightness"] = brightness_applies ? obj.brightness : 1.0f;
+        if (filled) {
+            // The background's brightness is held to the same pipeline as the text's.
+            material.customShader.constValues["g_Background"]           = obj.backgroundcolor;
+            material.customShader.constValues["g_BackgroundBrightness"] =
+                brightness_applies ? obj.backgroundbrightness : 1.0f;
+            const auto inset = TextCardInsetInRaster(text_state, layout);
+            material.customShader.constValues["g_CardInset"] = std::array<float, 2> { inset.x(), inset.y() };
+        }
         if (outlined) material.customShader.constValues["g_OutlineColor"] = obj.outlinecolor;
         if (styled) material.customShader.constValues["g_ShadowColor"] = obj.dropshadowcolor;
         // Whether the card is a composite follows the layer's visible effects as they are
@@ -2337,6 +2387,16 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
             auto value      = std::make_unique<DynamicValue>(composite_start);
             composite_value = value.get();
             context.scene->runtime->RegisterMaterialConstant(mesh->MaterialSlotPtr(), "g_Composite",
+                                                             std::move(value));
+        }
+        // Where the card lies in the raster moves with the text (the style's room around it is
+        // fixed in pixels, the raster is not), so the runtime keeps the constant up to date.
+        DynamicValue* card_inset_value = nullptr;
+        if (filled && mesh->MaterialSlotPtr() != nullptr) {
+            const auto inset  = TextCardInsetInRaster(text_state, layout);
+            auto       value  = std::make_unique<DynamicValue>(inset);
+            card_inset_value  = value.get();
+            context.scene->runtime->RegisterMaterialConstant(mesh->MaterialSlotPtr(), "g_CardInset",
                                                              std::move(value));
         }
 
@@ -2376,6 +2436,26 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
             }
             QueueSceneScriptIfNeeded(context, runtime_name, *setting);
         }
+        if (filled) {
+            for (const auto& [key, uniform] :
+                 { std::pair<const char*, const char*> { "backgroundcolor", "g_Background" },
+                   { "backgroundbrightness", "g_BackgroundBrightness" } }) {
+                const auto setting = obj.field_bindings.find(key);
+                if (setting == obj.field_bindings.end()) continue;
+                const bool brightness = std::string_view(key) == "backgroundbrightness";
+                if (brightness && ! brightness_applies) {
+                    // Nothing draws with it, but a script that drives it still runs.
+                    context.scene->runtime->BindMaterialBrightness(
+                        {}, ResolveFloatSetting(*context.scene->runtime, *setting, runtime_name));
+                } else {
+                    context.scene->runtime->RegisterMaterialConstant(
+                        mesh->MaterialSlotPtr(), uniform,
+                        brightness ? ResolveFloatSetting(*context.scene->runtime, *setting, runtime_name)
+                                   : ResolveVec3Setting(*context.scene->runtime, *setting, runtime_name));
+                }
+                QueueSceneScriptIfNeeded(context, runtime_name, *setting);
+            }
+        }
         // The outline and shadow colours are uniforms of the card's shader, so a
         // property or script bound to one drives it live, like the layer's colour.
         // (Their sizes, offsets and opacity are baked into the card's pixels and
@@ -2406,6 +2486,19 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
                                                     ParseTextScreenAnchor(obj.anchor));
         RegisterNodeTransformSettings(*context.scene->runtime, node.get(), runtime_name,
                                       obj.origin_setting, obj.scale_setting, obj.angles_setting);
+        const auto register_gate = [&](std::vector<std::shared_ptr<SceneImageEffect>> built) {
+            // The margin and the composite follow the effects that are visible, as they
+            // are switched.
+            context.scene->runtime->RegisterTextEffectGate(
+                runtime_name,
+                SceneRuntimeContext::TextEffectGate {
+                    .padded_regardless = TextCardIsPaddedRegardless(obj, scene_fog),
+                    .effects           = std::move(built),
+                    .composite         = composite_value,
+                    .card_inset        = card_inset_value,
+                });
+        };
+        if (! through_effects && card_inset_value != nullptr) register_gate({});
         if (through_effects) {
             // The last pass is drawn translucent onto the scene whatever the colour blend
             // mode: Wallpaper Engine forces it, "add" included, while an effect runs. A layer
@@ -2434,15 +2527,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
                                                                             : nullptr,
                                              additive_color_blend ? std::optional<BlendMode> { BlendMode::Additive }
                                                                   : std::nullopt);
-            // The margin and the composite follow the effects that are visible, as they
-            // are switched.
-            context.scene->runtime->RegisterTextEffectGate(
-                runtime_name,
-                SceneRuntimeContext::TextEffectGate {
-                    .padded_regardless = TextCardIsPaddedRegardless(obj, scene_fog),
-                    .effects           = std::move(built),
-                    .composite         = composite_value,
-                });
+            register_gate(std::move(built));
         } else {
             // Camera parallax moves a layer through the model matrix of the draw, and
             // the value updater adds it to a draw that has a record with the layer's

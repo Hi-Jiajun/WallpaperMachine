@@ -6718,6 +6718,185 @@ TEST_F(MetalSceneDraw, ATurnedAndScaledEffectsTextIsComposedOverTheSceneBehindIt
     }
 }
 
+namespace
+{
+
+/// Where a text caption's card lies in the 384 by 256 picture of the backdrop fixture, in pixels:
+/// the card the layout gives, centred where the layout puts it from the caption's origin.
+struct CardPixels
+{
+    int left { 0 };
+    int right { 0 };
+    int top { 0 };
+    int bottom { 0 };
+};
+
+CardPixels CardOfCaption(Scene& scene, const Quadrant& quadrant)
+{
+    const auto state = scene.runtime->NodeTextState(std::string("caption ") + quadrant.name);
+    EXPECT_TRUE(state.has_value());
+    if (! state.has_value()) return {};
+    const auto layout = MeasureTextLayerLayout(*state);
+    const float centre_x = float(quadrant.x) + layout.centre.x();
+    const float centre_y = 256.0f - (float(quadrant.y) + layout.centre.y());
+    return { int(std::lround(centre_x - layout.card.x() * 0.5f)), int(std::lround(centre_x + layout.card.x() * 0.5f)),
+             int(std::lround(centre_y - layout.card.y() * 0.5f)), int(std::lround(centre_y + layout.card.y() * 0.5f)) };
+}
+
+std::array<int, 3> PixelAt(const RendererPicture& picture, int x, int y)
+{
+    const auto* pixel = &picture.rgb[(static_cast<std::size_t>(y) * picture.width + x) * 3u];
+    return { pixel[0], pixel[1], pixel[2] };
+}
+
+/// The darkest pixel in a rectangle, as red, green, blue.
+std::array<int, 3> DarkestIn(const RendererPicture& picture, const CardPixels& area)
+{
+    std::array<int, 3> darkest { 255, 255, 255 };
+    int                least = 1 << 30;
+    for (int y = area.top; y < area.bottom; ++y) {
+        for (int x = area.left; x < area.right; ++x) {
+            const auto pixel = PixelAt(picture, x, y);
+            if (pixel[0] + pixel[1] + pixel[2] < least) {
+                least   = pixel[0] + pixel[1] + pixel[2];
+                darkest = pixel;
+            }
+        }
+    }
+    return darkest;
+}
+
+constexpr std::array<double, 3> kPlateColour { 0.0, 0.5, 1.0 };
+
+/// A caption with an opaque background of `kPlateColour`, small enough that its card lies in its
+/// quadrant. `extra` is merged over it.
+BackdropOptions OpaqueCaption(nlohmann::json extra = nlohmann::json::object())
+{
+    BackdropOptions options;
+    options.caption = { { "opaquebackground", true }, { "backgroundcolor", "0 0.5 1" }, { "pointsize", 12 },
+                        { "padding", "12 12" } };
+    options.caption.merge_patch(extra);
+    return options;
+}
+
+} // namespace
+
+TEST_F(MetalSceneDraw, AnOpaqueBackgroundFillsTheCardAtTheLayersAlphaOnBothRenderers)
+{
+    // Wallpaper Engine fills the card with the background colour at the layer's alpha before the
+    // glyphs, or, for a card that goes through effects, clears the composite to that colour and
+    // alpha where it would seed it from the scene. Over each quadrant of the backdrop the card's
+    // rectangle is the quadrant's colour mixed towards the plate by the alpha, and nothing
+    // outside it changes; where a stem of the caption's glyph is the plate shows through by what
+    // the glyph leaves, which the two ways of drawing it differ in (the glyph over the fill, or the
+    // glyph blended into the cleared composite).
+    constexpr double kAlpha = 0.5;
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        for (const bool through_effect : { false, true }) {
+            SCOPED_TRACE(through_effect ? "through an effect" : "drawn directly");
+            const std::string name = std::string("text-plate-") + (native ? "native-" : "compat-") +
+                                     (through_effect ? "fx" : "plain");
+            const auto project = WriteTextOverBackdropFixture(
+                root_ / name, kAlpha, through_effect ? std::string_view(kCopyEffect) : std::string_view(),
+                OpaqueCaption());
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
+            ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+            for (const auto& quadrant : kQuadrants) {
+                SCOPED_TRACE(quadrant.name);
+                const auto card = CardOfCaption(*loaded.scene, quadrant);
+                ASSERT_GT(card.right - card.left, 16);
+                ASSERT_GT(card.bottom - card.top, 16);
+                const int near_left  = card.left + 3;
+                const int near_right = card.right - 4;
+                const int near_top   = card.top + 3;
+                const int near_bottom = card.bottom - 4;
+                for (std::size_t channel = 0; channel < 3; ++channel) {
+                    const double plate = kPlateColour[channel] * 255.0;
+                    const double fill  = plate * kAlpha + quadrant.colour[channel] * (1.0 - kAlpha);
+                    // The four corners inside the card, clear of the glyph.
+                    for (const auto& [x, y] : { std::pair<int, int> { near_left, near_top },
+                                                { near_right, near_top }, { near_left, near_bottom },
+                                                { near_right, near_bottom } }) {
+                        EXPECT_NEAR(PixelAt(picture, x, y)[channel], fill, 3.0)
+                            << "channel " << channel << " at " << x << "," << y;
+                    }
+                    // Just outside it: the backdrop, untouched.
+                    for (const auto& [x, y] : { std::pair<int, int> { card.left - 3, (card.top + card.bottom) / 2 },
+                                                { card.right + 2, (card.top + card.bottom) / 2 },
+                                                { (card.left + card.right) / 2, card.top - 3 },
+                                                { (card.left + card.right) / 2, card.bottom + 2 } }) {
+                        EXPECT_NEAR(PixelAt(picture, x, y)[channel], quadrant.colour[channel], 3.0)
+                            << "channel " << channel << " at " << x << "," << y;
+                    }
+                    // The black glyph's stem. Directly: the glyph over the fill, so the fill's
+                    // colour and the scene behind it show through what the glyph leaves of each.
+                    // Through the composite: the plate where the glyph leaves it, and the glyph
+                    // blended in by its alpha squared on alpha.
+                    const double stem = kAlpha;
+                    double expected;
+                    if (! through_effect) {
+                        expected = fill * (1.0 - stem);
+                    } else {
+                        const double composite_alpha = std::pow(stem, kTextCompositeAlphaExponent) + kAlpha * (1.0 - stem);
+                        const double rgb = plate * (1.0 - stem);
+                        expected = rgb * composite_alpha + quadrant.colour[channel] * (1.0 - composite_alpha);
+                    }
+                    const auto darkest = DarkestIn(picture, { card.left, card.right, card.top, card.bottom });
+                    // The darkest pixel is the darkest sum, so only a channel the plate and the
+                    // quadrant share the order of is read alone.
+                    if (kPlateColour[channel] > 0.0 || quadrant.colour[channel] > 0) {
+                        EXPECT_NEAR(darkest[channel], expected, 4.0) << "channel " << channel;
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST_F(MetalSceneDraw, AnOpaqueBackgroundFillsTheCardAndNotTheRoomAStyleNeedsAroundItOnBothRenderers)
+{
+    // The raster of a styled text is larger than its card by the room the outline, blur and shadow
+    // reach into, and the fill is the card's rectangle: Wallpaper Engine's quad is the card, and a
+    // shadow past it falls on the scene. The corner of the card is filled, and a pixel just beyond
+    // it, inside the raster, is the backdrop.
+    BackdropOptions options = OpaqueCaption({ { "padding", "6 6" }, { "outline", true }, { "outlinethickness", 4 },
+                                              { "dropshadow", true }, { "dropshadowsize", 6 } });
+    constexpr double kAlpha = 1.0;
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        const std::string name = std::string("text-plate-style-") + (native ? "native" : "compat");
+        const auto project = WriteTextOverBackdropFixture(root_ / name, kAlpha, {}, options);
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+        const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+        ASSERT_TRUE(picture.error.empty()) << picture.error;
+        for (const auto& quadrant : kQuadrants) {
+            SCOPED_TRACE(quadrant.name);
+            const auto state = loaded.scene->runtime->NodeTextState(std::string("caption ") + quadrant.name);
+            ASSERT_TRUE(state.has_value());
+            ASSERT_GE(TextStyleMargin(*state), 6.0f) << "the style has no room around the card to leave unfilled";
+            const auto card = CardOfCaption(*loaded.scene, quadrant);
+            for (std::size_t channel = 0; channel < 3; ++channel) {
+                const double plate = kPlateColour[channel] * 255.0;
+                EXPECT_NEAR(PixelAt(picture, card.left + 2, card.top + 2)[channel], plate, 3.0)
+                    << "channel " << channel;
+                EXPECT_NEAR(PixelAt(picture, card.right - 3, card.bottom - 3)[channel], plate, 3.0)
+                    << "channel " << channel;
+                EXPECT_NEAR(PixelAt(picture, card.left - 3, card.top - 3)[channel], quadrant.colour[channel], 3.0)
+                    << "channel " << channel;
+                EXPECT_NEAR(PixelAt(picture, card.right + 2, card.bottom + 2)[channel], quadrant.colour[channel], 3.0)
+                    << "channel " << channel;
+            }
+        }
+    }
+}
+
 TEST_F(MetalSceneDraw, ATextLayerWhoseEffectsAreAllOffKeepsItsSingleAlphaOnBothRenderers)
 {
     // With every effect off there is no composite: the glyphs go straight onto the scene

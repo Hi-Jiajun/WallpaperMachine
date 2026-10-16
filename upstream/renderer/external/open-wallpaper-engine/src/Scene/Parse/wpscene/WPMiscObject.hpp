@@ -145,7 +145,8 @@ struct WPMiscObjectBase {
 
 struct WPTextObject : WPMiscObjectBase {
     nlohmann::json       text;
-    nlohmann::json       font;
+    // Wallpaper Engine's default for a text object that leaves the key out: Arial.
+    nlohmann::json       font = "systemfont_arial";
     // Wallpaper Engine's defaults for a text object that leaves these keys out.
     float                pointsize { 32.0f };
     // Wallpaper Engine's defaults for the key being absent: a 32 pixel margin
