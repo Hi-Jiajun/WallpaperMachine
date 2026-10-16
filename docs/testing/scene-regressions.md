@@ -196,6 +196,33 @@ Playback, backend, host and startup areas are in
   rectangle test. `offscreen_scene_probe` with `WE_TEST_CLICK_OFFSET` exercises
   real assets.
 
+- **Which layers the cursor reaches** — `MouseInput.OnlySolidImageTextAndModelLayersAreHitTested`,
+  `.ALayerThatDisablesPropagationHidesTheLayersBehindItFromTheCursor`,
+  `.OnlyAVisibleBlockerInFrontStopsTheWalk`,
+  `.ALayerBehindABlockerHearsNeitherTheDownNorTheClickOfAPress`,
+  `.TheBlockerInFrontFollowsTheLayerOrderAndAFrameInProgress` and
+  `.ARolledBackRegistrationRestoresTheCursorTargetOfTheLayerItReplaced` in
+  `mouse_input_test`; for the parse
+  `TextObjectRuntime.ATextLayerRegistersItsSolidAndPropagationFlagsForTheCursor`,
+  `SceneSchema.ParserRegistersWhatTheCursorMakesOfAModelLayer`,
+  `LayerTextureReference.ImageLayersAndGroupsRegisterTheirCursorTargeting` and
+  `.LightsCamerasParticlesAndGroupsAreNeverHitTestedForTheCursor`. Wallpaper Engine walks the layers front to back and tests only solid
+  (default on) image, text and model layers, by their quad; a plain group, a
+  particle, a light or a camera is never tested. A visible layer under the cursor
+  with `disablepropagation` ends the walk: the layers behind it hear no enter,
+  leave, move or press, and keep the hover state they had, so a hovered layer is not
+  left when a blocker moves over it. A blocker needs no script of its own, and one
+  that is hidden, not solid, or behind the layer in question blocks nothing. The
+  layer order is the scene's own (`LayerNameAt`). The frontmost visible blocker under
+  the cursor is found once for a frame's cursor events (a walk from the front over
+  the layers in order, one hit test per blocker it reaches) and a layer is out of the
+  walk when it stands behind it, by a rank looked up in a map rebuilt when the order
+  changes; the search is dropped again whenever a cursor callback has run, since a
+  callback can hide or move a blocker, and costs nothing in a scene with no blocker.
+  A cost has not been measured on a scene with many scripted layers and one blocker.
+  Not modelled: Wallpaper Engine's walk skips blocking while a button is held and a
+  captured set is non-empty, and fires its click on release rather than on press.
+
 ## Scene scripts and property bindings
 
 All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.

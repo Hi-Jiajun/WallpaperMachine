@@ -601,6 +601,9 @@ void ParseLayerNodes(ParseContext& context, const nlohmann::json& objects) {
                                                 runtime_name);
         if (context.scene->runtime != nullptr) {
             context.scene->runtime->RegisterNode(runtime_name, node.get());
+            // A plain group, or a layer of a kind not parsed yet, is never
+            // hit-tested for the cursor.
+            context.scene->runtime->SetNodeCursorTarget(runtime_name, false, true, false);
             context.scene->runtime->RegisterNodeVisibility(
                 runtime_name,
                 node.get(),
@@ -2265,6 +2268,8 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         }
         context.scene->runtime->SetNodeAnchorAlignment(
             runtime_name, anchor, Vector3f(obj.origin.data()));
+        context.scene->runtime->SetNodeCursorTarget(runtime_name, true, obj.solid,
+                                                    obj.disablepropagation);
         // Pinned to the edge of what the display shows, where that differs from
         // the canvas; the runtime moves it as the presentation changes.
         context.scene->runtime->SetNodeScreenAnchor(runtime_name,
@@ -4033,6 +4038,8 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         context.scene->runtime != nullptr && AlignmentHasAnchorOffset(wpimgobj.alignment);
     if (context.scene->runtime != nullptr) {
         context.scene->runtime->RegisterNode(runtime_name, spImgNode.get());
+        context.scene->runtime->SetNodeCursorTarget(runtime_name, true, wpimgobj.solid,
+                                                    wpimgobj.disablepropagation);
         if (const auto layer = context.layer_puppet_animations.find(wpimgobj.id);
             layer != context.layer_puppet_animations.end()) {
             context.scene->runtime->RegisterPuppetLayer(runtime_name, layer->second);
@@ -4679,6 +4686,8 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
     if (! is_child) {
         if (context.scene->runtime != nullptr) {
             context.scene->runtime->RegisterNode(runtime_name, spNode.get());
+            // Particle layers are not hit-tested for the cursor, solid or not.
+            context.scene->runtime->SetNodeCursorTarget(runtime_name, false, true, false);
             context.scene->runtime->RegisterNodeVisibility(
                 runtime_name,
                 spNode.get(),
@@ -5147,6 +5156,10 @@ void ParseModelObj(ParseContext& context, wpscene::WPModelObject& obj) {
     node->AddMesh(mesh);
 
     RegisterCommonNodeBindings(context, *node, runtime_name, obj, previous_runtime_name);
+    if (context.scene->runtime != nullptr) {
+        context.scene->runtime->SetNodeCursorTarget(runtime_name, true, obj.solid,
+                                                    obj.disablepropagation);
+    }
     if (has_bones && context.scene->runtime != nullptr) {
         const auto& layer = context.layer_puppet_animations.at(obj.id);
         context.scene->runtime->RegisterPuppetLayer(runtime_name, layer);
@@ -5245,6 +5258,10 @@ void ParseCameraObj(ParseContext& context, wpscene::WPCameraObject& obj, float r
     // Orthographic shots already share an origin/zoom clock below.
     RegisterCommonNodeBindings(context, *node, runtime_name, obj, previous_runtime_name,
                                !context.is_ortho);
+    if (context.scene->runtime != nullptr) {
+        context.scene->runtime->SetNodeCursorTarget(runtime_name, false, obj.solid,
+                                                    obj.disablepropagation);
+    }
     QueueSceneScriptIfNeeded(context, runtime_name, obj.visible_setting);
     QueueSceneScriptIfNeeded(context, runtime_name, obj.origin_setting);
     QueueSceneScriptIfNeeded(context, runtime_name, obj.scale_setting);
@@ -5337,6 +5354,7 @@ void ParseLightObj(ParseContext& context, wpscene::WPLightObject& light_obj) {
     if (context.scene->runtime != nullptr) {
         auto& runtime = *context.scene->runtime;
         runtime.RegisterNode(runtime_name, node.get());
+        runtime.SetNodeCursorTarget(runtime_name, false, true, false);
         runtime.RegisterNodeVisibility(
             runtime_name,
             node.get(),

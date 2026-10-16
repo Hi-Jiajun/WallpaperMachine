@@ -578,6 +578,68 @@ TEST(LayerTextureReference, ACompositeFollowsItsLayersTextureHeaderWhateverIsPar
     EXPECT_EQ(ping_pong->sample.minFilter, composite->sample.minFilter);
 }
 
+// Only image, text and model layers are tested for the cursor. A light, a
+// camera, a particle emitter and a plain group are registered as layers the
+// cursor never reaches, and an image layer carries its own `solid` and
+// `disablepropagation`.
+TEST(LayerTextureReference, LightsCamerasParticlesAndGroupsAreNeverHitTestedForTheCursor) {
+    const ProjectProperties properties {};
+    fs::VFS                 vfs;
+    auto files = std::map<std::string, std::string> {
+        { "/particle.json",
+          R"({"emitter":[{"name":"emit","id":1}],"material":"mat.json","maxcount":4,"starttime":0})" },
+    };
+    auto parsed = ParseScene(vfs, R"([
+        {"id":1,"name":"image","image":"image.json","solid":false,"disablepropagation":true},
+        {"id":2,"name":"group","origin":"0 0 0"},
+        {"id":3,"name":"lamp","light":"point","origin":"8 8 100","color":"1 1 1","radius":50,
+         "intensity":1},
+        {"id":4,"name":"shot","camera":"default","origin":[8,4,500],"angles":[0,0,0],"fov":50},
+        {"id":5,"name":"sparks","particle":"particle.json","origin":[8,4,0],
+         "solid":true,"disablepropagation":true}
+      ])", files, &properties);
+    ASSERT_NE(parsed, nullptr);
+    ASSERT_NE(parsed->runtime, nullptr);
+    const auto target = [&](std::string_view name) {
+        return parsed->runtime->NodeCursorTargetOf(name);
+    };
+    ASSERT_TRUE(target("image").has_value());
+    EXPECT_TRUE(target("image")->hittable);
+    EXPECT_FALSE(target("image")->solid);
+    EXPECT_TRUE(target("image")->blocks);
+    for (const char* name : { "group", "lamp", "shot", "sparks" }) {
+        SCOPED_TRACE(name);
+        ASSERT_TRUE(target(name).has_value()) << "the kind of layer was never registered";
+        EXPECT_FALSE(target(name)->hittable);
+    }
+}
+
+// The cursor is tested against image, text and model layers that are solid, and
+// only those; a plain group is never a target.
+TEST(LayerTextureReference, ImageLayersAndGroupsRegisterTheirCursorTargeting) {
+    const ProjectProperties properties {};
+    fs::VFS                 vfs;
+    auto parsed = ParseScene(vfs, R"([
+        {"id":1,"name":"plain","image":"image.json"},
+        {"id":2,"name":"ghost","image":"image.json","solid":false},
+        {"id":3,"name":"blocker","image":"image.json","disablepropagation":true},
+        {"id":4,"name":"group","origin":"0 0 0"}
+      ])", {}, &properties);
+    ASSERT_NE(parsed, nullptr);
+    ASSERT_NE(parsed->runtime, nullptr);
+    const auto target = [&](std::string_view name) {
+        return parsed->runtime->NodeCursorTargetOf(name);
+    };
+    ASSERT_TRUE(target("plain").has_value());
+    EXPECT_TRUE(target("plain")->hittable);
+    EXPECT_TRUE(target("plain")->solid);
+    EXPECT_FALSE(target("plain")->blocks);
+    EXPECT_FALSE(target("ghost")->solid);
+    EXPECT_TRUE(target("blocker")->blocks);
+    ASSERT_TRUE(target("group").has_value());
+    EXPECT_FALSE(target("group")->hittable);
+}
+
 TEST(LayerTextureReference, ExternalMaterialsKeepHiddenTransitiveProducers) {
     const ProjectProperties properties {};
     fs::VFS                 vfs;

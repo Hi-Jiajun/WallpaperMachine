@@ -221,7 +221,11 @@ file, not from what an earlier layer happened to load), wrapped when the layer s
 `clampuvs` is off, and clamped and linear otherwise. A texture file whose header asks
 for point sampling is also sampled with its mip level picked by point, as the
 reference's sampler for that flag does; a texture without the flag, and a render
-target, keep the blend of mip levels they always had. A project layer
+target, keep the blend of mip levels they always had. Whether the cursor reaches a layer follows Wallpaper
+Engine's walk: only image, text and model layers that are `solid` (the default) are
+tested, a plain group or a particle layer is not, and a visible layer under the cursor
+with `disablepropagation` hides every layer behind it, which hears no enter, leave or
+move meanwhile and keeps whatever hover state it had. A project layer
 (`models/util/projectlayer.json`) is as large as the scene's canvas, and the
 depth-testing composition layer composes like the plain one. A `shape` object, the
 quad the editor's light-shaft effect is drawn on, is a quad as tall as the canvas on

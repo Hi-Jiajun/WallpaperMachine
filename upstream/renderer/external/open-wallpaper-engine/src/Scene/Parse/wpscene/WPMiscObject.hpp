@@ -165,7 +165,11 @@ struct WPTextObject : WPMiscObjectBase {
     bool                 clampuvs { true };
     bool                 perspective { false };
     bool                 copybackground { false };
-    bool                 solid { false };
+    // `solid` layers are hit-tested for the cursor, and Wallpaper Engine's
+    // default is on; a layer with `disablepropagation` hides the layers behind it
+    // from the cursor where it is under it.
+    bool                 solid { true };
+    bool                 disablepropagation { false };
     bool                 opaquebackground { false };
     bool                 ledsource { false };
     std::array<float, 3> backgroundcolor { 0.0f, 0.0f, 0.0f };
@@ -212,6 +216,7 @@ struct WPTextObject : WPMiscObjectBase {
         GET_JSON_NAME_VALUE_NOWARN(json, "perspective", perspective);
         GET_JSON_NAME_VALUE_NOWARN(json, "copybackground", copybackground);
         GET_JSON_NAME_VALUE_NOWARN(json, "solid", solid);
+        GET_JSON_NAME_VALUE_NOWARN(json, "disablepropagation", disablepropagation);
         GET_JSON_NAME_VALUE_NOWARN(json, "opaquebackground", opaquebackground);
         GET_JSON_NAME_VALUE_NOWARN(json, "ledsource", ledsource);
         GET_JSON_NAME_VALUE_NOWARN(json, "backgroundcolor", backgroundcolor);
@@ -242,6 +247,8 @@ struct WPModelObject : WPMiscObjectBase {
     std::string model;
     std::string attachment;
     bool        perspective { false };
+    bool        solid { true };
+    bool        disablepropagation { false };
     std::vector<WPPuppetLayer::AnimationLayer> puppet_layers;
     std::vector<nlohmann::json> puppet_layer_settings;
 
@@ -250,6 +257,8 @@ struct WPModelObject : WPMiscObjectBase {
         GET_JSON_NAME_VALUE_NOWARN(json, "model", model);
         GET_JSON_NAME_VALUE_NOWARN(json, "attachment", attachment);
         GET_JSON_NAME_VALUE_NOWARN(json, "perspective", perspective);
+        GET_JSON_NAME_VALUE_NOWARN(json, "solid", solid);
+        GET_JSON_NAME_VALUE_NOWARN(json, "disablepropagation", disablepropagation);
         ParsePuppetAnimationLayers(json, puppet_layers, puppet_layer_settings);
         return true;
     }

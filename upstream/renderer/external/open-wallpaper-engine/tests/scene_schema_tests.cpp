@@ -1344,6 +1344,49 @@ TEST(SceneSchema, ParserInstantiatesLeafModel) {
     EXPECT_TRUE(default_rt->withDepth);
 }
 
+TEST(SceneSchema, ParserRegistersWhatTheCursorMakesOfAModelLayer) {
+    // A model is one of the three kinds the cursor is tested against, solid
+    // unless the scene says otherwise, and a model can stop the walk too.
+    auto files = std::map<std::string, std::string> {};
+    AddLeafModelSceneFiles(files);
+    fs::VFS vfs;
+    EXPECT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+    audio::SoundManager sound_manager { audio::SoundManager::OutputBackend::Null };
+    WPSceneParser       parser;
+    ProjectProperties   properties;
+    auto parsed = parser.Parse(
+        SceneParseRequest { .scene_id = "model-cursor-target", .project_properties = &properties },
+        R"({
+      "camera": {"center":[0,0,0], "eye":[0,0,1], "up":[0,1,0]},
+      "general": {
+        "ambientcolor":[0.2,0.2,0.2], "skylightcolor":[0.3,0.3,0.3],
+        "clearcolor":[0,0,0], "cameraparallax":false,
+        "cameraparallaxamount":0, "cameraparallaxdelay":0,
+        "cameraparallaxmouseinfluence":0,
+        "orthogonalprojection":{"width":640,"height":360}
+      },
+      "objects": [
+        {"id":1,"name":"plain","model":"planet.mdl","visible":true},
+        {"id":2,"name":"ghost","model":"planet.mdl","solid":false,"visible":true},
+        {"id":3,"name":"blocker","model":"planet.mdl","disablepropagation":true,"visible":true}
+      ]
+    })",
+        vfs, sound_manager);
+    ASSERT_NE(parsed, nullptr);
+    ASSERT_NE(parsed->runtime, nullptr);
+    const auto plain = parsed->runtime->NodeCursorTargetOf("plain");
+    ASSERT_TRUE(plain.has_value());
+    EXPECT_TRUE(plain->hittable);
+    EXPECT_TRUE(plain->solid);
+    EXPECT_FALSE(plain->blocks);
+    const auto ghost = parsed->runtime->NodeCursorTargetOf("ghost");
+    ASSERT_TRUE(ghost.has_value());
+    EXPECT_FALSE(ghost->solid);
+    const auto blocker = parsed->runtime->NodeCursorTargetOf("blocker");
+    ASSERT_TRUE(blocker.has_value());
+    EXPECT_TRUE(blocker->blocks);
+}
+
 TEST(SceneSchema, OrthogonalprojectionNullActivatesPerspective) {
     fs::VFS vfs;
     MountSceneFiles(vfs);

@@ -5173,6 +5173,27 @@ TEST(TextObjectRuntime, StyledTextCardCoversTheStyleWhenTheLayerIsParsed) {
     EXPECT_NEAR(image->header.width, plain_card.max_x - plain_card.min_x + 2.0f * margin, 1.0f);
 }
 
+TEST(TextObjectRuntime, ATextLayerRegistersItsSolidAndPropagationFlagsForTheCursor) {
+    TextSceneFixture fixture(R"([
+      {"id":1,"name":"plain","text":"a","font":"Arial","visible":true},
+      {"id":2,"name":"not solid","text":"a","font":"Arial","solid":false,"visible":true},
+      {"id":3,"name":"blocker","text":"a","font":"Arial","disablepropagation":true,"visible":true}
+    ])", "text-cursor-target");
+    ASSERT_NE(fixture.scene, nullptr);
+    ASSERT_NE(fixture.scene->runtime, nullptr);
+    const auto target = [&](std::string_view name) {
+        return fixture.scene->runtime->NodeCursorTargetOf(name).value_or(
+            SceneRuntimeContext::NodeCursorTarget { .hittable = false, .solid = false, .blocks = true });
+    };
+    // Solid is on unless the scene says otherwise, and propagation is not
+    // disabled unless it does.
+    EXPECT_TRUE(target("plain").hittable);
+    EXPECT_TRUE(target("plain").solid);
+    EXPECT_FALSE(target("plain").blocks);
+    EXPECT_FALSE(target("not solid").solid);
+    EXPECT_TRUE(target("blocker").blocks);
+}
+
 
 // The size of a text layer in a scene file is the card Wallpaper Engine laid the
 // text out in, so it is ground truth for the layout. These are five cards it saved

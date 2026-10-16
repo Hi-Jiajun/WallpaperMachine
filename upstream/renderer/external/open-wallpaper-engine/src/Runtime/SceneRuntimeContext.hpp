@@ -341,6 +341,18 @@ public:
     // display shows (`SetCursorViewport`), on top of wherever its origin puts it.
     bool            SetNodeScreenAnchor(std::string_view name, TextScreenAnchor anchor);
     bool            SetNodeRotation(std::string_view name, const Eigen::Vector3f& value);
+    // How the cursor treats a layer: only image, text and model layers that are
+    // `solid` are hit-tested, and a visible one under the cursor with
+    // `disablepropagation` hides every layer behind it from the cursor. A layer
+    // never registered here is tested like a solid image.
+    void            SetNodeCursorTarget(std::string_view name, bool hittable, bool solid,
+                                        bool disable_propagation);
+    struct NodeCursorTarget {
+        bool hittable { true };
+        bool solid { true };
+        bool blocks { false };
+    };
+    std::optional<NodeCursorTarget> NodeCursorTargetOf(std::string_view name) const;
     Eigen::Vector3f NodeTranslate(std::string_view name) const;
     Eigen::Vector3f NodeScale(std::string_view name) const;
     Eigen::Vector3f NodeRotation(std::string_view name) const;
@@ -430,6 +442,14 @@ private:
         TextScreenAnchor screen_anchor { TextScreenAnchor::None };
         Eigen::Vector2f  screen_offset { Eigen::Vector2f::Zero() };
     };
+    /// What the cursor walk makes of a layer: under the cursor, not under it, or
+    /// never reached because a layer in front of it stopped the walk.
+    enum class CursorVisit
+    {
+        Outside,
+        Inside,
+        Skipped,
+    };
     struct NodeVec3Binding {
         SceneNode*    node { nullptr };
         DynamicValue* value { nullptr };
@@ -474,6 +494,8 @@ private:
 public:
     struct NodeRegistrationSnapshot {
         bool                                    has_node { false };
+        /// Where the layer stood in `LayerNameAt` order, so a rollback puts it back there.
+        std::size_t                             order_index { static_cast<std::size_t>(-1) };
         SceneNode*                              node { nullptr };
         std::optional<NodeVisibilityBinding>    visibility;
         std::optional<NodeVec3Binding>          translate;
@@ -486,6 +508,7 @@ public:
         std::optional<TextLayer>                text_layer;
         std::vector<TextValueBinding>           text_values;
         std::optional<NodeAlignmentBinding>     alignment;
+        std::optional<NodeCursorTarget>         cursor_target;
         std::optional<std::string>              template_path;
         std::vector<std::string>                video_textures;
         std::weak_ptr<WPSoundStream>            sound_layer;
@@ -547,8 +570,15 @@ private:
     void DispatchPendingAnimationEvents();
     bool                           CursorInsidePresentedContent() const;
     bool CursorHitsLayer(std::string_view name) const;
+    bool CursorHitsLayerGeometry(std::string_view name) const;
+    CursorVisit VisitCursorLayer(std::string_view name) const;
+    bool CursorBlockedByLayerInFront(std::string_view name) const;
+    std::optional<std::size_t> NodeRank(std::string_view name) const;
+    std::optional<std::size_t> FrontmostCursorBlocker() const;
     bool CursorHitsScriptLayer(const ScriptedDynamicValue& value) const;
     bool CursorHitsScriptLayer(const SceneScriptProgram& script) const;
+    CursorVisit VisitScriptLayer(const ScriptedDynamicValue& value) const;
+    CursorVisit VisitScriptLayer(const SceneScriptProgram& script) const;
     void StartTextWorker();
     void StopTextWorker();
     /// Whether this text layer's pending layout is being worked on at all.
@@ -583,6 +613,8 @@ private:
     std::unordered_map<std::string, std::unique_ptr<DynamicValue>> m_property_values;
     std::vector<std::unique_ptr<DynamicValue>>                     m_owned_values;
     std::unordered_map<std::string, SceneNode*>                    m_nodes;
+    /// Registration order of `m_nodes`, back to front: the order the scene file lists them in.
+    std::vector<std::string>                                       m_node_order;
     std::unordered_map<std::string, std::string>                   m_layer_aliases;
     std::unordered_map<std::string, NodeVisibilityBinding>         m_node_visibility;
     std::unordered_map<std::string, NodeVec3Binding>               m_node_translate;
@@ -644,19 +676,36 @@ private:
     std::unordered_map<std::string, TextLayer>                     m_text_layers;
     std::unordered_map<std::string, uint64_t>                      m_queued_text_revisions;
     std::unordered_map<std::string, NodeAlignmentBinding>          m_node_alignment;
-    std::unordered_map<std::string, std::string>                   m_node_template_paths;
-    std::unordered_map<std::string, LayerTemplateBinding>          m_layer_templates;
-    std::function<bool(std::string_view)>                          m_layer_template_loader;
-    std::unordered_set<std::string>                               m_loading_layer_templates;
-    std::unordered_set<std::string>                               m_failed_layer_templates;
-    std::unordered_map<std::string, std::vector<std::string>>      m_node_video_textures;
+    // Looked up by name every frame the cursor is in the window, so the maps
+    // below take a `string_view` without making a string of it.
     struct StringHash {
         using is_transparent = void;
         std::size_t operator()(std::string_view value) const noexcept {
             return std::hash<std::string_view> {}(value);
         }
     };
+    std::unordered_map<std::string, NodeCursorTarget, StringHash, std::equal_to<>>
+        m_node_cursor_targets;
+    // Set once any layer is registered as one that stops the cursor walk; the
+    // blocker search is skipped until then.
+    bool                                                           m_any_cursor_blocker { false };
+    // Where each layer stands in `m_node_order` (higher is in front), rebuilt the
+    // first time it is asked for after the order changed.
+    mutable std::unordered_map<std::string, std::size_t, StringHash, std::equal_to<>>
+        m_node_rank;
+    mutable bool                                                   m_node_rank_valid { false };
+    // The frontmost visible blocker under the cursor, found once for the cursor
+    // events of a frame and found again after a callback that may have moved
+    // layers: its rank in `m_node_order`, or none.
+    mutable bool                                                   m_cursor_blocker_cached { false };
+    mutable std::optional<std::size_t>                             m_cursor_blocker_rank;
     PresentedMargins                                               m_presented_margins {};
+    std::unordered_map<std::string, std::string>                   m_node_template_paths;
+    std::unordered_map<std::string, LayerTemplateBinding>          m_layer_templates;
+    std::function<bool(std::string_view)>                          m_layer_template_loader;
+    std::unordered_set<std::string>                               m_loading_layer_templates;
+    std::unordered_set<std::string>                               m_failed_layer_templates;
+    std::unordered_map<std::string, std::vector<std::string>>      m_node_video_textures;
     std::unordered_map<std::string, VideoTexturePlaybackBinding, StringHash, std::equal_to<>>
         m_video_texture_playback;
     std::unordered_map<std::string, std::weak_ptr<WPSoundStream>>  m_sound_layers;

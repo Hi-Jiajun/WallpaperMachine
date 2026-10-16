@@ -777,6 +777,12 @@ into private textures; the three that draw skip visibly without a Metal device.
   value, and held there (a load-only property). The text object's other layout keys
   (`pointsize`, `padding`, `spacing`, `maxwidth`, `maxrows`, the limit flags) read the
   scene file's value whatever property or script is bound to them.
+- **Cursor walk details.** Layers are walked in the scene's layer order, and the quad
+  test keeps a coverage mask for layers whose scripts handle the cursor, which
+  Wallpaper Engine's does not have. Wallpaper Engine lets no blocker stop the walk while
+  a button is held with a captured set, and fires a click on release over the layer
+  that took the press, where a script here gets enter, down and click together on
+  press.
 - **Model utility flags.** A project layer is sized by the canvas but still takes the
   passthrough path, not the compose one: it does not draw its children into a target of
   its own and has no composite-only mode (the 11 local scenes that use it hold layers of

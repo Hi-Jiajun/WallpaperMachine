@@ -635,5 +635,278 @@ export function update(value) {
     EXPECT_EQ(runtime->scriptErrorCount(), 0u);
 }
 
+// Which layers the cursor reaches. Wallpaper Engine walks the layers from the
+// front and only tests those that are `solid` image, text or model layers; a
+// visible layer under the cursor with `disablepropagation` ends the walk, so
+// nothing behind it is visited, entered, left or moved over.
+namespace
+{
+// A 1920x1080 scene of square layers, each marked by a script that shows its
+// marker on `cursorEnter` and hides it on `cursorLeave`.
+struct CursorStage {
+    std::unique_ptr<SceneRuntimeContext>      runtime;
+    std::vector<std::shared_ptr<SceneNode>>   nodes;
+    bool                                      was_in_window { false };
+
+    CursorStage() {
+        runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {
+            .canvas_width = 1920, .canvas_height = 1080 });
+    }
+
+    // Layers register back to front, as the scene lists them.
+    void AddLayer(const std::string& name, float x, float size = 100.0f, bool script = true) {
+        auto node = std::make_shared<SceneNode>();
+        node->SetTranslate(Eigen::Vector3f(x, 500.0f, 0.0f));
+        runtime->RegisterNode(name, node.get());
+        runtime->RegisterNodeSize(name, Eigen::Vector2f(size, size));
+        nodes.push_back(node);
+        order.push_back(name);
+        if (! script) return;
+        auto marker = std::make_shared<SceneNode>();
+        marker->SetVisible(false);
+        runtime->RegisterNode(name + " marker", marker.get());
+        nodes.push_back(marker);
+        runtime->RegisterSceneScript(
+            "function cursorEnter() { scene.getObject('" + name + " marker').visible = true; }\n"
+            "function cursorLeave() { scene.getObject('" + name + " marker').visible = false; }\n",
+            name);
+    }
+
+    // Puts the cursor at scene point (x, 500) and lets the frame's events run.
+    void MoveTo(float x) {
+        runtime->SetCursorInput(x / 1920.0f, 1.0f - 500.0f / 1080.0f);
+        runtime->SetCursorEnter(true);
+        was_in_window = runtime->DispatchCursorFrameEvents(was_in_window);
+        runtime->Tick(1.0 / 60.0);
+    }
+
+    bool Hovered(const std::string& name) const { return runtime->NodeVisible(name + " marker"); }
+
+    std::vector<std::string> order;
+};
+} // namespace
+
+TEST(MouseInput, OnlySolidImageTextAndModelLayersAreHitTested) {
+    CursorStage stage;
+    stage.AddLayer("solid", 100.0f);
+    stage.AddLayer("not solid", 300.0f);
+    stage.AddLayer("particles", 500.0f);
+    stage.runtime->SetNodeCursorTarget("solid", true, true, false);
+    stage.runtime->SetNodeCursorTarget("not solid", true, false, false);
+    stage.runtime->SetNodeCursorTarget("particles", false, true, false);
+
+    stage.MoveTo(100.0f);
+    EXPECT_TRUE(stage.Hovered("solid"));
+    stage.MoveTo(300.0f);
+    EXPECT_FALSE(stage.Hovered("not solid")) << "a layer with solid off is never hit";
+    EXPECT_FALSE(stage.Hovered("solid"));
+    stage.MoveTo(500.0f);
+    EXPECT_FALSE(stage.Hovered("particles")) << "a particle layer is never hit, solid or not";
+    EXPECT_EQ(stage.runtime->scriptErrorCount(), 0u);
+}
+
+TEST(MouseInput, ALayerThatDisablesPropagationHidesTheLayersBehindItFromTheCursor) {
+    CursorStage stage;
+    stage.AddLayer("back", 100.0f);     // spans 50..150
+    stage.AddLayer("front", 150.0f);    // spans 100..200, drawn over it
+    stage.AddLayer("beside", 400.0f);
+    stage.runtime->SetNodeCursorTarget("back", true, true, false);
+    stage.runtime->SetNodeCursorTarget("front", true, true, true);
+    stage.runtime->SetNodeCursorTarget("beside", true, true, false);
+
+    // Over `back` alone it is entered, and over `front` alone only `front` is.
+    stage.MoveTo(75.0f);
+    EXPECT_TRUE(stage.Hovered("back"));
+    EXPECT_FALSE(stage.Hovered("front"));
+    // Where `front` covers it the walk ends at `front`: `back` hears nothing, and
+    // stays as it was, entered, rather than being left.
+    stage.MoveTo(125.0f);
+    EXPECT_TRUE(stage.Hovered("front"));
+    EXPECT_TRUE(stage.Hovered("back"));
+    // Away from both, the walk reaches `back` and it is left.
+    stage.MoveTo(300.0f);
+    EXPECT_FALSE(stage.Hovered("back"));
+    EXPECT_FALSE(stage.Hovered("front"));
+    // Coming back in where `front` covers it, `back` is not entered.
+    stage.MoveTo(125.0f);
+    EXPECT_FALSE(stage.Hovered("back"));
+    EXPECT_TRUE(stage.Hovered("front"));
+    // A layer elsewhere is unaffected throughout.
+    stage.MoveTo(400.0f);
+    EXPECT_TRUE(stage.Hovered("beside"));
+    EXPECT_EQ(stage.runtime->scriptErrorCount(), 0u);
+}
+
+TEST(MouseInput, OnlyAVisibleBlockerInFrontStopsTheWalk) {
+    // A solid layer in front that does not disable propagation hides nothing.
+    {
+        CursorStage stage;
+        stage.AddLayer("back", 100.0f);
+        stage.AddLayer("front", 150.0f);
+        stage.runtime->SetNodeCursorTarget("front", true, true, false);
+        stage.MoveTo(125.0f);
+        EXPECT_TRUE(stage.Hovered("back"));
+        EXPECT_TRUE(stage.Hovered("front"));
+    }
+    // A blocker behind a layer does not hide the one in front of it.
+    {
+        CursorStage stage;
+        stage.AddLayer("back", 100.0f);
+        stage.AddLayer("front", 150.0f);
+        stage.runtime->SetNodeCursorTarget("back", true, true, true);
+        stage.MoveTo(125.0f);
+        EXPECT_TRUE(stage.Hovered("front"));
+        EXPECT_TRUE(stage.Hovered("back"));
+    }
+    // A blocker that is hidden is not visible and hides nothing; one that is not
+    // solid or is not a hit-tested kind is not walked at all.
+    for (int variant = 0; variant < 3; ++variant) {
+        CursorStage stage;
+        stage.AddLayer("back", 100.0f);
+        stage.AddLayer("front", 150.0f, 100.0f, false);
+        stage.runtime->SetNodeCursorTarget("front", variant != 2, variant != 1, true);
+        if (variant == 0) stage.nodes.back()->SetVisible(false);
+        stage.MoveTo(125.0f);
+        EXPECT_TRUE(stage.Hovered("back")) << "variant " << variant;
+    }
+    // A blocker that is visible does hide it, with no script of its own.
+    {
+        CursorStage stage;
+        stage.AddLayer("back", 100.0f);
+        stage.AddLayer("front", 150.0f, 100.0f, false);
+        stage.runtime->SetNodeCursorTarget("front", true, true, true);
+        stage.MoveTo(125.0f);
+        EXPECT_FALSE(stage.Hovered("back"));
+    }
+}
+
+// A press goes to the layers the walk reaches and to no other: a layer behind a
+// visible blocker hears neither its down nor its click, and one not behind it
+// hears both.
+TEST(MouseInput, ALayerBehindABlockerHearsNeitherTheDownNorTheClickOfAPress) {
+    CursorStage stage;
+    stage.AddLayer("back", 100.0f, 100.0f, false);   // spans 50..150
+    stage.AddLayer("front", 150.0f, 100.0f, false);  // spans 100..200
+    stage.AddLayer("beside", 400.0f, 100.0f, false);
+    stage.runtime->SetNodeCursorTarget("front", true, true, true);
+    const auto listen = [&](const std::string& layer) {
+        auto down = std::make_shared<SceneNode>();
+        auto click = std::make_shared<SceneNode>();
+        down->SetVisible(false);
+        click->SetVisible(false);
+        stage.runtime->RegisterNode(layer + " down", down.get());
+        stage.runtime->RegisterNode(layer + " click", click.get());
+        stage.nodes.push_back(down);
+        stage.nodes.push_back(click);
+        stage.runtime->RegisterSceneScript(
+            "function cursorDown() { scene.getObject('" + layer + " down').visible = true; }\n"
+            "function cursorClick() { scene.getObject('" + layer + " click').visible = true; }\n",
+            layer);
+    };
+    listen("back");
+    listen("front");
+    listen("beside");
+
+    // Where `front` covers `back`, only `front` is pressed.
+    stage.runtime->SetCursorInput(125.0f / 1920.0f, 1.0f - 500.0f / 1080.0f);
+    stage.runtime->SetCursorEnter(true);
+    stage.runtime->SetCursorButton(0, true);
+    stage.was_in_window = stage.runtime->DispatchCursorFrameEvents(stage.was_in_window);
+    stage.runtime->Tick(1.0 / 60.0);
+    EXPECT_TRUE(stage.runtime->NodeVisible("front down"));
+    EXPECT_TRUE(stage.runtime->NodeVisible("front click"));
+    EXPECT_FALSE(stage.runtime->NodeVisible("back down"));
+    EXPECT_FALSE(stage.runtime->NodeVisible("back click"));
+    EXPECT_FALSE(stage.runtime->NodeVisible("beside down"));
+    stage.runtime->SetCursorButton(0, false);
+    stage.was_in_window = stage.runtime->DispatchCursorFrameEvents(stage.was_in_window);
+
+    // Where only `back` is under the cursor, nothing stands in front of it.
+    stage.runtime->SetCursorInput(75.0f / 1920.0f, 1.0f - 500.0f / 1080.0f);
+    stage.runtime->SetCursorButton(0, true);
+    stage.was_in_window = stage.runtime->DispatchCursorFrameEvents(stage.was_in_window);
+    stage.runtime->Tick(1.0 / 60.0);
+    EXPECT_TRUE(stage.runtime->NodeVisible("back down"));
+    EXPECT_TRUE(stage.runtime->NodeVisible("back click"));
+    EXPECT_EQ(stage.runtime->scriptErrorCount(), 0u);
+}
+
+// The blocker in front is found from the layers' order, which scripts and the
+// host can change, and from what is visible, which a callback can change in the
+// middle of a frame.
+TEST(MouseInput, TheBlockerInFrontFollowsTheLayerOrderAndAFrameInProgress) {
+    {
+        CursorStage stage;
+        stage.AddLayer("back", 100.0f);
+        stage.AddLayer("front", 150.0f, 100.0f, false);
+        stage.runtime->SetNodeCursorTarget("front", true, true, true);
+        stage.MoveTo(125.0f);
+        EXPECT_FALSE(stage.Hovered("back")) << "behind the blocker";
+        stage.MoveTo(300.0f);
+        EXPECT_EQ(stage.runtime->scriptErrorCount(), 0u);
+    }
+    {
+        // `lid` is in front of `blocker`, which is in front of `under`. Entering
+        // `lid` hides the blocker, so `under`, visited after it in the same frame,
+        // is reached by the walk. A search made before the callback ran would have
+        // `under` still hidden by it.
+        CursorStage stage;
+        stage.AddLayer("under", 100.0f, 100.0f, false);
+        stage.AddLayer("blocker", 100.0f, 100.0f, false);
+        stage.AddLayer("lid", 100.0f, 100.0f, false);
+        stage.runtime->SetNodeCursorTarget("blocker", true, true, true);
+        auto marker = std::make_shared<SceneNode>();
+        marker->SetVisible(false);
+        stage.runtime->RegisterNode("under marker", marker.get());
+        stage.nodes.push_back(marker);
+        stage.runtime->RegisterSceneScript(
+            "function cursorEnter() { scene.getObject('blocker').visible = false; }\n", "lid");
+        stage.runtime->RegisterSceneScript(
+            "function cursorEnter() { scene.getObject('under marker').visible = true; }\n",
+            "under");
+        stage.MoveTo(100.0f);
+        EXPECT_TRUE(stage.Hovered("under"))
+            << "the blocker the first callback hid still hid the layer behind it";
+        EXPECT_EQ(stage.runtime->scriptErrorCount(), 0u);
+    }
+}
+
+// A registration rolled back because the layer failed to load puts back what the
+// layer it replaced was to the cursor, and leaves nothing behind where there was
+// no such layer.
+TEST(MouseInput, ARolledBackRegistrationRestoresTheCursorTargetOfTheLayerItReplaced) {
+    CursorStage stage;
+    stage.AddLayer("back", 100.0f);
+    stage.AddLayer("front", 150.0f, 100.0f, false);
+    stage.runtime->SetNodeCursorTarget("front", true, true, true);
+    const auto snapshot = stage.runtime->CaptureNodeRegistration("front");
+    ASSERT_NE(snapshot, nullptr);
+
+    // A reload registers the layer again as something the cursor passes through,
+    // then fails.
+    auto failed = std::make_shared<SceneNode>();
+    failed->SetTranslate(Eigen::Vector3f(150.0f, 500.0f, 0.0f));
+    stage.runtime->RegisterNode("front", failed.get());
+    stage.runtime->RegisterNodeSize("front", Eigen::Vector2f(100.0f, 100.0f));
+    stage.runtime->SetNodeCursorTarget("front", false, false, false);
+    stage.runtime->RollbackNodeRegistration("front", failed.get(), snapshot);
+
+    const auto restored = stage.runtime->NodeCursorTargetOf("front");
+    ASSERT_TRUE(restored.has_value());
+    EXPECT_TRUE(restored->hittable);
+    EXPECT_TRUE(restored->solid);
+    EXPECT_TRUE(restored->blocks);
+    // The blocker still stands in front of `back`.
+    stage.MoveTo(125.0f);
+    EXPECT_FALSE(stage.Hovered("back"));
+
+    // Nothing was there before: nothing is left.
+    auto fresh = std::make_shared<SceneNode>();
+    stage.runtime->RegisterNode("fresh", fresh.get());
+    stage.runtime->SetNodeCursorTarget("fresh", true, true, true);
+    stage.runtime->RollbackNodeRegistration("fresh", fresh.get(), nullptr);
+    EXPECT_FALSE(stage.runtime->NodeCursorTargetOf("fresh").has_value());
+}
+
 } // namespace
 } // namespace wallpaper

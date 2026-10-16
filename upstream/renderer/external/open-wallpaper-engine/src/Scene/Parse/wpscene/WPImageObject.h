@@ -96,6 +96,11 @@ public:
     // effects run through and the composite other layers read), as a texture
     // whose header asks for it is sampled. Off by default.
     bool                       nointerpolation { false };
+    // Cursor targeting: `solid` layers are hit-tested, on by default, and a layer
+    // with `disablepropagation` hides the layers behind it from the cursor where
+    // it is under it.
+    bool                       solid { true };
+    bool                       disablepropagation { false };
     bool                       visible { true };
     // The model's own flags (`models/util/*.json`): `autosize` sizes the layer from
     // its texture, or from the scene's canvas with `projectlayer`, instead of from

@@ -1119,6 +1119,10 @@ void SceneRuntimeContext::RegisterScriptedValue(ScriptedDynamicValue* value) {
 void SceneRuntimeContext::RegisterNode(std::string name, SceneNode* node) {
     if (node == nullptr || name.empty()) return;
     std::string key     = std::move(name);
+    if (! m_nodes.contains(key)) {
+        m_node_order.push_back(key);
+        m_node_rank_valid = false;
+    }
     auto&       slot    = m_nodes[key];
     const bool  rebound = slot != node;
     slot                = node;
@@ -1156,9 +1160,13 @@ void SceneRuntimeContext::UnregisterNode(std::string_view name) {
     m_node_rotation.erase(key);
     m_node_effect_final.erase(key);
     m_node_alpha.erase(key);
-    m_nodes.erase(key);
+    if (m_nodes.erase(key) != 0) {
+        std::erase(m_node_order, key);
+        m_node_rank_valid = false;
+    }
     m_node_size.erase(key);
     m_node_hit_masks.erase(key);
+    m_node_cursor_targets.erase(key);
     m_puppet_layers.erase(key);
     m_text_layers.erase(key);
     m_text_values.erase(std::remove_if(m_text_values.begin(),
@@ -1184,6 +1192,12 @@ void SceneRuntimeContext::RollbackNodeRegistration(
 
     UnregisterNode(key);
     if (previous == nullptr) return;
+    // Back where the layer stood in the scene's order.
+    if (previous->has_node) {
+        const auto position = std::min(previous->order_index, m_node_order.size());
+        m_node_order.insert(m_node_order.begin() + static_cast<std::ptrdiff_t>(position), key);
+        m_node_rank_valid = false;
+    }
 
     m_material_constants.resize(previous->material_constants_size);
     m_material_alpha.resize(previous->material_alpha_size);
@@ -1220,6 +1234,10 @@ void SceneRuntimeContext::RollbackNodeRegistration(
     if (previous->effect_final.has_value()) m_node_effect_final[key] = *previous->effect_final;
     if (previous->size.has_value()) m_node_size[key] = *previous->size;
     if (previous->hit_mask.has_value()) m_node_hit_masks[key] = *previous->hit_mask;
+    if (previous->cursor_target.has_value()) {
+        m_node_cursor_targets[key] = *previous->cursor_target;
+        if (previous->cursor_target->blocks) m_any_cursor_blocker = true;
+    }
     if (previous->puppet_layer.has_value()) m_puppet_layers[key] = *previous->puppet_layer;
     if (previous->text_layer.has_value()) m_text_layers.emplace(key, *previous->text_layer);
     m_text_values.insert(m_text_values.end(),
@@ -1246,6 +1264,8 @@ SceneRuntimeContext::CaptureNodeRegistration(std::string_view name) const {
     if (const auto iterator = m_nodes.find(key); iterator != m_nodes.end()) {
         snapshot->has_node = true;
         snapshot->node     = iterator->second;
+        const auto position = std::find(m_node_order.begin(), m_node_order.end(), key);
+        snapshot->order_index = static_cast<std::size_t>(position - m_node_order.begin());
     }
     if (const auto iterator = m_node_visibility.find(key); iterator != m_node_visibility.end()) {
         snapshot->visibility = iterator->second;
@@ -1267,6 +1287,10 @@ SceneRuntimeContext::CaptureNodeRegistration(std::string_view name) const {
     }
     if (const auto iterator = m_node_hit_masks.find(key); iterator != m_node_hit_masks.end()) {
         snapshot->hit_mask = iterator->second;
+    }
+    if (const auto iterator = m_node_cursor_targets.find(key);
+        iterator != m_node_cursor_targets.end()) {
+        snapshot->cursor_target = iterator->second;
     }
     if (const auto iterator = m_puppet_layers.find(key); iterator != m_puppet_layers.end()) {
         snapshot->puppet_layer = iterator->second;
@@ -2773,9 +2797,26 @@ bool SceneRuntimeContext::CursorInsidePresentedContent() const {
            cursor.y() >= origin.y() && cursor.y() <= origin.y() + size.y();
 }
 
-bool SceneRuntimeContext::CursorHitsLayer(std::string_view name) const {
-    if (name.empty()) return true;
-    if (! CursorInsidePresentedContent()) return false;
+void SceneRuntimeContext::SetNodeCursorTarget(std::string_view name, bool hittable, bool solid,
+                                              bool disable_propagation) {
+    if (name.empty()) return;
+    m_node_cursor_targets[std::string(name)] = NodeCursorTarget {
+        .hittable = hittable, .solid = solid, .blocks = disable_propagation,
+    };
+    if (disable_propagation) m_any_cursor_blocker = true;
+}
+
+std::optional<SceneRuntimeContext::NodeCursorTarget>
+SceneRuntimeContext::NodeCursorTargetOf(std::string_view name) const {
+    const auto target = m_node_cursor_targets.find(name);
+    if (target == m_node_cursor_targets.end()) return std::nullopt;
+    return target->second;
+}
+
+// Whether the cursor is over the layer's own rectangle. Wallpaper Engine tests
+// nothing but that quad; a layer a script handles the cursor for also answers
+// to its coverage mask, so a cut-out layer is only hit where it is drawn.
+bool SceneRuntimeContext::CursorHitsLayerGeometry(std::string_view name) const {
     const std::string key(name);
     const auto        node_iterator = m_nodes.find(key);
     if (node_iterator == m_nodes.end() || node_iterator->second == nullptr) return false;
@@ -2794,12 +2835,91 @@ bool SceneRuntimeContext::CursorHitsLayer(std::string_view name) const {
                        ndc);
 }
 
+std::optional<std::size_t> SceneRuntimeContext::NodeRank(std::string_view name) const {
+    if (! m_node_rank_valid) {
+        m_node_rank.clear();
+        for (std::size_t rank = 0; rank < m_node_order.size(); ++rank) {
+            m_node_rank.emplace(m_node_order[rank], rank);
+        }
+        m_node_rank_valid = true;
+    }
+    const auto found = m_node_rank.find(name);
+    if (found == m_node_rank.end()) return std::nullopt;
+    return found->second;
+}
+
+// Wallpaper Engine walks the layers from the front. A visible layer under the
+// cursor that sets `disablepropagation` ends the walk there, so nothing behind
+// it is visited, whether or not anything in front of it handles the cursor.
+// The frontmost such layer is found once for the frame's cursor events; a layer
+// is then out of the walk when it stands behind it.
+std::optional<std::size_t> SceneRuntimeContext::FrontmostCursorBlocker() const {
+    if (m_cursor_blocker_cached) return m_cursor_blocker_rank;
+    m_cursor_blocker_cached = true;
+    m_cursor_blocker_rank.reset();
+    for (std::size_t rank = m_node_order.size(); rank-- > 0;) {
+        const std::string& name   = m_node_order[rank];
+        const auto         target = m_node_cursor_targets.find(std::string_view(name));
+        if (target == m_node_cursor_targets.end() || ! target->second.blocks ||
+            ! target->second.hittable || ! target->second.solid) {
+            continue;
+        }
+        const auto node = m_nodes.find(name);
+        if (node == m_nodes.end() || node->second == nullptr || ! node->second->EffectiveVisible()) {
+            continue;
+        }
+        if (CursorHitsLayerGeometry(name)) {
+            m_cursor_blocker_rank = rank;
+            break;
+        }
+    }
+    return m_cursor_blocker_rank;
+}
+
+bool SceneRuntimeContext::CursorBlockedByLayerInFront(std::string_view name) const {
+    if (! m_any_cursor_blocker) return false;
+    const auto blocker = FrontmostCursorBlocker();
+    if (! blocker.has_value()) return false;
+    const auto own = NodeRank(name);
+    return own.has_value() && *own < *blocker;
+}
+
+SceneRuntimeContext::CursorVisit SceneRuntimeContext::VisitCursorLayer(std::string_view name) const {
+    // A script of the scene itself, rather than of a layer, hears the cursor
+    // wherever it is.
+    if (name.empty()) return CursorVisit::Inside;
+    if (! CursorInsidePresentedContent()) return CursorVisit::Outside;
+    // Layers that are not solid, and objects of any kind but image, text and
+    // model, are not tested for the cursor at all.
+    if (const auto target = m_node_cursor_targets.find(name);
+        target != m_node_cursor_targets.end() &&
+        (! target->second.hittable || ! target->second.solid)) {
+        return CursorVisit::Outside;
+    }
+    if (CursorBlockedByLayerInFront(name)) return CursorVisit::Skipped;
+    return CursorHitsLayerGeometry(name) ? CursorVisit::Inside : CursorVisit::Outside;
+}
+
+bool SceneRuntimeContext::CursorHitsLayer(std::string_view name) const {
+    return VisitCursorLayer(name) == CursorVisit::Inside;
+}
+
 bool SceneRuntimeContext::CursorHitsScriptLayer(const ScriptedDynamicValue& value) const {
     return CursorHitsLayer(value.LayerName());
 }
 
 bool SceneRuntimeContext::CursorHitsScriptLayer(const SceneScriptProgram& script) const {
     return CursorHitsLayer(script.LayerName());
+}
+
+SceneRuntimeContext::CursorVisit
+SceneRuntimeContext::VisitScriptLayer(const ScriptedDynamicValue& value) const {
+    return VisitCursorLayer(value.LayerName());
+}
+
+SceneRuntimeContext::CursorVisit
+SceneRuntimeContext::VisitScriptLayer(const SceneScriptProgram& script) const {
+    return VisitCursorLayer(script.LayerName());
 }
 
 // An authored timeline can name frames its layer's scripts react to. Handlers
@@ -2880,12 +3000,17 @@ bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
     constexpr auto press_mask = static_cast<uint8_t>(ScriptCursorEvent::Down) |
                                 static_cast<uint8_t>(ScriptCursorEvent::Click);
     const bool cursor_in_window = m_host_context->cursor_in_window;
+    // The frontmost blocker is found once for the frame. A callback may move or
+    // hide layers, so what it found is dropped whenever one has run.
+    m_cursor_blocker_cached = false;
+    const auto fired = [this] { m_cursor_blocker_cached = false; };
     if (cursor_in_window && ! cursor_was_in_window) {
         for (std::size_t index = 0; index < value_count; ++index) {
             auto* value = m_scripted_values[index];
             if (value != nullptr && (value->CursorHandlerMask() & hover_mask) != 0 &&
                 CursorHitsScriptLayer(*value)) {
                 value->DispatchCursorEnter(*m_host_context);
+                fired();
                 m_scripted_value_cursor_inside[value] = true;
             }
         }
@@ -2893,7 +3018,10 @@ bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
             auto* script = m_scene_scripts[index].script.get();
             if (script == nullptr) continue;
             m_scene_scripts[index].cursor_inside = CursorHitsScriptLayer(*script);
-            if (m_scene_scripts[index].cursor_inside) script->DispatchCursorEnter(*m_host_context);
+            if (m_scene_scripts[index].cursor_inside) {
+                script->DispatchCursorEnter(*m_host_context);
+                fired();
+            }
         }
     } else if (! cursor_in_window && cursor_was_in_window) {
         for (std::size_t index = 0; index < value_count; ++index) {
@@ -2901,13 +3029,17 @@ bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
             if (value == nullptr || (value->CursorHandlerMask() & hover_mask) == 0) continue;
             if (m_scripted_value_cursor_inside[value]) {
                 value->DispatchCursorLeave(*m_host_context);
+                fired();
             }
             m_scripted_value_cursor_inside[value] = false;
         }
         for (std::size_t index = 0; index < script_count; ++index) {
             auto* script = m_scene_scripts[index].script.get();
             if (script == nullptr) continue;
-            if (m_scene_scripts[index].cursor_inside) script->DispatchCursorLeave(*m_host_context);
+            if (m_scene_scripts[index].cursor_inside) {
+                script->DispatchCursorLeave(*m_host_context);
+                fired();
+            }
             m_scene_scripts[index].cursor_inside = false;
         }
     }
@@ -2916,31 +3048,46 @@ bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
         for (std::size_t index = 0; index < value_count; ++index) {
             auto* value = m_scripted_values[index];
             if (value == nullptr || (value->CursorHandlerMask() & hover_mask) == 0) continue;
-            const bool now_inside = CursorHitsScriptLayer(*value);
+            const auto visit = VisitScriptLayer(*value);
+            // A layer the walk never reached hears nothing and stays as it was.
+            if (visit == CursorVisit::Skipped) continue;
+            const bool now_inside = visit == CursorVisit::Inside;
             bool&      was_inside = m_scripted_value_cursor_inside[value];
             if (now_inside != was_inside) {
                 if (now_inside) {
                     value->DispatchCursorEnter(*m_host_context);
+                    fired();
                 } else {
                     value->DispatchCursorLeave(*m_host_context);
+                    fired();
                 }
                 was_inside = now_inside;
             }
-            if (now_inside) value->DispatchCursorMove(*m_host_context);
+            if (now_inside) {
+                value->DispatchCursorMove(*m_host_context);
+                fired();
+            }
         }
         for (std::size_t index = 0; index < script_count; ++index) {
             auto* script = m_scene_scripts[index].script.get();
             if (script == nullptr) continue;
-            const bool now_inside = CursorHitsScriptLayer(*script);
+            const auto visit = VisitScriptLayer(*script);
+            if (visit == CursorVisit::Skipped) continue;
+            const bool now_inside = visit == CursorVisit::Inside;
             if (now_inside != m_scene_scripts[index].cursor_inside) {
                 if (now_inside) {
                     script->DispatchCursorEnter(*m_host_context);
+                    fired();
                 } else {
                     script->DispatchCursorLeave(*m_host_context);
+                    fired();
                 }
                 m_scene_scripts[index].cursor_inside = now_inside;
             }
-            if (now_inside) script->DispatchCursorMove(*m_host_context);
+            if (now_inside) {
+                script->DispatchCursorMove(*m_host_context);
+                fired();
+            }
         }
     }
 
@@ -2957,14 +3104,18 @@ bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
                 if (value == nullptr || (value->CursorHandlerMask() & press_mask) == 0 ||
                     ! CursorHitsScriptLayer(*value)) continue;
                 value->DispatchCursorDown(*m_host_context);
+                fired();
                 value->DispatchCursorClick(*m_host_context);
+                fired();
                 held_values.push_back(value);
             }
             for (std::size_t index = 0; index < script_count; ++index) {
                 auto* script = m_scene_scripts[index].script.get();
                 if (script == nullptr || ! CursorHitsScriptLayer(*script)) continue;
                 script->DispatchCursorDown(*m_host_context);
+                fired();
                 script->DispatchCursorClick(*m_host_context);
+                fired();
                 held_scripts.push_back(index);
             }
         }
@@ -2996,6 +3147,7 @@ bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
                     }
                 }
                 value->DispatchCursorUp(*m_host_context);
+                fired();
             }
             for (std::size_t index = 0; index < script_count; ++index) {
                 auto* script = m_scene_scripts[index].script.get();
@@ -3008,6 +3160,7 @@ bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
                     }
                 }
                 script->DispatchCursorUp(*m_host_context);
+                fired();
             }
         }
     }
