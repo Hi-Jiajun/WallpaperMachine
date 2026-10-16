@@ -381,7 +381,7 @@ Step 6 is the guard that the bump actually reached the build:
 `CFBundleShortVersionString`, so a mismatch means the published tag and the
 built version disagree and the job fails instead of publishing the wrong binary.
 
-**`test`** runs `prepare-build`, `python3 scripts/build.py --renderer-only` for the
+**`test`** calls the Test workflow ([`test.yml`](#test-testyml)) for the tag. It runs `prepare-build`, `python3 scripts/build.py --renderer-only` for the
 renderer and the generated bridge, `python3 scripts/check_rust.py`,
 `python3 scripts/check_renderer.py --allow-missing-gpu --allow-imprecise-timers`,
 and `python3 scripts/test.py --serial`, which builds the Debug app, icon included,
@@ -465,6 +465,24 @@ exists, and `--latest=false` otherwise; a failed lookup leaves the uploaded draf
 unpublished. Manual invocations must be serialized with every other publisher too:
 use the release workflow for the shared lock. The script's docstring and
 `scripts/tests/test_publish_release.py` cover both rules.
+
+### Test (`test.yml`)
+
+The release gate as a workflow of its own: Build calls it with the tag, and
+**Actions -> Test -> Run workflow** runs it for any `ref` (default `main`) on the same
+`macos-26` runner without tagging, building the Release app or publishing. Use it to
+reproduce a hosted-runner failure before cutting a version, since a tag whose gate
+fails stays unpublished ([recovery](#recovering-a-failed-release)):
+
+```sh
+gh workflow run test.yml --ref main -f ref=main
+gh workflow run test.yml --ref main -f ref=main -f skip_renderer=true -f only="SettingsWindowRenderTests WorkshopBrowserRenderTests"
+```
+
+`only` passes each space-separated name to `scripts/test.py --only`, and
+`skip_renderer` skips the Rust and renderer checks; both are for diagnosis, so only a
+run without them says the gate passes. A failed run keeps its logs, result bundles
+included, as `test-logs-<run id>` (`test-logs-<tag>` when Build calls it) for 14 days.
 
 ### Warm caches (`warm-caches.yml`)
 
