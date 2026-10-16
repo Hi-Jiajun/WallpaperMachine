@@ -9,6 +9,17 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-14 — Control panel redesign: macOS sidebar, System Settings-style Settings
+
+The control panel became a native-looking macOS window: a floating sidebar over the system sidebar material, a title bar naming the place on show, Now Playing in place of the activity bar, a Filters popover, and Settings reorganised into searchable System Settings-style sections with Quick Settings. New native action: nextWallpaper.
+
+- `python3 scripts/test.py` — exit 0; 2,704 tests: 2,659 passed, 0 failed, 45 skipped
+- Targeted offscreen panel suites (every `Tests/Unit/Panel` class plus `AppThemeTests`) — all pass, including the new `testQuickSettingsSearchAndExplanationsWithoutWindow`, `testSidebarShowsFavoritesAndCollectionsAsLibraryViewsWithoutWindow` and `testNextWallpaperMovesARotatingPlaylistAlongAndOtherwiseLeavesTheScheduler`
+- `python3 -m unittest scripts/tests/test_panel_localization.py` — 47 new strings in zh-Hans, zh-Hant and ja
+- Visual: offscreen WKWebView renders (dark/light; Installed, Discover with Filters, Quick Settings, Playback & Power, Appearance; 860px rail) reviewed; offscreen snapshots freeze transitions and do not draw backdrop blur, so those were checked in a browser harness instead
+- `python3 scripts/build.py --swift-only --configuration Release` — built
+- Not checked: the real sidebar material, traffic-light alignment and full-screen layout in a live window (no desktop run was authorised)
+
 ## 2026-10-14 — Send performance data, sharing and the one-time prompts
 
 Opt-in telemetry (docs/features/telemetry.md), share buttons, and a prompt store that schedules the support, star and performance data prompts. The website endpoint lives in the website repository and is not deployed.

@@ -1,14 +1,14 @@
 import SwiftUI
 
-/// The Filters popover of the Installed page: the collection on show, the tags a wallpaper must
+/// The Filters sidebar of the Installed page: the collection on show, the tags a wallpaper must
 /// have (Show only), and the boxes whose unticking hides every wallpaper that carries the tag.
 /// Nothing is sent anywhere: the grid narrows as the boxes change.
-struct InstalledFilterPopover: View {
+struct InstalledFilters: View {
   @Environment(PanelController.self) private var controller
 
   var body: some View {
     let model = controller.library
-    FilterPopover(count: model.filterCount, onClear: { model.clearFilters() }) {
+    FilterPanel(count: model.filterCount, onClear: { model.clearFilters() }) {
       if let collection = model.shownCollection {
         CollectionFilterRow(name: collection.name) { model.showAllWallpapers() }
       }

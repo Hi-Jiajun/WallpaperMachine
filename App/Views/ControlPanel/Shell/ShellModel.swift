@@ -3,15 +3,13 @@ import Observation
 import SwiftUI
 
 /// The popovers the shell presents through `ShellModel.popover(_:)`. Only one of them is open at a
-/// time: opening one closes whichever was open, and a change of page closes it. The library and
-/// pixiv present theirs from their own state, which `ShellModel.isPopoverOpen` reads.
+/// time: opening one closes whichever was open, and a change of page closes it. The library
+/// presents its Import popover from its own state, which `ShellModel.isPopoverOpen` reads.
 enum ShellPopover: Hashable, Sendable {
   /// Now Playing's Recently used list.
   case history
   /// The downloads button's list.
   case downloads
-  /// The Filter button's choices.
-  case filters
 }
 
 /// How the window adapts to its width. Below `compactWidth` there is not room for the sidebar, a
@@ -64,6 +62,10 @@ final class ShellModel {
   /// The person's choice about the inspector, once they have made one; nil follows the window's
   /// width.
   private(set) var inspectorChoice: Bool?
+  /// The Filters sidebar is open beside the page. One for the window: it stays open from one
+  /// library page to the next, showing that page's filters, and waits out Settings, which has none.
+  /// It starts closed and is not stored.
+  private(set) var isFiltersChoice = false
   /// The welcome guide was asked for again, from Settings. The guide also opens by itself, and for
   /// good, until the first-run flag is set.
   var isWelcomeRequested = false
@@ -111,6 +113,12 @@ final class ShellModel {
   /// Whether the page on show has an inspector column.
   var hasInspector: Bool { selection != .settings }
 
+  /// Whether the page on show has filters, and so a Filters sidebar.
+  var hasFilters: Bool { selection != .settings }
+
+  /// Whether the Filters sidebar is on show: open, on a page that has filters.
+  var areFiltersShown: Bool { hasFilters && isFiltersChoice }
+
   /// Whether the inspector is open on the pages that have one. Without a choice of the person's it
   /// follows the window: open when there is room, closed in a narrow window. A choice made in a
   /// narrow window holds when the window grows, and one made in a wide window when it shrinks.
@@ -123,25 +131,20 @@ final class ShellModel {
   }
 
   /// Whether any popover of the window is open, which the support prompt waits behind: the
-  /// shell's own (`popover(_:)`, which Steam Workshop's Filter and the toolbar's Downloads list
-  /// use too), the ones the library and pixiv present from their own state, and one a view
-  /// reported by setting this.
+  /// shell's own (`popover(_:)`, which the toolbar's Downloads list uses too), the library's Import,
+  /// which it presents from its own state, and one a view reported by setting this.
   ///
-  /// The areas' own popovers are read from their models rather than from what each last reported
-  /// here. A single reported flag lost track as soon as two popovers overlapped: the library's
-  /// Filter opening while Recently used was open was never counted, and once Recently used closed
-  /// the support prompt could come up over the Filter.
+  /// The library's own popover is read from its model rather than from what it last reported
+  /// here. A single reported flag lost track as soon as two popovers overlapped: one opening while
+  /// Recently used was open was never counted, and once Recently used closed the support prompt
+  /// could come up over it.
   var isPopoverOpen: Bool {
     get { activePopover != nil || isReportedPopoverOpen || isAreaPopoverOpen }
     set { isReportedPopoverOpen = newValue }
   }
 
-  /// The popovers the areas present from their own state: the library's Filter and Import, and
-  /// pixiv's Filter.
-  private var isAreaPopoverOpen: Bool {
-    let library = controller.library
-    return library.isFilterOpen || library.importAnchor != nil || controller.pixivBrowser.showsFilters
-  }
+  /// The popover an area presents from its own state: the library's Import.
+  private var isAreaPopoverOpen: Bool { controller.library.importAnchor != nil }
 
   /// What the shell contributes to the support prompt's conditions: the offer waits while the guide
   /// or a popover is up and while a wallpaper is being switched or waiting to be. The presenter adds
@@ -318,6 +321,27 @@ final class ShellModel {
     PanelActionCoordinator.key("releaseHeld", id: id)
   }
 
+  // MARK: Side columns
+
+  /// Opens or closes the Filters sidebar. In a narrow window there is no room for a readable grid
+  /// between it and the inspector, so opening it closes the inspector, as the person sees.
+  func setFiltersShown(_ shown: Bool) {
+    guard hasFilters, shown != isFiltersChoice else { return }
+    if shown && isCompact && isInspectorShown { isInspectorShown = false }
+    isFiltersChoice = shown
+  }
+
+  /// The Filter buttons and the sidebar's own button.
+  func toggleFilters() { setFiltersShown(!areFiltersShown) }
+
+  /// The toolbar's inspector button. Opening the inspector in a narrow window closes the Filters
+  /// sidebar, for the same reason.
+  func toggleInspector() {
+    let shown = !isInspectorShown
+    if shown && isCompact && areFiltersShown { isFiltersChoice = false }
+    isInspectorShown = shown
+  }
+
   // MARK: Popovers
 
   /// A binding for a popover's `isPresented`. Opening it closes any other popover of the shell;
@@ -335,7 +359,7 @@ final class ShellModel {
   }
 
   /// Closes the shell's popover and forgets a reported one, which a change of page does: a popover
-  /// belongs to the page it was opened on. The library and pixiv close their own as they leave.
+  /// belongs to the page it was opened on. The library closes its own as it leaves.
   func closePopover() {
     activePopover = nil
     isReportedPopoverOpen = false

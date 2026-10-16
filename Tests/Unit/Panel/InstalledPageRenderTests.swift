@@ -294,7 +294,7 @@ final class InstalledPageRenderTests: PanelTestCase {
     model.setIncluded("Web", false)
     let controller = panel.controller
     let hosting = NSHostingView(
-      rootView: InstalledFilterPopover()
+      rootView: InstalledFilters()
         .environment(controller)
         .environment(\.panelImages, controller.images)
         .panelTheme(theme: controller.theme, locale: PanelLocale.shared))
@@ -365,7 +365,8 @@ final class InstalledPageRenderTests: PanelTestCase {
       texts.contains { $0.contains(summary) }, "and the report's counts after it: \(texts)")
   }
 
-  /// A popover is hosted on its own: its width is its own, whatever the window.
+  /// A popover or the Filters sidebar hosted on its own: its width is its own, whatever the
+  /// window.
   private func popoverSize<V: View>(_ view: V, _ panel: PanelFixture, dark: Bool) async throws -> CGSize {
     let controller = panel.controller
     let hosting = NSHostingView(
@@ -389,7 +390,7 @@ final class InstalledPageRenderTests: PanelTestCase {
     return size
   }
 
-  func testTheFiltersAndImportPopoversKeepTheirWidthInEveryLanguageAndAppearance() async throws {
+  func testTheFiltersSidebarAndImportPopoverKeepTheirWidthInEveryLanguageAndAppearance() async throws {
     let panel = try makeController()
     defer { Task { await panel.shutdown() } }
     try await prepare(panel)
@@ -402,9 +403,10 @@ final class InstalledPageRenderTests: PanelTestCase {
     for language in AppLanguage.supported.map(\.tag) {
       try panel.controller.appLanguage.set(language)
       for dark in [false, true] {
-        let filters = try await popoverSize(InstalledFilterPopover(), panel, dark: dark)
-        XCTAssertEqual(filters.width, 300, accuracy: 1, "filters, \(language)")
-        XCTAssertLessThanOrEqual(filters.height, 521, "filters scroll beyond 520 points")
+        let filters = try await popoverSize(FilterSidebar(selection: .wallpaper), panel, dark: dark)
+        XCTAssertEqual(
+          filters.width, FilterSidebar.width + FilterSidebar.inset, accuracy: 1,
+          "filters, \(language)")
         let importing = try await popoverSize(ImportPopover(), panel, dark: dark)
         XCTAssertEqual(importing.width, 320, accuracy: 1, "import, \(language)")
         XCTAssertLessThanOrEqual(importing.height, 520)

@@ -209,18 +209,19 @@ private struct WorkshopTools: View {
   }
 }
 
-/// The Filter button, tinted while any filter applies or the popover is open, with the count of
-/// active filters; it owns the Filters popover.
+/// The Filter button, tinted while any filter applies or the Filters sidebar is open, with the
+/// count of active filters; it opens and closes the sidebar.
 private struct FilterButton: View {
   let iconOnly: Bool
 
   @Environment(PanelController.self) private var controller
 
   var body: some View {
-    @Bindable var model = controller.workshopBrowser
+    let model = controller.workshopBrowser
+    let shell = controller.shell
     let count = model.filterCount
     Button {
-      model.isFilterPopoverOpen.toggle()
+      shell.toggleFilters()
     } label: {
       HStack(spacing: 6) {
         Image(systemName: "line.3.horizontal.decrease")
@@ -229,14 +230,11 @@ private struct FilterButton: View {
         if count > 0 { CountBadge(count: count, style: .attention) }
       }
     }
-    .buttonStyle(.panelCapsule(isActive: count > 0 || model.isFilterPopoverOpen))
-    .help(model.isFilterPopoverOpen ? L("Hide filters") : L("Show filters"))
+    .buttonStyle(.panelCapsule(isActive: count > 0 || shell.areFiltersShown))
+    .help(shell.areFiltersShown ? L("Hide filters") : L("Show filters"))
     .accessibilityLabel(Text("Filter"))
     .accessibilityValue(count > 0 ? Text(verbatim: L("\(count) active")) : Text(verbatim: ""))
     .accessibilityIdentifier("workshop-filter")
-    .popover(isPresented: $model.isFilterPopoverOpen, arrowEdge: .bottom) {
-      WorkshopFilterPopover()
-    }
   }
 }
 

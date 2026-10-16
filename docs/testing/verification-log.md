@@ -25,6 +25,15 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-16 — Filters sidebar replaces the Filters popover
+
+- Change: Installed, Workshop and pixiv filters moved from a popover into one shell-level Filters sidebar (FilterSidebar in PanelDetail) that slides out from under the window sidebar; Filter buttons and the sidebar's own top-right button toggle it.
+- python3 scripts/test.py: passed, 3829 passed, 0 failed, 45 skipped (Python suites OK).
+- New tests: ShellModelTests (one sidebar across library pages, waits out Settings; takes turns with the inspector under 960 pt), ShellRenderTests (sidebar + inspector fit the split view from 1240 down to 760 pt).
+- Migrated tests: InstalledBrowserModelTests, InstalledPageRenderTests (sidebar width 268 pt in every language and appearance), WorkshopBrowserModelTests, ShellModelTests support-prompt/popover cases.
+- Visual: offscreen snapshot (temporary probe, deleted) confirmed placement beside the page and search bar; offscreen rendering draws no glass, so the glass look and the slide animation were not seen on a real desktop.
+- Gap: InspectorRenderTests smallest-window test timed out twice earlier today on the untouched base and passed in this run: flaky, unrelated.
+
 ## 2026-10-16 — origin/main's telemetry and sharing carried into the native panel
 
 Main's 103 unpushed commits were rebased onto origin/main, whose 1.4.1 telemetry and sharing commits were written for the web panel the native SwiftUI panel had replaced; their services kept, their web UI rebuilt natively (Storage switch and report, guide draft, three-prompt sheet, Share…, About links).
@@ -119,14 +128,3 @@ Settings restyled after a Claude Design mock-up: centred page cards, translucent
 - `python3 scripts/test.py --only ControlPanelShellTests/testQuickSettingsSearchAndExplanationsWithoutWindow` — passes with the search fix; with only that hunk reverted the new assertion fails (seen as the panel harness's 2-minute timeout, which is how a failed assertion inside `withPanel` surfaces)
 - Visual review: a temporary offscreen WebKit capture test (deleted) rendered all 11 sections in light and dark at 1100 and 780 px, plus search and an opened ⓘ; glyphs checked on a `qlmanage`-rendered contact sheet at 15, 18 and 34 px
 - Not checked: the real window's vibrancy sidebar and hover states of the borderless pop-ups (offscreen snapshots draw neither); no desktop run
-
-## 2026-10-14 — Control panel redesign: macOS sidebar, System Settings-style Settings
-
-The control panel became a native-looking macOS window: a floating sidebar over the system sidebar material, a title bar naming the place on show, Now Playing in place of the activity bar, a Filters popover, and Settings reorganised into searchable System Settings-style sections with Quick Settings. New native action: nextWallpaper.
-
-- `python3 scripts/test.py` — exit 0; 2,704 tests: 2,659 passed, 0 failed, 45 skipped
-- Targeted offscreen panel suites (every `Tests/Unit/Panel` class plus `AppThemeTests`) — all pass, including the new `testQuickSettingsSearchAndExplanationsWithoutWindow`, `testSidebarShowsFavoritesAndCollectionsAsLibraryViewsWithoutWindow` and `testNextWallpaperMovesARotatingPlaylistAlongAndOtherwiseLeavesTheScheduler`
-- `python3 -m unittest scripts/tests/test_panel_localization.py` — 47 new strings in zh-Hans, zh-Hant and ja
-- Visual: offscreen WKWebView renders (dark/light; Installed, Discover with Filters, Quick Settings, Playback & Power, Appearance; 860px rail) reviewed; offscreen snapshots freeze transitions and do not draw backdrop blur, so those were checked in a browser harness instead
-- `python3 scripts/build.py --swift-only --configuration Release` — built
-- Not checked: the real sidebar material, traffic-light alignment and full-screen layout in a live window (no desktop run was authorised)

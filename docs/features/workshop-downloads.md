@@ -20,7 +20,7 @@ network; a new search always starts a fresh cache. Nothing about a page depends
 on the window: resizing only reflows the tiles and never re-fetches or re-cuts a
 page (grid rules: [control panel](control-panel.md#layout)).
 
-The Filters popover (opened from the header's **Filter** button, see [control
+The Filters sidebar (opened from the header's **Filter** button, see [control
 panel](control-panel.md#filtering)) mirrors Wallpaper Engine's own filter list, tag
 for tag and default for default:
 

@@ -74,8 +74,8 @@ private struct HeaderCapsuleBody: View {
 
 // MARK: - Filter
 
-/// The Filter capsule: tinted while any filter applies or the popover is open, with the number of
-/// filters in effect beside it. It hangs the Filters popover.
+/// The Filter capsule: tinted while any filter applies or the Filters sidebar is open, with the
+/// number of filters in effect beside it. It opens and closes the sidebar.
 private struct FilterButton: View {
   let tier: HeaderTier
 
@@ -83,9 +83,10 @@ private struct FilterButton: View {
 
   var body: some View {
     let model = controller.library
+    let shell = controller.shell
     let count = model.filterCount
     Button {
-      model.toggleFilter()
+      shell.toggleFilters()
     } label: {
       HStack(spacing: 5) {
         Image(systemName: "line.3.horizontal.decrease")
@@ -94,14 +95,8 @@ private struct FilterButton: View {
         if count > 0 { CountBadge(count: count, style: .attention) }
       }
     }
-    .buttonStyle(HeaderCapsuleStyle(tier: tier, isActive: count > 0 || model.isFilterOpen))
-    .popover(
-      isPresented: Binding(get: { model.isFilterOpen }, set: { model.setFilterOpen($0) }),
-      arrowEdge: .bottom
-    ) {
-      InstalledFilterPopover()
-    }
-    .help(model.isFilterOpen ? L("Hide filters") : L("Show filters"))
+    .buttonStyle(HeaderCapsuleStyle(tier: tier, isActive: count > 0 || shell.areFiltersShown))
+    .help(shell.areFiltersShown ? L("Hide filters") : L("Show filters"))
     .accessibilityLabel(Text("Filter"))
     .accessibilityValue(Text(verbatim: model.filterButtonValue))
     .accessibilityIdentifier("installed-filter")

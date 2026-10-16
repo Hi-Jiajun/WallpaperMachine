@@ -142,11 +142,12 @@ was run.
 - [ ] Navigate away and back: query, page and selection stay.
 - [ ] A failed request's Retry repeats that request.
 - [ ] Open and dismiss the Downloads/Import pane.
-- [ ] Open the Filters popover from the toolbar's Filter button and select tags across
+- [ ] Open the Filters sidebar from the page's Filter button and select tags across
       the resolution, ultrawide/portrait, genre, age-rating and category groups:
-      results contain only items matching every selected tag, the popover floats over
-      the grid without reflowing it, and Clear filters restores the unfiltered query.
-      Escape, a click outside, the Filter button and another page each close the popover.
+      results contain only items matching every selected tag, the sidebar slides out
+      from under the window sidebar while the grid narrows, and Clear filters restores
+      the unfiltered query. The Filter button and the sidebar's own button close it
+      with the same slide; it stays open on the next library page.
 - [ ] Filter changes never activate wallpapers.
 
 ## pixiv
@@ -157,13 +158,13 @@ was run.
       it appears in Installed as a still wallpaper, applies, and Image fit and
       Background color change it.
 - [ ] **Sign in to pixiv…** opens pixiv's own sign-in page in its own window;
-      signing in with a pixiv ID or email closes it and the Filters popover names the
+      signing in with a pixiv ID or email closes it and the Filters sidebar names the
       account. Closing the window instead changes nothing.
 - [ ] Quit and reopen: the sign-in is still there, with no keychain prompt on a
       release build.
 - [ ] With an account whose viewing restrictions allow R-18 works, tick Mature
       (R-18): search includes works with the R-18 badge and the R-18 rankings
-      join the menu. With an account that hides them, the Filters popover says so.
+      join the menu. With an account that hides them, the Filters sidebar says so.
 - [ ] **Log out**: the Mature box unticks and disables, an R-18 ranking returns
       to its all-ages one, and Keychain Access no longer lists
       `app.wallpapermachine.pixiv`.

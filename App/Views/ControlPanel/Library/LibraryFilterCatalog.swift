@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The boxes of the Filters popover, tag for tag as Wallpaper Engine's own Workshop sidebar has
+/// The boxes of the Filters sidebar, tag for tag as Wallpaper Engine's own Workshop sidebar has
 /// them. Installed applies them to the library in the app; Discover sends the same tags to
 /// Steam. Tags are Steam's English names and are never translated when matched or sent: only the
 /// labels are.

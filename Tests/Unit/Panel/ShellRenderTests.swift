@@ -288,6 +288,33 @@ final class ShellRenderTests: PanelTestCase {
     }
   }
 
+  func testTheFiltersSidebarAndTheInspectorFitTheWindowAtEveryWidth() async throws {
+    try await withPanel { panel in
+      try await ShellFixtures.seed(panel.store, bridge: panel.bridge)
+      let host = ShellFixtureHost(panel: panel)
+      let shell = panel.controller.shell
+      defer { host.close() }
+      host.layout(at: NSSize(width: 1240, height: 800))
+      try await host.settle(300)
+      shell.setFiltersShown(true)
+      try await host.settle(600)
+      XCTAssertTrue(shell.areFiltersShown)
+      XCTAssertTrue(shell.isInspectorShown, "a wide window has room for both")
+      XCTAssertLessThanOrEqual(host.widestSplitView, 1241)
+
+      var width = 1240.0
+      while width > 760 {
+        host.layout(at: NSSize(width: width, height: 640))
+        try await host.settle(50)
+        XCTAssertLessThanOrEqual(host.widestSplitView, width + 1, "\(Int(width))")
+        width -= 37
+      }
+      host.layout(at: NSSize(width: 760, height: 640))
+      try await host.settle(900)
+      XCTAssertLessThanOrEqual(host.widestSplitView, 761, "both open in the narrowest window")
+    }
+  }
+
   // MARK: Popovers and keyboard
 
   func testChangingThePageClosesAnOpenPopover() async throws {
@@ -298,7 +325,7 @@ final class ShellRenderTests: PanelTestCase {
       defer { host.close() }
       host.layout(at: NSSize(width: 1240, height: 800))
       try await host.settle(300)
-      shell.popover(.filters).wrappedValue = true
+      shell.popover(.history).wrappedValue = true
       XCTAssertTrue(shell.isPopoverOpen)
       panel.navigation.selection = .settings
       try await host.settle(300)

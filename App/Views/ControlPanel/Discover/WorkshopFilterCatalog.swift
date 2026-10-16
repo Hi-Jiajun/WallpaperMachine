@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The boxes of the Workshop's Filters popover, tag for tag as Wallpaper Engine's own Workshop
+/// The boxes of the Workshop's Filters sidebar, tag for tag as Wallpaper Engine's own Workshop
 /// sidebar lists them.
 ///
 /// "Show only" boxes start unticked, and ticking one sends its tag to Steam as a required tag.

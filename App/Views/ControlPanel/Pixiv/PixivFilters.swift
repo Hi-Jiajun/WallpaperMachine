@@ -1,15 +1,15 @@
 import SwiftUI
 
-/// The Filters popover of the pixiv page: the pixiv account, then orientation, minimum size, age
+/// The Filters sidebar of the pixiv page: the pixiv account, then orientation, minimum size, age
 /// rating and AI-generated works. Every change is committed at once, with the whole draft.
-struct PixivFilterPopover: View {
+struct PixivFilters: View {
   @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
 
   var body: some View {
     let model = controller.pixivBrowser
     let query = model.query
-    FilterPopover(count: model.filterCount, onClear: { model.clearFilters() }) {
+    FilterPanel(count: model.filterCount, onClear: { model.clearFilters() }) {
       FilterGroup("pixiv account", isExpanded: expansion(.account)) { PixivAccountGroup() }
       FilterGroup(
         "Orientation", count: model.count(in: .orientation), isExpanded: expansion(.orientation)
@@ -108,7 +108,7 @@ struct PixivFilterPopover: View {
   }
 }
 
-/// The popover's first group: who is signed in, and the way to sign in or out. Signing in happens
+/// The sidebar's first group: who is signed in, and the way to sign in or out. Signing in happens
 /// on pixiv's own page in a window of its own; the app keeps only the session, in the keychain.
 private struct PixivAccountGroup: View {
   @Environment(PanelController.self) private var controller
@@ -167,7 +167,7 @@ private struct PixivAccountGroup: View {
 }
 
 /// "Sign in to pixiv…", or "Show sign-in window" while the window is open: the same action in the
-/// popover and beside the page's header. `isShort` gives the words a narrow header has room for
+/// Filters sidebar and beside the page's header. `isShort` gives the words a narrow header has room for
 /// ("Sign in", "Sign-in window"), with the full ones in the tooltip and for VoiceOver.
 ///
 /// The glyphs say what the button does: an account to sign in to, and a window to bring forward.

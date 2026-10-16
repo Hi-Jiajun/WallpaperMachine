@@ -123,7 +123,6 @@ final class DownloadsModel {
       target: target, account: seed.account, remembersSession: seed.remembersSession)
     // Opening a dialog closes whatever popover is open.
     isQueuePopoverOpen = false
-    controller.workshopBrowser.isFilterPopoverOpen = false
     reconcile()
   }
 

@@ -22,11 +22,9 @@ struct PixivBrowserPage: View {
     }
     .onChange(of: model.isSignedIn, initial: true) { model.reconcileAccount() }
     .task { model.loadIfNeeded() }
-    .onChange(of: model.showsFilters) { _, shown in controller.shell.isPopoverOpen = shown }
     .onDisappear {
-      // A popover closes with its page. A search that was waiting for its pause still goes out,
-      // and the grid's place is stored at once rather than at the end of its 400 ms wait.
-      model.showsFilters = false
+      // A search that was waiting for its pause still goes out, and the grid's place is stored at
+      // once rather than at the end of its 400 ms wait.
       model.flushScrollReport()
     }
     .accessibilityIdentifier("pixiv-page")
@@ -162,7 +160,7 @@ struct PixivScrollKey: Hashable {
 
 /// The slim row under the toolbar: Filter, the menu, and on the trailing side the sign-in link and
 /// Refresh. It never asks for more width than it is given: the menu's label shortens first, then
-/// the sign-in link takes its short words ("Sign in") and then leaves (the Filters popover still
+/// the sign-in link takes its short words ("Sign in") and then leaves (the Filters sidebar still
 /// has it). Refresh turns into a spinner while a load replaces works on show; while the page's
 /// centre says it is loading, that is the one indicator, and Refresh only waits.
 struct PixivHeaderRow: View {
@@ -238,15 +236,16 @@ struct PixivHeaderRow: View {
   }
 }
 
-/// The Filter capsule: how many filters are on, and the popover that sets them.
+/// The Filter capsule: how many filters are on; it opens and closes the Filters sidebar.
 private struct PixivFilterButton: View {
   @Environment(PanelController.self) private var controller
 
   var body: some View {
-    @Bindable var model = controller.pixivBrowser
+    let model = controller.pixivBrowser
+    let shell = controller.shell
     let count = model.filterCount
     Button {
-      model.showsFilters.toggle()
+      shell.toggleFilters()
     } label: {
       HStack(spacing: 5) {
         Image(systemName: "line.3.horizontal.decrease")
@@ -255,13 +254,10 @@ private struct PixivFilterButton: View {
         if count > 0 { CountBadge(count: count, style: .attention) }
       }
     }
-    .buttonStyle(.panelCapsule(isActive: count > 0))
-    .help(model.showsFilters ? L("Hide filters") : L("Show filters"))
+    .buttonStyle(.panelCapsule(isActive: count > 0 || shell.areFiltersShown))
+    .help(shell.areFiltersShown ? L("Hide filters") : L("Show filters"))
     .accessibilityValue(count > 0 ? L("\(count) active") : "")
     .accessibilityIdentifier("pixiv-filter-button")
-    .popover(isPresented: $model.showsFilters, arrowEdge: .bottom) {
-      PixivFilterPopover()
-    }
   }
 }
 

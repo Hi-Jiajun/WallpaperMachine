@@ -1,18 +1,18 @@
 import SwiftUI
 
-/// The Workshop's Filters popover: the boxes Wallpaper Engine's own sidebar offers, in the groups it
+/// The Workshop's Filters sidebar: the boxes Wallpaper Engine's own sidebar offers, in the groups it
 /// groups them in.
 ///
 /// Each change searches at once. "Show only" boxes require a tag; every other box is ticked unless it
-/// hides what carries its tag, so a fresh popover with everything ticked filters nothing. A group's
+/// hides what carries its tag, so a fresh sidebar with everything ticked filters nothing. A group's
 /// title carries how many of its boxes differ from their defaults, the header carries the total,
 /// and Clear puts the defaults back.
-struct WorkshopFilterPopover: View {
+struct WorkshopFilters: View {
   @Environment(PanelController.self) private var controller
 
   var body: some View {
     let model = controller.workshopBrowser
-    FilterPopover(count: model.filterCount, onClear: { model.clearFilters() }) {
+    FilterPanel(count: model.filterCount, onClear: { model.clearFilters() }) {
       showOnly(model)
       ForEach(WorkshopFilterCatalog.groups) { group in
         FilterGroup(

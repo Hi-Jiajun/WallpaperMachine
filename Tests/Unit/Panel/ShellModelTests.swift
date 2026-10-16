@@ -185,16 +185,16 @@ final class ShellModelTests: PanelTestCase {
       let shell = panel.controller.shell
       XCTAssertFalse(shell.isPopoverOpen)
       let history = shell.popover(.history)
-      let filters = shell.popover(.filters)
+      let downloads = shell.popover(.downloads)
       history.wrappedValue = true
       XCTAssertTrue(shell.isPopoverOpen)
       XCTAssertTrue(history.wrappedValue)
-      filters.wrappedValue = true
+      downloads.wrappedValue = true
       XCTAssertFalse(history.wrappedValue, "opening one closes the other")
-      XCTAssertTrue(filters.wrappedValue)
+      XCTAssertTrue(downloads.wrappedValue)
 
       history.wrappedValue = false
-      XCTAssertTrue(filters.wrappedValue, "the close of a popover that had already been replaced changes nothing")
+      XCTAssertTrue(downloads.wrappedValue, "the close of a popover that had already been replaced changes nothing")
       shell.closePopover()
       XCTAssertFalse(shell.isPopoverOpen)
     }
@@ -220,13 +220,13 @@ final class ShellModelTests: PanelTestCase {
     try await withPanel { panel in
       let controller = panel.controller
       let shell = controller.shell
-      // Recently used is open when the library's Filter opens over it, and closes after.
+      // Recently used is open when the library's Import opens over it, and closes after.
       shell.popover(.history).wrappedValue = true
-      controller.library.setFilterOpen(true)
+      controller.library.openImport(from: .page)
       shell.popover(.history).wrappedValue = false
-      XCTAssertTrue(shell.isPopoverOpen, "the Filter popover is still open")
+      XCTAssertTrue(shell.isPopoverOpen, "the Import popover is still open")
       XCTAssertTrue(shell.blocksSupportPrompt)
-      controller.library.setFilterOpen(false)
+      controller.library.closeImport()
       XCTAssertFalse(shell.isPopoverOpen)
 
       // A popover a view reported belongs to the page it was opened on.
@@ -237,17 +237,13 @@ final class ShellModelTests: PanelTestCase {
       for open in [
         { controller.library.openImport(from: .page) },
         { controller.library.openImport(from: .pill) },
-        { controller.workshopBrowser.isFilterPopoverOpen = true },
         { controller.downloads.isQueuePopoverOpen = true },
-        { controller.pixivBrowser.showsFilters = true },
       ] {
         open()
         XCTAssertTrue(shell.isPopoverOpen)
         XCTAssertTrue(controller.supportPrompt.gate.popoverIsOpen, "the support prompt waits behind it")
-        controller.library.closePopovers()
-        controller.workshopBrowser.isFilterPopoverOpen = false
+        controller.library.closeImport()
         controller.downloads.isQueuePopoverOpen = false
-        controller.pixivBrowser.showsFilters = false
         XCTAssertFalse(shell.isPopoverOpen)
         XCTAssertFalse(controller.supportPrompt.gate.popoverIsOpen)
       }
@@ -286,6 +282,68 @@ final class ShellModelTests: PanelTestCase {
       XCTAssertFalse(shell.isPopoverOpen, "then the popover")
       XCTAssertFalse(shell.handleEscape(), "a selection is the library page's to clear")
     }
+  }
+
+  // MARK: Filters sidebar
+
+  func testTheFiltersSidebarIsOneForTheLibraryPagesAndWaitsOutSettings() async throws {
+    try await withPanel { panel in
+      let controller = panel.controller
+      let shell = controller.shell
+      XCTAssertFalse(shell.areFiltersShown, "it starts closed")
+      shell.toggleFilters()
+      XCTAssertTrue(shell.areFiltersShown)
+      XCTAssertEqual(controller.library.filterButtonValue, L("Expanded"))
+      XCTAssertFalse(shell.isPopoverOpen, "a sidebar is not a popover")
+      XCTAssertFalse(shell.blocksSupportPrompt, "and the support prompt does not wait behind it")
+
+      await shell.open(.workshop).value
+      XCTAssertTrue(shell.areFiltersShown, "it stays open on the next library page")
+      await shell.open(.settings).value
+      XCTAssertFalse(shell.areFiltersShown, "Settings has no filters")
+      shell.toggleFilters()
+      XCTAssertFalse(shell.areFiltersShown, "nor a sidebar to open")
+      await shell.open(.pixiv).value
+      XCTAssertTrue(shell.areFiltersShown, "and the choice waits for the next page that has them")
+
+      shell.toggleFilters()
+      XCTAssertFalse(shell.areFiltersShown)
+      XCTAssertEqual(controller.library.filterButtonValue, L("Collapsed"))
+    }
+  }
+
+  func testInANarrowWindowTheFiltersSidebarAndTheInspectorTakeTurns() async throws {
+    try await withPanel { panel in
+      let shell = panel.controller.shell
+      shell.windowWidthChanged(.regular)
+      XCTAssertTrue(shell.isInspectorShown)
+      shell.setFiltersShown(true)
+      XCTAssertTrue(shell.isInspectorShown, "a wide window has room for both")
+      shell.setFiltersShown(false)
+
+      let narrow = try await makeCompact(shell)
+      XCTAssertTrue(narrow)
+      shell.toggleInspector()
+      XCTAssertTrue(shell.isInspectorShown)
+      shell.setFiltersShown(true)
+      XCTAssertTrue(shell.areFiltersShown)
+      XCTAssertFalse(shell.isInspectorShown, "opening the filters closes the inspector")
+      shell.toggleInspector()
+      XCTAssertTrue(shell.isInspectorShown)
+      XCTAssertFalse(shell.areFiltersShown, "and opening the inspector closes the filters")
+    }
+  }
+
+  /// Takes the shell to a narrow window at once.
+  private func makeCompact(_ shell: ShellModel) async throws -> Bool {
+    let sleeper = ManualSleeper()
+    shell.sleep = sleeper.closure
+    shell.windowWidthChanged(.compact)
+    let shrinking = shell.pendingCompactChange
+    await sleeper.waitUntilPending()
+    sleeper.fireNext()
+    await shrinking?.value
+    return shell.isCompact
   }
 
   // MARK: Inspector and window width
@@ -426,7 +484,7 @@ final class ShellModelTests: PanelTestCase {
       XCTAssertTrue(shell.blocksSupportPrompt, "the guide is open")
       panel.controller.markWelcomeSeen()
       XCTAssertFalse(shell.blocksSupportPrompt)
-      shell.popover(.filters).wrappedValue = true
+      shell.popover(.history).wrappedValue = true
       XCTAssertTrue(shell.blocksSupportPrompt)
       shell.closePopover()
       XCTAssertFalse(shell.blocksSupportPrompt)

@@ -8,8 +8,8 @@ import SwiftUI
 ///
 /// The model reads and acts through `controller`, which owns every store. It is the state the page
 /// keeps for itself: the search text, the tag filters and the sort, the multi-selection with its
-/// press-and-sweep gesture, the one animated tile, the Filters and Import popovers, and the
-/// import pill. Filters and sort are reported to `controller.storeViewState(_:)` as they change
+/// press-and-sweep gesture, the one animated tile, the Import popover, and the import pill.
+/// Filters and sort are reported to `controller.storeViewState(_:)` as they change
 /// so a reopened window comes back to them, and restored once when the model is made.
 ///
 /// The model lives as long as the window, not as long as the page: leaving for another page and
@@ -33,8 +33,6 @@ final class InstalledBrowserModel {
   private(set) var scrollToTopCount = 0
   /// Which Filters groups are open, by key. The person's choice, kept while the window lives.
   var openFilterGroups: Set<String> = ["show-only", "type", "rating", "genre"]
-  /// Whether the Filters popover is open.
-  private(set) var isFilterOpen = false
 
   // MARK: Selection
   //
@@ -206,14 +204,14 @@ final class InstalledBrowserModel {
     return !narrowing.text.isEmpty || narrowing.hasFilters
   }
 
-  /// What VoiceOver reads after the Filter button's name: how many filters apply, and whether its
-  /// popover is open, which the web panel's button said with `aria-expanded`. Two separate facts,
-  /// so a list of them.
+  /// What VoiceOver reads after the Filter button's name: how many filters apply, and whether the
+  /// Filters sidebar is open, which the web panel's button said with `aria-expanded`. Two separate
+  /// facts, so a list of them.
   var filterButtonValue: String {
     let count = filterCount
     var parts: [String] = []
     if count > 0 { parts.append(L("\(count) active")) }
-    parts.append(isFilterOpen ? L("Expanded") : L("Collapsed"))
+    parts.append(controller.shell.areFiltersShown ? L("Expanded") : L("Collapsed"))
     return parts.joined(separator: ", ")
   }
 
@@ -524,9 +522,9 @@ final class InstalledBrowserModel {
 
   // MARK: Leaving
 
-  /// The page goes: its popovers close, nothing plays or sweeps, and what waited to be reported is.
+  /// The page goes: its popover closes, nothing plays or sweeps, and what waited to be reported is.
   func leavePage() {
-    closePopovers()
+    closeImport()
     windowWentAway()
   }
 
@@ -539,32 +537,16 @@ final class InstalledBrowserModel {
     summaryTask?.cancel()
   }
 
-  // MARK: Popovers
-
-  func setFilterOpen(_ isOpen: Bool) {
-    guard isFilterOpen != isOpen else { return }
-    isFilterOpen = isOpen
-    if isOpen { closeImport() }
-    popoversChanged()
-  }
-
-  func toggleFilter() { setFilterOpen(!isFilterOpen) }
-
-  /// Closes every popover of the page, as leaving the page does.
-  func closePopovers() {
-    setFilterOpen(false)
-    closeImport()
-  }
+  // MARK: Popover
 
   func popoversChanged() {
-    controller.shell.isPopoverOpen = isFilterOpen || importAnchor != nil
+    controller.shell.isPopoverOpen = importAnchor != nil
   }
 
   // MARK: Import popover and pill
 
   func openImport(from anchor: ImportAnchor) {
     guard importAnchor != anchor else { return }
-    if isFilterOpen { isFilterOpen = false }
     importAnchor = anchor
     importPill.observe(controller.importState, popoverOpen: true)
     popoversChanged()

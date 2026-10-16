@@ -49,7 +49,7 @@ and holds its tools.
 | Sidebar | The system sidebar, its translucent material reaching under the title bar; 220 points wide, resizable from 180 to 300. **Browse** holds Steam Workshop and pixiv. **Library** holds All wallpapers (the library's count, and an accent dot while Workshop updates exist; the whole row's tooltip then says how many, and VoiceOver reads it after the count) and Favorites (its count; it is Installed's own Favorite filter). **Collections** lists each local collection with its size ([Local collections](#local-collections)). The arrow keys move the highlight and open the row, as a click does. At the bottom are the Now Playing card (below) and **Settings**. Opening Settings swaps the list for Settings' own ([Pages and Settings](#pages-and-settings)) |
 | Toolbar | The window title names the place on show: **All wallpapers**, **Favorites**, the collection's name, **Steam Workshop**, **pixiv**, or the Settings section's name (**Search results** while searching Settings). The subtitle counts All wallpapers (with the number of updates), Favorites and a collection, and says nothing while the library loads. On the right: activity pills while there is something to report (an import in progress or a result not yet looked at, which opens Import; SteamCMD setup in progress; pixiv saves, which lead to the pixiv page), the target-display menu (named by the screen alone; its items, tooltip and VoiceOver value keep the renderer's full title, and two screens of one name keep it on the button too), the downloads button and **Wallpaper details**, which shows and hides the inspector; Settings shows neither the menu nor **Wallpaper details**. The downloads button appears once there is download activity, rings itself with the batch's mean progress while anything transfers, and carries the batch summary (status, percent, network speed, time left, **needs attention**) as its label and tooltip. |
 | Page | Installed, Steam Workshop and pixiv open with one full-width search bar at the top of the page (Command-F puts the keyboard in it), which stays in place when moving between them; VoiceOver names it for what it searches (**Search installed wallpapers**, **Search Steam Workshop**, **Search pixiv by tag**). **Installed**: a header row (**Filter** with its count, the sort menu and its direction, then **Select**, **Refresh** and **Import**; in a narrow column the controls keep their places and drop their words, which stay as tooltips and VoiceOver names), the tile grid and a footer (how many a search or filter leaves, **Update N wallpapers**, the selection tools, the drag-select tip, or *Loading your library…*; with none of these it is not shown, since the subtitle counts the view). **Steam Workshop** (the Discover page): a header with its lists (**Wallpapers**, **Collections**, **Your subscriptions**; one menu in the narrowest column), Filter, sort and Refresh (it searches from the page's search bar, which an author's or a collection's list leaves out); then the grid and a footer with the result summary and the pager (Previous, an editable page number with the number of pages, Next). A Workshop page is one Steam page of 30 tiles, at most 1,000 pages. **pixiv**: see [pixiv](pixiv.md#browsing) |
-| Filters popover | Opens from the page's **Filter** button on Installed, Discover and pixiv ([Filtering](#filtering)) |
+| Filters sidebar | A second sidebar at the page's leading edge, drawn like the window sidebar, opened from the page's **Filter** button on Installed, Discover and pixiv ([Filtering](#filtering)) |
 | Inspector | The system inspector column: preview, title, facts, actions, tags, and the selected wallpaper's options and properties ([wallpaper properties](wallpaper-properties.md)). 300 points wide, resizable from 260 to 420. It starts open in a window 960 points wide or more and closed in a narrower one, and follows the width once a resize has settled, until the person opens or closes it with **Wallpaper details**: that choice then holds whatever the width, also across a visit to Settings, which has none. Nothing is stored. The top of an installed wallpaper's inspector is washed with a blurred copy of its still (never the animation); the sections below are collapsible cards |
 | Now Playing | The card above Settings in the sidebar: the target display's wallpaper and the playback controls ([Now Playing](#now-playing)) |
 
@@ -136,12 +136,12 @@ The sidebar opens the pages:
 - **Steam Workshop** opens the Discover page, which browses the Steam Workshop. See
   [Workshop downloads](workshop-downloads.md).
 - **pixiv** browses pixiv's illustration rankings and tag search in the same grid,
-  filters popover and inspector, and saves a page of a work as a still wallpaper.
+  Filters sidebar and inspector, and saves a page of a work as a still wallpaper.
   See [pixiv](pixiv.md).
 - **All wallpapers**, **Favorites** and each local collection show the local
   library on the Installed page. Favorites is Installed's own Favorite filter and a
   collection is its collection filter, so either can also be set from the
-  [Filters popover](#filtering) and the sidebar follows.
+  [Filters sidebar](#filtering) and the window sidebar follows.
 - **Settings** replaces the page with a sectioned settings view, described
   below.
 
@@ -580,22 +580,28 @@ ids are unchanged, so nothing persisted or sent over the bridge moves.
 
 ## Filtering
 
-Installed, Discover and pixiv share one **Filters popover**. Its only switch is the
-page's **Filter** button: a funnel symbol, the label "Filter" and, when filters are
+Installed, Discover and pixiv share one **Filters sidebar**. The page's **Filter**
+button opens and closes it: a funnel symbol, the label "Filter" and, when filters are
 active, their count in a badge; the button is tinted with the accent while any filter
-applies, and VoiceOver reads the count. The popover is a system popover under the
-button with a heading, the count and **Clear**, and floats over the grid without
-reflowing it. It closes with the Filter button, `Escape`, a click outside it or a
-change of page, and only one of the panel's popovers is open at a time. It is page
-state only: nothing is stored, and closing never changes the search or the
-filters. Each page's groups are listed below; Tags render as chips.
+applies or the sidebar is open, and VoiceOver reads the count and whether it is open.
+The sidebar is a 260-point column at the page's leading edge, beside the window
+sidebar and drawn like it (floating glass from macOS 26), with the search bar and
+grid narrowing beside it. It slides out from under the window sidebar and back
+(a fade under Reduce Motion). Its header holds **Filters**, the count, **Clear** and,
+at its top-right corner, the sidebar button that closes it. One sidebar serves the
+window: it stays open from one library page to the next, showing that page's
+filters, and waits out Settings, which has none. In a window under 960 points
+there is no room for it beside the inspector, so opening one of them closes the
+other. It is not a popover: it holds neither the support prompt nor other popovers
+back. It starts closed and nothing is stored; closing never changes the search or
+the filters. Each page's groups are listed below; Tags render as chips.
 Groups fold open and shut with a short animation (none under Reduce Motion).
 Collapsed groups retain their state and show their own active count:
 Show only counts selected tags, and exclude groups count visible boxes that differ
 from that page's defaults. **Clear** restores those defaults; hidden or unknown
 tags are not claimed to be represented by the sum of visible group counts.
 
-- **Installed:** the popover carries Discover's boxes and rules (see below),
+- **Installed:** the sidebar carries Discover's boxes and rules (see below),
   applied in the page to each wallpaper. **Show only** starts with Favorites,
   Active on target display and Update available, then Approved, Audio responsive
   and Customizable; **Type** (Scene, Video, Web) reads the wallpaper's kind; **Age
@@ -616,18 +622,18 @@ tags are not claimed to be represented by the sum of visible group counts.
   (download or import), both measured off the main thread by
   `LibraryMetricsService` and re-checked only after a library reload; wallpapers
   not yet measured sort last.
-- **Discover:** the popover is Wallpaper Engine's own filter list — Show only
+- **Discover:** the sidebar is Wallpaper Engine's own filter list — Show only
   (required tags), then Type, Age rating, Resolution and Tags as tick boxes whose
   unticked entries are excluded (see [workshop-downloads](workshop-downloads.md)).
   Sort opens on Most popular this year; the other orders are listed there too.
-- **pixiv:** the popover starts with the pixiv account (sign in, or who is signed
+- **pixiv:** the sidebar starts with the pixiv account (sign in, or who is signed
   in and **Log out**), then Orientation, Minimum size, Age rating and
   AI-generated; its Mature (R-18) box waits for a sign-in. The page's menu lists
   rankings while the search field is empty and search orders once it is not. See
   [pixiv](pixiv.md#browsing).
 
 An empty result offers recovery for the actual restriction: **Clear search**,
-**Clear filters** (plus **Show filters** while the popover is closed), or **Clear search and
+**Clear filters** (plus **Show filters** while the sidebar is closed), or **Clear search and
 filters**. A Workshop response with no restrictions offers Refresh instead of an
 ineffective Clear. First loading, Workshop failure/Retry and an empty local library
 keep their own states; a refresh can leave existing results visible.

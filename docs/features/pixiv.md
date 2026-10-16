@@ -33,7 +33,7 @@ read; a malformed entry is dropped instead of failing its page. A ranking or
 search that fails to open empties the grid instead of leaving the listing before
 it on show, where Next would page the one that failed; **Retry** asks for it again.
 
-The Filters popover (the header's **Filter** button, see
+The Filters sidebar (the header's **Filter** button, see
 [control-panel](control-panel.md#filtering)) holds the pixiv account and these
 groups:
 
@@ -119,7 +119,7 @@ library reloads, waiting for any wallpaper being applied to finish first.
 
 ## Signing in and R-18 works
 
-**Sign in to pixiv…** in the Filters popover's pixiv account group, or the link in the
+**Sign in to pixiv…** in the Filters sidebar's pixiv account group, or the link in the
 page's header (it shrinks to a symbol, then leaves, on a narrow page), opens pixiv's own sign-in page in a window of its own (`WebSignInWindowController`, the one Steam's
 sign-in for [subscriptions](workshop-downloads.md#subscriptions) uses too). The page
 runs in a private website data store that disappears with the window; the app

@@ -296,17 +296,17 @@ final class InstalledBrowserModelTests: PanelTestCase {
     XCTAssertFalse(model.descending)
   }
 
-  func testTheFilterButtonSaysHowManyFiltersApplyAndWhetherItsPopoverIsOpen() async throws {
+  func testTheFilterButtonSaysHowManyFiltersApplyAndWhetherTheSidebarIsOpen() async throws {
     let panel = try makeController()
     defer { Task { await panel.shutdown() } }
     let model = panel.controller.library
     XCTAssertEqual(model.filterButtonValue, L("Collapsed"))
-    model.setFilterOpen(true)
+    panel.controller.shell.setFiltersShown(true)
     XCTAssertEqual(model.filterButtonValue, L("Expanded"))
     model.setRequired("Approved", true)
     model.setIncluded("Web", false)
     XCTAssertEqual(model.filterButtonValue, "\(L("2 active")), \(L("Expanded"))")
-    model.setFilterOpen(false)
+    panel.controller.shell.setFiltersShown(false)
     XCTAssertEqual(model.filterButtonValue, "\(L("2 active")), \(L("Collapsed"))")
   }
 
@@ -517,15 +517,15 @@ final class InstalledBrowserModelTests: PanelTestCase {
     XCTAssertEqual(model.selectedIDs, ["w01", "w02"], "and is still ticked")
   }
 
-  func testLeavingThePageClosesItsPopoversAndReportsWhatWaited() async throws {
+  func testLeavingThePageClosesItsPopoverAndReportsWhatWaited() async throws {
     let panel = try makeController()
     defer { Task { await panel.shutdown() } }
     let model = panel.controller.library
     model.sleep = ManualSleeper().closure
     model.setText("abc")
-    model.setFilterOpen(true)
+    model.openImport(from: .page)
     model.leavePage()
-    XCTAssertFalse(model.isFilterOpen)
+    XCTAssertNil(model.importAnchor)
     XCTAssertFalse(panel.controller.shell.isPopoverOpen)
     XCTAssertEqual(panel.navigation.viewState?.installed.text, "abc")
   }
@@ -1192,24 +1192,25 @@ final class InstalledBrowserModelTests: PanelTestCase {
 
   // MARK: Import
 
-  func testTheImportPopoverStartsAtSkipAndOnePopoverOpensAtATime() async throws {
+  func testTheImportPopoverStartsAtSkipAndOpensFromOneAnchorAtATime() async throws {
     let panel = try makeController()
     defer { Task { await panel.shutdown() } }
     let model = panel.controller.library
     XCTAssertEqual(model.importDuplicates, .skip, "keep what the library holds")
-    model.setFilterOpen(true)
-    XCTAssertTrue(panel.controller.shell.isPopoverOpen)
+    panel.controller.shell.setFiltersShown(true)
+    XCTAssertFalse(panel.controller.shell.isPopoverOpen, "the Filters sidebar is not a popover")
     model.openImport(from: .page)
-    XCTAssertFalse(model.isFilterOpen, "opening one closes the other")
+    XCTAssertTrue(panel.controller.shell.areFiltersShown, "and stays open beside it")
     XCTAssertEqual(model.importAnchor, .page)
     XCTAssertTrue(panel.controller.shell.isPopoverOpen)
     model.toggleImport(from: .page)
     XCTAssertNil(model.importAnchor)
     XCTAssertFalse(panel.controller.shell.isPopoverOpen)
+    model.openImport(from: .page)
     model.openImport(from: .pill)
-    model.closePopovers()
+    XCTAssertEqual(model.importAnchor, .pill, "the popover moves to the anchor that asked last")
+    model.closeImport()
     XCTAssertNil(model.importAnchor)
-    XCTAssertFalse(model.isFilterOpen)
   }
 
   func testAFinishedImportShowsInThePillUntilItsPopoverHasBeenOpenedAndClosed() async throws {

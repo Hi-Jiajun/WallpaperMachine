@@ -72,7 +72,7 @@ final class WorkshopFilterCatalogTests: XCTestCase {
     XCTAssertEqual(
       Catalog.entries.filter(\.isOffByDefault).map(\.tag), ["Questionable", "Mature", "Unspecified"])
     let fresh = WorkshopFilterDraft.cleared
-    XCTAssertEqual(fresh.count, 0, "a fresh popover filters nothing, so the count reads zero")
+    XCTAssertEqual(fresh.count, 0, "a fresh sidebar filters nothing, so the count reads zero")
     XCTAssertFalse(fresh.isIncluded("Mature"))
     XCTAssertTrue(fresh.isIncluded("Anime"))
   }

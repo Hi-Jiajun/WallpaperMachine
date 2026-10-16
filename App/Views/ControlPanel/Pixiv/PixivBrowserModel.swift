@@ -1,7 +1,7 @@
 import AppKit
 import Observation
 
-/// The groups of the Filters popover, which can each be folded.
+/// The groups of the Filters sidebar, which can each be folded.
 enum PixivFilterGroup: CaseIterable, Hashable {
   case account, orientation, minimumSize, ageRating, ai
 }
@@ -32,9 +32,7 @@ final class PixivBrowserModel {
 
   /// What the page edits. Read `query` for what is shown and sent.
   private(set) var draft: PixivQuery
-  /// The Filters popover is open.
-  var showsFilters = false
-  /// The folded groups of the popover: kept while the page lives, all open at first.
+  /// The folded groups of the Filters sidebar: kept while the page lives, all open at first.
   var collapsedGroups: Set<PixivFilterGroup> = []
 
   /// Test seam: the clock of the search debounce and of the scroll report.

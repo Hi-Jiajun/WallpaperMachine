@@ -46,7 +46,7 @@ struct WorkshopBrowserPage: View {
     if browse.items.isEmpty {
       let state = WorkshopEmptyState.make(
         browse: browse, draftText: model.text, filterCount: model.filterCount)
-      WorkshopEmptyStateView(state: state, filtersAreOpen: model.isFilterPopoverOpen)
+      WorkshopEmptyStateView(state: state, filtersAreOpen: controller.shell.areFiltersShown)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     } else {
       WorkshopGrid(items: browse.items, isLoading: browse.isLoading)
@@ -228,7 +228,9 @@ struct WorkshopEmptyStateView: View {
       ) {
         HStack {
           Button("Clear filters") { model.clearFilters() }
-          if !filtersAreOpen { Button("Show filters") { model.isFilterPopoverOpen = true } }
+          if !filtersAreOpen {
+            Button("Show filters") { controller.shell.setFiltersShown(true) }
+          }
         }
         .buttonStyle(.panelSecondary)
       }
@@ -247,7 +249,9 @@ struct WorkshopEmptyStateView: View {
               Label("Next page", systemImage: "chevron.right")
             }
           }
-          if !filtersAreOpen { Button("Show filters") { model.isFilterPopoverOpen = true } }
+          if !filtersAreOpen {
+            Button("Show filters") { controller.shell.setFiltersShown(true) }
+          }
         }
         .buttonStyle(.panelSecondary)
       }

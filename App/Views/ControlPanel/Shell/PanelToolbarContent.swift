@@ -38,7 +38,7 @@ private struct InspectorToggle: View {
   var body: some View {
     let shell = controller.shell
     Button {
-      shell.isInspectorShown.toggle()
+      shell.toggleInspector()
     } label: {
       Label(L("Wallpaper details"), systemImage: "sidebar.trailing")
     }

@@ -27,13 +27,6 @@ final class WorkshopBrowserModel {
 
   // MARK: Page state
 
-  /// The Filters popover is open. It is the shell's `.filters` popover, so opening it closes any
-  /// other (the Downloads list), it closes with the page, and the shell's flag the support prompt
-  /// waits behind is true exactly while it is up.
-  var isFilterPopoverOpen: Bool {
-    get { controller.shell.activePopover == .filters }
-    set { controller.shell.popover(.filters).wrappedValue = newValue }
-  }
   /// Filter groups the person folded. Every group starts open.
   var foldedFilterGroups: Set<String> = []
   /// What the jump field holds: the page on show until the person types another.
@@ -316,7 +309,6 @@ final class WorkshopBrowserModel {
   /// The page went away: every animation is released and the grid's place is stored.
   func pageDisappeared() {
     previews.releaseAll()
-    isFilterPopoverOpen = false
     flushScrollReport()
   }
 

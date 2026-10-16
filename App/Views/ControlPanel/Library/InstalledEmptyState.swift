@@ -72,8 +72,8 @@ struct InstalledEmptyState: View {
           HStack(spacing: 8) {
             Button("Clear filters") { model.clearFilters() }
               .buttonStyle(.panelCapsule)
-            if !model.isFilterOpen {
-              Button("Show filters") { model.setFilterOpen(true) }
+            if !controller.shell.areFiltersShown {
+              Button("Show filters") { controller.shell.setFiltersShown(true) }
                 .buttonStyle(.panelCapsule)
             }
           }

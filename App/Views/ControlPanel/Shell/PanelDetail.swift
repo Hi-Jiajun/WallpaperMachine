@@ -1,11 +1,15 @@
 import SwiftUI
 
-/// The detail column: the page on show, with its title, toolbar, banners and inspector. Library
-/// pages (Installed, Steam Workshop, pixiv) have an inspector column beside them; Settings is a
-/// page of its own.
+/// The detail column: the page on show, with its title, toolbar, banners, Filters sidebar and
+/// inspector. Library pages (Installed, Steam Workshop, pixiv) have the Filters sidebar before them
+/// and an inspector column beside them; Settings is a page of its own.
 struct PanelDetail: View {
   @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  /// The slide of the Filters sidebar, close to the navigation sidebar's own.
+  private static let filtersAnimation = Animation.smooth(duration: 0.32)
 
   var body: some View {
     let shell = controller.shell
@@ -17,23 +21,34 @@ struct PanelDetail: View {
       selection: selection, scope: controller.library.scope, counts: counts,
       settingsSection: controller.settings.selectedSection, searchQuery: controller.settings.query,
       workshopSubtitle: selection == .workshop ? controller.workshopTitleSubtitle : nil)
-    page(for: selection)
-      // One search bar at the top of the pages that have one, kept in place across them.
-      .safeAreaInset(edge: .top, spacing: 0) { PageSearchBar(selection: selection) }
-      .safeAreaInset(edge: .top, spacing: 0) { PanelBanners() }
-      .background { theme.surface.background.color.ignoresSafeArea() }
-      // The inspector stays attached on every page and is only closed on Settings, so moving
-      // between Settings and the library never adds or removes the split view's own toolbar items.
-      //
-      // The page has no minimum width of its own: the inspector asks for 260 points at least, and a
-      // page minimum on top of that makes the split view wider than the 760-point window.
-      .inspector(isPresented: inspectorBinding(shell, selection)) {
-        inspector(for: selection).inspectorColumnWidth(min: 260, ideal: 300, max: 420)
+    HStack(spacing: 0) {
+      if shell.areFiltersShown {
+        // It comes out from under the navigation sidebar, which floats above the detail.
+        FilterSidebar(selection: selection)
+          .transition(
+            reduceMotion ? .opacity : .move(edge: .leading).combined(with: .opacity))
       }
-      // Under the first-run guide the bare title bar names nothing: the guide is what is on show.
-      .navigationTitle(shell.isWelcomeOpen ? "" : title.title)
-      .navigationSubtitle(shell.isWelcomeOpen ? "" : title.subtitle ?? "")
-      .toolbar { PanelToolbarContent(controller: controller) }
+      page(for: selection)
+        // One search bar at the top of the pages that have one, kept in place across them.
+        .safeAreaInset(edge: .top, spacing: 0) { PageSearchBar(selection: selection) }
+        .safeAreaInset(edge: .top, spacing: 0) { PanelBanners() }
+    }
+    .animation(
+      reduceMotion ? .easeOut(duration: 0.15) : Self.filtersAnimation,
+      value: shell.areFiltersShown)
+    .background { theme.surface.background.color.ignoresSafeArea() }
+    // The inspector stays attached on every page and is only closed on Settings, so moving
+    // between Settings and the library never adds or removes the split view's own toolbar items.
+    //
+    // The page has no minimum width of its own: the inspector asks for 260 points at least, and a
+    // page minimum on top of that makes the split view wider than the 760-point window.
+    .inspector(isPresented: inspectorBinding(shell, selection)) {
+      inspector(for: selection).inspectorColumnWidth(min: 260, ideal: 300, max: 420)
+    }
+    // Under the first-run guide the bare title bar names nothing: the guide is what is on show.
+    .navigationTitle(shell.isWelcomeOpen ? "" : title.title)
+    .navigationSubtitle(shell.isWelcomeOpen ? "" : title.subtitle ?? "")
+    .toolbar { PanelToolbarContent(controller: controller) }
   }
 
   /// Open or closed by the person's choice, or by the window's width while they have not chosen, on

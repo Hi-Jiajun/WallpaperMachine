@@ -368,19 +368,15 @@ final class WorkshopBrowserModelTests: MediaPanelTestCase {
 
   // MARK: Popovers, focus and the grid's place
 
-  func testOpeningAPopoverTellsTheShellWhichTheSupportPromptWaitsBehind() throws {
+  func testTheDownloadsPopoverLeavesTheFiltersSidebarOpen() throws {
     let panel = try makePanel()
     let controller = panel.controller
-    XCTAssertFalse(controller.shell.isPopoverOpen)
-    controller.workshopBrowser.isFilterPopoverOpen = true
-    XCTAssertTrue(controller.shell.isPopoverOpen)
+    controller.shell.setFiltersShown(true)
+    XCTAssertFalse(controller.shell.isPopoverOpen, "the sidebar is not a popover")
     controller.downloads.isQueuePopoverOpen = true
-    XCTAssertFalse(controller.workshopBrowser.isFilterPopoverOpen, "one popover at a time")
     XCTAssertTrue(controller.shell.isPopoverOpen, "the Downloads popover is open")
-    controller.workshopBrowser.isFilterPopoverOpen = true
-    XCTAssertFalse(controller.downloads.isQueuePopoverOpen, "and the other way round")
-    XCTAssertTrue(controller.shell.isPopoverOpen)
-    controller.workshopBrowser.isFilterPopoverOpen = false
+    XCTAssertTrue(controller.shell.areFiltersShown, "beside the sidebar")
+    controller.downloads.isQueuePopoverOpen = false
     XCTAssertFalse(controller.shell.isPopoverOpen)
   }
 
@@ -417,12 +413,10 @@ final class WorkshopBrowserModelTests: MediaPanelTestCase {
     XCTAssertEqual(controller.navigation.viewState?.scroll["discover"], 410, "an offset that is not a place is ignored")
   }
 
-  func testLeavingThePageClosesItsPopoverAndReleasesTheAnimations() async throws {
+  func testLeavingThePageReleasesTheAnimations() async throws {
     let panel = try makePanel()
     let model = panel.controller.workshopBrowser
-    model.isFilterPopoverOpen = true
     model.pageDisappeared()
-    XCTAssertFalse(model.isFilterPopoverOpen)
     XCTAssertTrue(model.previews.animations.isEmpty)
   }
 }

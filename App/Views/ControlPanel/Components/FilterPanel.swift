@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// The frame of a filters popover: a header with the number of filters in effect and a Clear
-/// button, and the filter groups below it. What the groups contain belongs to the page that shows
-/// it.
-struct FilterPopover<Content: View>: View {
+/// The contents of the Filters sidebar: a header with the number of filters in effect, Clear and the
+/// button that closes the sidebar, and the filter groups below it. What the groups contain belongs
+/// to the page that shows it.
+struct FilterPanel<Content: View>: View {
   /// How many filters are in effect.
   let count: Int
   let onClear: () -> Void
@@ -18,22 +18,54 @@ struct FilterPopover<Content: View>: View {
         Button("Clear", action: onClear)
           .buttonStyle(.link)
           .disabled(count == 0)
+        FilterSidebarToggle()
       }
-      .padding(.horizontal, 14)
-      .padding(.vertical, 10)
-      Divider()
+      .padding(.leading, 14)
+      .padding(.trailing, 8)
+      .padding(.vertical, 8)
+      Divider().padding(.horizontal, 10)
       ScrollView {
         VStack(alignment: .leading, spacing: 0) { content }
           .padding(.horizontal, 14)
           .padding(.vertical, 6)
       }
     }
-    .frame(width: 300)
-    .frame(maxHeight: 520)
   }
 }
 
-/// One group of a filters popover: a disclosure whose title carries how many of its options are on.
+/// The sidebar's own button, at its top trailing corner where the navigation sidebar has its
+/// toggle, with the same glyph: it closes the sidebar.
+private struct FilterSidebarToggle: View {
+  @Environment(PanelController.self) private var controller
+
+  var body: some View {
+    Button {
+      controller.shell.toggleFilters()
+    } label: {
+      Image(systemName: "sidebar.left")
+        .font(.system(size: 13, weight: .medium))
+        .frame(width: 18, height: 18)
+    }
+    .modifier(SidebarToggleStyle())
+    .help(L("Hide filters"))
+    .accessibilityLabel(Text("Hide filters"))
+    .accessibilityIdentifier("filters-sidebar-toggle")
+  }
+}
+
+/// The navigation sidebar's toggle is a round glass button from macOS 26; before that a plain
+/// toolbar glyph.
+private struct SidebarToggleStyle: ViewModifier {
+  func body(content: Content) -> some View {
+    if #available(macOS 26.0, *) {
+      content.buttonStyle(.glass).buttonBorderShape(.circle).controlSize(.large)
+    } else {
+      content.buttonStyle(.borderless)
+    }
+  }
+}
+
+/// One group of the Filters sidebar: a disclosure whose title carries how many of its options are on.
 struct FilterGroup<Content: View>: View {
   private let title: Text
   let count: Int
