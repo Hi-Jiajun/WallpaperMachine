@@ -1057,7 +1057,8 @@ never to `.shared`.
   and `DownloadDialogResolutionTests` (the download dialog's stages, Not now, the hand-off card, a
   rejected account, late failures, the first-run guide keeping its own sign-in), and
   `WorkshopBrowserRenderTests` (the page, inspector, empty states, dialog stages and Downloads list
-  in every language at both sizes, shrinking with the inspector open, a tile's VoiceOver label).
+  in every language at both sizes, shrinking with the inspector open, a tile's VoiceOver label, a
+  download that resumes or pauses with the Downloads list open redrawn in place).
 - pixiv: `PanelPixivActionsTests`, `PixivPanelStateTests`, `PixivBrowserModelTests`,
   `PixivListSummaryTests` and `PixivBrowserRenderTests`; see [Pixiv](#pixiv).
 - Settings: `SettingsSearchTests` (matches, counts, folding disclosures, the panel's language, the

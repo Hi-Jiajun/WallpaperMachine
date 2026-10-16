@@ -62,6 +62,29 @@ struct DownloadQueue: Equatable {
   /// Clearing removes what is not under way.
   var canClearFinished: Bool { downloads.count > pending.count }
 
+  /// One row of the popover: a retained request or a job.
+  enum Entry: Identifiable, Equatable {
+    case request(DownloadRequestRow)
+    case job(DownloadRow)
+
+    /// A job keeps one identity whether it runs, waits, is paused or failed, so the list redraws
+    /// it in place as it changes section; a lazy stack keeps a stale row for an id that moves from
+    /// one `ForEach` to another.
+    var id: String {
+      switch self {
+      case .request(let request): "request:\(request.id)"
+      case .job(let job): "\(job.source):\(job.id)"
+      }
+    }
+  }
+
+  /// The popover's rows in order, for one `ForEach`: the requests, the running and waiting jobs,
+  /// those that need review, then the finished ones when they are shown.
+  func entries(showingCompleted: Bool) -> [Entry] {
+    requests.map(Entry.request) + (pending + unresolved).map(Entry.job)
+      + (showingCompleted ? succeeded.map(Entry.job) : [])
+  }
+
   /// What the popover says when it has no rows.
   @MainActor
   var emptyMessage: String {

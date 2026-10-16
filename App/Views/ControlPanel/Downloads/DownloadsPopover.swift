@@ -19,12 +19,11 @@ struct DownloadsPopover: View {
   var body: some View {
     let model = controller.downloads
     let queue = fixedQueue ?? controller.downloadQueue
-    let rows = queue.requests.count + queue.pending.count + queue.unresolved.count
-      + (model.showsCompleted ? queue.succeeded.count : 0)
+    let entries = queue.entries(showingCompleted: model.showsCompleted)
     VStack(spacing: 0) {
       header(queue)
       Divider()
-      if rows == 0 {
+      if entries.isEmpty {
         Text(verbatim: queue.emptyMessage)
           .font(.system(size: 12.5))
           .foregroundStyle(theme.surface.muted.color)
@@ -34,11 +33,12 @@ struct DownloadsPopover: View {
       } else {
         ScrollView {
           LazyVStack(spacing: 0) {
-            ForEach(queue.requests) { DownloadsPopoverRequestRow(request: $0) }
-            ForEach(queue.pending) { DownloadsPopoverJobRow(row: $0) }
-            ForEach(queue.unresolved) { DownloadsPopoverJobRow(row: $0) }
-            if model.showsCompleted {
-              ForEach(queue.succeeded) { DownloadsPopoverJobRow(row: $0) }
+            // One ForEach: a job that resumes, pauses or fails keeps its row.
+            ForEach(entries) { entry in
+              switch entry {
+              case .request(let request): DownloadsPopoverRequestRow(request: request)
+              case .job(let row): DownloadsPopoverJobRow(row: row)
+              }
             }
           }
         }

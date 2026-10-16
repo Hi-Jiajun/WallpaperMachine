@@ -437,6 +437,55 @@ final class WorkshopBrowserRenderTests: MediaPanelTestCase {
     }
   }
 
+  func testAResumedDownloadRedrawsAsRunningWhileTheListIsOpen() async throws {
+    let panel = try makeDiscoverPanel()
+    let paused = DownloadRow(id: "1", title: "Aurora Fjord", status: "Download paused", isPaused: true)
+    let running = DownloadRow(
+      id: "1", title: "Aurora Fjord", status: "Starting SteamCMD and contacting Steam…",
+      isPending: true)
+    let other = DownloadRow(id: "2", title: "Glacier Lake", status: "Download paused", isPaused: true)
+    let source = DownloadQueueSource(
+      DownloadQueue.make(requests: [], steam: [paused, other], pixiv: [], slotLimit: 3))
+    let hosting = NSHostingView(
+      rootView: AnyView(
+        DownloadQueueSourceView(source: source).environment(panel.controller)
+          .environment(\.panelImages, panel.controller.images)
+          .panelTheme(theme: panel.controller.theme, locale: PanelLocale.shared)))
+    let window = NSWindow(
+      contentRect: NSRect(x: 0, y: 0, width: 360, height: 600), styleMask: [.titled],
+      backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentView = hosting
+    defer {
+      window.contentView = nil
+      window.close()
+    }
+    func drawn() async throws -> Set<String> {
+      for _ in 0..<5 {
+        hosting.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(60))
+      }
+      return Set(elements(in: hosting).map(\.label))
+        .union(accessibility(in: hosting, key: "accessibilityTitle"))
+        .union(accessibility(in: hosting, key: "accessibilityValue"))
+    }
+    var shown = try await drawn()
+    XCTAssertTrue(shown.contains { $0.contains("Download paused") }, "precondition: \(shown)")
+
+    // Resuming moves the row from the paused section to the running one under the same id.
+    source.queue = DownloadQueue.make(requests: [], steam: [running, other], pixiv: [], slotLimit: 3)
+    shown = try await drawn()
+    XCTAssertTrue(
+      shown.contains { $0.contains("Starting SteamCMD and contacting Steam") },
+      "the resumed row says what it does now: \(shown)")
+    XCTAssertTrue(shown.contains { $0.contains("Pause download") }, "and offers a pause: \(shown)")
+
+    // Pausing it moves it back.
+    source.queue = DownloadQueue.make(requests: [], steam: [paused, other], pixiv: [], slotLimit: 3)
+    shown = try await drawn()
+    XCTAssertFalse(shown.contains { $0.contains("Pause download") }, "a paused row offers no pause: \(shown)")
+  }
+
   func testTheDownloadsListsControlsNeverWrapOrTruncateInAnyLanguage() async throws {
     for language in AppLanguage.supported.map(\.tag) {
       let panel = try makeDiscoverPanel(language: language)
@@ -480,4 +529,17 @@ final class WorkshopBrowserRenderTests: MediaPanelTestCase {
       XCTAssertLessThanOrEqual(size.width, 261, "\(language): the inspector never asks for more than its column")
     }
   }
+}
+
+/// A Downloads list whose queue a test replaces while it is drawn, as the stores do while it is open.
+@MainActor
+@Observable
+private final class DownloadQueueSource {
+  var queue: DownloadQueue
+  init(_ queue: DownloadQueue) { self.queue = queue }
+}
+
+private struct DownloadQueueSourceView: View {
+  let source: DownloadQueueSource
+  var body: some View { DownloadsPopover(queue: source.queue) }
 }
