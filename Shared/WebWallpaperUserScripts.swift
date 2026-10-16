@@ -13,13 +13,17 @@ extension WebWallpaperProtocol {
     /// wallpaper, and must neither answer the host nor be asked by it.
     ///
     /// The font aliases (`WebWallpaperFontAliases`) go into every frame of a local page too,
-    /// since a subframe sets text in the fonts it names as the wallpaper does.
+    /// since a subframe sets text in the fonts it names as the wallpaper does, and so does
+    /// `requestIdleCallback` (`WebWallpaperIdleCallbacks`), which Chromium has in every frame.
     ///
     /// Web workers are out of reach of a user script, so a worker's own `fetch`
     /// keeps WebKit's behaviour.
     static func userScripts(seed: Seed = Seed()) -> [WKUserScript] {
         [
             WKUserScript(source: compatScript, injectionTime: .atDocumentStart, forMainFrameOnly: false),
+            WKUserScript(
+                source: WebWallpaperIdleCallbacks.script, injectionTime: .atDocumentStart,
+                forMainFrameOnly: false),
             WKUserScript(
                 source: WebWallpaperFontAliases.script, injectionTime: .atDocumentStart,
                 forMainFrameOnly: false),

@@ -1329,7 +1329,8 @@ following (`WebWallpaperRenderScaleTests`, plus the render-scale cases of
 (`WebWallpaperMoveThrottleTests`, and the interval a page asks for in
 `WebWallpaperPageTests`), the opt-in Web Inspector switch
 (`WebWallpaperInspectionTests`, plus the running and new page cases of
-`WebWallpaperHostLifecycleTests`), the Windows font names a page asks for drawn in macOS
+`WebWallpaperHostLifecycleTests`), `requestIdleCallback` where WebKit lacks it
+(`WebWallpaperIdleCallbackTests`), the Windows font names a page asks for drawn in macOS
 faces (`WebWallpaperFontAliasTests`) and the screen-saver surface
 (`ScreenSaverWebSurfaceTests`). Detail and limits:
 [web wallpapers](../features/web-wallpapers.md#verification).
