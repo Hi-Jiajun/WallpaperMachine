@@ -3631,13 +3631,21 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
     }
 }
 
+/// Wallpaper Engine composes a layer from the flags and shader of its model, not
+/// from the model's path. These are the editor's two models of that kind: the
+/// composition layer, and the one that also tests depth.
+bool IsComposeLayerModel(std::string_view image) {
+    return image == "models/util/composelayer.json" ||
+           image == "models/util/composelayer_depthtest.json";
+}
+
 void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     auto& wpimgobj = img_obj;
     const auto runtime_name = LayerRuntimeName(context, wpimgobj);
 
     auto& vfs = *context.vfs;
 
-    const bool isCompose = (wpimgobj.image == "models/util/composelayer.json");
+    const bool isCompose = IsComposeLayerModel(wpimgobj.image);
     ResolveUserEffectVisibility(context, wpimgobj.effects, runtime_name);
 
     // A colour blend mode mixes the layer with the screen behind it through
@@ -3701,6 +3709,11 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         wpimgobj.size[1]   = static_cast<float>(context.ortho_h);
         wpimgobj.origin[0] = static_cast<float>(context.ortho_w) * 0.5f;
         wpimgobj.origin[1] = static_cast<float>(context.ortho_h) * 0.5f;
+    } else if (wpimgobj.autosize && wpimgobj.projectlayer) {
+        // A project layer is as large as the scene's canvas, whatever size the
+        // scene file saved for it; where it sits is the scene file's.
+        wpimgobj.size[0] = static_cast<float>(context.ortho_w);
+        wpimgobj.size[1] = static_cast<float>(context.ortho_h);
     }
 
     // wpimgobj.origin[1] = context.ortho_h - wpimgobj.origin[1];

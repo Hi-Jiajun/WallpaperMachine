@@ -877,6 +877,61 @@ TEST(LayerTextureReference, ComposeChildrenKeepTheirPlaceInsideTheLayer) {
     EXPECT_NEAR(corner.y(), (5.0 + 4.0) / 16.0, 1e-4);
 }
 
+// Wallpaper Engine composes a layer from the flags and the shader of its model,
+// not from the model's name, so the depth-testing variant of the composition
+// layer composes its children the same way.
+TEST(LayerTextureReference, TheDepthTestedComposeModelComposesLikeTheOthers) {
+    fs::VFS vfs;
+    auto    parsed = ParseScene(vfs, R"([
+        {"id":1,"name":"container","image":"models/util/composelayer_depthtest.json",
+         "size":[64,32],"origin":[32,16,0],"copybackground":false},
+        {"id":2,"name":"child","parent":1,"image":"small.json","origin":[10,5,0]}
+      ])",
+      {{ "/models/util/composelayer_depthtest.json",
+         R"({"passthrough":true,"material":"materials/util/composelayer.json"})" },
+       { "/materials/util/composelayer.json",
+         R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"enabled","depthwrite":"disabled","shader":"genericimage","textures":["_rt_FullFrameBuffer"]}]})" },
+       { "/materials/util/effectpassthrough.json",
+         R"({"passes":[{"blending":"normal","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage"}]})" },
+       { "/small.json", R"({"width":16,"height":8,"material":"mat.json"})" }});
+    ASSERT_NE(parsed, nullptr);
+    AddScreenTarget(*parsed);
+    const auto graph = sceneToRenderGraph(*parsed);
+    ASSERT_NE(graph, nullptr);
+    const auto* child = FindPassByNode(*graph, "child");
+    ASSERT_NE(child, nullptr);
+
+    const auto corner = CardCornerNdc(*parsed, *child, { 8.0, 4.0 });
+    EXPECT_NEAR(corner.x(), (10.0 + 8.0) / 32.0, 1e-4);
+    EXPECT_NEAR(corner.y(), (5.0 + 4.0) / 16.0, 1e-4);
+}
+
+// A project layer is sized by the scene's canvas, not by the size the scene file
+// saved for it; the layer's position stays the scene file's.
+TEST(LayerTextureReference, AProjectLayerTakesTheCanvasSizeAndKeepsItsOrigin) {
+    const ProjectProperties properties {};
+    fs::VFS                 vfs;
+    auto parsed = ParseScene(vfs, R"([
+        {"id":1,"name":"project","image":"models/util/projectlayer.json",
+         "size":[10,10],"origin":[40,12,0]},
+        {"id":2,"name":"plain","image":"models/util/solid.json","size":[10,10],"origin":[40,12,0]}
+      ])",
+      {{ "/models/util/projectlayer.json",
+         R"({"passthrough":true,"autosize":true,"projectlayer":true,"material":"materials/util/composelayer.json"})" },
+       { "/models/util/solid.json",
+         R"({"autosize":true,"material":"materials/util/composelayer.json"})" },
+       { "/materials/util/composelayer.json",
+         R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":["_rt_FullFrameBuffer"]}]})" }},
+      &properties);
+    ASSERT_NE(parsed, nullptr);
+    ASSERT_NE(parsed->runtime, nullptr);
+    // The scene's canvas is 64 by 32.
+    EXPECT_TRUE(parsed->runtime->NodeSize("project").isApprox(Eigen::Vector2f(64.0f, 32.0f)));
+    EXPECT_TRUE(parsed->runtime->NodeTranslate("project").isApprox(Eigen::Vector3f(40.0f, 12.0f, 0.0f)));
+    // `autosize` alone sizes from the texture, which the scene file's size already is.
+    EXPECT_TRUE(parsed->runtime->NodeSize("plain").isApprox(Eigen::Vector2f(10.0f, 10.0f)));
+}
+
 // A compose layer that only copies the background behind it adds nothing on
 // screen and used to be skipped outright. A mask drawn after other layers can
 // still sample it to paint that background back -- a toggle's clouds clipped to

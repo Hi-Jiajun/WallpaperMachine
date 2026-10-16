@@ -615,6 +615,12 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   without it the blend of the two. A render target has a single level, so its filter
   has no mip to choose. No local scene shows the difference: its point-sampled
   textures have one mip level or are magnified.
+- **Model flags of the layer utilities** — `LayerTextureReference.TheDepthTestedComposeModelComposesLikeTheOthers`
+  and `.AProjectLayerTakesTheCanvasSizeAndKeepsItsOrigin`. A layer composes when its
+  model is the composition layer or its depth-testing variant; a model with both
+  `autosize` and `projectlayer` is as large as the scene's canvas, whatever size
+  the scene saved. `solidlayer` is read and unused, and `autosize` alone still takes
+  the saved size.
 - **Layers a wallpaper's properties hide** — `HiddenLayers.ALayerItsPropertiesHideStaysOutOfTheGraphUntilSomethingShowsIt`
   in `layer_texture_reference_test` (CPU, in the gate) and
   `MetalSceneDraw.ALayerItsPropertiesHideHoldsNoImagesUntilAScriptShowsIt` in

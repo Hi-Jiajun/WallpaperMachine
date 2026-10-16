@@ -97,7 +97,12 @@ public:
     // whose header asks for it is sampled. Off by default.
     bool                       nointerpolation { false };
     bool                       visible { true };
+    // The model's own flags (`models/util/*.json`): `autosize` sizes the layer from
+    // its texture, or from the scene's canvas with `projectlayer`, instead of from
+    // the object's `size`; `solidlayer` marks a layer drawn as a flat colour.
     bool                       autosize { false };
+    bool                       projectlayer { false };
+    bool                       solidlayer { false };
     bool                       dynamic_origin { false };
     bool                       dynamic_scale { false };
     bool                       dynamic_angles { false };

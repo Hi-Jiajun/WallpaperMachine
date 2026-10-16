@@ -743,6 +743,11 @@ into private textures; the three that draw skip visibly without a Metal device.
   measurement before it lands. The exception is a texture whose header asks for
   point sampling: both backends sample it with the mip level picked by point, as the
   reference's sampler for that flag does.
+- **Model utility flags.** A project layer is sized by the canvas but still takes the
+  passthrough path, not the compose one: it does not draw its children into a target of
+  its own and has no composite-only mode (the 11 local scenes that use it hold layers of
+  the canvas's size, where the two paths were not compared). `autosize` alone, which sizes a layer by its texture, and
+  `solidlayer` are read and not applied.
 - **A lone `pixels_equal=false` on a large scene is not by itself a regression.**
   On an unmodified build a 4K scene's `frame-2` has been seen once to differ from
   its isolated twin by a few levels everywhere (no clock, label or single layer),

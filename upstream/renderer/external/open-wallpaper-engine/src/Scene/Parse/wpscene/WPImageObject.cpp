@@ -229,6 +229,9 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
         return false;
     }
     GET_JSON_NAME_VALUE_NOWARN(jImage, "fullscreen", fullscreen);
+    GET_JSON_NAME_VALUE_NOWARN(jImage, "autosize", autosize);
+    GET_JSON_NAME_VALUE_NOWARN(jImage, "projectlayer", projectlayer);
+    GET_JSON_NAME_VALUE_NOWARN(jImage, "solidlayer", solidlayer);
     GET_JSON_NAME_VALUE_NOWARN(jImage, "passthrough", config.passthrough);
 	GET_JSON_NAME_VALUE_NOWARN(json, "name", name);
 	GET_JSON_NAME_VALUE_NOWARN(json, "id", id);

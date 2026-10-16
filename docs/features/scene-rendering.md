@@ -165,7 +165,9 @@ file, not from what an earlier layer happened to load), wrapped when the layer s
 `clampuvs` is off, and clamped and linear otherwise. A texture file whose header asks
 for point sampling is also sampled with its mip level picked by point, as the
 reference's sampler for that flag does; a texture without the flag, and a render
-target, keep the blend of mip levels they always had.
+target, keep the blend of mip levels they always had. A project layer
+(`models/util/projectlayer.json`) is as large as the scene's canvas, and the
+depth-testing composition layer composes like the plain one.
 
 Desktop posters work on both backends and need no setting: each re-draws its final
 composition — fit, zoom, flip and position included — into an image of its own only
