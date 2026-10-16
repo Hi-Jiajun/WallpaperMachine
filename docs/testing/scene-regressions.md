@@ -615,6 +615,20 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   without it the blend of the two. A render target has a single level, so its filter
   has no mip to choose. No local scene shows the difference: its point-sampled
   textures have one mip level or are magnified.
+- **Shape objects** — `LayerTextureReference.AShapeDrawsItsLastEffectAdditivelyOntoTheScene`
+  (CPU, in the gate) and `MetalSceneDraw.AShapeIsAddedOntoTheSceneOnBothRenderers`. A
+  `shape` is the group node `ParseLayerNodes` makes for it with a mesh and a material
+  added by `ParseShapeObj`: the quad of `point0` to `point3` (corner `(p.x, 1 - p.y)`
+  of a canvas-high square about the layer, texture coordinate `p`) or the whole
+  square, the last visible effect's material with `DIRECTDRAW` forced on, drawn
+  additively onto the scene. The effect shader of both tests only compiles when
+  `DIRECTDRAW` is on, so the test fails if the parser stops forcing it. The Metal
+  test draws half-transparent red over green on both renderers and requires
+  identical pictures, red-added inside the quad and untouched outside it. The
+  shipped light-shaft effect, parsed with the editor's own assets, compiles through
+  the shape path in both its linear and its radial modes; drawn once offscreen on
+  Native Metal it was a beam narrowing upward and fading downward, as the editor
+  shows it (checked by hand, not kept as a test, as it needs the editor's assets).
 - **Model flags of the layer utilities** — `LayerTextureReference.TheDepthTestedComposeModelComposesLikeTheOthers`
   and `.AProjectLayerTakesTheCanvasSizeAndKeepsItsOrigin`. A layer composes when its
   model is the composition layer or its depth-testing variant; a model with both

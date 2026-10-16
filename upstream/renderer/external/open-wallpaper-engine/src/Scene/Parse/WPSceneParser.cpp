@@ -286,7 +286,7 @@ struct ParseContext {
 using WPObjectVar =
     std::variant<wpscene::WPImageObject, wpscene::WPParticleObject, wpscene::WPSoundObject,
                  wpscene::WPLightObject, wpscene::WPTextObject, wpscene::WPModelObject,
-                 wpscene::WPCameraObject>;
+                 wpscene::WPCameraObject, wpscene::WPShapeObject>;
 
 struct RawLayerObject {
     int32_t              id { 0 };
@@ -2608,6 +2608,116 @@ void AttachEffectsToNode(ParseContext& context,
             LOG_ERROR("effect '%s' failed to load", effect.name.c_str());
         }
     }
+}
+
+/// The four corners `point0` to `point3` of the first effect's first pass, in the
+/// 0..1 square of the shape, if all four are there.
+std::optional<std::array<Eigen::Vector2f, 4>>
+ShapeCornerPoints(const wpscene::WPShapeObject& obj) {
+    if (obj.effects.empty() || obj.effects.front().materials.empty()) return std::nullopt;
+    auto material = obj.effects.front().materials.front();
+    if (! obj.effects.front().passes.empty()) material.MergePass(obj.effects.front().passes.front());
+    std::array<Eigen::Vector2f, 4> points;
+    for (std::size_t index = 0; index < points.size(); ++index) {
+        const auto value = material.constantshadervalues.find("point" + std::to_string(index));
+        if (value == material.constantshadervalues.end() || value->second.value.size() < 2) {
+            return std::nullopt;
+        }
+        points[index] = Eigen::Vector2f(value->second.value[0], value->second.value[1]);
+    }
+    return points;
+}
+
+/// A shape's geometry: with its four corners the quad they make, a corner at
+/// `(p.x, 1 - p.y)` of a square `size` on a side centred on the layer, with
+/// texture coordinates `p`; without them the whole square.
+void GenShapeMesh(SceneMesh& mesh, float size, const std::optional<std::array<Eigen::Vector2f, 4>>& corners) {
+    if (! corners.has_value()) {
+        const auto side = static_cast<uint16_t>(std::clamp(std::lround(size), 1l, 65535l));
+        GenCardMesh(mesh, { side, side });
+        return;
+    }
+    // One strip covers the quad whichever way its corners wind, since the
+    // texture coordinates are an affine function of position over the square.
+    constexpr std::array<std::size_t, 4> kStripOrder { 3, 0, 2, 1 };
+    std::array<float, 12> positions {};
+    std::array<float, 8>  texcoords {};
+    for (std::size_t slot = 0; slot < kStripOrder.size(); ++slot) {
+        const auto& corner   = (*corners)[kStripOrder[slot]];
+        positions[slot * 3 + 0] = size * corner.x() - size * 0.5f;
+        positions[slot * 3 + 1] = size * (1.0f - corner.y()) - size * 0.5f;
+        positions[slot * 3 + 2] = 0.0f;
+        texcoords[slot * 2 + 0] = corner.x();
+        texcoords[slot * 2 + 1] = corner.y();
+    }
+    SceneVertexArray vertex(
+        {
+            { WE_IN_POSITION.data(), VertexType::FLOAT3 },
+            { WE_IN_TEXCOORD.data(), VertexType::FLOAT2 },
+        },
+        4);
+    vertex.SetVertex(WE_IN_POSITION, positions);
+    vertex.SetVertex(WE_IN_TEXCOORD, texcoords);
+    mesh.AddVertexArray(std::move(vertex));
+}
+
+/// A `shape` object draws its last effect, every pass of it, straight onto the
+/// scene as the layer's own geometry, additively, with the effect's `DIRECTDRAW`
+/// combo forced on in every pass: there is no layer texture and no composite to
+/// process. The layer is the group node `ParseLayerNodes` made for it, which keeps
+/// the transform, parent chain, visibility and scripts of any layer; this gives it
+/// the mesh and the material. An effect of more than one pass would draw into
+/// buffers first, which a mesh drawn onto the scene cannot, and is left out.
+void ParseShapeObj(ParseContext& context, wpscene::WPShapeObject& obj) {
+    const auto node_iterator = context.layer_nodes.find(obj.id);
+    if (node_iterator == context.layer_nodes.end() || node_iterator->second == nullptr) return;
+    SceneNode& node = *node_iterator->second;
+    const std::string runtime_name = node.Name();
+    ResolveUserEffectVisibility(context, obj.effects, runtime_name);
+
+    const wpscene::WPImageEffect* last = nullptr;
+    for (const auto& effect : obj.effects) {
+        if (effect.visible && ! effect.materials.empty()) last = &effect;
+    }
+    if (last == nullptr) return;
+    if (last->materials.size() != 1) {
+        LOG_ERROR("shape '%s': an effect of more than one pass is not drawn", obj.name.c_str());
+        return;
+    }
+
+    auto wpmat = last->materials.front();
+    if (! last->passes.empty()) wpmat.MergePass(last->passes.front());
+    wpmat.combos["DIRECTDRAW"] = 1;
+
+    auto& vfs = *context.vfs;
+    SceneMaterial     material;
+    WPShaderValueData shader_value_data;
+    WPShaderInfo      shader_info;
+    shader_info.baseConstSvs = context.global_base_uniforms;
+    shader_info.baseConstSvs["g_EffectTextureProjectionMatrix"] =
+        ShaderValue::fromMatrix(Eigen::Matrix4f::Identity());
+    shader_info.baseConstSvs["g_EffectTextureProjectionMatrixInverse"] =
+        ShaderValue::fromMatrix(Eigen::Matrix4f::Identity());
+    if (! LoadMaterial(vfs, wpmat, context.scene.get(), &node, &material, &shader_value_data,
+                       &shader_info)) {
+        LOG_ERROR("shape '%s': its effect failed to load", obj.name.c_str());
+        return;
+    }
+    LoadConstvalue(material, wpmat, shader_info);
+    // Wallpaper Engine forces the effect's final pass additive for the draw, whatever
+    // its material says.
+    material.blenmode                = BlendMode::Additive;
+    shader_value_data.parallaxDepth  = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
+    shader_value_data.parallax_layer = &node;
+
+    auto mesh = std::make_shared<SceneMesh>();
+    GenShapeMesh(*mesh, static_cast<float>(context.ortho_h), ShapeCornerPoints(obj));
+    mesh->AddMaterial(std::move(material));
+    if (context.scene->runtime != nullptr) {
+        RegisterMaterialConstants(context, mesh->MaterialSlotPtr(), wpmat, shader_info, runtime_name);
+    }
+    node.AddMesh(mesh);
+    context.shader_updater->SetNodeData(&node, shader_value_data);
 }
 
 void RegisterNodeVideoTextureRuntime(ParseContext& context, const std::string& runtime_name,
@@ -5149,6 +5259,8 @@ bool HasDynamicVisible(const wpscene::WPModelObject& object) { return object.dyn
 
 bool HasDynamicVisible(const wpscene::WPCameraObject& object) { return object.dynamic_visible; }
 
+bool HasDynamicVisible(const wpscene::WPShapeObject& object) { return object.dynamic_visible; }
+
 std::unordered_set<int32_t> CollectReachableDependencyIds(const nlohmann::json& objects,
                                                           const LayerObjectIndex& index,
                                                           fs::VFS& vfs) {
@@ -5288,6 +5400,8 @@ std::shared_ptr<Scene> WPSceneParser::Parse(const SceneParseRequest& request,
             AddWPObject<wpscene::WPModelObject>(wp_objs, obj, vfs);
         } else if (obj.contains("camera") && ! obj.at("camera").is_null()) {
             AddWPObject<wpscene::WPCameraObject>(wp_objs, obj, vfs);
+        } else if (obj.contains("shape") && obj.at("shape").is_string()) {
+            AddWPObject<wpscene::WPShapeObject>(wp_objs, obj, vfs);
         }
     }
     context.layer_name_counts.clear();
@@ -5487,6 +5601,9 @@ std::shared_ptr<Scene> WPSceneParser::Parse(const SceneParseRequest& request,
                        },
                        [&context](wpscene::WPModelObject& obj) {
                            ParseModelObj(context, obj);
+                       },
+                       [&context](wpscene::WPShapeObject& obj) {
+                           ParseShapeObj(context, obj);
                        },
                        [&context, &sc](wpscene::WPCameraObject& obj) {
                            // Read the authored scene settings, not a shared camera whose FOV

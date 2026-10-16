@@ -195,6 +195,28 @@ struct WPModelObject : WPMiscObjectBase {
     }
 };
 
+/// A `shape` object (`"shape": "quad"`): a quad as tall as the canvas on both axes
+/// that Wallpaper Engine draws through its effects, light shafts being the one the
+/// editor ships. It has no texture; the last of its effects is drawn straight onto
+/// the scene.
+struct WPShapeObject : WPMiscObjectBase {
+    std::string                shape;
+    std::vector<WPImageEffect> effects;
+
+    bool FromJson(const nlohmann::json& json, fs::VFS& vfs) {
+        FromCommonJson(json);
+        GET_JSON_NAME_VALUE_NOWARN(json, "shape", shape);
+        if (json.contains("effects")) {
+            for (const auto& jE : json.at("effects")) {
+                WPImageEffect effect;
+                effect.FromJson(jE, vfs);
+                effects.push_back(std::move(effect));
+            }
+        }
+        return true;
+    }
+};
+
 struct WPCameraObject : WPMiscObjectBase {
     std::string camera;
     std::string path;

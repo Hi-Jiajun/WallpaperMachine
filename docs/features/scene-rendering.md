@@ -167,7 +167,12 @@ for point sampling is also sampled with its mip level picked by point, as the
 reference's sampler for that flag does; a texture without the flag, and a render
 target, keep the blend of mip levels they always had. A project layer
 (`models/util/projectlayer.json`) is as large as the scene's canvas, and the
-depth-testing composition layer composes like the plain one.
+depth-testing composition layer composes like the plain one. A `shape` object, the
+quad the editor's light-shaft effect is drawn on, is a quad as tall as the canvas on
+both axes, or the one `point0` to `point3` of its first effect make; it has no
+texture, and its last effect, with `DIRECTDRAW` forced on, is drawn additively
+straight onto the scene as the layer's own geometry, so it keeps a layer's transform,
+parents, visibility and scripts. An effect of more than one pass is left out.
 
 Desktop posters work on both backends and need no setting: each re-draws its final
 composition — fit, zoom, flip and position included — into an image of its own only

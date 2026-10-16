@@ -735,6 +735,10 @@ into private textures; the three that draw skip visibly without a Metal device.
 - The `perspective` flag of an image layer is read by no parser (`WPTextObject`
   and `WPModelObject` read theirs); image layers always draw through the
   orthographic camera.
+- **Object kinds not drawn or not modelled.** A `shape` object draws only an effect of
+  a single pass: its last effect is drawn onto the scene as a mesh, so a multi-pass
+  last effect, which would draw into buffers first, is left out (the editor's
+  light-shaft effect has one pass).
 - **File textures are sampled trilinearly.** Wallpaper Engine's sampler for a file
   texture is anisotropic (8x), which only shows on a surface seen at an angle (the
   local scene with 3D models), and it samples a shadow atlas through a comparison

@@ -4373,6 +4373,109 @@ TEST_F(MetalSceneDraw, AnImageLayersTargetsArePointSampledWhenItAsksOnBothRender
 
 namespace
 {
+/// A `shape` quad over a scene cleared to green 0.25. Its effect draws half-transparent
+/// red, and only compiles with `DIRECTDRAW`, which the scene file never sets.
+std::filesystem::path WriteShapeFixture(const std::filesystem::path& root, std::string_view corners)
+{
+    const std::map<std::string, std::string> files {
+        { "project.json",
+          R"({"title":"Metal shape smoke","type":"scene","file":"layout.json","general":{"properties":{}}})" },
+        { "effects/shaft/effect.json",
+          R"({"name":"shaft","passes":[{"material":"materials/effects/shaft.json"}]})" },
+        { "materials/effects/shaft.json",
+          R"({"passes":[{"shader":"effects/shaft","blending":"normal","cullmode":"nocull",)"
+          R"("depthtest":"disabled","depthwrite":"disabled","textures":[null]}]})" },
+        { "shaders/effects/shaft.vert",
+          "uniform mat4 g_ModelViewProjectionMatrix;\n"
+          "attribute vec3 a_Position;\n"
+          "attribute vec2 a_TexCoord;\n"
+          "varying vec2 v_TexCoord;\n"
+          "void main() {\n"
+          "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+          "  v_TexCoord = a_TexCoord;\n"
+          "}\n" },
+        { "shaders/effects/shaft.frag",
+          "#if ! DIRECTDRAW\n"
+          "#error the shape did not force DIRECTDRAW on\n"
+          "#endif\n"
+          "uniform vec2 g_Point0; // {\"material\":\"point0\",\"default\":\"0 0\"}\n"
+          "uniform vec2 g_Point1; // {\"material\":\"point1\",\"default\":\"1 0\"}\n"
+          "uniform vec2 g_Point2; // {\"material\":\"point2\",\"default\":\"1 1\"}\n"
+          "uniform vec2 g_Point3; // {\"material\":\"point3\",\"default\":\"0 1\"}\n"
+          "varying vec2 v_TexCoord;\n"
+          "void main() {\n"
+          "  gl_FragColor = vec4(1.0, 0.0, 0.0, 0.5);\n"
+          "}\n" },
+        { "layout.json",
+          R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+          R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0,0.25,0],)"
+          R"("cameraparallax":false,"orthogonalprojection":{"width":384,"height":256}},)"
+          R"("objects":[{"id":1,"name":"shaft","shape":"quad","origin":[192,128,0],)"
+          R"("scale":[1,1,1],"angles":[0,0,0],"visible":true,)"
+          R"("effects":[{"file":"effects/shaft/effect.json","id":2,"visible":true)" +
+              std::string(corners) + R"(}]}]})" },
+    };
+    for (const auto& [name, contents] : files) {
+        const auto path = root / name;
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream(path) << contents;
+    }
+    return root / "project.json";
+}
+} // namespace
+
+TEST_F(MetalSceneDraw, AShapeIsAddedOntoTheSceneOnBothRenderers)
+{
+    // A shape is a quad as tall as the canvas on both axes. Its effect, half-transparent
+    // red, is drawn additively straight onto the scene: half of the red over green 0.25.
+    // Given four corners it covers the quad they make and nothing else.
+    for (const bool corners : { false, true }) {
+        SCOPED_TRACE(corners ? "four corners" : "whole square");
+        std::map<bool, RendererPicture> pictures;
+        for (const bool native : { false, true }) {
+            const std::string name = std::string(corners ? "shape-corners-" : "shape-square-") +
+                                     (native ? "native" : "compat");
+            const auto project = WriteShapeFixture(
+                root_ / name,
+                corners ? R"(,"passes":[{"constantshadervalues":{"point0":"0.25 0.25",)"
+                          R"("point1":"0.75 0.25","point2":"0.75 0.75","point3":"0.25 0.75"}}])"
+                        : "");
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            if (native) {
+                const auto selection = SelectSceneBackend(*loaded.scene);
+                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            }
+            pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 2, 1.0 / 60.0);
+            ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+        }
+        const auto& rgb = pictures[true].rgb;
+        ASSERT_EQ(rgb.size(), 384u * 256u * 3u);
+        const auto pixel = [&](uint32_t x, uint32_t y) {
+            const std::size_t at = (static_cast<std::size_t>(y) * 384u + x) * 3u;
+            return std::array<int, 3> { rgb[at], rgb[at + 1], rgb[at + 2] };
+        };
+        const std::array<int, 3> added { 128, 64, 0 };
+        const std::array<int, 3> bare { 0, 64, 0 };
+        EXPECT_EQ(pixel(192, 128), added) << "the centre of the shape";
+        // The square spans x 64..320 and the full height; the corners' quad
+        // spans 64 columns either side of the centre, and 64 rows.
+        if (corners) {
+            EXPECT_EQ(pixel(192 + 40, 128 + 40), added);
+            EXPECT_EQ(pixel(192 + 90, 128), bare) << "outside the quad of the corners";
+            EXPECT_EQ(pixel(192, 128 - 90), bare) << "outside the quad of the corners";
+        } else {
+            EXPECT_EQ(pixel(192 + 100, 128), added);
+            EXPECT_EQ(pixel(10, 128), bare) << "outside the square, left of it";
+        }
+        EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
+            << "the native renderer drew the shape differently from the compatibility renderer";
+    }
+}
+
+namespace
+{
 /// A 64 by 64 texture with seven mip levels whose first level is white and whose
 /// others are black, so which level a sample came from shows in its brightness.
 void WriteMipChainTexture(const std::filesystem::path& path, uint32_t flags)

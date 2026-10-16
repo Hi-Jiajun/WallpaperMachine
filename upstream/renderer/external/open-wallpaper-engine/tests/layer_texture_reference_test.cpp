@@ -932,6 +932,122 @@ TEST(LayerTextureReference, AProjectLayerTakesTheCanvasSizeAndKeepsItsOrigin) {
     EXPECT_TRUE(parsed->runtime->NodeSize("plain").isApprox(Eigen::Vector2f(10.0f, 10.0f)));
 }
 
+// What a `shape` object needs of an effect: its shader only compiles with the
+// DIRECTDRAW combo on, which the scene file never sets, and a uniform tells two
+// effects apart.
+std::map<std::string, std::string> ShapeEffectFiles() {
+    const std::string vert = std::string(kVert);
+    const std::string frag = R"(#if ! DIRECTDRAW
+#error the shape did not force DIRECTDRAW on
+#endif
+uniform vec3 g_Tint; // {"material":"tint","default":"1 1 1"}
+varying vec2 v_TexCoord;
+void main() {
+  gl_FragColor = vec4(g_Tint * v_TexCoord.x, 1.0);
+}
+)";
+    std::map<std::string, std::string> files {
+        { "/materials/effects/shaft.json",
+          R"({"passes":[{"shader":"effects/shaft","blending":"normal","cullmode":"nocull",)"
+          R"("depthtest":"disabled","depthwrite":"disabled","textures":[null]}]})" },
+        { "/shaders/effects/shaft.vert", vert },
+        { "/shaders/effects/shaft.frag", frag },
+    };
+    for (const std::string name : { "first", "second" }) {
+        files["/effects/" + name + "/effect.json"] =
+            R"({"name":")" + name +
+            R"(","passes":[{"material":"materials/effects/shaft.json"}]})";
+    }
+    return files;
+}
+
+// A `shape` object is a quad as tall as the canvas on both axes, drawn through its
+// last effect straight onto the scene, additively, with the effect's DIRECTDRAW
+// combo forced on. With `point0` to `point3` on the first effect's first pass the
+// quad is the one those four corners make.
+TEST(LayerTextureReference, AShapeDrawsItsLastEffectAdditivelyOntoTheScene) {
+    const ProjectProperties properties {};
+    fs::VFS                 vfs;
+    auto parsed = ParseScene(vfs, R"([
+        {"id":1,"name":"shaft","shape":"quad","origin":[32,16,0],"visible":true,
+         "effects":[
+           {"file":"effects/first/effect.json","id":10,"visible":true,
+            "passes":[{"constantshadervalues":{"tint":"1 0 0","point0":"0.25 0.25",
+              "point1":"0.75 0.25","point2":"0.9 0.75","point3":"0.1 0.75"}}]},
+           {"file":"effects/second/effect.json","id":11,"visible":true,
+            "passes":[{"constantshadervalues":{"tint":"0 1 0"}}]}]},
+        {"id":2,"name":"whole","shape":"quad","origin":[32,16,0],"visible":true,
+         "effects":[{"file":"effects/first/effect.json","id":12,"visible":true}]},
+        {"id":3,"name":"hidden","shape":"quad","visible":false,
+         "effects":[{"file":"effects/first/effect.json","id":13,"visible":true}]}
+      ])", ShapeEffectFiles(), &properties);
+    ASSERT_NE(parsed, nullptr);
+
+    SceneNode* shaft = nullptr;
+    SceneNode* whole = nullptr;
+    SceneNode* hidden = nullptr;
+    for (auto& child : parsed->sceneGraph->GetChildren()) {
+        if (child->Name() == "shaft") shaft = child.get();
+        if (child->Name() == "whole") whole = child.get();
+        if (child->Name() == "hidden") hidden = child.get();
+    }
+    ASSERT_NE(shaft, nullptr);
+    ASSERT_NE(whole, nullptr);
+    ASSERT_NE(hidden, nullptr);
+    // An object that is not shown is not drawn at all.
+    EXPECT_EQ(hidden->Mesh(), nullptr);
+
+    // The quad of the four corners, as `(p.x, 1 - p.y)` of a 32 unit square about
+    // the layer, with the corner as its texture coordinates; it is the last
+    // effect's material that draws it.
+    ASSERT_NE(shaft->Mesh(), nullptr);
+    const auto& vertices = shaft->Mesh()->GetVertexArray(0);
+    ASSERT_EQ(vertices.VertexCount(), 4u);
+    const auto offsets  = vertices.GetAttrOffsetMap();
+    const auto position = offsets.at(std::string(WE_IN_POSITION)).offset / sizeof(float);
+    const auto texcoord = offsets.at(std::string(WE_IN_TEXCOORD)).offset / sizeof(float);
+    std::vector<std::array<float, 4>> got;
+    for (std::size_t index = 0; index < vertices.VertexCount(); ++index) {
+        const float* v = vertices.Data() + index * vertices.OneSize();
+        got.push_back({ v[position], v[position + 1], v[texcoord], v[texcoord + 1] });
+    }
+    std::sort(got.begin(), got.end());
+    std::vector<std::array<float, 4>> expected;
+    for (const auto& corner : std::vector<std::array<float, 2>> {
+             { 0.25f, 0.25f }, { 0.75f, 0.25f }, { 0.9f, 0.75f }, { 0.1f, 0.75f } }) {
+        expected.push_back({ 32.0f * corner[0] - 16.0f, 32.0f * (1.0f - corner[1]) - 16.0f,
+                             corner[0], corner[1] });
+    }
+    std::sort(expected.begin(), expected.end());
+    ASSERT_EQ(got.size(), expected.size());
+    for (std::size_t index = 0; index < got.size(); ++index) {
+        for (std::size_t lane = 0; lane < 4; ++lane) {
+            EXPECT_NEAR(got[index][lane], expected[index][lane], 1e-4f) << index << "/" << lane;
+        }
+    }
+    const auto* material = shaft->Mesh()->Material();
+    ASSERT_NE(material, nullptr);
+    EXPECT_EQ(material->blenmode, BlendMode::Additive);
+    ASSERT_TRUE(material->customShader.constValues.contains("g_Tint"));
+    EXPECT_FLOAT_EQ(material->customShader.constValues.at("g_Tint")[0], 0.0f)
+        << "the first effect was drawn instead of the last";
+    EXPECT_FLOAT_EQ(material->customShader.constValues.at("g_Tint")[1], 1.0f);
+
+    // Without the four corners it is the whole square, as tall as the canvas.
+    ASSERT_NE(whole->Mesh(), nullptr);
+    const auto [lower, upper] = CardCorners(*whole->Mesh());
+    EXPECT_TRUE(lower.isApprox(Eigen::Vector2d(-16.0, -16.0)));
+    EXPECT_TRUE(upper.isApprox(Eigen::Vector2d(16.0, 16.0)));
+
+    // And it reaches the scene's own target as a pass of its own.
+    AddScreenTarget(*parsed);
+    const auto graph = sceneToRenderGraph(*parsed);
+    ASSERT_NE(graph, nullptr);
+    const auto* pass = FindPassByNode(*graph, "shaft");
+    ASSERT_NE(pass, nullptr);
+    EXPECT_EQ(pass->desc().output, std::string(SpecTex_Default));
+}
+
 // A compose layer that only copies the background behind it adds nothing on
 // screen and used to be skipped outright. A mask drawn after other layers can
 // still sample it to paint that background back -- a toggle's clouds clipped to
