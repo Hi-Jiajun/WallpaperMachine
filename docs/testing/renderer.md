@@ -720,6 +720,12 @@ into private textures; the three that draw skip visibly without a Metal device.
   `ShaderValue: … not found in glsl` line is authored leftovers, not a binding
   failure. Wallpaper Engine's own `clipping_mask` effect fails to translate (see
   [Shader pipeline](scene-regressions.md#shader-pipeline)).
+- **Shadows, spot cookies and volumetric lights are not drawn.** A light with
+  `castshadow` lights as if nothing cast a shadow (`_rt_shadowAtlas` is never
+  written), a spot cookie lights through its cone instead of its cookie image, and
+  `castvolumetrics` adds no light shafts. When a kind has more lights than its
+  `lightconfig` count, the first ones in scene order are lit, where Wallpaper Engine
+  sorts them first.
 - Wallpaper Engine's `fur4` shader does not compile on its own: its instanced shells read
   the dialect's cast macros (`CASTF` among them), which the compiler does not supply with
   `CASTI`, `CASTU`, `CAST4U`, `DECLARE_SAMPLER2D_PARAMETER` and `MAKE_SAMPLER2D_ARGUMENT`.

@@ -2047,6 +2047,177 @@ TEST(SceneSchema, ParserKeepsSceneLightsAndUpdatesViewUniforms) {
     EXPECT_NEAR(captured["g_LightsPosition"][2], 33.0f, 1e-3f);
 }
 
+std::string LitPerspectiveSceneJson(std::string_view objects, std::string_view lightconfig) {
+    return std::string(R"({
+      "camera": {"center":[0,0,0], "eye":[0,10,20], "up":[0,1,0]},
+      "general": {
+        "ambientcolor":[0.2,0.2,0.2], "skylightcolor":[0.3,0.3,0.3],
+        "clearcolor":[0,0,0], "cameraparallax":false,
+        "cameraparallaxamount":0, "cameraparallaxdelay":0,
+        "cameraparallaxmouseinfluence":0,
+        "orthogonalprojection":null, "fov":60, "nearz":0.1, "farz":5000,
+        "lightconfig": )") +
+           std::string(lightconfig) + R"(},
+      "objects": )" + std::string(objects) + "}";
+}
+
+using CapturedUniforms = std::unordered_map<std::string, std::vector<float>>;
+
+CapturedUniforms CaptureLightUniforms(Scene& scene, SceneNode& node) {
+    static constexpr std::array kNames {
+        "g_LPoint_Color", "g_LPoint_Origin", "g_LSpot_Color", "g_LSpot_Origin",
+        "g_LSpot_Direction", "g_LSpot_Exponent", "g_LTube_Color", "g_LTube_OriginA",
+        "g_LTube_OriginB", "g_LDirectional_Color", "g_LDirectional_Direction",
+        "g_LightsPosition", "g_LightsColorPremultiplied", "g_NormalModelMatrix",
+    };
+    auto* updater = dynamic_cast<WPShaderValueUpdater*>(scene.shaderValueUpdater.get());
+    EXPECT_NE(updater, nullptr);
+    CapturedUniforms captured;
+    if (updater == nullptr) return captured;
+    updater->InitUniforms(&node, 0, [](std::string_view name) {
+        return std::find(kNames.begin(), kNames.end(), name) != kNames.end();
+    });
+    sprite_map_t sprites;
+    updater->UpdateUniforms(&node, sprites, [&](std::string_view name, const ShaderValue& value) {
+        captured[std::string(name)] = std::vector<float>(value.data(), value.data() + value.size());
+    });
+    return captured;
+}
+
+void ExpectSlot(const CapturedUniforms& captured, const std::string& name, std::size_t slot,
+                std::array<float, 4> expected) {
+    SCOPED_TRACE(name + "[" + std::to_string(slot) + "]");
+    const auto found = captured.find(name);
+    ASSERT_NE(found, captured.end());
+    ASSERT_GE(found->second.size(), slot * 4 + 4);
+    for (std::size_t lane = 0; lane < 4; ++lane) {
+        EXPECT_NEAR(found->second[slot * 4 + lane], expected[lane], 1e-4f) << "lane " << lane;
+    }
+}
+
+Eigen::Vector3d WorldAxisX(SceneNode& node) {
+    node.UpdateTrans();
+    return node.ModelTrans().block<3, 1>(0, 0);
+}
+
+TEST(SceneSchema, LightsOfEachKindFillWallpaperEnginesLightingArrays) {
+    std::map<std::string, std::string> files;
+    AddLeafModelSceneFiles(files);
+    fs::VFS vfs;
+    ASSERT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+    audio::SoundManager sound_manager;
+    WPSceneParser       parser;
+    auto scene = parser.Parse("lights", LitPerspectiveSceneJson(R"([
+      {"id":1,"name":"planet","model":"planet.mdl"},
+      {"id":10,"name":"bulb","light":"lpoint","origin":"1 2 3","color":"1 0.5 0.25",
+       "intensity":2,"radius":50,"exponent":3},
+      {"id":11,"name":"off","light":"lpoint","origin":"9 9 9","color":"1 1 1",
+       "intensity":5,"radius":50,"visible":false},
+      {"id":12,"name":"torch","light":"lspot","origin":"0 0 0","angles":"0 0 1.5707963",
+       "color":"0 1 0","intensity":4,"radius":80,"exponent":1.5,"innercone":20,"outercone":30},
+      {"id":13,"name":"bar","light":"ltube","origin":"10 0 0","scale":"2 2 2",
+       "controlpoint":"5 0 0","color":"1 0 0","intensity":1,"radius":30},
+      {"id":20,"name":"rig","origin":"100 0 0","angles":"0 0 0.5"},
+      {"id":14,"name":"sun","light":"ldirectional","parent":20,"origin":"1 0 0",
+       "color":"1 1 1","intensity":0.5,"radius":200},
+      {"id":15,"name":"lamp","light":"point","origin":"7 8 9","color":"1 1 1",
+       "intensity":1,"radius":2}
+    ])", R"({"point":2,"spot":1,"tube":1,"directional":1})"), vfs, sound_manager);
+    ASSERT_NE(scene, nullptr);
+    EXPECT_EQ(scene->light_config.point, 2u);
+    EXPECT_EQ(scene->light_config.directional, 1u);
+    // A light hidden for good is not parsed at all, like any other object.
+    ASSERT_EQ(scene->lights.size(), 5u);
+
+    auto planet = FindRootChildByName(*scene, "planet");
+    ASSERT_NE(planet, nullptr);
+    const auto captured = CaptureLightUniforms(*scene, *planet);
+
+    // A point light: colour times intensity with its radius, origin with its
+    // exponent. The unused slot stays zero.
+    ExpectSlot(captured, "g_LPoint_Color", 0, { 2.0f, 1.0f, 0.5f, 50.0f });
+    ExpectSlot(captured, "g_LPoint_Origin", 0, { 1.0f, 2.0f, 3.0f, 3.0f });
+    ExpectSlot(captured, "g_LPoint_Color", 1, { 0.0f, 0.0f, 0.0f, 0.0f });
+
+    // A spot shines along its own x axis, rotated with it; the cone cosines
+    // ride in the w lanes.
+    const auto* torch = scene->lights[1]->node();
+    ASSERT_NE(torch, nullptr);
+    const auto  spot_axis = WorldAxisX(*const_cast<SceneNode*>(torch));
+    EXPECT_GT(std::abs(spot_axis.y()), 0.99);
+    ExpectSlot(captured, "g_LSpot_Color", 0, { 0.0f, 4.0f, 0.0f, 80.0f });
+    ExpectSlot(captured, "g_LSpot_Origin", 0, { 0.0f, 0.0f, 0.0f, std::cos(20.0f * 3.14159265f / 180.0f) });
+    ExpectSlot(captured, "g_LSpot_Direction", 0,
+               { float(spot_axis.x()), float(spot_axis.y()), float(spot_axis.z()),
+                 std::cos(30.0f * 3.14159265f / 180.0f) });
+    ExpectSlot(captured, "g_LSpot_Exponent", 0, { 1.5f, 0.0f, 0.0f, 0.0f });
+
+    // A tube runs from its origin to its control point carried by its own
+    // transform (scaled by two here), with the default exponent.
+    ExpectSlot(captured, "g_LTube_OriginA", 0, { 10.0f, 0.0f, 0.0f, 2.0f });
+    ExpectSlot(captured, "g_LTube_OriginB", 0, { 20.0f, 0.0f, 0.0f, 0.0f });
+
+    // A directional light follows its parent; its direction points back
+    // towards it, against its world x axis.
+    auto* sun = scene->lights[3]->node();
+    ASSERT_NE(sun, nullptr);
+    const auto sun_axis = WorldAxisX(*sun);
+    EXPECT_GT(std::abs(sun_axis.y()), 0.4);
+    ExpectSlot(captured, "g_LDirectional_Color", 0, { 0.5f, 0.5f, 0.5f, 1.0f });
+    ExpectSlot(captured, "g_LDirectional_Direction", 0,
+               { float(-sun_axis.x()), float(-sun_axis.y()), float(-sun_axis.z()), 0.0f });
+
+    // Only the older `point` light feeds the four packed legacy lights.
+    ExpectSlot(captured, "g_LightsPosition", 0, { 7.0f, 8.0f, 9.0f, 0.0f });
+    ExpectSlot(captured, "g_LightsPosition", 1, { 0.0f, 0.0f, 0.0f, 0.0f });
+}
+
+TEST(SceneSchema, LightsFollowTheirUserPropertyScriptAndIntensityTimeline) {
+    std::map<std::string, std::string> files;
+    AddLeafModelSceneFiles(files);
+    fs::VFS vfs;
+    ASSERT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+    audio::SoundManager sound_manager;
+    WPSceneParser       parser;
+    ProjectProperties   properties {
+        { "daynight", RuntimeScalarValue::Bool(true) },
+    };
+    auto scene = parser.Parse(
+        SceneParseRequest { .scene_id = "light-bindings", .project_properties = &properties },
+        LitPerspectiveSceneJson(R"([
+          {"id":1,"name":"planet","model":"planet.mdl"},
+          {"id":10,"name":"day","light":"lpoint","origin":"0 0 0","color":"1 1 1","radius":10,
+           "intensity":{"value":1,"animation":{"c0":[{"frame":0,"value":1},{"frame":10,"value":3}],
+             "options":{"fps":10,"length":10,"mode":"single"}}},
+           "visible":{"user":"daynight","value":true}},
+          {"id":11,"name":"moving","light":"lpoint","color":"1 1 1","radius":10,"intensity":1,
+           "origin":{"value":"0 0 0","script":"export function update() { return new Vec3(4, 5, 6); }"}}
+        ])", R"({"point":2})"),
+        vfs,
+        sound_manager);
+    ASSERT_NE(scene, nullptr);
+    ASSERT_NE(scene->runtime, nullptr);
+    auto planet = FindRootChildByName(*scene, "planet");
+    ASSERT_NE(planet, nullptr);
+
+    scene->runtime->Tick(0.5);
+    auto captured = CaptureLightUniforms(*scene, *planet);
+    // Halfway along its intensity timeline, and the script has moved the other.
+    ExpectSlot(captured, "g_LPoint_Color", 0, { 2.0f, 2.0f, 2.0f, 10.0f });
+    ExpectSlot(captured, "g_LPoint_Origin", 1, { 4.0f, 5.0f, 6.0f, 2.0f });
+    const auto lit_hash = scene->shaderValueUpdater->LightStateHash(planet.get(), 0);
+    EXPECT_NE(lit_hash, 0u);
+
+    // Switching the property off takes the light out; the moved one now
+    // fills the first slot, and a lit pass sees a different light state.
+    scene->runtime->ApplyProjectPropertyOverride({ { "daynight", RuntimeScalarValue::Bool(false) } });
+    scene->runtime->Tick(0.01);
+    captured = CaptureLightUniforms(*scene, *planet);
+    ExpectSlot(captured, "g_LPoint_Origin", 0, { 4.0f, 5.0f, 6.0f, 2.0f });
+    ExpectSlot(captured, "g_LPoint_Color", 1, { 0.0f, 0.0f, 0.0f, 0.0f });
+    EXPECT_NE(scene->shaderValueUpdater->LightStateHash(planet.get(), 0), lit_hash);
+}
+
 TEST(SceneSchema, ATextureSlotsTexelIsTheStepOfTheTextureItSamples) {
     std::map<std::string, std::string> files;
     AddLeafModelSceneFiles(files);
@@ -2073,6 +2244,32 @@ TEST(SceneSchema, ATextureSlotsTexelIsTheStepOfTheTextureItSamples) {
     EXPECT_FLOAT_EQ(texel[1], 1.0f / float(target->height));
     EXPECT_FLOAT_EQ(texel[2], float(target->width));
     EXPECT_FLOAT_EQ(texel[3], float(target->height));
+}
+
+TEST(SceneSchema, TheNormalMatrixIsTheDrawsRotationWithoutItsScale) {
+    std::map<std::string, std::string> files;
+    AddLeafModelSceneFiles(files);
+    fs::VFS vfs;
+    ASSERT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+    audio::SoundManager sound_manager;
+    WPSceneParser       parser;
+    auto scene = parser.Parse("normal-matrix", PerspectiveSceneJson(R"([
+      {"id":1,"name":"planet","model":"planet.mdl","scale":"3 3 3","angles":"0 0 1.5707963"}
+    ])"), vfs, sound_manager);
+    ASSERT_NE(scene, nullptr);
+    auto planet = FindRootChildByName(*scene, "planet");
+    ASSERT_NE(planet, nullptr);
+    const auto captured = CaptureLightUniforms(*scene, *planet);
+    const auto axis     = WorldAxisX(*planet).normalized();
+    // Three std140 columns, each a unit axis of the layer.
+    ExpectSlot(captured, "g_NormalModelMatrix", 0,
+               { float(axis.x()), float(axis.y()), float(axis.z()), 0.0f });
+    const auto& matrix = captured.at("g_NormalModelMatrix");
+    ASSERT_EQ(matrix.size(), 12u);
+    for (int column = 0; column < 3; ++column) {
+        const Eigen::Vector3f v(matrix[column * 4], matrix[column * 4 + 1], matrix[column * 4 + 2]);
+        EXPECT_NEAR(v.norm(), 1.0f, 1e-4f);
+    }
 }
 
 TEST(SceneSchema, ParserKeepsInvisibleImageDependencySources) {

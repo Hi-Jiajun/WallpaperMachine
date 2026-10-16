@@ -50,6 +50,10 @@ struct WPUniformInfo {
     bool has_TEXELSIZEHALF { false };
     bool has_SCREEN { false };
     bool has_LP { false };
+    bool has_LCP { false };
+    // Any of the arrays a `#require LightingV1` block reads.
+    bool has_LIGHTS_V1 { false };
+    bool has_NORMALMODEL { false };
     bool has_ORIENTATIONUP { false };
     bool has_ORIENTATIONRIGHT { false };
     bool has_ORIENTATIONFORWARD { false };
@@ -108,6 +112,7 @@ public:
                         const UpdateUniformOp&) override;
     void ForgetNode(SceneNode*) override;
     void FrameEnd() override;
+    uint64_t LightStateHash(SceneNode*, uint32_t material_slot) const override;
     uint32_t FrameVaryingUniforms(SceneNode*, uint32_t material_slot,
                                   const std::string& camera_override) const override;
     void MouseInput(double, double) override;

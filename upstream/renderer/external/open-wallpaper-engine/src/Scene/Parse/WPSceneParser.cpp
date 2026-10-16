@@ -1033,6 +1033,24 @@ CullMode ParseSceneCullMode(std::string_view value) {
     return value == "nocull" ? CullMode::None : CullMode::Back;
 }
 
+// `general.lightconfig` names how many lights of each kind lit shaders are
+// compiled for. Wallpaper Engine packs each count into four bits; its shadow
+// and cookie subsets are not drawn here, so those lights count as plain ones.
+SceneLightConfig ParseSceneLightConfig(const nlohmann::json& config) {
+    SceneLightConfig lights;
+    if (! config.is_object()) return lights;
+    const auto count = [&config](const char* key) -> uint32_t {
+        const auto found = config.find(key);
+        if (found == config.end() || ! found->is_number()) return 0;
+        return static_cast<uint32_t>(std::clamp(found->get<double>(), 0.0, 15.0));
+    };
+    lights.point       = count("point");
+    lights.spot        = count("spot");
+    lights.tube        = count("tube");
+    lights.directional = count("directional");
+    return lights;
+}
+
 void ParseSpecTexName(std::string& name, Scene& scene, fs::VFS& vfs,
                       const wpscene::WPMaterial& wpmat, const WPShaderInfo& sinfo) {
     static const LayerObjectIndex kEmptyIndex;
@@ -1313,6 +1331,16 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
     // Lit 2D layers use a fixed view direction; a perspective eye on their
     // plane makes their normal/view dot product zero.
     pWPShaderInfo->combos["SCENE_ORTHO"] = pScene->display_sized ? "0" : "1";
+    // How many lights of each kind a lit pass's `#require LightingV1` block is
+    // written for. Left out when the scene declares none, so an unlit scene's
+    // shaders compile exactly as before.
+    if (! pScene->light_config.empty()) {
+        const auto& lights                    = pScene->light_config;
+        pWPShaderInfo->combos["LIGHTS_POINT"]       = std::to_string(lights.point);
+        pWPShaderInfo->combos["LIGHTS_SPOT"]        = std::to_string(lights.spot);
+        pWPShaderInfo->combos["LIGHTS_TUBE"]        = std::to_string(lights.tube);
+        pWPShaderInfo->combos["LIGHTS_DIRECTIONAL"] = std::to_string(lights.directional);
+    }
 
     if (exists(pWPShaderInfo->combos, "LIGHTING")) {
         // pWPShaderInfo->combos["PRELIGHTING"] =
@@ -3248,6 +3276,7 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
     scene.display_sized = ! sc.general.isOrtho;
     scene.opaque_first = ! sc.general.isOrtho && sc.general.transparentsorting;
     scene.hdr = sc.general.hdr;
+    scene.light_config = ParseSceneLightConfig(sc.general.lightconfig);
     if (context.request != nullptr && context.request->project_properties != nullptr) {
         SceneRuntimeBootstrap bootstrap {
             .canvas_width       = scene.ortho[0],
@@ -3277,7 +3306,8 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
         gb["g_TexelSize"]     = std::array { 1.0f / 1920.0f, 1.0f / 1080.0f };
         gb["g_TexelSizeHalf"] = std::array { 1.0f / 1920.0f / 2.0f, 1.0f / 1080.0f / 2.0f };
 
-        gb["g_LightAmbientColor"] = sc.general.ambientcolor;
+        gb["g_LightAmbientColor"]  = sc.general.ambientcolor;
+        gb["g_LightSkylightColor"] = sc.general.skylightcolor;
         // std140 mat3 is three vec4 columns (48 bytes). A mat4 identity is 64
         // bytes and spills into the following view-projection uniform.
         gb["g_NormalModelMatrix"] = std::array<float, 12> {
@@ -4673,18 +4703,102 @@ void ApplyDefaultDepthTarget(ParseContext& context) {
     }
 }
 
+std::string LightRuntimeName(const ParseContext& context, const wpscene::WPLightObject& obj) {
+    if (! obj.name.empty()) {
+        const auto count = context.layer_name_counts.find(obj.name);
+        if (count == context.layer_name_counts.end() || count->second == 0) return obj.name;
+    }
+    return "__we_light_" + std::to_string(obj.id);
+}
+
+// A light is a node in the scene graph like any layer: it follows its parent,
+// its transform and visibility take user properties, scripts and timelines,
+// and nothing draws it. Colour, intensity, radius and exponent are re-read
+// from their bindings every tick.
 void ParseLightObj(ParseContext& context, wpscene::WPLightObject& light_obj) {
-    auto node = std::make_shared<SceneNode>(Vector3f(light_obj.origin.data()),
+    const auto runtime_name = LightRuntimeName(context, light_obj);
+    auto       node         = std::make_shared<SceneNode>(Vector3f(light_obj.origin.data()),
                                             Vector3f(light_obj.scale.data()),
-                                            Vector3f(light_obj.angles.data()));
+                                            Vector3f(light_obj.angles.data()),
+                                            runtime_name);
+    node->ID() = light_obj.id;
 
     context.scene->lights.emplace_back(std::make_unique<SceneLight>(
-        Vector3f(light_obj.color.data()), light_obj.radius, light_obj.intensity));
+        ParseSceneLightType(light_obj.light), Vector3f(light_obj.color.data()), light_obj.radius,
+        light_obj.intensity));
+    auto* light = context.scene->lights.back().get();
+    light->setExponent(light_obj.exponent);
+    light->setCones(light_obj.innercone, light_obj.outercone);
+    light->setControlPoint(Vector3f(light_obj.controlpoint.data()));
+    light->setNode(node);
 
-    auto& light = *(context.scene->lights.back());
-    light.setNode(node);
+    if (context.scene->runtime != nullptr) {
+        auto& runtime = *context.scene->runtime;
+        runtime.RegisterNode(runtime_name, node.get());
+        runtime.RegisterNodeVisibility(
+            runtime_name,
+            node.get(),
+            ResolveBoolSetting(runtime,
+                               light_obj.dynamic_visible ? light_obj.visible_setting
+                                                         : nlohmann::json(light_obj.visible),
+                               runtime_name));
+        RegisterNodeOriginSetting(runtime, node.get(), runtime_name, light_obj.origin_setting);
+        if (light_obj.dynamic_scale) {
+            runtime.RegisterNodeScale(runtime_name,
+                                      node.get(),
+                                      ResolveVec3Setting(runtime,
+                                                         light_obj.scale_setting,
+                                                         runtime_name,
+                                                         Vec3SettingSemantic::Generic));
+        }
+        if (light_obj.dynamic_angles) {
+            runtime.RegisterNodeRotation(runtime_name,
+                                         node.get(),
+                                         ResolveVec3Setting(runtime,
+                                                            light_obj.angles_setting,
+                                                            runtime_name,
+                                                            Vec3SettingSemantic::AnglesDegrees));
+        }
+        if (auto animation = ResolveScalarAnimation(light_obj.intensity_setting)) {
+            light->setIntensityAnimation(
+                runtime.RegisterScalarAnimation(runtime_name, std::move(*animation)));
+        } else if (HasDynamicSetting(light_obj.intensity_setting)) {
+            runtime.RegisterDynamicValueListener(
+                ResolveFloatSetting(runtime, light_obj.intensity_setting, runtime_name),
+                [light](const DynamicValue& value) { light->setIntensity(value.getFloat()); });
+        }
+        if (HasDynamicSetting(light_obj.color_setting)) {
+            runtime.RegisterDynamicValueListener(
+                ResolveVec3Setting(runtime, light_obj.color_setting, runtime_name),
+                [light](const DynamicValue& value) { light->setColor(value.getVec3()); });
+        }
+        if (HasDynamicSetting(light_obj.radius_setting)) {
+            runtime.RegisterDynamicValueListener(
+                ResolveFloatSetting(runtime, light_obj.radius_setting, runtime_name),
+                [light](const DynamicValue& value) { light->setRadius(value.getFloat()); });
+        }
+        if (HasDynamicSetting(light_obj.exponent_setting)) {
+            runtime.RegisterDynamicValueListener(
+                ResolveFloatSetting(runtime, light_obj.exponent_setting, runtime_name),
+                [light](const DynamicValue& value) { light->setExponent(value.getFloat()); });
+        }
+        for (const auto* setting : { &light_obj.visible_setting, &light_obj.origin_setting,
+                                     &light_obj.scale_setting, &light_obj.angles_setting,
+                                     &light_obj.intensity_setting, &light_obj.color_setting,
+                                     &light_obj.radius_setting, &light_obj.exponent_setting }) {
+            QueueSceneScriptIfNeeded(context, runtime_name, *setting);
+        }
+    } else {
+        node->SetVisible(light_obj.visible);
+    }
 
-    context.scene->sceneGraph->AppendChild(node);
+    if (light_obj.id != 0) {
+        // Attached under its parent with the other objects, once all exist.
+        context.layer_nodes[light_obj.id]      = node;
+        context.layer_parent_ids[light_obj.id] = light_obj.parent_id;
+    } else {
+        context.scene->sceneGraph->AppendChild(node);
+    }
 }
 
 void SyncImageEffectFinalTransforms(ParseContext& context) {

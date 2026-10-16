@@ -73,11 +73,28 @@ shaders are the ones compiled: the flipped screen coordinate of the compositing
 pass, a brace-listed sample kernel, and a light falloff that stays defined beyond a
 light's radius.
 
-Scene lighting is the author's own shader reading the light positions and
-premultiplied colours, which both renderers fill from the scene's lights the same
-way. `g_Texture<N>Texel` is the step of
+Scene lighting works as in Wallpaper Engine, on both renderers. A lit shader
+(`genericimage4`, `generic4`, the particle, rope, foliage and fluid shaders) asks for
+`#require LightingV1`; the shader compiler writes in a `PerformLighting_V1` with one
+uniform array per light kind, sized by the scene's `general.lightconfig`, and calls
+the author's own `ComputePBRLightShadow` for every light. Point (`lpoint`), spot
+(`lspot`), tube (`ltube`) and directional (`ldirectional`) lights fill those arrays
+every frame: colour times intensity with the radius, the world position with the
+exponent, a spot's cone cosines and the light's own x axis as the way a spot or
+directional light points, a tube's far end its control point carried by the light's
+transform. The older `point` light still fills the four packed legacy lights
+(`g_LightsPosition`, `g_LightsColorPremultiplied`). A light is a node like any layer:
+it follows its parent, and its visibility, transform, colour, intensity, radius and
+exponent follow user properties, scripts and timelines; a hidden light, or one under
+a hidden layer, lights nothing. Each kind lights at most as many lights as the config
+names, the first ones in scene order. A lit pass reuses its last image only while
+the lights it reads are unchanged. `g_NormalModelMatrix` is each draw's own rotation
+and `g_LightSkylightColor` the scene's skylight; `g_Texture<N>Texel` is the step of
 the texture a slot samples, as for Wallpaper Engine's morph-target and downsample
-shaders. Both renderers apply a material's depth state and cull mode the same way: a
+shaders. Shadow maps, spot cookies and
+volumetric light shafts are not drawn: a light that casts a shadow lights as if
+nothing did, which is also what Wallpaper Engine shows when nothing in the scene
+casts one. Both renderers apply a material's depth state and cull mode the same way: a
 pass into a depth-attached target (a model, a skybox, a scene with a perspective
 camera) takes its material's depth test, depth write and cull mode, against the same
 front faces, and every other pass draws in painter's order and culls nothing. A pass

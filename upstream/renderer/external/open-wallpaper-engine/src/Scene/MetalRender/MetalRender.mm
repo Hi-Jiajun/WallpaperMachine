@@ -4162,6 +4162,11 @@ vulkan::StaticPassSample MetalRender::Impl::frameSample(Scene& scene, std::size_
                 }
             }
         }
+        // Lights move, fade and switch without touching this node or material.
+        if (const auto* updater = scene.shaderValueUpdater.get(); updater != nullptr) {
+            hash = vulkan::StaticHashMix(hash,
+                                         updater->LightStateHash(desc.node, desc.material_slot));
+        }
     }
 
     hash = vulkan::FoldPassCameras(hash, scene, desc.camera_override, desc.node);

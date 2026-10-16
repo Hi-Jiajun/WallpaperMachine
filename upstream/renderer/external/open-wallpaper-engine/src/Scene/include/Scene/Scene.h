@@ -60,6 +60,8 @@ public:
     std::unordered_map<std::string, std::vector<std::string>>     linkedCameras;
 
     std::vector<std::unique_ptr<SceneLight>> lights;
+    /// The light counts lit shaders are compiled for (`general.lightconfig`).
+    SceneLightConfig                         light_config;
 
     std::shared_ptr<SceneNode>           sceneGraph;
     std::vector<std::shared_ptr<ScenePostProcess>> post_processes;

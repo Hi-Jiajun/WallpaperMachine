@@ -1117,6 +1117,10 @@ StaticPassSample CustomShaderPass::frameSample(const Scene& scene) const {
                 }
             }
         }
+        // Lights move, fade and switch without touching this node or material.
+        if (const auto* updater = scene.shaderValueUpdater.get(); updater != nullptr) {
+            hash = StaticHashMix(hash, updater->LightStateHash(node, m_desc.material_slot));
+        }
     }
     hash = FoldPassCameras(hash, scene, m_desc.camera_override, node);
     for (const auto& [index, sprite] : m_desc.sprites_map) {

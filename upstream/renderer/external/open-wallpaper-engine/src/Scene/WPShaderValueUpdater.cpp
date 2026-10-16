@@ -16,6 +16,9 @@
 #include <ctime>
 #include <numeric>
 #include <vector>
+#include <span>
+#include <algorithm>
+#include <cmath>
 
 using namespace wallpaper;
 using namespace Eigen;
@@ -29,6 +32,149 @@ constexpr std::string_view G_AUDIO_SPECTRUM32_LEFT  = "g_AudioSpectrum32Left";
 constexpr std::string_view G_AUDIO_SPECTRUM32_RIGHT = "g_AudioSpectrum32Right";
 constexpr std::string_view G_AUDIO_SPECTRUM64_LEFT  = "g_AudioSpectrum64Left";
 constexpr std::string_view G_AUDIO_SPECTRUM64_RIGHT = "g_AudioSpectrum64Right";
+constexpr std::string_view G_NORMALMODEL            = "g_NormalModelMatrix";
+
+constexpr std::string_view G_LPOINT_COLOR         = "g_LPoint_Color";
+constexpr std::string_view G_LPOINT_ORIGIN        = "g_LPoint_Origin";
+constexpr std::string_view G_LSPOT_COLOR          = "g_LSpot_Color";
+constexpr std::string_view G_LSPOT_ORIGIN         = "g_LSpot_Origin";
+constexpr std::string_view G_LSPOT_DIRECTION      = "g_LSpot_Direction";
+constexpr std::string_view G_LSPOT_EXPONENT       = "g_LSpot_Exponent";
+constexpr std::string_view G_LTUBE_COLOR          = "g_LTube_Color";
+constexpr std::string_view G_LTUBE_ORIGINA        = "g_LTube_OriginA";
+constexpr std::string_view G_LTUBE_ORIGINB        = "g_LTube_OriginB";
+constexpr std::string_view G_LDIRECTIONAL_COLOR   = "g_LDirectional_Color";
+constexpr std::string_view G_LDIRECTIONAL_DIRECTION = "g_LDirectional_Direction";
+constexpr std::array       kLightingV1Uniforms {
+    G_LPOINT_COLOR,  G_LPOINT_ORIGIN,  G_LSPOT_COLOR,        G_LSPOT_ORIGIN,
+    G_LSPOT_DIRECTION, G_LSPOT_EXPONENT, G_LTUBE_COLOR,      G_LTUBE_ORIGINA,
+    G_LTUBE_ORIGINB, G_LDIRECTIONAL_COLOR, G_LDIRECTIONAL_DIRECTION,
+};
+
+/// One frame's `LightingV1` uniform arrays, four floats per slot, laid out as
+/// Wallpaper Engine fills them: each kind's visible lights in scene order, up
+/// to the count the scene's light config compiled its shaders for, with unused
+/// slots left zero.
+struct LightingV1Arrays {
+    std::vector<float> point_color, point_origin;
+    std::vector<float> spot_color, spot_origin, spot_direction, spot_exponent;
+    std::vector<float> tube_color, tube_origin_a, tube_origin_b;
+    std::vector<float> directional_color, directional_direction;
+};
+
+void PutVec4(std::vector<float>& array, std::size_t slot, const Vector3d& xyz, float w) {
+    array[slot * 4 + 0] = static_cast<float>(xyz.x());
+    array[slot * 4 + 1] = static_cast<float>(xyz.y());
+    array[slot * 4 + 2] = static_cast<float>(xyz.z());
+    array[slot * 4 + 3] = w;
+}
+
+LightingV1Arrays PackLightingV1(const Scene& scene) {
+    const auto&      config = scene.light_config;
+    LightingV1Arrays arrays;
+    for (auto* array : { &arrays.point_color, &arrays.point_origin }) array->assign(config.point * 4, 0.0f);
+    for (auto* array : { &arrays.spot_color, &arrays.spot_origin, &arrays.spot_direction,
+                         &arrays.spot_exponent })
+        array->assign(config.spot * 4, 0.0f);
+    for (auto* array : { &arrays.tube_color, &arrays.tube_origin_a, &arrays.tube_origin_b })
+        array->assign(config.tube * 4, 0.0f);
+    for (auto* array : { &arrays.directional_color, &arrays.directional_direction })
+        array->assign(config.directional * 4, 0.0f);
+
+    std::size_t point = 0, spot = 0, tube = 0, directional = 0;
+    constexpr double kDegrees = 3.14159265358979323846 / 180.0;
+    for (const auto& light : scene.lights) {
+        if (light == nullptr || light->node() == nullptr || ! light->visible()) continue;
+        auto* node = light->node();
+        node->UpdateTrans();
+        const Matrix4d  world  = node->ModelTrans();
+        const Vector3d  origin = world.block<3, 1>(0, 3);
+        // The light's own x axis, scale included, is the way a spot or
+        // directional light points.
+        const Vector3d  axis   = world.block<3, 1>(0, 0);
+        const Vector3d  color  = (light->color() * light->intensity()).cast<double>();
+        switch (light->type()) {
+        case SceneLightType::Point:
+            if (point >= config.point) break;
+            PutVec4(arrays.point_color, point, color, light->radius());
+            PutVec4(arrays.point_origin, point, origin, light->exponent());
+            ++point;
+            break;
+        case SceneLightType::Spot:
+            if (spot >= config.spot) break;
+            PutVec4(arrays.spot_color, spot, color, light->radius());
+            PutVec4(arrays.spot_origin, spot, origin,
+                    static_cast<float>(std::cos(light->innerCone() * kDegrees)));
+            PutVec4(arrays.spot_direction, spot, axis,
+                    static_cast<float>(std::cos(light->outerCone() * kDegrees)));
+            arrays.spot_exponent[spot * 4] = light->exponent();
+            ++spot;
+            break;
+        case SceneLightType::Tube: {
+            if (tube >= config.tube) break;
+            const Vector4d far_end =
+                world * light->controlPoint().cast<double>().homogeneous();
+            PutVec4(arrays.tube_color, tube, color, light->radius());
+            PutVec4(arrays.tube_origin_a, tube, origin, light->exponent());
+            PutVec4(arrays.tube_origin_b, tube, far_end.head<3>(), 0.0f);
+            ++tube;
+            break;
+        }
+        case SceneLightType::Directional:
+            if (directional >= config.directional) break;
+            PutVec4(arrays.directional_color, directional, color, 1.0f);
+            // Towards the light: it shines along its own x axis.
+            PutVec4(arrays.directional_direction, directional, -axis, 0.0f);
+            ++directional;
+            break;
+        case SceneLightType::Legacy: break;
+        }
+    }
+    return arrays;
+}
+
+/// The legacy four-light packing: positions in `g_LightsPosition`, colours
+/// premultiplied by intensity and radius squared in three vec4s, the fourth
+/// light's channels in their w lanes.
+struct LegacyLightArrays {
+    std::array<float, 16> positions { 0 };
+    std::array<float, 12> colors { 0 };
+};
+
+LegacyLightArrays PackLegacyLights(const Scene& scene) {
+    LegacyLightArrays arrays;
+    uint              i = 0;
+    for (const auto& l : scene.lights) {
+        if (i == 4) break;
+        if (l == nullptr || l->type() != SceneLightType::Legacy || l->node() == nullptr) continue;
+        if (! l->visible()) continue;
+        l->node()->UpdateTrans();
+        const Vector3d trans = l->node()->ModelTrans().block<3, 1>(0, 3);
+        for (size_t axis = 0; axis < 3; ++axis) {
+            arrays.positions[i * 4 + axis] = static_cast<float>(trans[axis]);
+        }
+        const auto color = l->premultipliedColor();
+        if (i < 3) {
+            std::copy(color.begin(), color.end(), arrays.colors.begin() + i * 4);
+        } else {
+            // Three vec4 uniforms hold four RGB lights: the last light's
+            // channels occupy the w component of each of the first three.
+            for (size_t channel = 0; channel < 3; ++channel) {
+                arrays.colors[channel * 4 + 3] = color[channel];
+            }
+        }
+        i++;
+    }
+    return arrays;
+}
+
+uint64_t HashFloats(uint64_t hash, const float* values, std::size_t count) {
+    const auto* bytes = reinterpret_cast<const unsigned char*>(values);
+    for (std::size_t i = 0; i < count * sizeof(float); ++i) {
+        hash = (hash ^ bytes[i]) * 0x100000001b3ULL;
+    }
+    return hash;
+}
 
 } // namespace
 
@@ -54,6 +200,36 @@ void WPShaderValueUpdater::FrameBegin() {
 }
 
 void WPShaderValueUpdater::FrameEnd() {}
+
+uint64_t WPShaderValueUpdater::LightStateHash(SceneNode* node, uint32_t material_slot) const {
+    if (node == nullptr || m_scene == nullptr) return 0;
+    const auto slots = m_nodeUniformInfoMap.find(node);
+    if (slots == m_nodeUniformInfoMap.end()) return 0;
+    auto it = slots->second.find(material_slot);
+    if (it == slots->second.end()) it = slots->second.find(0);
+    if (it == slots->second.end()) return 0;
+    const auto& info = it->second;
+    if (! info.has_LP && ! info.has_LCP && ! info.has_LIGHTS_V1) return 0;
+
+    uint64_t hash = 0xcbf29ce484222325ULL;
+    if (info.has_LP || info.has_LCP) {
+        const auto legacy = PackLegacyLights(*m_scene);
+        hash = HashFloats(hash, legacy.positions.data(), legacy.positions.size());
+        hash = HashFloats(hash, legacy.colors.data(), legacy.colors.size());
+    }
+    if (info.has_LIGHTS_V1) {
+        const auto lights = PackLightingV1(*m_scene);
+        for (const auto* values : {
+                 &lights.point_color, &lights.point_origin, &lights.spot_color, &lights.spot_origin,
+                 &lights.spot_direction, &lights.spot_exponent, &lights.tube_color,
+                 &lights.tube_origin_a, &lights.tube_origin_b, &lights.directional_color,
+                 &lights.directional_direction }) {
+            hash = HashFloats(hash, values->data(), values->size());
+        }
+    }
+    // Zero is "reads no lights"; a material that does never hashes to it.
+    return hash == 0 ? 1 : hash;
+}
 
 uint32_t WPShaderValueUpdater::FrameVaryingUniforms(SceneNode*          node,
                                                     uint32_t            material_slot,
@@ -174,6 +350,10 @@ void WPShaderValueUpdater::InitUniforms(SceneNode* pNode, uint32_t material_slot
     info.has_TEXELSIZEHALF    = existsOp(G_TEXELSIZEHALF);
     info.has_SCREEN           = existsOp(G_SCREEN);
     info.has_LP               = existsOp(G_LP);
+    info.has_LCP              = existsOp(G_LCP);
+    info.has_LIGHTS_V1        = std::any_of(kLightingV1Uniforms.begin(), kLightingV1Uniforms.end(),
+                                     [&existsOp](std::string_view name) { return existsOp(name); });
+    info.has_NORMALMODEL      = existsOp(G_NORMALMODEL);
     info.has_ORIENTATIONUP      = existsOp(G_ORIENTATIONUP);
     info.has_ORIENTATIONRIGHT   = existsOp(G_ORIENTATIONRIGHT);
     info.has_ORIENTATIONFORWARD = existsOp(G_ORIENTATIONFORWARD);
@@ -349,7 +529,7 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, uint32_t material_sl
                                   (float)axes.forward.z() });
         }
     }
-    if (reqM || reqMVP || reqMI || reqMVPI) {
+    if (reqM || reqMVP || reqMI || reqMVPI || info.has_NORMALMODEL) {
         Matrix4d modelTrans = samples_screen_background ? pNode->ModelTrans()
                               : layer_local             ? Matrix4d::Identity()
                                                         : pNode->RenderTrans();
@@ -385,6 +565,19 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, uint32_t material_sl
         }
 
         if (reqM) updateOp(G_M, ShaderValue::fromMatrix(modelTrans));
+        if (info.has_NORMALMODEL) {
+            // The draw's rotation without its scale: each axis of the model
+            // matrix normalised, as a std140 mat3 (three padded columns).
+            std::array<float, 12> normal_model { 0 };
+            for (int column = 0; column < 3; ++column) {
+                Vector3d axis = modelTrans.block<3, 1>(0, column);
+                if (axis.squaredNorm() > 0.0) axis.normalize();
+                for (int row = 0; row < 3; ++row) {
+                    normal_model[column * 4 + row] = static_cast<float>(axis[row]);
+                }
+            }
+            updateOp(G_NORMALMODEL, normal_model);
+        }
         if (reqAM) updateOp(G_AM, ShaderValue::fromMatrix(modelTrans));
         if (reqMI) updateOp(G_MI, ShaderValue::fromMatrix(modelTrans.inverse()));
         if (reqMVP) {
@@ -492,29 +685,28 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, uint32_t material_sl
         updateOp(gtrans, std::array { f.x, f.y });
     }
 
-    if (info.has_LP) {
-        std::array<float, 16> lights { 0 };
-        std::array<float, 12> lights_color { 0 };
-        uint                  i = 0;
-        for (auto& l : m_scene->lights) {
-            if (i == 4) break;
-            assert(l->node() != nullptr);
-            const auto& trans = l->node()->Translate();
-            std::copy(trans.begin(), trans.end(), lights.begin() + i * 4);
-            const auto color = l->premultipliedColor();
-            if (i < 3) {
-                std::copy(color.begin(), color.end(), lights_color.begin() + i * 4);
-            } else {
-                // Three vec4 uniforms hold four RGB lights: the last light's
-                // channels occupy the w component of each of the first three.
-                for (size_t channel = 0; channel < 3; ++channel) {
-                    lights_color[channel * 4 + 3] = color[channel];
-                }
-            }
-            i++;
+    if (info.has_LP || info.has_LCP) {
+        const auto legacy = PackLegacyLights(*m_scene);
+        updateOp(G_LP, legacy.positions);
+        updateOp(G_LCP, legacy.colors);
+    }
+    if (info.has_LIGHTS_V1) {
+        const auto lights = PackLightingV1(*m_scene);
+        for (const auto& [name, values] : {
+                 std::pair { G_LPOINT_COLOR, &lights.point_color },
+                 std::pair { G_LPOINT_ORIGIN, &lights.point_origin },
+                 std::pair { G_LSPOT_COLOR, &lights.spot_color },
+                 std::pair { G_LSPOT_ORIGIN, &lights.spot_origin },
+                 std::pair { G_LSPOT_DIRECTION, &lights.spot_direction },
+                 std::pair { G_LSPOT_EXPONENT, &lights.spot_exponent },
+                 std::pair { G_LTUBE_COLOR, &lights.tube_color },
+                 std::pair { G_LTUBE_ORIGINA, &lights.tube_origin_a },
+                 std::pair { G_LTUBE_ORIGINB, &lights.tube_origin_b },
+                 std::pair { G_LDIRECTIONAL_COLOR, &lights.directional_color },
+                 std::pair { G_LDIRECTIONAL_DIRECTION, &lights.directional_direction },
+             }) {
+            if (! values->empty()) updateOp(name, std::span<const float> { *values });
         }
-        updateOp(G_LP, lights);
-        updateOp(G_LCP, lights_color);
     }
 
     if (info.has_EYE || info.has_VIEWFORWARD || info.has_VIEWUP || info.has_VIEWRIGHT) {

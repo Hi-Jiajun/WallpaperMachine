@@ -2063,6 +2063,99 @@ TEST_F(MetalSceneDraw, ADepthTestedDrawCullsTheSameFacesAsCompatibility)
     EXPECT_GT(card_pixels["away-back-no-depth"], 1000u);
 }
 
+TEST_F(MetalSceneDraw, ALayerLitByScenePointAndDirectionalLightsIsTheSameOnBothRenderers)
+{
+    // A lit layer asks for `#require LightingV1` and is handed the scene's lights
+    // by kind. Here a red point light sits over the left of the card and a dim
+    // blue directional light shines straight at it: the left is red, the right
+    // only blue, and both renderers draw the same picture. The radiance helper
+    // is the fixture's own, in the shape of Wallpaper Engine's `common_pbr_2.h`.
+    std::map<bool, RendererPicture> pictures;
+    for (const bool native : { false, true }) {
+        const std::string name = native ? "lit-native" : "lit-compat";
+        const auto project = WriteFixture(root_ / name);
+        std::ofstream(root_ / name / "shaders/metal_probe.vert")
+            << "uniform mat4 g_ModelViewProjectionMatrix;\n"
+               "uniform mat4 g_ModelMatrix;\n"
+               "attribute vec3 a_Position;\n"
+               "attribute vec2 a_TexCoord;\n"
+               "varying vec2 v_TexCoord;\n"
+               "varying vec3 v_WorldPos;\n"
+               "void main() {\n"
+               "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+               "  v_WorldPos = (g_ModelMatrix * vec4(a_Position, 1.0)).xyz;\n"
+               "  v_TexCoord = a_TexCoord;\n"
+               "}\n";
+        std::ofstream(root_ / name / "shaders/common_pbr_2.h")
+            << "vec3 ComputePBRLightShadow(vec3 N, vec3 L, vec3 V, vec3 albedo, vec3 lightColor,\n"
+               "    float radius, float exponent, vec3 specularTint, vec3 f0, float roughness,\n"
+               "    float metallic, float shadowFactor) {\n"
+               "  float falloff = clamp(1.0 - length(L) / radius, 0.0, 1.0);\n"
+               "  return albedo * lightColor * pow(falloff, exponent) * max(dot(N, normalize(L)), 0.0);\n"
+               "}\n"
+               "vec3 ComputePBRLightShadowInfinite(vec3 N, vec3 L, vec3 V, vec3 albedo, vec3 lightColor,\n"
+               "    vec3 specularTint, vec3 f0, float roughness, float metallic, float shadowFactor) {\n"
+               "  return albedo * lightColor * max(dot(N, L), 0.0);\n"
+               "}\n"
+               "vec3 PointSegmentDelta(vec3 p, vec3 a, vec3 b) { return a - p; }\n";
+        std::ofstream(root_ / name / "shaders/metal_probe.frag")
+            << "// [COMBO] {\"material\":\"lighting\",\"combo\":\"LIGHTING\",\"default\":0}\n"
+               "#define CAST3(x) vec3(x)\n"
+               "#include \"common_pbr_2.h\"\n"
+               "varying vec2 v_TexCoord;\n"
+               "varying vec3 v_WorldPos;\n"
+               "#require LightingV1\n"
+               "void main() {\n"
+               "  vec3 color = vec3(0.0);\n"
+               "#if LIGHTING\n"
+               "  color = PerformLighting_V1(v_WorldPos, vec3(1.0), vec3(0.0, 0.0, 1.0),\n"
+               "      vec3(0.0, 0.0, 1.0), vec3(1.0), vec3(0.04), 1.0, 0.0);\n"
+               "#endif\n"
+               "  gl_FragColor = vec4(color, 1.0);\n"
+               "}\n";
+        std::ofstream(root_ / name / "materials/tile.json")
+            << R"({"passes":[{"shader":"metal_probe","blending":"normal","cullmode":"nocull",)"
+               R"("depthtest":"disabled","depthwrite":"disabled","combos":{"LIGHTING":1}}]})";
+        std::ofstream(root_ / name / "layout.json")
+            << R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+               R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0,0,0],)"
+               R"("cameraparallax":false,"orthogonalprojection":{"width":384,"height":256},)"
+               R"("lightconfig":{"point":1,"directional":1}},)"
+               R"("objects":[{"id":1,"name":"tile","image":"models/tile.json","origin":[192,128,0],)"
+               R"("scale":[1,1,1],"angles":[0,0,0],"visible":true},)"
+               R"({"id":2,"name":"red","light":"lpoint","origin":"96 128 40","color":"1 0 0",)"
+               R"("intensity":1,"radius":90,"exponent":1},)"
+               R"({"id":3,"name":"sky","light":"ldirectional","origin":"0 0 0","angles":"0 1.5707963 0",)"
+               R"("color":"0 0 1","intensity":0.5,"radius":1}]})";
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+        ASSERT_EQ(loaded.scene->lights.size(), 2u);
+        if (native) {
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+        }
+        pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
+        ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+    }
+    const auto& rgb = pictures[true].rgb;
+    ASSERT_EQ(rgb.size(), 384u * 256u * 3u);
+    const auto at = [&rgb](std::size_t x, std::size_t y) {
+        const std::size_t i = (y * 384 + x) * 3;
+        return std::array<int, 3> { rgb[i], rgb[i + 1], rgb[i + 2] };
+    };
+    // Under the point light: red, and the directional light's blue.
+    const auto left = at(96, 128);
+    EXPECT_GT(left[0], 100) << "the point light did not light the layer under it";
+    EXPECT_NEAR(left[2], 128, 3) << "the directional light did not reach the layer";
+    // Out of the point light's reach: only the directional light.
+    const auto right = at(280, 128);
+    EXPECT_LT(right[0], 5) << "the point light lit beyond its radius";
+    EXPECT_NEAR(right[2], 128, 3) << "the directional light did not reach the layer";
+    EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
+        << "the native renderer lit the layer differently from the compatibility renderer";
+}
+
 /// The fixture's card in constant red times its `g_Color4`, over a scene
 /// cleared to green 0.25, with `object_fields` added to the card. The
 /// `effectpassthrough` material stands in for Wallpaper Engine's: its

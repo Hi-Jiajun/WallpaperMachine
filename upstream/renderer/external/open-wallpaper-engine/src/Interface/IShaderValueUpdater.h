@@ -69,6 +69,15 @@ public:
         (void)camera_override;
         return frame_varying_uniform::kAll;
     }
+    /// The scene's lights as this node's material reads them, hashed, or 0
+    /// when it reads no light uniform. Lights move, fade and switch on and off
+    /// without a graph edit or a material change, so a pass that lights itself
+    /// folds this into its static sample.
+    virtual uint64_t LightStateHash(SceneNode* node, uint32_t material_slot) const {
+        (void)node;
+        (void)material_slot;
+        return 0;
+    }
     /// Drops what was recorded for a node that is about to be freed, so a
     /// later node allocated at the same address starts from nothing.
     virtual void ForgetNode(SceneNode* node) { (void)node; }

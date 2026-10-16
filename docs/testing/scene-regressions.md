@@ -741,6 +741,13 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   does so for Wallpaper Engine's own lit shaders when
   `WALLPAPER_MACHINE_ASSETS_ROOT` names them (`fur4` is excluded: its instanced shells read the
   dialect's `CASTF` cast macro, which the compiler does not supply, lit or unlit).
+  `SceneSchema.LightsOfEachKindFillWallpaperEnginesLightingArrays` checks every
+  kind's uniform layout, parenting and the legacy-only packing;
+  `SceneSchema.LightsFollowTheirUserPropertyScriptAndIntensityTimeline` the
+  bindings and the light-state hash the static cache folds in;
+  `SceneSchema.TheNormalMatrixIsTheDrawsRotationWithoutItsScale` the per-draw
+  normal matrix; `MetalSceneDraw.ALayerLitByScenePointAndDirectionalLightsIsTheSameOnBothRenderers`
+  the lit pixels on both renderers.
   `SceneSchema.ATextureSlotsTexelIsTheStepOfTheTextureItSamples` checks that
   `g_Texture<N>Texel` is (1 / width, 1 / height, width, height) of the sampled
   texture. After a shader-crate change, rebuild
