@@ -531,7 +531,7 @@ std::string BasicImageSceneJson() {
       "camera": {"center":[0,0,0], "eye":[0,0,1], "up":[0,1,0]},
       "general": {
         "ambientcolor":[0.2,0.2,0.2], "skylightcolor":[0.3,0.3,0.3],
-        "clearcolor":[0,0,0], "cameraparallax":false,
+        "clearcolor":[0,0,0], "bloom":false, "cameraparallax":false,
         "cameraparallaxamount":0, "cameraparallaxdelay":0,
         "cameraparallaxmouseinfluence":0,
         "orthogonalprojection":{"width":640,"height":360}
@@ -812,6 +812,30 @@ void main() {
 )" },
     };
     EXPECT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+}
+
+// Stand-ins for Wallpaper Engine's HDR bloom materials, each with a shader of
+// its own name so a test can tell the passes apart.
+void AddHdrBloomFixtureFiles(std::map<std::string, std::string>& files) {
+    const std::string vert = "attribute vec3 a_Position;\nattribute vec2 a_TexCoord;\n"
+                             "varying vec2 v_TexCoord;\nvoid main() {\n"
+                             "  gl_Position = vec4(a_Position, 1.0);\n  v_TexCoord = a_TexCoord;\n}\n";
+    const std::string frag =
+        "uniform sampler2D g_Texture0;\nuniform vec4 g_RenderVar0;\n"
+        "uniform float g_BloomStrength;\nuniform vec4 g_BloomBlendParams;\nuniform vec3 g_BloomTint;\n"
+        "uniform float g_BloomScatter;\nvarying vec2 v_TexCoord;\n"
+        "void main() {\n  gl_FragColor = texture(g_Texture0, v_TexCoord + g_RenderVar0.xy) *\n"
+        "      g_BloomStrength * g_BloomScatter * g_BloomBlendParams.x * g_BloomTint.x;\n}\n";
+    for (const auto& [material, shader] : std::array<std::pair<const char*, const char*>, 5> {
+             std::pair { "hdr_downsample_bloom", "hdr_extract" }, { "hdr_downsample", "hdr_down" },
+             { "hdr_upsample", "hdr_up" }, { "hdr_upsample_cubic", "hdr_cubic" },
+             { "combine_hdr_upsample_linear", "hdr_combine" } }) {
+        files[std::string("/materials/util/") + material + ".json"] =
+            std::string(R"({"passes":[{"blending":"normal","cullmode":"nocull","depthtest":"disabled",)"
+                        R"("depthwrite":"disabled","shader":")") + shader + R"("}]})";
+        files[std::string("/shaders/") + shader + ".vert"] = vert;
+        files[std::string("/shaders/") + shader + ".frag"] = frag;
+    }
 }
 
 std::string BloomSceneJson(bool hdr) {
@@ -3000,6 +3024,8 @@ void main() {
 )" },
         { "/materials/a.tex.tex", "" },
     };
+    // An HDR scene renders in HDR only with its bloom on, so it needs bloom.
+    AddHdrBloomFixtureFiles(files);
     EXPECT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
     audio::SoundManager sound_manager(audio::SoundManager::OutputBackend::Null);
     const std::string   scene = R"({
@@ -3008,7 +3034,7 @@ void main() {
         "ambientcolor":[0.2,0.2,0.2], "skylightcolor":[0.3,0.3,0.3],
         "clearcolor":[0,0,0], "cameraparallax":false,
         "cameraparallaxamount":0, "cameraparallaxdelay":0,
-        "cameraparallaxmouseinfluence":0, "hdr":true,
+        "cameraparallaxmouseinfluence":0, "hdr":true, "bloom":true,
         "orthogonalprojection":{"width":640,"height":360}
       },
       "objects": [
@@ -4343,6 +4369,32 @@ TEST(SceneSchema, SceneSettingsLeftOutTakeWallpaperEnginesDefaults) {
     for (int i = 0; i < 3; ++i) {
         EXPECT_FLOAT_EQ(sc.general.ambientcolor[i], 0.0f);
         EXPECT_FLOAT_EQ(sc.general.skylightcolor[i], 0.0f);
+    }
+}
+
+
+// Wallpaper Engine's HDR pipeline needs the scene's bloom as well as its
+// `hdr`: an HDR scene with bloom off is drawn with ordinary 8-bit targets.
+TEST(SceneSchema, AnHdrSceneWithoutBloomRendersAsAnOrdinaryOne) {
+    std::map<std::string, std::string> files;
+    AddHdrBloomFixtureFiles(files);
+    fs::VFS vfs;
+    ASSERT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+    audio::SoundManager sound_manager { audio::SoundManager::OutputBackend::Null };
+    WPSceneParser       parser;
+    for (const bool bloom : { false, true }) {
+        SCOPED_TRACE(bloom);
+        auto scene = parser.Parse(
+            bloom ? "hdr-with-bloom" : "hdr-without-bloom",
+            std::string(R"({"camera": {"center":[0,0,0], "eye":[0,0,1], "up":[0,1,0]},
+              "general": {"clearcolor":[0,0,0], "hdr":true, "bloom":)") +
+                (bloom ? "true" : "false") +
+                R"(, "orthogonalprojection":{"width":640,"height":360}}, "objects": []})",
+            vfs, sound_manager);
+        ASSERT_NE(scene, nullptr);
+        EXPECT_EQ(scene->hdr, bloom);
+        EXPECT_EQ(scene->FindRenderTarget(SpecTex_Default)->format,
+                  bloom ? TextureFormat::RGBA16F : TextureFormat::RGBA8);
     }
 }
 

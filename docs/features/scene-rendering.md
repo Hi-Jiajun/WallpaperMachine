@@ -623,12 +623,14 @@ limit, and loose images, videos, sprite atlases, multi-slot images and unknown
 encoded containers keep their original loading behavior. It is a texture-residency
 reduction, not a fixed ceiling on total process memory.
 
-An authored `hdr` scene selects the HDR path on either scene backend: overbright
-color is preserved in half-float targets and bloom is HDR, while non-HDR scenes keep
-the 8-bit path. Half-float targets cost eight rather than four bytes per pixel, and
-the cache accounts for that actual size; a six-level bloom pyramid starting at
-half-resolution holds under a third of a full-size target's pixels. This is real
-post-processing work, not a free brightness adjustment or supersampling, and
+An authored `hdr` scene with its bloom on selects the HDR path on either scene
+backend, as in Wallpaper Engine: overbright color is preserved in half-float targets
+and bloom is HDR, while other scenes, an `hdr` scene with bloom off included, keep the
+8-bit path. A scene that leaves `bloom` out has it on, at strength 2 above 0.65, as
+Wallpaper Engine has it. Half-float targets cost eight rather than four bytes per
+pixel, and the cache accounts for that actual size; a six-level bloom pyramid
+starting at half-resolution holds under a third of a full-size target's pixels. This
+is real post-processing work, not a free brightness adjustment or supersampling, and
 increasing FPS alone cannot substitute for it: the High preset controls only frame
 rate and render scale ([Quality](performance.md#quality)). Bloom spread is this
 renderer's own energy-conserving model; exact Wallpaper Engine parameter parity is

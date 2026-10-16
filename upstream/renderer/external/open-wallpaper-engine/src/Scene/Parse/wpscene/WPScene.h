@@ -64,9 +64,10 @@ public:
     // Black, as Wallpaper Engine leaves them when a scene omits them.
     std::array<float, 3> ambientcolor { 0.0f, 0.0f, 0.0f };
     std::array<float, 3> skylightcolor { 0.0f, 0.0f, 0.0f };
-    bool                 bloom { false };
-    float                bloomstrength { 0.0f };
-    float                bloomthreshold { 0.0f };
+    // Wallpaper Engine's defaults: bloom on, at strength 2 above 0.65.
+    bool                 bloom { true };
+    float                bloomstrength { 2.0f };
+    float                bloomthreshold { 0.65f };
     nlohmann::json       bloom_setting;
     nlohmann::json       bloomstrength_setting;
     nlohmann::json       bloomthreshold_setting;

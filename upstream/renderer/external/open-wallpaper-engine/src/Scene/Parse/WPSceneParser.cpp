@@ -3445,7 +3445,6 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
     scene.ortho[1]     = sc.general.orthogonalprojection.height;
     scene.display_sized = ! sc.general.isOrtho;
     scene.opaque_first = ! sc.general.isOrtho && sc.general.transparentsorting;
-    scene.hdr = sc.general.hdr;
     scene.light_config = ParseSceneLightConfig(sc.general.lightconfig);
     scene.fog_distance = sc.general.fogdistance;
     scene.fog_height   = sc.general.fogheight;
@@ -3489,6 +3488,10 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
                                     setting(g.camerashakeroughness_setting, g.camerashakeroughness)));
         }
     }
+    // Wallpaper Engine renders in HDR only when the scene asks for HDR and has
+    // bloom on (its bloom switch read above, a bound one at its property's
+    // value); an HDR scene without bloom is drawn as an ordinary one.
+    scene.hdr = sc.general.hdr && sc.general.bloom;
     context.ortho_w = scene.ortho[0];
     context.ortho_h = scene.ortho[1];
     context.is_ortho = sc.general.isOrtho;

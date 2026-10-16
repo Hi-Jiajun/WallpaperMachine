@@ -781,8 +781,10 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   texture. After a shader-crate change, rebuild
   `target/release/libshader.a` (`cargo build -p shader --features ffi --release`)
   before the CMake test binaries, or they link the old compiler.
-- **HDR, bloom and emissive masks** — an authored `hdr` scene uses RGBA16F color
-  intermediates on both backends; masks and source media keep their formats and
+- **HDR, bloom and emissive masks** — an authored `hdr` scene with bloom on uses
+  RGBA16F color intermediates on both backends
+  (`SceneSchema.AnHdrSceneWithoutBloomRendersAsAnOrdinaryOne`: with bloom off it is
+  8-bit, as in Wallpaper Engine); masks and source media keep their formats and
   SDR scenes keep RGBA8. HDR shader combos are enabled before compilation, not
   approximated by raising final display brightness, and the fourth
   texture-component flag (TEX bit23) travels through the C++/Rust compiler
