@@ -25,6 +25,15 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-16 — Text layout, placement, effect buffers and fonts: review follow-ups of the text steps
+
+Follow-ups to the reviews of the ported text steps (face cache, alignment words and brightness, card layout, placement, effect buffers, composite, fonts), checked in an isolated worktree with the renderer test binaries; the app gate (`scripts/test.py`), `scripts/check_renderer.py` and the Swift unit target were not run, and there was no desktop, app launch or audio.
+
+- every renderer test binary of the worktree (`run_suites.sh`, 30 binaries) — all passed, among them `text_object_runtime_test` 158, `metal_scene_draw_smoke` 130, `scene_schema_tests` 156, `script_runtime_compat_test` 171, `mouse_input_test` 30, `layer_texture_reference_test` 38
+- new tests fail without their change: a font file rewritten or deleted under a cached face, the rows set within the widest row's width (not the block's), the effect matrices of a screen-anchored text, CJK punctuation drawn by the symbol face
+- rebuild cost of a text card that changes in texels, six forced rebuilds on a real clock scene (72 passes, 1920 by 1080, native Metal) — 0.5 to 0.8 ms to lower and 39 to 45 ms to compile; 0.6 to 0.9 ms on a one-layer scene
+- gaps: no Wallpaper Engine frame was compared for the changes of this pass; the brightness probes (`probetextb1`, `probetextb2`) and the exponent probe for a chain other than opacity are uncaptured, so the HDR half of the text brightness rule and the composite exponent of non-opacity chains stay inferred; that Segoe UI Symbol lacks the CJK punctuation is inferred; the sandboxed lock-screen extension was not run with a face opened by path
+
 ## 2026-10-15 — 2D scene resolution: Display resolution by default
 
 Headless only: no desktop, no audio, no app launch, no Release build.
@@ -132,17 +141,3 @@ The panel offers Reduced quality for the three system conditions and names the c
 - Skipped: the full `python3 scripts/test.py` gate, `check_rust.py` and `check_renderer.py` (no Rust or C++ change in this commit), `--ui`, any desktop run
 - Not covered: the live layout of the Playback rows and how the new sentences read in each language, a real Low Power Mode, thermal change or discharge reaching a running wallpaper, a change while the Mac is locked
 - The power saving of Reduced quality has not been measured; no claim is made in the app or the docs. Planned comparison: a power benchmark with the profile on and off (the condition matrix has no row for it yet) in an authorized session
-
-## 2026-10-13 — Native Metal compatibility, cost and default
-
-Native Metal draws scene lights, previous-frame effects and steps with an unproduced input, culls and steps the host frame like Compatibility, shares target images, survives a pipeline-archive folder deleted mid-write, and becomes the default renderer with Compatibility as the per-scene fallback.
-
-- Admission, `metal_scene_draw_smoke` once per scene over the 60 local scene wallpapers: main 95dfb6bc 48/60 on Native Metal (8 history feedback, 4 dynamic lighting); this branch 60/60.
-- Same-harness parity, `MetalSceneDraw.LocalProjectsDrawTheSamePictureOnBothRenderers` with `WE_TEST_METAL_FRAMES=180 WE_TEST_RANDOM_SEED=1 WE_TEST_METAL_WARMUP_TICKS=40`: 57/60 identical (mean abs < 0.05/255), 3616389236 0.06 and 3675966045 0.26 (at most 0.1% of pixels), 3610485014 8.6 but differs from itself run to run.
-- Cost, `UnchangedPresent.LocalProjectEnergyIsMeasuredHeadlessly` (`WE_TEST_ENERGY_*`), 12 scenes at 3840x2160 and 60 FPS, C N N C, 2 x 15 s per renderer: process CPU time 21.6 -> 17.1 s (-21%, every scene lower), own command-buffer GPU time 59.5 -> 51.0 s (-14%), command buffers 3 -> 1 per frame, CPU energy -12%; Compatibility 50.1 and 57.8 FPS on 3226487183 and 3620484312, Native 60. Measured before the last rebase; whole-GPU energy unusable while other sessions drew.
-- Footprint, same test with 2 x 5 s windows on the rebased build: 18954 -> 18318 MB in total (-3.4%), 9 of 12 lower, none more than +6% (within run-to-run spread).
-- Target sharing: 3620484312 Native render targets 926 -> 247 MB with no blit added; `WALLPAPER_MACHINE_METAL_TARGET_SHARING=0` restores one image per target.
-- Archive crash: `MetalSceneDraw.AStoreFolderDeletedWhileItsArchiveIsWrittenCostsOnlyThatWrite` crashed 4 of 4 runs serialising beside the store and passes 4 of 4 with the fix; found as a SIGSEGV of `unchanged_present_test` in `check_renderer.py`.
-- Every commit's tree built and passed `metal_scene_draw_smoke`, `metal_backend_test`, `unchanged_present_test` and `layer_texture_reference_test`; after the rebase onto 18ddfbd8 the same four and `script_runtime_compat_test` pass.
-- `python3 scripts/check_rust.py` exit 0 (3 corpus/asset skips); `python3 scripts/check_renderer.py` exit 0 (env-gated local-project, energy, text-workshop and local-video skips); `python3 scripts/test.py` exit 0, 2564 passed, 45 skipped; all on 95dfb6bc plus this branch.
-- Not checked: a real display or the desktop, wallpapers outside the local library, the lock screen (still Compatibility). Seen only under parallel load and passing alone: `TextThatHasNotChangedIsNeitherLaidOutNorUploadedAgain`, `TheSkipPresentsTheSameVideoFramesInTheSameOrder`.

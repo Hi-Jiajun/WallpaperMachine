@@ -6609,6 +6609,69 @@ TEST_F(MetalSceneDraw, EnablingAnEffectDoesNotMoveAnAlignedTextLayerOnBothRender
     }
 }
 
+TEST_F(MetalSceneDraw, AnEffectsUvOffsetIsAFractionOfTheCardOnBothRenderers)
+{
+    // The chain of a text layer draws into buffers that are its card, and `v_TexCoord` runs
+    // 0 to 1 across that card, as in Wallpaper Engine: an effect that reads its input a quarter
+    // of the way along (a skew, a scrolling shadow, an offset of 0.25) moves the text by a
+    // quarter of the card's width or height, not of some larger buffer the card sits in. The
+    // same layer through an effect that copies is the reference. Down the card `v` runs from
+    // the top (0) to the bottom (1), so reading a quarter further moves the text up.
+    for (const bool vertical : { false, true }) {
+        const std::string shader =
+            std::string("uniform sampler2D g_Texture0;\n"
+                        "varying vec2 v_TexCoord;\n"
+                        "void main() {\n"
+                        "  gl_FragColor = texture(g_Texture0, v_TexCoord + vec2(") +
+            (vertical ? "0.0, 0.25" : "0.25, 0.0") + "));\n}\n";
+        for (const bool native : { false, true }) {
+            SCOPED_TRACE(std::string(vertical ? "vertical, " : "horizontal, ") +
+                         (native ? "native" : "compatibility"));
+            std::map<bool, LitBox> boxes;
+            float                  card_width = 0.0f, card_height = 0.0f;
+            for (const bool offset : { false, true }) {
+                const std::string name = std::string("text-uv-offset-") + (vertical ? "v-" : "h-") +
+                                         (native ? "native-" : "compat-") + (offset ? "shifted" : "plain");
+                // Padding wider than the shift, so that the shifted copy is not cut off at the
+                // card's edge.
+                const auto project = WriteTextFixture(
+                    root_ / name, "HH", true, {},
+                    R"(,"pointsize":10,"horizontalalign":"left","verticalalign":"center","padding":"60 40")");
+                if (offset) std::ofstream(root_ / name / "shaders/probe_copy.frag") << shader;
+                LoadedScene loaded;
+                std::string error;
+                ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+                ASSERT_NE(loaded.scene->runtime, nullptr);
+                const auto layout = loaded.scene->runtime->NodeTextLayout("caption");
+                ASSERT_TRUE(layout.has_value());
+                card_width  = layout->card.x();
+                card_height = layout->card.y();
+                const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+                ASSERT_TRUE(picture.error.empty()) << picture.error;
+                boxes[offset] = LitBoxOf(picture);
+                ASSERT_TRUE(boxes[offset].any());
+            }
+            // A buffer sized from the canvas or the editor's box, as these used to be, is more
+            // than twice the 384 columns of the canvas: the card is well below that.
+            ASSERT_GT(card_width, 60.0f);
+            ASSERT_LT(card_width, 250.0f);
+            ASSERT_GT(card_height, 60.0f);
+            ASSERT_LT(card_height, 250.0f);
+            if (vertical) {
+                EXPECT_NEAR(boxes[false].top - boxes[true].top, 0.25f * card_height, 1.5f);
+                EXPECT_NEAR(boxes[false].bottom - boxes[true].bottom, 0.25f * card_height, 1.5f);
+                EXPECT_NEAR(boxes[false].left, boxes[true].left, 1);
+                EXPECT_NEAR(boxes[false].right, boxes[true].right, 1);
+            } else {
+                EXPECT_NEAR(boxes[false].left - boxes[true].left, 0.25f * card_width, 1.5f);
+                EXPECT_NEAR(boxes[false].right - boxes[true].right, 0.25f * card_width, 1.5f);
+                EXPECT_NEAR(boxes[false].top, boxes[true].top, 1);
+                EXPECT_NEAR(boxes[false].bottom, boxes[true].bottom, 1);
+            }
+        }
+    }
+}
+
 TEST_F(MetalSceneDraw, AnAlignedTextLayerIsTheSamePictureOnBothRenderers)
 {
     for (const char* horizontal : { "left", "right" }) {
@@ -8550,8 +8613,8 @@ TEST_F(MetalSceneDraw, ATextLayerWithAnEffectChainKeepsBothOfItsCards)
             << "the text layer's effect chain produced no pixels in the scene's own target";
         // And the chain's cards follow a relayout rather than keeping the size
         // the first frame was built at. Different glyphs, not more of the same
-        // word: the chain draws into a buffer the layer's card is clipped to,
-        // and a longer repetition can leave exactly the same pixels inside it.
+        // word: a longer repetition of the same glyphs can leave exactly the same
+        // pixels inside the card.
         ASSERT_TRUE(loaded.scene->runtime->SetNodeText("caption", "WOVEN"));
         std::vector<uint8_t> changed;
         for (int frame = 0; frame < 16; ++frame) {

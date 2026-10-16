@@ -315,6 +315,73 @@ void ExpectTextEffectFboCoversFinalMesh(const SceneRenderTarget& fbo,
               std::min(static_cast<float>(target_height), std::ceil(final_mesh_size.y())));
 }
 
+/// A scene whose only layer is the text "caption" with one effect on it, as `effects/gradient`:
+/// a pass that draws its input through unchanged, or with `with_buffer` two, the first into
+/// a buffer of the effect's own. What a test then asks about is the buffers the chain draws
+/// into and the card it ends on.
+struct TextEffectScene {
+    fs::VFS                    vfs;
+    audio::SoundManager        sound_manager;
+    WPSceneParser              parser;
+    ProjectProperties          properties;
+    std::shared_ptr<Scene>     scene;
+    SceneNode*                 text { nullptr };
+    std::shared_ptr<SceneCamera> camera;
+    std::shared_ptr<SceneImageEffectLayer> effect_layer;
+
+    bool Load(std::string_view scene_id, std::string_view text_fields, bool with_buffer = false) {
+        std::map<std::string, std::string> files {
+            { "/effects/gradient/effect.json",
+              with_buffer ? R"JSON({
+                "name": "gradient", "version": 1,
+                "fbos": [ { "name": "_rt_BlurBuffer", "scale": 2 } ],
+                "passes": [
+                  { "material": "materials/effects/gradient.json",
+                    "bind": [ { "name": "previous", "index": 0 } ],
+                    "target": "_rt_BlurBuffer" },
+                  { "material": "materials/effects/gradient.json",
+                    "bind": [ { "name": "_rt_BlurBuffer", "index": 0 } ] }
+                ]
+              })JSON"
+                          : R"JSON({
+                "name": "gradient", "version": 1,
+                "passes": [ { "material": "materials/effects/gradient.json" } ]
+              })JSON" },
+            { "/materials/effects/gradient.json",
+              R"JSON({ "passes": [{ "shader": "effects/gradient", "textures": [null] }] })JSON" },
+            { "/shaders/effects/gradient.vert",
+              "layout(binding = 1) uniform mat4 g_ModelViewProjectionMatrix;\n"
+              "in vec3 a_Position;\n"
+              "in vec2 a_TexCoord;\n"
+              "out vec2 v_TexCoord;\n"
+              "void main() { gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0); v_TexCoord = a_TexCoord; }\n" },
+            { "/shaders/effects/gradient.frag",
+              "uniform sampler2D g_Texture0;\n"
+              "in vec2 v_TexCoord;\n"
+              "void main() { gl_FragColor = texture(g_Texture0, v_TexCoord); }\n" },
+        };
+        if (! vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files)))) return false;
+        SceneParseRequest request { .scene_id = std::string(scene_id), .project_properties = &properties };
+        scene = parser.Parse(request,
+                             MinimalSceneObjects(
+                                 R"([{"id": 1, "name": "caption", "font": "Arial", "pointsize": 20,
+                                      "origin": "0 0 0", "visible": true,
+                                      "effects": [{"file": "effects/gradient/effect.json", "id": 2, "visible": true}],)" +
+                                 std::string(text_fields) + "}]"),
+                             vfs,
+                             sound_manager);
+        if (scene == nullptr || scene->runtime == nullptr) return false;
+        text = FindRootChild(*scene, "caption");
+        if (text == nullptr || text->Camera().empty()) return false;
+        camera = scene->cameras.at(text->Camera());
+        if (! camera->HasImgEffect()) return false;
+        effect_layer = camera->GetImgEffect();
+        return effect_layer != nullptr;
+    }
+
+    SceneRenderTarget* FirstTarget() { return scene->FindRenderTarget(effect_layer->FirstTarget()); }
+};
+
 bool ShaderUsesUniformMember(const ShaderCode& spirv, std::string_view member_name) {
     spv_reflect::ShaderModule module(spirv, SPV_REFLECT_MODULE_FLAG_NO_COPY);
 
@@ -1162,8 +1229,14 @@ TEST(TextObjectRuntime, RuntimeTextEffectTargetsResizeWithTextRasterSize) {
     ASSERT_NE(pingpong, nullptr);
     fbo = scene->FindRenderTarget(effect_layer->GetEffect(0)->nodes.front().output);
     ASSERT_NE(fbo, nullptr);
-    EXPECT_EQ(pingpong->width, initial_pingpong_width);
-    EXPECT_EQ(camera->Width(), initial_camera_width);
+    // The chain's buffers are the new card's, with the fraction cut off, as Wallpaper
+    // Engine builds them again for every layout.
+    const auto resized_layout = scene->runtime->NodeTextLayout("caption");
+    ASSERT_TRUE(resized_layout.has_value());
+    EXPECT_GT(pingpong->width, initial_pingpong_width);
+    EXPECT_EQ(pingpong->width, static_cast<int>(resized_layout->card.x()));
+    EXPECT_EQ(pingpong->height, static_cast<int>(resized_layout->card.y()));
+    EXPECT_GT(camera->Width(), initial_camera_width);
     EXPECT_EQ(static_cast<int>(camera->Width()), pingpong->width);
     EXPECT_EQ(static_cast<int>(camera->Height()), pingpong->height);
     const auto resized_text_mesh_size = MeshSize(*text->Mesh());
@@ -1172,16 +1245,16 @@ TEST(TextObjectRuntime, RuntimeTextEffectTargetsResizeWithTextRasterSize) {
                                        effect_layer->FinalMesh(),
                                        pingpong->width,
                                        pingpong->height);
-    EXPECT_EQ(fbo->width, initial_fbo_width);
+    EXPECT_GT(fbo->width, initial_fbo_width);
     EXPECT_GT(resized_text_mesh_size.x(), initial_text_mesh_size.x());
     EXPECT_GT(resized_final_mesh_size.x(), initial_final_mesh_size.x());
     EXPECT_NEAR(resized_final_mesh_size.x(), resized_text_mesh_size.x(), 1.0f);
     EXPECT_NEAR(resized_final_mesh_size.y(), resized_text_mesh_size.y(), 1.0f);
     const auto uv_bounds = MeshTexCoordBounds(effect_layer->FinalMesh());
-    EXPECT_GE(uv_bounds.min_u, 0.0f);
-    EXPECT_LE(uv_bounds.max_u, 1.0f);
-    EXPECT_GE(uv_bounds.min_v, 0.0f);
-    EXPECT_LE(uv_bounds.max_v, 1.0f);
+    EXPECT_FLOAT_EQ(uv_bounds.min_u, 0.0f);
+    EXPECT_FLOAT_EQ(uv_bounds.max_u, 1.0f);
+    EXPECT_FLOAT_EQ(uv_bounds.min_v, 0.0f);
+    EXPECT_FLOAT_EQ(uv_bounds.max_v, 1.0f);
 
     ASSERT_EQ(resolved_final, effect_layer->ResolvedFinalRenderNode());
     ASSERT_NE(resolved_final->Mesh(), nullptr);
@@ -1190,14 +1263,16 @@ TEST(TextObjectRuntime, RuntimeTextEffectTargetsResizeWithTextRasterSize) {
     EXPECT_NEAR(resolved_final_mesh_size.x(), resized_text_mesh_size.x(), 1.0f);
     EXPECT_NEAR(resolved_final_mesh_size.y(), resized_text_mesh_size.y(), 1.0f);
     const auto resolved_uv_bounds = MeshTexCoordBounds(*resolved_final->Mesh());
-    EXPECT_GE(resolved_uv_bounds.min_u, 0.0f);
-    EXPECT_LE(resolved_uv_bounds.max_u, 1.0f);
-    EXPECT_GE(resolved_uv_bounds.min_v, 0.0f);
-    EXPECT_LE(resolved_uv_bounds.max_v, 1.0f);
+    EXPECT_FLOAT_EQ(resolved_uv_bounds.min_u, 0.0f);
+    EXPECT_FLOAT_EQ(resolved_uv_bounds.max_u, 1.0f);
+    EXPECT_FLOAT_EQ(resolved_uv_bounds.min_v, 0.0f);
+    EXPECT_FLOAT_EQ(resolved_uv_bounds.max_v, 1.0f);
+    // The buffers are another size, so the graph that owns them is built again: once.
+    EXPECT_TRUE(scene->runtime->ConsumeSceneGraphMutationFlag());
     EXPECT_FALSE(scene->runtime->ConsumeSceneGraphMutationFlag());
 }
 
-TEST(TextObjectRuntime, ParserTextEffectFinalUvsUseRoundedRenderTargetExtent) {
+TEST(TextObjectRuntime, ParserTextEffectFinalUvsAreTheWholeCutOffBuffer) {
     fs::VFS vfs;
     MountAssets(vfs,
                 {
@@ -1240,9 +1315,10 @@ TEST(TextObjectRuntime, ParserTextEffectFinalUvsUseRoundedRenderTargetExtent) {
             {
               "id": 1,
               "name": "caption",
-              "text": "a",
+              "text": "Wind",
               "font": "Arial",
-              "pointsize": 20.125,
+              "pointsize": 20,
+              "spacing": "0.2 0",
               "padding": 0,
               "origin": "0 0 0",
               "size": [93.6, 41.6],
@@ -1269,14 +1345,171 @@ TEST(TextObjectRuntime, ParserTextEffectFinalUvsUseRoundedRenderTargetExtent) {
     const auto effect_layer = camera->GetImgEffect();
     ASSERT_NE(effect_layer, nullptr);
 
+    // The buffers are the card with the fraction cut off, and the final card is exactly that
+    // box with the whole buffer on it: texture coordinates 0 to 1, neither a texel of the
+    // buffer left out nor one stretched over a fraction of a unit.
+    const auto layout = scene->runtime->NodeTextLayout("caption");
+    ASSERT_TRUE(layout.has_value());
+    ASSERT_GE(layout->card.x() - std::floor(layout->card.x()), 0.5f)
+        << "the card has a fraction that rounding would take up";
+    EXPECT_EQ(static_cast<int>(camera->Width()), static_cast<int>(layout->card.x()));
+    EXPECT_EQ(static_cast<int>(camera->Height()), static_cast<int>(layout->card.y()));
     const auto final_mesh_size = MeshSize(effect_layer->FinalMesh());
-    const auto uv_bounds       = MeshTexCoordBounds(effect_layer->FinalMesh());
-    const auto expected_u_span = final_mesh_size.x() / static_cast<float>(camera->Width());
-    const auto expected_v_span = final_mesh_size.y() / static_cast<float>(camera->Height());
-    EXPECT_NEAR(uv_bounds.max_u - uv_bounds.min_u, expected_u_span, 1.0e-5f);
-    EXPECT_NEAR(uv_bounds.max_v - uv_bounds.min_v, expected_v_span, 1.0e-5f);
-    EXPECT_LT(uv_bounds.max_u - uv_bounds.min_u, 1.0f);
-    EXPECT_LT(uv_bounds.max_v - uv_bounds.min_v, 1.0f);
+    EXPECT_NEAR(final_mesh_size.x(), std::floor(layout->card.x()), 1.0e-3f);
+    EXPECT_NEAR(final_mesh_size.y(), std::floor(layout->card.y()), 1.0e-3f);
+    const auto uv_bounds = MeshTexCoordBounds(effect_layer->FinalMesh());
+    EXPECT_FLOAT_EQ(uv_bounds.min_u, 0.0f);
+    EXPECT_FLOAT_EQ(uv_bounds.max_u, 1.0f);
+    EXPECT_FLOAT_EQ(uv_bounds.min_v, 0.0f);
+    EXPECT_FLOAT_EQ(uv_bounds.max_v, 1.0f);
+}
+
+// Wallpaper Engine builds the buffers an effect chain draws into as the card's width and
+// height with the fraction cut off (at least 4), and the chain's `v_TexCoord` runs 0 to 1
+// across that card. Nothing about the scene or the editor's box enters: not the canvas, not
+// the `size` the editor drew, not the alignment or the padding, which are in the card.
+TEST(TextObjectRuntime, EffectTargetIsTheCardNotACapacity) {
+    struct Variant {
+        const char* name;
+        const char* fields;
+    };
+    const std::vector<Variant> variants {
+        { "centred", R"("text":"Wind","horizontalalign":"center","verticalalign":"center","padding":0)" },
+        { "left top", R"("text":"Wind","horizontalalign":"left","verticalalign":"top","padding":0)" },
+        { "right bottom", R"("text":"Wind","horizontalalign":"right","verticalalign":"bottom","padding":0)" },
+        { "padded", R"("text":"Wind","horizontalalign":"right","padding":"24 10")" },
+        // The editor's box says nothing about the card.
+        { "authored size", R"("text":"Wind","horizontalalign":"left","padding":0,"size":"800 400")" },
+        // A card with a fraction: the buffers cut it off, they do not round it.
+        { "fractional", R"("text":"Wind","padding":0,"spacing":"0.2 0")" },
+        // A card smaller than 4 texels (no text is a 2 by 2 card) still gets 4 by 4 buffers.
+        { "empty", R"("text":"","padding":0)" },
+    };
+    for (const bool with_buffer : { false, true }) {
+        for (const auto& variant : variants) {
+            SCOPED_TRACE(std::string(variant.name) + (with_buffer ? ", with a buffer" : ""));
+            TextEffectScene fixture;
+            ASSERT_TRUE(fixture.Load("text-effect-card-target", variant.fields, with_buffer));
+            auto& scene = *fixture.scene;
+            const auto layout = scene.runtime->NodeTextLayout("caption");
+            ASSERT_TRUE(layout.has_value());
+            const int expected_width  = std::max(4, static_cast<int>(layout->card.x()));
+            const int expected_height = std::max(4, static_cast<int>(layout->card.y()));
+            if (std::string_view(variant.name) == "fractional") {
+                ASSERT_GE(layout->card.x() - std::floor(layout->card.x()), 0.5f)
+                    << "the card has to have a fraction that rounding would take up";
+            }
+            if (std::string_view(variant.name) == "authored size") {
+                ASSERT_LT(expected_width, 400);
+            }
+            if (std::string_view(variant.name) == "empty") {
+                ASSERT_LT(layout->card.x(), 4.0f) << "the card has to be under the floor";
+                ASSERT_EQ(expected_width, 4);
+            }
+
+            auto* pingpong = fixture.FirstTarget();
+            ASSERT_NE(pingpong, nullptr);
+            EXPECT_EQ(pingpong->width, expected_width);
+            EXPECT_EQ(pingpong->height, expected_height);
+            EXPECT_EQ(static_cast<int>(fixture.camera->Width()), expected_width);
+            EXPECT_EQ(static_cast<int>(fixture.camera->Height()), expected_height);
+            // The chain is framed on the card, wherever the alignment hangs it.
+            EXPECT_NEAR(fixture.camera->GetPosition().x(), layout->centre.x(), 1.0e-3);
+            EXPECT_NEAR(fixture.camera->GetPosition().y(), layout->centre.y(), 1.0e-3);
+
+            // The final card is the whole target: its corners are the card's cut-off box and
+            // its texture coordinates are 0 to 1.
+            const auto& final_mesh = fixture.effect_layer->FinalMesh();
+            EXPECT_NEAR(MeshSize(final_mesh).x(), static_cast<float>(expected_width), 1.0e-3f);
+            EXPECT_NEAR(MeshSize(final_mesh).y(), static_cast<float>(expected_height), 1.0e-3f);
+            EXPECT_NEAR(MeshCenter(final_mesh).x(), layout->centre.x(), 1.0e-3f);
+            EXPECT_NEAR(MeshCenter(final_mesh).y(), layout->centre.y(), 1.0e-3f);
+            const auto uv = MeshTexCoordBounds(final_mesh);
+            EXPECT_FLOAT_EQ(uv.min_u, 0.0f);
+            EXPECT_FLOAT_EQ(uv.max_u, 1.0f);
+            EXPECT_FLOAT_EQ(uv.min_v, 0.0f);
+            EXPECT_FLOAT_EQ(uv.max_v, 1.0f);
+
+            // The graph the renderers draw has the same final card.
+            auto graph = sceneToRenderGraph(scene);
+            ASSERT_NE(graph, nullptr);
+            auto* resolved_final = fixture.effect_layer->ResolvedFinalRenderNode();
+            ASSERT_NE(resolved_final, nullptr);
+            ASSERT_NE(resolved_final->Mesh(), nullptr);
+            EXPECT_NEAR(MeshSize(*resolved_final->Mesh()).x(), static_cast<float>(expected_width), 1.0e-3f);
+            const auto resolved_uv = MeshTexCoordBounds(*resolved_final->Mesh());
+            EXPECT_FLOAT_EQ(resolved_uv.min_u, 0.0f);
+            EXPECT_FLOAT_EQ(resolved_uv.max_u, 1.0f);
+        }
+    }
+}
+
+// A card that changes size in texels is built again, once for the text change that did it
+// and not again while it stays that size. A card that changes by less than a texel, or only
+// moves, costs the graph nothing: `ACardThatGrowsWithinATexelKeepsItsBuffers` and
+// `AnEffectChainFollowsTheCardWhenTheAlignmentMovesIt`.
+TEST(TextObjectRuntime, ACardThatChangesInTexelsRebuildsTheGraphOncePerTextChange) {
+    TextEffectScene fixture;
+    ASSERT_TRUE(fixture.Load("text-effect-card-grows",
+                             R"("text":"a","padding":0,"horizontalalign":"right")", true));
+    auto& runtime = *fixture.scene->runtime;
+    ASSERT_NE(sceneToRenderGraph(*fixture.scene), nullptr);
+    (void)runtime.ConsumeSceneGraphMutationFlag();
+    const int before_width = fixture.FirstTarget()->width;
+
+    ASSERT_TRUE(runtime.SetNodeText("caption", "a much longer caption for effects"));
+    PumpTextUntilClean(runtime);
+
+    const auto layout = runtime.NodeTextLayout("caption");
+    ASSERT_TRUE(layout.has_value());
+    const int expected_width  = std::max(4, static_cast<int>(layout->card.x()));
+    const int expected_height = std::max(4, static_cast<int>(layout->card.y()));
+    ASSERT_GT(expected_width, before_width);
+    auto* pingpong = fixture.FirstTarget();
+    ASSERT_NE(pingpong, nullptr);
+    EXPECT_EQ(pingpong->width, expected_width);
+    EXPECT_EQ(pingpong->height, expected_height);
+    EXPECT_EQ(static_cast<int>(fixture.camera->Width()), expected_width);
+    EXPECT_EQ(static_cast<int>(fixture.camera->Height()), expected_height);
+    // Every buffer bound to the first one follows it; the buffer of the effect's own is
+    // sized from the card as the first one was.
+    for (const auto& [key, target] : fixture.scene->renderTargets) {
+        if (! target.bind.enable || target.bind.name != fixture.effect_layer->FirstTarget()) continue;
+        EXPECT_EQ(target.width, expected_width) << key;
+        EXPECT_EQ(target.height, expected_height) << key;
+    }
+    EXPECT_NEAR(MeshSize(fixture.effect_layer->FinalMesh()).x(), static_cast<float>(expected_width), 1.0e-3f);
+    const auto uv = MeshTexCoordBounds(fixture.effect_layer->FinalMesh());
+    EXPECT_FLOAT_EQ(uv.min_u, 0.0f);
+    EXPECT_FLOAT_EQ(uv.max_u, 1.0f);
+
+    // The graph the renderers rebuild is asked for once...
+    EXPECT_TRUE(runtime.ConsumeSceneGraphMutationFlag());
+    // ...and the frames that follow, with nothing changed, ask for nothing.
+    for (int frame = 0; frame < 30; ++frame) {
+        runtime.Tick(1.0 / 60.0);
+        runtime.PumpTextLayerCache();
+        ASSERT_FALSE(runtime.ConsumeSceneGraphMutationFlag()) << "frame " << frame;
+    }
+
+    // A card that gets smaller is built again at its new size the same way: the buffers do
+    // not stay as large as the longest text the layer has shown.
+    ASSERT_TRUE(runtime.SetNodeText("caption", "a"));
+    PumpTextUntilClean(runtime);
+    const auto shrunk = runtime.NodeTextLayout("caption");
+    ASSERT_TRUE(shrunk.has_value());
+    ASSERT_LT(static_cast<int>(shrunk->card.x()), expected_width);
+    EXPECT_EQ(fixture.FirstTarget()->width, std::max(4, static_cast<int>(shrunk->card.x())));
+    EXPECT_EQ(fixture.FirstTarget()->height, std::max(4, static_cast<int>(shrunk->card.y())));
+    EXPECT_EQ(static_cast<int>(fixture.camera->Width()), fixture.FirstTarget()->width);
+    EXPECT_NEAR(MeshSize(fixture.effect_layer->FinalMesh()).x(),
+                static_cast<float>(fixture.FirstTarget()->width), 1.0e-3f);
+    EXPECT_TRUE(runtime.ConsumeSceneGraphMutationFlag());
+    for (int frame = 0; frame < 30; ++frame) {
+        runtime.Tick(1.0 / 60.0);
+        runtime.PumpTextLayerCache();
+        ASSERT_FALSE(runtime.ConsumeSceneGraphMutationFlag()) << "frame " << frame;
+    }
 }
 
 TEST(TextObjectRuntime, OversizedTextEffectClipsFinalMeshToBoundedTarget) {
@@ -1411,7 +1644,7 @@ TEST(TextObjectRuntime, OversizedTextEffectClipsFinalMeshToBoundedTarget) {
     EXPECT_FALSE(scene->runtime->ConsumeSceneGraphMutationFlag());
 }
 
-TEST(TextObjectRuntime, SceneScriptTextEffectMutationKeepsFinalUvsInCapacity) {
+TEST(TextObjectRuntime, SceneScriptTextEffectMutationKeepsFinalUvsOnTheWholeBuffer) {
     fs::VFS vfs;
     MountAssets(vfs,
                 {
@@ -1489,11 +1722,18 @@ TEST(TextObjectRuntime, SceneScriptTextEffectMutationKeepsFinalUvsInCapacity) {
     PumpTextUntilClean(*scene->runtime);
 
     EXPECT_EQ(scene->runtime->NodeText("caption"), "a much longer caption for effects");
+    // The buffers were built again for the longer text, and the final card is all of them.
     const auto uv_bounds = MeshTexCoordBounds(effect_layer->FinalMesh());
-    EXPECT_GE(uv_bounds.min_u, 0.0f);
-    EXPECT_LE(uv_bounds.max_u, 1.0f);
-    EXPECT_GE(uv_bounds.min_v, 0.0f);
-    EXPECT_LE(uv_bounds.max_v, 1.0f);
+    EXPECT_FLOAT_EQ(uv_bounds.min_u, 0.0f);
+    EXPECT_FLOAT_EQ(uv_bounds.max_u, 1.0f);
+    EXPECT_FLOAT_EQ(uv_bounds.min_v, 0.0f);
+    EXPECT_FLOAT_EQ(uv_bounds.max_v, 1.0f);
+    const auto layout = scene->runtime->NodeTextLayout("caption");
+    ASSERT_TRUE(layout.has_value());
+    auto* pingpong = scene->FindRenderTarget(effect_layer->FirstTarget());
+    ASSERT_NE(pingpong, nullptr);
+    EXPECT_EQ(pingpong->width, static_cast<int>(layout->card.x()));
+    EXPECT_TRUE(scene->runtime->ConsumeSceneGraphMutationFlag());
     EXPECT_FALSE(scene->runtime->ConsumeSceneGraphMutationFlag());
     EXPECT_EQ(scene->runtime->scriptErrorCount(), 0u);
 }
@@ -1618,8 +1858,9 @@ TEST(TextObjectRuntime, AlignedTextEffectTracksMeasuredRenderFrameWhenRasterExpa
     ASSERT_NE(pingpong, nullptr);
     auto* fbo = scene->FindRenderTarget(effect_layer->GetEffect(0)->nodes.front().output);
     ASSERT_NE(fbo, nullptr);
-    EXPECT_GE(pingpong->width, static_cast<int32_t>(std::lround(render_frame.size.x())));
-    EXPECT_GE(pingpong->height, static_cast<int32_t>(std::lround(render_frame.size.y())));
+    // The buffers are the card, its fraction cut off, and the final card is all of them.
+    EXPECT_EQ(pingpong->width, static_cast<int32_t>(render_frame.size.x()));
+    EXPECT_EQ(pingpong->height, static_cast<int32_t>(render_frame.size.y()));
     EXPECT_EQ(static_cast<int32_t>(std::lround(camera->Width())), pingpong->width);
     EXPECT_EQ(static_cast<int32_t>(std::lround(camera->Height())), pingpong->height);
 
@@ -1634,10 +1875,10 @@ TEST(TextObjectRuntime, AlignedTextEffectTracksMeasuredRenderFrameWhenRasterExpa
     EXPECT_NEAR(final_mesh_center.x(), render_frame.center.x(), 1.0e-4f);
     EXPECT_NEAR(final_mesh_center.y(), render_frame.center.y(), 1.0e-4f);
     const auto uv_bounds = MeshTexCoordBounds(effect_layer->FinalMesh());
-    EXPECT_GE(uv_bounds.min_u, 0.0f);
-    EXPECT_LE(uv_bounds.max_u, 1.0f);
-    EXPECT_GE(uv_bounds.min_v, 0.0f);
-    EXPECT_LE(uv_bounds.max_v, 1.0f);
+    EXPECT_FLOAT_EQ(uv_bounds.min_u, 0.0f);
+    EXPECT_FLOAT_EQ(uv_bounds.max_u, 1.0f);
+    EXPECT_FLOAT_EQ(uv_bounds.min_v, 0.0f);
+    EXPECT_FLOAT_EQ(uv_bounds.max_v, 1.0f);
 
     auto graph = sceneToRenderGraph(*scene);
     ASSERT_NE(graph, nullptr);
@@ -1764,8 +2005,8 @@ TEST(TextObjectRuntime, AlignedTextEffectCoversMeasuredRasterWithoutScaling) {
     ASSERT_NE(pingpong, nullptr);
     auto* fbo = scene->FindRenderTarget(effect_layer->GetEffect(0)->nodes.front().output);
     ASSERT_NE(fbo, nullptr);
-    EXPECT_GE(pingpong->width, static_cast<int32_t>(std::ceil(card.x())));
-    EXPECT_GE(pingpong->height, static_cast<int32_t>(std::ceil(card.y())));
+    EXPECT_EQ(pingpong->width, static_cast<int32_t>(card.x()));
+    EXPECT_EQ(pingpong->height, static_cast<int32_t>(card.y()));
     EXPECT_EQ(static_cast<int32_t>(std::lround(camera->Width())), pingpong->width);
     EXPECT_EQ(static_cast<int32_t>(std::lround(camera->Height())), pingpong->height);
     EXPECT_NEAR(camera->GetPosition().x(), text_mesh_center.x(), 1.0e-4);
@@ -6601,12 +6842,12 @@ TEST(TextObjectRuntime, AnEffectChainFollowsTheCardWhenTheAlignmentMovesIt) {
         EXPECT_NEAR(MeshCenter(effect_layer->FinalMesh()).x(), layout->centre.x(), 1.0e-3f);
         EXPECT_NEAR(MeshCenter(effect_layer->FinalMesh()).y(), layout->centre.y(), 1.0e-3f);
         EXPECT_NEAR(final_box.Size().x(), card.x(), 1.0f);
-        // The final card is cut from what the chain drew: its texture coordinates stay in range.
+        // The final card is all of what the chain drew: its texture coordinates are 0 to 1.
         const auto uv = MeshTexCoordBounds(effect_layer->FinalMesh());
-        EXPECT_GE(uv.min_u, -1.0e-4f);
-        EXPECT_LE(uv.max_u, 1.0f + 1.0e-4f);
-        EXPECT_GE(uv.min_v, -1.0e-4f);
-        EXPECT_LE(uv.max_v, 1.0f + 1.0e-4f);
+        EXPECT_FLOAT_EQ(uv.min_u, 0.0f);
+        EXPECT_FLOAT_EQ(uv.max_u, 1.0f);
+        EXPECT_FLOAT_EQ(uv.min_v, 0.0f);
+        EXPECT_FLOAT_EQ(uv.max_v, 1.0f);
         EXPECT_NEAR(camera->GetPosition().x(), layout->centre.x(), 1.0e-3);
         EXPECT_NEAR(MeshCenter(*node->Mesh()).x(), layout->centre.x(), 1.0e-3f);
     };

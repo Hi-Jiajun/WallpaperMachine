@@ -173,35 +173,6 @@ void ResizeCardMesh(SceneMesh& mesh, TextLayerRenderBounds bounds) {
     mesh.SetDirty();
 }
 
-void ResizeCardMesh(SceneMesh& mesh, TextLayerRenderBounds bounds, TextLayerTextureBounds texture) {
-    if (bounds.right <= bounds.left || bounds.top <= bounds.bottom) return;
-
-    SceneMesh replacement(mesh.UpdateDriver());
-    constexpr float z = 0.0f;
-
-    const std::array pos {
-        bounds.left,  bounds.bottom, z, bounds.left, bounds.top, z,
-        bounds.right, bounds.bottom, z, bounds.right, bounds.top, z,
-    };
-    const std::array tex_coord {
-        texture.left, texture.bottom, texture.left, texture.top,
-        texture.right, texture.bottom, texture.right, texture.top,
-    };
-
-    SceneVertexArray vertices(
-        {
-            { WE_IN_POSITION.data(), VertexType::FLOAT3 },
-            { WE_IN_TEXCOORD.data(), VertexType::FLOAT2 },
-        },
-        4);
-    vertices.SetVertex(WE_IN_POSITION, pos);
-    vertices.SetVertex(WE_IN_TEXCOORD, tex_coord);
-    replacement.AddVertexArray(std::move(vertices));
-
-    mesh.ChangeMeshDataFrom(replacement);
-    mesh.SetDirty();
-}
-
 Eigen::Vector2d CursorWorldToNdc(const CursorViewport& viewport, const Eigen::Vector3f& cursor) {
     if (viewport.content_size.x() == 0.0f || viewport.content_size.y() == 0.0f) {
         return Eigen::Vector2d { 0.0, 0.0 };
@@ -1133,61 +1104,42 @@ bool SceneRuntimeContext::ApplyPreparedTextLayer(const RuntimePreparedTextLayerI
             effect_iterator->second.node != nullptr &&
             effect_iterator->second.node->Mesh() != nullptr &&
             effect_iterator->second.layer != nullptr) {
-            auto& target_frame = effect_iterator->second.target_frame;
-            // The buffers were built at their card's size with the fraction cut off, so
-            // what a card asks of them is its size in texels, as they were built: the
-            // part of a texel past them is cut off in these as in Wallpaper Engine's,
-            // and is no reason to build every buffer again.
-            const auto texels = TextCardTexelExtent(prepared.render_frame.size);
-            const auto needed = TextLayerRenderFrameForTargetExtent(
-                prepared.render_frame,
-                Eigen::Vector2f(static_cast<float>(texels[0]), static_cast<float>(texels[1])));
-            const auto& bounds = needed.bounds;
-            if (bounds.left < target_frame.bounds.left ||
-                bounds.right > target_frame.bounds.right ||
-                bounds.bottom < target_frame.bounds.bottom ||
-                bounds.top > target_frame.bounds.top) {
-                Eigen::Vector2f capacity = target_frame.size;
-                for (int axis = 0; axis < 2; ++axis) {
-                    while (capacity[axis] < needed.size[axis] && capacity[axis] < 4096.0f)
-                        capacity[axis] = std::min(4096.0f, capacity[axis] * 2.0f);
+            auto& binding = effect_iterator->second;
+            // The chain's buffers are the card with the fraction cut off, as Wallpaper Engine
+            // builds them again for every layout. A card that is the same number of texels
+            // as before (a clock whose digits differ by a fraction, a text that only changed
+            // sides) keeps them: the camera and the final card follow it and nothing else
+            // is touched. One that is another size asks for the graph that owns the buffers
+            // to be built once, however many frames the text takes to settle.
+            const auto frame   = TextLayerEffectFrame(prepared.render_frame);
+            const bool resized = ! SizeNearlyEqual(frame.size, binding.target_frame.size, 0.5f);
+            binding.target_frame = frame;
+            auto camera = m_scene->cameras.at(binding.node->Camera());
+            camera->SetWidth(frame.size.x());
+            camera->SetHeight(frame.size.y());
+            camera->GetAttachedNode()->SetTranslate(
+                Eigen::Vector3f(frame.center.x(), frame.center.y(), 0.0f));
+            camera->Update();
+            if (resized) {
+                // The first buffer and every buffer sized from it.
+                const auto& first = binding.layer->FirstTarget();
+                for (auto& [key, target] : m_scene->renderTargets) {
+                    if (key != first && (! target.bind.enable || target.bind.name != first))
+                        continue;
+                    const double scale = key == first ? 1.0 : target.bind.scale;
+                    target.width = target.authored_width =
+                        std::max(4, static_cast<int32_t>(std::lround(frame.size.x() * scale)));
+                    target.height = target.authored_height =
+                        std::max(4, static_cast<int32_t>(std::lround(frame.size.y() * scale)));
                 }
-                const bool grew = ! SizeNearlyEqual(capacity, target_frame.size, 1.0f);
-                target_frame = TextLayerRenderFrameForCapacity(
-                    prepared.state, prepared.layout, capacity);
-                auto& binding = effect_iterator->second;
-                auto camera = m_scene->cameras.at(binding.node->Camera());
-                camera->SetWidth(capacity.x());
-                camera->SetHeight(capacity.y());
-                camera->GetAttachedNode()->SetTranslate(
-                    Eigen::Vector3f(target_frame.center.x(), target_frame.center.y(), 0.0f));
-                camera->Update();
-                if (grew) {
-                    const auto& first = binding.layer->FirstTarget();
-                    for (auto& [key, target] : m_scene->renderTargets) {
-                        if (key != first && (! target.bind.enable || target.bind.name != first))
-                            continue;
-                        const double scale = key == first ? 1.0 : target.bind.scale;
-                        target.width = target.authored_width =
-                            std::max(4, static_cast<int32_t>(std::lround(capacity.x() * scale)));
-                        target.height = target.authored_height =
-                            std::max(4, static_cast<int32_t>(std::lround(capacity.y() * scale)));
-                    }
-                    m_scene_graph_mutated = true;
-                }
+                m_scene_graph_mutated = true;
             }
-            const auto  final_frame =
-                TextLayerRenderFrameClampedToTarget(prepared.render_frame, target_frame);
-            const auto texture_bounds = TextLayerTextureBoundsForRenderTarget(
-                final_frame, target_frame.size, target_frame.center);
-            ResizeCardMesh(
-                effect_iterator->second.layer->FinalMesh(), final_frame.bounds, texture_bounds);
-            if (auto* resolved =
-                    effect_iterator->second.layer->ResolvedFinalRenderNode();
+            ResizeCardMesh(binding.layer->FinalMesh(), frame.bounds);
+            if (auto* resolved = binding.layer->ResolvedFinalRenderNode();
                 resolved != nullptr && resolved->Mesh() != nullptr) {
-                ResizeCardMesh(*resolved->Mesh(), final_frame.bounds, texture_bounds);
+                ResizeCardMesh(*resolved->Mesh(), frame.bounds);
             }
-            card = final_frame;
+            card = frame;
         }
         if (const auto node_iterator = m_nodes.find(prepared.name);
             node_iterator != m_nodes.end() && node_iterator->second != nullptr) {

@@ -960,7 +960,17 @@ into private textures; the three that draw skip visibly without a Metal device.
   image layer of one local HDR scene). The distance fog and height fog flags
   of a scene, which make Wallpaper Engine pad and composite every text layer, are
   modelled for the padding only: the composite itself and the `FOG_COMPUTED` combo
-  change nothing a text layer draws here. A style key (`outline`, `blur`,
+  change nothing a text layer draws here. The buffers of an effect chain on a text
+  layer are the card's size, as in Wallpaper Engine, with three differences that are
+  not worked around. The `fbos` an effect declares are the card's size whatever their
+  `scale` (Wallpaper Engine's divide it, from the decompile's call of the buffer
+  builder, which was not re-read for the division), so a half-scale blur buffer costs
+  four times what it does there. A card past 4096 texels on a side is drawn into
+  buffers cut to 4096, where Wallpaper Engine has no limit of its own (the glyph raster
+  is capped at 4096 as well, and stretches past it). A layer with an outline, blur or
+  shadow draws into the card and the margin the style reaches, which Wallpaper Engine
+  does not have, so an effect's UV fractions on it are fractions of that slightly larger
+  picture. A style key (`outline`, `blur`,
   `dropshadow`, their sizes and opacity) driven by a script or a timeline keeps the
   scene file's value; one bound to a property is read once at load, with the user's
   value, and held there (a load-only property). The text object's other layout keys

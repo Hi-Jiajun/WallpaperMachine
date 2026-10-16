@@ -1186,8 +1186,8 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   - A sampled text layer is its card in its own composite, as an image is
     (`ASampledTextLayerIsItsCardInItsOwnComposite`; pixels on the native backend
     in `MetalSceneDraw.AHiddenTextLayerAnotherSamplesIsItsCardInItsComposite`).
-    With effects the card is the chain's final card, not the larger capacity
-    the chain renders at, and a card aligned to one side of the origin is framed
+    With effects the card is the chain's final card, which is the chain's buffers
+    and nothing wider, and a card aligned to one side of the origin is framed
     off the layer's origin. A relayout moves the composite camera with
     the card and resizes the target to keep one texel per unit, since a consumer
     may place the image by its size (`g_Texture1Resolution`); only a size change
@@ -1774,6 +1774,44 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   compatibility renderer draw one picture, and
   `.EnablingAnEffectDoesNotMoveAnAlignedTextLayerOnBothRenderers` that padding moves
   nothing.
+- **Text effect buffers are the card** — `text_object_runtime_test`. The buffers an effect
+  chain on a text layer draws into are the layer's card with the fraction cut off, at least
+  4 texels, as Wallpaper Engine builds them, so the chain's `v_TexCoord` runs 0 to 1 across
+  the card. `TextObjectRuntime.EffectTargetIsTheCardNotACapacity` parses seven layers (centred,
+  left and top, right and bottom, padded, with an authored `size` of 800 by 400, with a
+  card of fraction .6, and with no text), each with a one-pass effect and with one that draws through a
+  buffer of its own, and requires the first buffer, the camera and the final card to be
+  the width and height of the card the layout measured, cut off and not rounded, centred
+  where the alignment hangs the card, with texture coordinates exactly 0 to 1 on the
+  final card and on the node the graph resolves it onto. None of them is a capacity, as
+  they were (twice the canvas or four times the authored `size`, at most 4096).
+  `.ACardThatChangesInTexelsRebuildsTheGraphOncePerTextChange` makes a text longer and
+  requires every buffer sized from the first to follow, the graph to be asked for once and
+  never again over thirty frames that change nothing, then makes it short again and
+  requires the same of the smaller card; a card under 4 texels (no text) gets 4 by 4
+  buffers and a final card that is exactly them (the `empty` variant above);
+  `.ACardThatGrowsWithinATexelKeepsItsBuffers` and
+  `.AnEffectChainFollowsTheCardWhenTheAlignmentMovesIt` are the other side: a card that
+  changes by a fraction or only moves costs the graph nothing.
+  `.RuntimeTextEffectTargetsResizeWithTextRasterSize`,
+  `.ParserTextEffectFinalUvsAreTheWholeCutOffBuffer`,
+  `.SceneScriptTextEffectMutationKeepsFinalUvsOnTheWholeBuffer` and the two
+  `.AlignedTextEffect...` tests follow the same rule through the parser, a relayout, a
+  script and the alignment. `.OversizedTextEffectClipsFinalMeshToBoundedTarget` keeps the
+  one clamp that is left: a card past 4096 texels on a side, which Wallpaper Engine has no
+  limit for, is drawn into buffers cut to 4096. On both renderers
+  `MetalSceneDraw.AnEffectsUvOffsetIsAFractionOfTheCardOnBothRenderers` puts a layer
+  through an effect that reads its input 0.25 along, across and down, and requires the text
+  to move by a quarter of the card's width, and up by a quarter of its height (`v` runs
+  from the top), within 1.5 pixels; with buffers sized from the canvas the
+  text moved by a quarter of those and left the picture. In a probe scene (`HHH` in
+  DIN Engschrift 48 with a padding of 200 through the `transform` effect at offset
+  0.25 0, in boxes of 400 by 160 and of 1400 by 700) the text stands 162 canvas units left
+  of its unaffected twin for a card 646 units wide, in both boxes (our render of the probe; no
+  frame of Wallpaper Engine's has been compared for it, so it shows the buffers are the card, not that
+  Wallpaper Engine moves the text by that much). A real clock (a
+  left-aligned, padded layer through a skew effect) that stood 22 pixels right of
+  Wallpaper Engine's, in a 3456-pixel frame, is within one.
 - **Alignment words and brightness** — `text_object_runtime_test`.
   `TextObjectRuntime.AlignmentKeysAreReadAsTheEnumRegistryReadsThem` parses a scene
   with every shape of the two keys (absent, each word, wrong case, empty, a longer
@@ -1891,9 +1929,9 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   waiting clock. Completed glyph images publish in revision order even when a
   newer value is pending, so continuously changing labels never stay blank
   waiting for an exact-current revision; the test compares the published glyph
-  pixels before and after catching up. An effect target grows geometrically, up
-  to 4096 per dimension, only when its caption outgrows the current capacity, and
-  that size change requests a graph rebuild.
+  pixels before and after catching up. An effect's buffers are the card's size in
+  texels, so a change of the text that gives the card another size requests one graph
+  rebuild (see "Text effect buffers are the card").
 - **Text layers on the native backend** — `MetalSceneDraw.ATextLayerIsParsedTranslatedAndDrawnByTheNativeBackend`:
   a parsed text object, the text program translated to Metal, the rasterised
   glyphs imported and the card drawn into the scene's own target. A text layer
@@ -1908,9 +1946,9 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   a text layer with effects has three meshes the relayout rewrites — its own
   card, the chain's final card and the node the chain resolves its last pass onto
   — and all of them have to be accepted and updated, or the scene falls back as a
-  whole or freezes at its first layout. Use text whose glyphs differ, not more of
-  the same word: the chain clips the card to its buffer, so a longer repetition
-  can leave identical pixels.
+  whole or freezes at its first layout. Use text whose glyphs differ from the first
+  text, so that a relayout that never reached the chain is a picture that did not
+  change.
 - **Opt-in local-asset diagnostic** — `TextObjectRuntime.LonelyCatHeadlessRegression`
   in `text_object_runtime_test`: set `WE_TEST_PROJECT`, `WE_TEST_ASSETS` and a
   disposable `WE_TEST_CACHE`, then run with

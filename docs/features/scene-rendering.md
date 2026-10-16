@@ -479,8 +479,20 @@ hangs.
 
 Every buffer of a card, an effect's or the composite another layer
 samples, is built at the card's width and height with the fraction cut off, at least 4
-texels, as the scene loads and again whenever a change of the text changes the card; a
-card that grows by less than the texel its buffers already have costs no new ones.
+texels, whatever the size of the scene or of the editor's box, as the scene loads and
+again whenever a change of the text gives the card another size in texels (one rebuild
+of the render graph for that change; none while the card only moves, as when its
+alignment flips, or grows by less than a texel; a rebuild is about 0.5 ms of lowering and
+the compile of every pass, 0.6 to 0.9 ms in all on a scene of one layer and 39 to 45 ms on
+a scene of 72 passes, and it drops every uploaded image, so a text with a visible effect whose
+card changes in texels every second, proportional digits or a typewriter, makes a heavy
+scene hitch for a few frames once per change). An effect on the text therefore sees
+the card as its whole picture: `v_TexCoord` runs 0 to 1 across it and
+`g_Texture0Resolution` is its size, so an offset, skew or scroll given as a fraction of
+the picture moves by that fraction of the card, as in Wallpaper Engine. A card past
+4096 texels on a side is drawn cut off to 4096. An effect's own buffers (`fbos`) that name no
+`width`, `height` or `fit` are the card's size whatever their `scale`; one that names its own
+size keeps that fixed size, as for an image layer, and is not resized with the card.
 
 `maxwidth` is the width a row may fill, as authored: padding is never
 taken from it, so a padded card can be wider than `maxwidth`. A row wraps before a

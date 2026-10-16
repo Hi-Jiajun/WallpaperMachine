@@ -1428,27 +1428,6 @@ TextLayerRenderFrame TextLayerRenderFrameForLayout(const TextLayerState& state,
     };
 }
 
-TextLayerRenderFrame TextLayerRenderFrameForCapacity(const TextLayerState& state,
-                                                     const TextLayerLayout& layout,
-                                                     Eigen::Vector2f capacity_size) {
-    const auto frame = TextLayerRenderFrameForLayout(state, layout);
-    return TextLayerRenderFrameForTargetExtent(frame, capacity_size);
-}
-
-TextLayerRenderFrame TextLayerRenderFrameForTargetExtent(const TextLayerRenderFrame& frame,
-                                                         Eigen::Vector2f target_extent) {
-    return {
-        .bounds = {
-            .left = frame.center.x() - (target_extent.x() * 0.5f),
-            .right = frame.center.x() + (target_extent.x() * 0.5f),
-            .bottom = frame.center.y() - (target_extent.y() * 0.5f),
-            .top = frame.center.y() + (target_extent.y() * 0.5f),
-        },
-        .size = target_extent,
-        .center = frame.center,
-    };
-}
-
 std::array<int32_t, 2> TextCardTexelExtent(Eigen::Vector2f card) {
     return {
         std::max(4, static_cast<int32_t>(std::max(1.0f, card.x()))),
@@ -1456,34 +1435,19 @@ std::array<int32_t, 2> TextCardTexelExtent(Eigen::Vector2f card) {
     };
 }
 
-TextLayerRenderFrame TextLayerRenderFrameClampedToTarget(const TextLayerRenderFrame& frame,
-                                                         const TextLayerRenderFrame& target) {
-    const TextLayerRenderBounds bounds {
-        .left   = std::clamp(frame.bounds.left, target.bounds.left, target.bounds.right),
-        .right  = std::clamp(frame.bounds.right, target.bounds.left, target.bounds.right),
-        .bottom = std::clamp(frame.bounds.bottom, target.bounds.bottom, target.bounds.top),
-        .top    = std::clamp(frame.bounds.top, target.bounds.bottom, target.bounds.top),
-    };
+TextLayerRenderFrame TextLayerEffectFrame(const TextLayerRenderFrame& card) {
+    const auto texels = TextCardTexelExtent(card.size);
+    const Eigen::Vector2f size(static_cast<float>(std::min(texels[0], kTextEffectExtentLimit)),
+                               static_cast<float>(std::min(texels[1], kTextEffectExtentLimit)));
     return {
-        .bounds = bounds,
-        .size   = Eigen::Vector2f(bounds.right - bounds.left, bounds.top - bounds.bottom),
-        .center = Eigen::Vector2f((bounds.left + bounds.right) * 0.5f,
-                                  (bounds.bottom + bounds.top) * 0.5f),
-    };
-}
-
-TextLayerTextureBounds TextLayerTextureBoundsForRenderTarget(const TextLayerRenderFrame& frame,
-                                                             Eigen::Vector2f target_size,
-                                                             Eigen::Vector2f target_center) {
-    if (target_size.x() <= 0.0f || target_size.y() <= 0.0f) return {};
-
-    const auto target_left   = target_center.x() - (target_size.x() * 0.5f);
-    const auto target_bottom = target_center.y() - (target_size.y() * 0.5f);
-    return {
-        .left = (frame.bounds.left - target_left) / target_size.x(),
-        .right = (frame.bounds.right - target_left) / target_size.x(),
-        .bottom = 1.0f - ((frame.bounds.bottom - target_bottom) / target_size.y()),
-        .top = 1.0f - ((frame.bounds.top - target_bottom) / target_size.y()),
+        .bounds = {
+            .left   = card.center.x() - size.x() * 0.5f,
+            .right  = card.center.x() + size.x() * 0.5f,
+            .bottom = card.center.y() - size.y() * 0.5f,
+            .top    = card.center.y() + size.y() * 0.5f,
+        },
+        .size   = size,
+        .center = card.center,
     };
 }
 

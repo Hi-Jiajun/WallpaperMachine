@@ -234,13 +234,6 @@ struct TextLayerRenderFrame {
     Eigen::Vector2f       center { Eigen::Vector2f::Zero() };
 };
 
-struct TextLayerTextureBounds {
-    float left { 0.0f };
-    float right { 1.0f };
-    float bottom { 1.0f };
-    float top { 0.0f };
-};
-
 class TextLayer {
 public:
     explicit TextLayer(TextLayerState state);
@@ -301,22 +294,20 @@ TextLayerRenderBounds TextLayerRenderBoundsForLayout(const TextLayerState& state
                                                      const TextLayerLayout& layout);
 TextLayerRenderFrame TextLayerRenderFrameForLayout(const TextLayerState& state,
                                                    const TextLayerLayout& layout);
-/// The frame of a buffer `capacity_size` wide and tall, centred on the card.
-TextLayerRenderFrame TextLayerRenderFrameForCapacity(const TextLayerState& state,
-                                                     const TextLayerLayout& layout,
-                                                     Eigen::Vector2f capacity_size);
-TextLayerRenderFrame TextLayerRenderFrameForTargetExtent(const TextLayerRenderFrame& frame,
-                                                         Eigen::Vector2f target_extent);
 /// The texels of the buffers a text card is drawn into: Wallpaper Engine builds them as the
 /// card's width and height with the fraction cut off, and at least 4 each. Every buffer
 /// built for a card, as the scene loads and again when the card changes, takes its size
 /// from here, so that none rounds where another cuts.
 std::array<int32_t, 2> TextCardTexelExtent(Eigen::Vector2f card);
-TextLayerRenderFrame TextLayerRenderFrameClampedToTarget(const TextLayerRenderFrame& frame,
-                                                         const TextLayerRenderFrame& target);
-TextLayerTextureBounds TextLayerTextureBoundsForRenderTarget(const TextLayerRenderFrame& frame,
-                                                             Eigen::Vector2f target_size,
-                                                             Eigen::Vector2f target_center);
+/// The most texels a side of the buffers an effect chain draws into holds. Wallpaper Engine
+/// has no limit of its own on them; a card past this is drawn cut off to it, centred.
+constexpr int32_t kTextEffectExtentLimit = 4096;
+/// The buffers the effect chain of a text layer draws into, as a frame: `TextCardTexelExtent`
+/// of the card (at most `kTextEffectExtentLimit`) wide and tall, centred on the card. They are
+/// the card and nothing wider, so the chain's texture coordinates 0 to 1 span the card, and
+/// the final card that puts the chain's result on the scene is this frame with the whole of
+/// the buffer on it.
+TextLayerRenderFrame TextLayerEffectFrame(const TextLayerRenderFrame& card);
 std::string     TextTextureName(std::string_view layer_key);
 void            RasterizeTextLayer(const TextLayerState& state, uint32_t width, uint32_t height,
                                    std::vector<uint8_t>& rgba);

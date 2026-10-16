@@ -859,30 +859,6 @@ void GenTextCardMesh(SceneMesh& mesh, TextLayerRenderBounds bounds,
     mesh.AddVertexArray(std::move(vertex));
 }
 
-void GenTextCardMesh(SceneMesh& mesh, TextLayerRenderBounds bounds,
-                     TextLayerTextureBounds texture) {
-    constexpr float z = 0.0f;
-
-    const std::array pos = {
-        bounds.left, bounds.bottom, z, bounds.left, bounds.top, z,
-        bounds.right, bounds.bottom, z, bounds.right, bounds.top, z,
-    };
-    const std::array texCoord = {
-        texture.left, texture.bottom, texture.left, texture.top,
-        texture.right, texture.bottom, texture.right, texture.top,
-    };
-
-    SceneVertexArray vertex(
-        {
-            { WE_IN_POSITION.data(), VertexType::FLOAT3 },
-            { WE_IN_TEXCOORD.data(), VertexType::FLOAT2 },
-        },
-        4);
-    vertex.SetVertex(WE_IN_POSITION, pos);
-    vertex.SetVertex(WE_IN_TEXCOORD, texCoord);
-    mesh.AddVertexArray(std::move(vertex));
-}
-
 void GenPassthroughCardMesh(SceneMesh& mesh, const std::array<uint16_t, 2> size,
                             const SceneNode& node, int32_t projection_width,
                             int32_t projection_height) {
@@ -1837,33 +1813,6 @@ void RegisterTextTexture(Scene& scene, const std::string& texture_name,
     scene.textures[texture_name] = std::move(texture);
 }
 
-Eigen::Vector2f ResolveTextEffectCapacity(const wpscene::WPTextObject& obj,
-                                          const ParseContext& context,
-                                          Eigen::Vector2f render_size, bool author_effects) {
-    constexpr float kExplicitCapacityScale = 4.0f;
-    constexpr float kImplicitCapacityScale = 2.0f;
-    constexpr float kMaxRuntimeTextEffectSize = 4096.0f;
-    const Eigen::Vector2f max_capacity(kMaxRuntimeTextEffectSize, kMaxRuntimeTextEffectSize);
-    // A layer whose only step is the colour blend's passthrough draws its card and
-    // nothing wider, so its buffers are the card's size, not room for an effect
-    // to spread into.
-    if (! author_effects) return render_size.cwiseMin(max_capacity);
-    const bool has_explicit_size = obj.size[0] > 0.0f && obj.size[1] > 0.0f;
-    Eigen::Vector2f capacity = render_size.cwiseMin(max_capacity);
-    if (has_explicit_size) {
-        capacity = capacity.cwiseMax(
-            (Eigen::Vector2f(obj.size[0], obj.size[1]) * kExplicitCapacityScale)
-                .cwiseMin(max_capacity));
-    } else {
-        capacity =
-            capacity.cwiseMax((Eigen::Vector2f(static_cast<float>(context.ortho_w),
-                                               static_cast<float>(context.ortho_h)) *
-                               kImplicitCapacityScale)
-                                  .cwiseMin(max_capacity));
-    }
-    return capacity.cwiseMin(max_capacity);
-}
-
 /// A layer another layer samples draws into a composite of its own, `extent`
 /// texels, through a camera that frames the layer's card in its own texture
 /// space: the card fills the target, and where the layer sits in the scene --
@@ -1896,11 +1845,10 @@ SceneCamera& RegisterLayerComposite(ParseContext& context, int32_t id, SceneNode
 }
 
 /// A sampled text layer's composite is the card it shows: its text, or with
-/// effects the final card of the chain, never the larger capacity the chain
-/// renders at. Aligned to one side of a box the text overflows, that card is
-/// not centred on the layer's origin, and every relayout may move and resize
-/// it (`SceneRuntimeContext::FitTextLayerComposite`), so the camera has a node
-/// of its own and frames the card exactly.
+/// effects the final card of the chain. Aligned to one side of a box the text
+/// overflows, that card is not centred on the layer's origin, and every relayout
+/// may move and resize it (`SceneRuntimeContext::FitTextLayerComposite`), so the
+/// camera has a node of its own and frames the card exactly.
 void RegisterTextComposite(ParseContext& context, const wpscene::WPTextObject& object,
                            SceneNode& node, const TextLayerRenderFrame& card) {
     auto camera_node = std::make_shared<SceneNode>();
@@ -2247,27 +2195,12 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
     const auto layout              = MeasureTextLayerLayout(text_state);
     const auto raster_size         = TextLayerRasterSizeForLayout(text_state, layout);
     auto       render_frame        = TextLayerRenderFrameForLayout(text_state, layout);
-    auto       effect_target_size =
-        ResolveTextEffectCapacity(obj, context, raster_size,
-                                  std::any_of(obj.effects.begin(), obj.effects.end(),
-                                              [&](const wpscene::WPImageEffect& effect) {
-                                                  return EffectIsBuilt(effect) &&
-                                                         (! color_blend_effect.has_value() ||
-                                                          &effect != &obj.effects[*color_blend_effect]);
-                                              }));
-    auto       effect_target_frame =
-        TextLayerRenderFrameForCapacity(text_state, layout, effect_target_size);
-    auto       effect_render_extent = TextCardTexelExtent(effect_target_frame.size);
-    effect_target_frame = TextLayerRenderFrameForTargetExtent(
-        effect_target_frame,
-        Eigen::Vector2f(static_cast<float>(effect_render_extent[0]),
-                        static_cast<float>(effect_render_extent[1])));
-    auto       effect_final_frame =
-        TextLayerRenderFrameClampedToTarget(render_frame, effect_target_frame);
-    auto       effect_texture_bounds = TextLayerTextureBoundsForRenderTarget(
-        effect_final_frame,
-        effect_target_frame.size,
-        effect_target_frame.center);
+    // The effect chain draws into buffers that are the card, as Wallpaper Engine's are: its
+    // width and height with the fraction cut off, whatever the scene's size or the box the
+    // editor drew. The chain's `v_TexCoord` then runs 0 to 1 across the card, and the final
+    // card is all of the last buffer.
+    const auto effect_frame         = TextLayerEffectFrame(render_frame);
+    const auto effect_render_extent = TextCardTexelExtent(effect_frame.size);
 
     auto       node_iterator = context.layer_nodes.find(obj.id);
     auto       node = node_iterator != context.layer_nodes.end() && node_iterator->second != nullptr
@@ -2292,7 +2225,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
     GenTextCardMesh(*mesh, render_frame.bounds);
     node->AddMesh(mesh);
     SceneMesh effect_final_mesh(MeshUpdate::OnEvent);
-    GenTextCardMesh(effect_final_mesh, effect_final_frame.bounds, effect_texture_bounds);
+    GenTextCardMesh(effect_final_mesh, effect_frame.bounds);
 
     if (context.scene->runtime != nullptr) {
         const auto texture_name = TextTextureName(runtime_name);
@@ -2395,7 +2328,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
                                 obj.effects,
                                 runtime_name,
                                 effect_render_extent,
-                                effect_target_frame.center,
+                                effect_frame.center,
                                 additive_color_blend ? BlendMode::Additive : BlendMode::Translucent,
                                 context.global_base_uniforms,
                                 { obj.parallaxDepth[0], obj.parallaxDepth[1] },
@@ -2414,7 +2347,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
             shader_value_data.parallaxDepth = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
             context.shader_updater->SetNodeData(node.get(), shader_value_data);
         }
-        const auto& card = through_effects ? effect_final_frame : render_frame;
+        const auto& card = through_effects ? effect_frame : render_frame;
         context.text_cards[obj.id] = card;
         if (context.referenced_layer_ids.contains(obj.id)) {
             RegisterTextComposite(context, obj, *node, card);

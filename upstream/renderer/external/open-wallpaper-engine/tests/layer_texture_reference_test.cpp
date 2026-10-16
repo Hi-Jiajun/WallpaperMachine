@@ -1277,8 +1277,8 @@ void main() {
 // and again after every relayout. A spacing of 0.2 between glyphs gives both texts
 // below a fractional card with a fraction of .6, where cutting and rounding differ.
 TEST(LayerTextureReference, ASampledTextLayerIsItsCardInItsOwnComposite) {
-    // With an effect the layer draws at an effect capacity larger than its
-    // card, and what is sampled is still the card. Declared as a dependency the
+    // With an effect the layer draws through the chain's buffers, and what is
+    // sampled is the chain's final card. Declared as a dependency the
     // reference is known before the text is parsed; named only in a material
     // file it is found while the consumer is parsed.
     for (const bool fractional : { false, true }) {
