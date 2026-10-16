@@ -12,6 +12,9 @@ Playback, backend, host and startup areas are in
 
 ## Cameras, parallax and cursor mapping
 
+- **LDR bloom** — `SceneSchema.ParserBuildsLdrBloomPostProcessWhenBloomEnabledWithoutHdr`:
+  the horizontal blur writes an eighth-size image of its own, as Wallpaper
+  Engine's does, and the combine reads it.
 - **Scene settings bound to user properties** — `SceneSchema.SceneSettingsBoundToUserPropertiesFollowThem`:
   a scene loads with its bound bloom switch, parallax switch and amount at the
   properties' current values and reports those properties as load-only; bloom
@@ -790,17 +793,20 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   texture-component flag (TEX bit23) travels through the C++/Rust compiler
   interface so an alpha-channel emissive mask can enable its shader branch.
   Missing HDR materials fail rather than silently substituting LDR. HDR bloom
-  uses the supplied downsample, additive upsample and SDR-combine materials;
-  the pyramid is bounded to 12 levels with source-sized sample offsets refreshed
-  at prepare/resize. The bounded model maps positive spread `s` to a coarse-level
-  weight `s / (1 + s)` and divides extraction strength by the sum of the pyramid
-  weights, so spread redistributes energy rather than amplifying a constant
-  field; zero strength disables the halo and negative spread has the same narrow
-  kernel as zero. These are this renderer's defined semantics, not a verified
-  reproduction of Wallpaper Engine's proprietary parameter mapping.
-  `MetalSceneDraw.HdrSpreadPreservesEnergyAndStrengthScalesTheHalo` checks GPU
-  pixels across live strength/spread changes (large spread and zero strength
-  included); `.ParsedHdrRadianceSurvivesEffectsLayerLinksAndBloom` uses an
+  follows Wallpaper Engine 2.8: as many half-size levels as the frame's shorter
+  side allows, at most eight and at most `bloomhdriterations`; extraction and
+  downsampling read one source texel either side and upsampling half of one
+  (`ScenePostProcessPass::source_texel_radius`, refreshed at prepare/resize); the
+  two coarsest levels upsample through `hdr_upsample_cubic` (the linear upsample
+  stands in when an asset set lacks it); every upsample adds its level times
+  `bloomhdrscatter` as it is, and the extraction strength is
+  `bloomhdrstrength / (scatter^max(levels - 2, 0) + 1)`. A scene that leaves the
+  keys out gets strength 2, threshold 1, feather 0.1, scatter 1.619 and eight
+  iterations. `SceneSchema.HdrBloomBuildsWallpaperEnginesLevelsAndWeights` checks
+  the levels, radii, cubic passes and weights the parser builds, and
+  `MetalSceneDraw.HdrBloomWeighsItsLevelsAsWallpaperEngine` GPU pixels across
+  live strength and scatter changes (zero strength included);
+  `.ParsedHdrRadianceSurvivesEffectsLayerLinksAndBloom` uses an
   original bit23 emissive texture through the real parser, effect chain and layer
   references. `MetalSceneDraw.OverbrightRadianceReachesBloomWithoutChangingLdrColor`
   and `PlaybackGPU.OverbrightTargetsFeedBloomAndPreserveSdrColor` read pixels and

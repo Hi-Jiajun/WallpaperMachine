@@ -813,7 +813,7 @@ TEST_F(MetalSceneDraw, ParsedHdrRadianceSurvivesEffectsLayerLinksAndBloom)
     }
 }
 
-TEST_F(MetalSceneDraw, HdrSpreadPreservesEnergyAndStrengthScalesTheHalo)
+TEST_F(MetalSceneDraw, HdrBloomWeighsItsLevelsAsWallpaperEngine)
 {
     const auto directory = root_ / "bounded-bloom";
     const auto project = WriteParsedRadianceFixture(directory, true);
@@ -868,18 +868,21 @@ TEST_F(MetalSceneDraw, HdrSpreadPreservesEnergyAndStrengthScalesTheHalo)
                 radiance[((height / 2) * width + width * 11 / 16) * 4],
             };
         };
-        std::array<float, 2> narrow {}, wide {}, stronger {}, extreme {}, off {};
-        sample(1.0f, 0.0f, narrow);
-        sample(1.0f, 4.0f, wide);
-        EXPECT_NEAR(narrow[0], 1.75f, 0.005f); // Constant field above the .25 threshold.
-        EXPECT_NEAR(wide[0], narrow[0], 0.005f);
-        EXPECT_NEAR(narrow[1], 0.0f, 0.005f);
-        EXPECT_GT(wide[1], narrow[1] + 0.02f); // Spread moves energy beyond the source.
+        // Two levels: the extraction is the strength over scatter^0 + 1, and
+        // the one upsample adds the coarse level times the scatter as it is.
+        std::array<float, 2> none {}, two {}, four {}, stronger {}, off {};
+        sample(1.0f, 0.0f, none);
+        sample(1.0f, 2.0f, two);
+        sample(1.0f, 4.0f, four);
+        EXPECT_NEAR(none[0], 1.75f / 2.0f, 0.005f); // Constant field above the .25 threshold.
+        EXPECT_NEAR(none[1], 0.0f, 0.005f);
+        EXPECT_GT(four[1], none[1] + 0.02f); // The scatter carries light beyond the source.
+        for (int i = 0; i < 2; ++i) {
+            EXPECT_NEAR(four[i] - none[i], 2.0f * (two[i] - none[i]), 0.01f)
+                << "the coarse level is not weighed by the scatter itself";
+        }
         sample(2.0f, 4.0f, stronger);
-        for (int i = 0; i < 2; ++i) EXPECT_NEAR(stronger[i], 2 * wide[i], 0.01f);
-        sample(1.0f, 1.0e6f, extreme);
-        EXPECT_NEAR(extreme[0], narrow[0], 0.005f);
-        EXPECT_LT(extreme[1], extreme[0]);
+        for (int i = 0; i < 2; ++i) EXPECT_NEAR(stronger[i], 2 * four[i], 0.01f);
         sample(0.0f, 4.0f, off);
         for (float value : off) EXPECT_FLOAT_EQ(value, 0.0f);
         render.destroy();

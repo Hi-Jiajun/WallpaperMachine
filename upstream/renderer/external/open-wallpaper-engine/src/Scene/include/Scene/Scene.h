@@ -29,6 +29,9 @@ struct SceneMetalProgram;
 struct ScenePostProcessPass {
     std::shared_ptr<SceneNode> node;
     std::string                output;
+    /// When positive, the pass's `g_RenderVar0` is kept at this many texels of
+    /// its first texture, (+x, +y, -x, -y), whatever size that texture has.
+    float                      source_texel_radius { 0.0f };
 };
 
 struct ScenePostProcessCopy {

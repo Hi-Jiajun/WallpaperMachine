@@ -74,9 +74,10 @@ public:
     bool                 hdr { false };
     float                bloomhdrstrength { 2.0f };
     float                bloomhdrthreshold { 1.0f };
-    float                bloomhdrscatter { 1.0f };
-    float                bloomhdrfeather { 0.5f };
-    int32_t              bloomhdriterations { 6 };
+    // Wallpaper Engine's defaults for a scene that leaves these out.
+    float                bloomhdrscatter { 1.619f };
+    float                bloomhdrfeather { 0.1f };
+    int32_t              bloomhdriterations { 8 };
     nlohmann::json       bloomhdrstrength_setting;
     nlohmann::json       bloomhdrthreshold_setting;
     nlohmann::json       bloomhdrscatter_setting;

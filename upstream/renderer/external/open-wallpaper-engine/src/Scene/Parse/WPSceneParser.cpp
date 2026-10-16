@@ -3100,9 +3100,10 @@ public:
     }
 
 private:
-    static constexpr std::array<std::string_view, 3> kBloomRenderTargets {
+    static constexpr std::array<std::string_view, 4> kBloomRenderTargets {
         "_rt_bloom_mip1",
         "_rt_bloom_mip2",
+        "_rt_bloom_blur",
         "_rt_bloom_combine",
     };
 
@@ -3173,25 +3174,27 @@ std::array<float, 4> HDRBloomBlend(float threshold, float feather) {
     return { threshold, threshold - knee, 2.0f * knee, 0.25f / (knee + 1.0e-5f) };
 }
 
-float HDRBloomScatterGain(float spread) {
-    // Positive, unbounded scene spread becomes a bounded coarse-level weight.
-    return 1.0f - 1.0f / (1.0f + std::max(0.0f, spread));
+// Wallpaper Engine's extraction strength: the scene's strength over one more
+// than the scatter raised to the number of levels past the second.
+float HDRBloomExtractionStrength(float strength, float scatter, int levels) {
+    return strength / (std::pow(scatter, static_cast<float>(std::max(levels - 2, 0))) + 1.0f);
 }
 
-float HDRBloomExtractionStrength(float strength, float spread, int levels) {
-    const float gain = HDRBloomScatterGain(spread);
-    float total = 1.0f, weight = 1.0f;
-    for (int i = 1; i < levels; ++i) {
-        weight *= gain;
-        total += weight;
+// As many half-size levels as the frame's shorter side allows, at most eight,
+// and at most the scene's iterations.
+int HDRBloomLevels(int iterations, int width, int height) {
+    const int shorter = std::max(2, std::min(width, height));
+    int available = 0;
+    for (int k = 0; k < 8; ++k) {
+        if ((shorter >> (k + 1)) >= 1) ++available;
     }
-    return std::max(0.0f, strength) / total;
+    return std::max(1, std::min(available, iterations));
 }
 
 void BuildHDRBloomPostProcess(ParseContext& context, const wpscene::WPSceneGeneral& general) {
     auto& scene = *context.scene;
-    const int levels = std::clamp(general.bloomhdriterations, 1, 12);
     const int width = std::max(1, scene.ortho[0]), height = std::max(1, scene.ortho[1]);
+    const int levels = HDRBloomLevels(general.bloomhdriterations, width, height);
     BloomRenderTargetRollback rollback(scene);
     std::vector<std::string> targets;
     targets.reserve(levels);
@@ -3206,11 +3209,17 @@ void BuildHDRBloomPostProcess(ParseContext& context, const wpscene::WPSceneGener
     bloom->name = "__hdr_bloom";
     std::vector<StagedPostProcessNode> staged;
     staged.reserve(levels * 2);
+    // Extraction and downsampling read one texel of their source either side,
+    // upsampling half of one; the size is kept current as targets resize.
     const auto append = [&](const char* material, std::vector<std::string> inputs,
-                            const std::string& output, const ShaderValueMap& uniforms) {
+                            const std::string& output, const ShaderValueMap& uniforms,
+                            float texel_radius, const char* fallback = nullptr) {
         auto node = BuildPostProcessNode(context, material, inputs, general, &uniforms);
+        if (!node && fallback != nullptr)
+            node = BuildPostProcessNode(context, fallback, inputs, general, &uniforms);
         if (!node) throw std::runtime_error("Unable to compile authored HDR bloom material");
-        bloom->steps.push_back(ScenePostProcessPass { .node = node->node, .output = output });
+        bloom->steps.push_back(ScenePostProcessPass {
+            .node = node->node, .output = output, .source_texel_radius = texel_radius });
         staged.push_back(std::move(*node));
     };
     const ShaderValueMap extract {
@@ -3220,18 +3229,26 @@ void BuildHDRBloomPostProcess(ParseContext& context, const wpscene::WPSceneGener
         { "g_BloomTint", general.bloomtint },
         { "g_RenderVar0", std::array<float, 4>{0, 0, 0, 0} },
     };
-    append("materials/util/hdr_downsample_bloom.json", {SpecTex_Default.data()}, targets.front(), extract);
+    append("materials/util/hdr_downsample_bloom.json", {SpecTex_Default.data()}, targets.front(),
+           extract, 1.0f);
     for (int i = 1; i < levels; ++i)
         append("materials/util/hdr_downsample.json", {targets[i - 1]}, targets[i],
-               {{"g_RenderVar0", std::array<float, 4>{0, 0, 0, 0}}});
+               {{"g_RenderVar0", std::array<float, 4>{0, 0, 0, 0}}}, 1.0f);
     const ShaderValueMap scatter {
-        { "g_BloomScatter", HDRBloomScatterGain(general.bloomhdrscatter) },
+        { "g_BloomScatter", general.bloomhdrscatter },
         { "g_RenderVar0", std::array<float, 4>{0, 0, 0, 0} },
     };
-    for (int i = levels - 1; i > 0; --i)
-        append("materials/util/hdr_upsample.json", {targets[i]}, targets[i - 1], scatter);
+    // The two coarsest levels are upsampled bicubically, the rest bilinearly.
+    for (int i = levels - 1; i > 0; --i) {
+        if (i >= levels - 2) {
+            append("materials/util/hdr_upsample_cubic.json", {targets[i]}, targets[i - 1], scatter,
+                   0.5f, "materials/util/hdr_upsample.json");
+        } else {
+            append("materials/util/hdr_upsample.json", {targets[i]}, targets[i - 1], scatter, 0.5f);
+        }
+    }
     append("materials/util/combine_hdr_upsample_linear.json",
-           {SpecTex_Default.data(), targets.front()}, "_rt_bloom_combine", {});
+           {SpecTex_Default.data(), targets.front()}, "_rt_bloom_combine", {}, 0.0f);
     bloom->steps.push_back(ScenePostProcessCopy {
         .src = "_rt_bloom_combine", .dst = SpecTex_Default.data(),
     });
@@ -3264,9 +3281,8 @@ void BuildHDRBloomPostProcess(ParseContext& context, const wpscene::WPSceneGener
                 (*amount)[1] = value.getFloat();
                 first->customShader.constValues["g_BloomStrength"] =
                     HDRBloomExtractionStrength((*amount)[0], (*amount)[1], levels);
-                const float gain = HDRBloomScatterGain((*amount)[1]);
                 for (const auto& material : materials)
-                    material->customShader.constValues["g_BloomScatter"] = gain;
+                    material->customShader.constValues["g_BloomScatter"] = (*amount)[1];
             });
         auto blend = std::make_shared<std::array<float, 2>>(
             std::array<float, 2>{general.bloomhdrthreshold, general.bloomhdrfeather});
@@ -3310,6 +3326,10 @@ void BuildBloomPostProcess(ParseContext& context, const wpscene::WPScene& sc) {
     BloomRenderTargetRollback bloom_render_target_rollback(*context.scene);
     AddScreenRenderTarget(*context.scene, "_rt_bloom_mip1", render_width, render_height, 0.25);
     AddScreenRenderTarget(*context.scene, "_rt_bloom_mip2", render_width, render_height, 0.125);
+    // Wallpaper Engine blurs into an eighth-size image of its own: the
+    // horizontal blur touches a quarter of the pixels writing back into the
+    // quarter-size one would.
+    AddScreenRenderTarget(*context.scene, "_rt_bloom_blur", render_width, render_height, 0.125);
     AddScreenRenderTarget(*context.scene, "_rt_bloom_combine", render_width, render_height, 1.0);
 
     auto bloom  = std::make_shared<ScenePostProcess>();
@@ -3325,7 +3345,7 @@ void BuildBloomPostProcess(ParseContext& context, const wpscene::WPScene& sc) {
         context, "materials/util/blur_h_bloom.json", { "_rt_bloom_mip2" }, sc.general);
     auto combine = BuildPostProcessNode(context,
                                         "materials/util/combine_ldr.json",
-                                        { SpecTex_Default.data(), "_rt_bloom_mip1" },
+                                        { SpecTex_Default.data(), "_rt_bloom_blur" },
                                         sc.general);
 
     if (! downsample_quarter.has_value() || ! downsample_eighth.has_value() ||
@@ -3392,7 +3412,7 @@ void BuildBloomPostProcess(ParseContext& context, const wpscene::WPScene& sc) {
     });
     bloom->steps.push_back(ScenePostProcessPass {
         .node   = std::move(blur_horizontal->node),
-        .output = "_rt_bloom_mip1",
+        .output = "_rt_bloom_blur",
     });
     bloom->steps.push_back(ScenePostProcessPass {
         .node   = std::move(combine->node),

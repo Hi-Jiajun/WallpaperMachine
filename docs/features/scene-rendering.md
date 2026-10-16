@@ -628,13 +628,13 @@ backend, as in Wallpaper Engine: overbright color is preserved in half-float tar
 and bloom is HDR, while other scenes, an `hdr` scene with bloom off included, keep the
 8-bit path. A scene that leaves `bloom` out has it on, at strength 2 above 0.65, as
 Wallpaper Engine has it. Half-float targets cost eight rather than four bytes per
-pixel, and the cache accounts for that actual size; a six-level bloom pyramid
+pixel, and the cache accounts for that actual size; an eight-level bloom pyramid
 starting at half-resolution holds under a third of a full-size target's pixels. This
 is real post-processing work, not a free brightness adjustment or supersampling, and
 increasing FPS alone cannot substitute for it: the High preset controls only frame
-rate and render scale ([Quality](performance.md#quality)). Bloom spread is this
-renderer's own energy-conserving model; exact Wallpaper Engine parameter parity is
-not established.
+rate and render scale ([Quality](performance.md#quality)). The HDR bloom's levels,
+sampling and weights are Wallpaper Engine's ([scene
+regressions](../testing/scene-regressions.md)).
 
 On both backends, a layer hidden by its authored visibility or by one of the
 wallpaper's own properties, itself or through a parent, is left out of the render

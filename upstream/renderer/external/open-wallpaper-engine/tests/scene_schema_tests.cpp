@@ -4222,7 +4222,7 @@ TEST(SceneSchema, ParserBuildsLdrBloomPostProcessWhenBloomEnabledWithoutHdr) {
     ASSERT_NE(copy, nullptr);
     EXPECT_EQ(pass0->output, "_rt_bloom_mip1");
     EXPECT_EQ(pass1->output, "_rt_bloom_mip2");
-    EXPECT_EQ(pass2->output, "_rt_bloom_mip1");
+    EXPECT_EQ(pass2->output, "_rt_bloom_blur");
     EXPECT_EQ(pass3->output, "_rt_bloom_combine");
     EXPECT_EQ(copy->src, "_rt_bloom_combine");
     EXPECT_EQ(copy->dst, SpecTex_Default);
@@ -4273,6 +4273,14 @@ TEST(SceneSchema, ParserBuildsLdrBloomPostProcessWhenBloomEnabledWithoutHdr) {
     EXPECT_DOUBLE_EQ(mip2_rt->bind.scale, 0.125);
     EXPECT_EQ(mip2_rt->width, 80);
     EXPECT_EQ(mip2_rt->height, 45);
+    // The horizontal blur writes an eighth-size image of its own, as Wallpaper
+    // Engine's does, and the combine reads it.
+    const auto* blur_rt = parsed->FindRenderTarget("_rt_bloom_blur");
+    ASSERT_NE(blur_rt, nullptr);
+    EXPECT_DOUBLE_EQ(blur_rt->bind.scale, 0.125);
+    EXPECT_EQ(blur_rt->width, 80);
+    ASSERT_GE(pass3->node->Mesh()->Material()->textures.size(), 2u);
+    EXPECT_EQ(pass3->node->Mesh()->Material()->textures[1], "_rt_bloom_blur");
     EXPECT_TRUE(combine_rt->bind.enable);
     EXPECT_TRUE(combine_rt->bind.screen);
     EXPECT_DOUBLE_EQ(combine_rt->bind.scale, 1.0);
@@ -4370,8 +4378,77 @@ TEST(SceneSchema, SceneSettingsLeftOutTakeWallpaperEnginesDefaults) {
         EXPECT_FLOAT_EQ(sc.general.ambientcolor[i], 0.0f);
         EXPECT_FLOAT_EQ(sc.general.skylightcolor[i], 0.0f);
     }
+    // And the HDR bloom keys, likewise.
+    EXPECT_FLOAT_EQ(sc.general.bloomhdrstrength, 2.0f);
+    EXPECT_FLOAT_EQ(sc.general.bloomhdrthreshold, 1.0f);
+    EXPECT_FLOAT_EQ(sc.general.bloomhdrfeather, 0.1f);
+    EXPECT_FLOAT_EQ(sc.general.bloomhdrscatter, 1.619f);
+    EXPECT_EQ(sc.general.bloomhdriterations, 8);
 }
 
+// Wallpaper Engine's HDR bloom: as many half-size levels as the frame allows,
+// at most eight and at most the scene's iterations; extraction and
+// downsampling read a texel either side, upsampling half of one, the two
+// coarsest levels bicubically; the scatter weighs each upsampled level as it
+// is, and the extraction strength is divided by one more than the scatter
+// raised to the levels past the second.
+TEST(SceneSchema, HdrBloomBuildsWallpaperEnginesLevelsAndWeights) {
+    std::map<std::string, std::string> files;
+    AddHdrBloomFixtureFiles(files);
+    fs::VFS vfs;
+    ASSERT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+    audio::SoundManager sound_manager { audio::SoundManager::OutputBackend::Null };
+    WPSceneParser       parser;
+    const auto scene_json = [](int iterations) {
+        return std::string(R"({
+          "camera": {"center":[0,0,0], "eye":[0,0,1], "up":[0,1,0]},
+          "general": {"clearcolor":[0,0,0], "bloom":true, "hdr":true,
+            "bloomhdrstrength":3.0, "bloomhdrscatter":2.0, "bloomhdrthreshold":1.0,
+            "bloomhdrfeather":0.1, "bloomhdriterations":)") + std::to_string(iterations) + R"(,
+            "orthogonalprojection":{"width":640,"height":360}},
+          "objects": []
+        })";
+    };
+
+    // Twelve asked for; a 360-pixel side allows eight.
+    auto deep = parser.Parse("hdr-bloom-deep", scene_json(12), vfs, sound_manager);
+    ASSERT_NE(deep, nullptr);
+    ASSERT_EQ(deep->post_processes.size(), 1u);
+    EXPECT_NE(deep->FindRenderTarget("_rt_hdr_bloom_7"), nullptr);
+    EXPECT_EQ(deep->FindRenderTarget("_rt_hdr_bloom_8"), nullptr);
+    const auto& steps = deep->post_processes[0]->steps;
+    ASSERT_EQ(steps.size(), 1u + 7u + 7u + 1u + 1u);
+    const auto pass = [&steps](std::size_t index) {
+        const auto* step = std::get_if<ScenePostProcessPass>(&steps.at(index));
+        EXPECT_NE(step, nullptr);
+        return step;
+    };
+    const auto material = [&pass](std::size_t index) {
+        return pass(index)->node->Mesh()->Material();
+    };
+    EXPECT_FLOAT_EQ(material(0)->customShader.constValues.at("g_BloomStrength")[0],
+                    3.0f / (std::pow(2.0f, 6.0f) + 1.0f));
+    EXPECT_FLOAT_EQ(pass(0)->source_texel_radius, 1.0f);
+    for (std::size_t i = 1; i <= 7; ++i) EXPECT_FLOAT_EQ(pass(i)->source_texel_radius, 1.0f);
+    for (std::size_t i = 8; i <= 14; ++i) {
+        SCOPED_TRACE(i);
+        EXPECT_FLOAT_EQ(pass(i)->source_texel_radius, 0.5f);
+        EXPECT_FLOAT_EQ(material(i)->customShader.constValues.at("g_BloomScatter")[0], 2.0f);
+        // The first two upsamples read the two coarsest levels.
+        EXPECT_EQ(material(i)->name, i <= 9 ? "hdr_cubic" : "hdr_up");
+    }
+    EXPECT_FLOAT_EQ(pass(15)->source_texel_radius, 0.0f);
+
+    // Three levels: both upsamples are of the two coarsest.
+    auto shallow = parser.Parse("hdr-bloom-shallow", scene_json(3), vfs, sound_manager);
+    ASSERT_NE(shallow, nullptr);
+    const auto& shallow_steps = shallow->post_processes.at(0)->steps;
+    ASSERT_EQ(shallow_steps.size(), 1u + 2u + 2u + 1u + 1u);
+    for (std::size_t i : { 3u, 4u }) {
+        EXPECT_EQ(std::get<ScenePostProcessPass>(shallow_steps[i]).node->Mesh()->Material()->name,
+                  "hdr_cubic");
+    }
+}
 
 // Wallpaper Engine's HDR pipeline needs the scene's bloom as well as its
 // `hdr`: an HDR scene with bloom off is drawn with ordinary 8-bit targets.
@@ -4421,6 +4498,7 @@ TEST(SceneSchema, ParserDoesNotCommitPartialBloomStateWhenMaterialLoadFails) {
     EXPECT_TRUE(parsed->post_processes.empty());
     EXPECT_EQ(parsed->FindRenderTarget("_rt_bloom_mip1"), nullptr);
     EXPECT_EQ(parsed->FindRenderTarget("_rt_bloom_mip2"), nullptr);
+    EXPECT_EQ(parsed->FindRenderTarget("_rt_bloom_blur"), nullptr);
     EXPECT_EQ(parsed->FindRenderTarget("_rt_bloom_combine"), nullptr);
 }
 
