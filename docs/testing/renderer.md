@@ -731,15 +731,34 @@ into private textures; the three that draw skip visibly without a Metal device.
   the dialect's cast macros (`CASTF` among them), which the compiler does not supply with
   `CASTI`, `CASTU`, `CAST4U`, `DECLARE_SAMPLER2D_PARAMETER` and `MAKE_SAMPLER2D_ARGUMENT`.
   Its redeclared `gl_InstanceID` is no longer the obstacle.
-- **Fog keys bound to user properties are not followed.** The `general` fog keys
-  bound to user properties keep the value the scene loaded with.
-- The `perspective` flag of an image layer is read by no parser (`WPTextObject`
-  and `WPModelObject` read theirs); image layers always draw through the
-  orthographic camera.
+- **Scene composition Wallpaper Engine has and this renderer does not.** A scene
+  with a 3D model gets no multisampling (Wallpaper Engine draws such scenes 2x
+  MSAA by default, from its `msaa` setting); a camera path's `camerafade` fade,
+  the planar `_rt_Reflection` pass and `customsortorder` are not implemented
+  (the model flags are under their own entry below); and
+  `general` fog keys bound to user properties keep the value the scene loaded
+  with. Wallpaper Engine's user-level post-processing quality (off, LDR, HDR,
+  display HDR) is fixed at its highest SDR level.
+- **The `perspective` flag of an image or text layer is not applied.** `WPTextObject`
+  and `WPModelObject` read it, `WPImageObject` does not, and only models use it: image
+  and text layers always draw through the orthographic camera, so a layer at a depth
+  or turned about x or y is drawn flat. Wallpaper Engine draws such a layer through a
+  perspective camera that sits `(canvas height / 2) / tan(fov / 2)` from the canvas
+  plane, with the scene's field of view (`perspectiveoverridefov`, else `fov`); in the
+  one local scene that shows it (a layer 222 units out, field of view 90, canvas
+  2160 high) that is 1.26 times larger than flat. The perspective camera a 2D scene
+  has is placed at 1000 units, and four places assume that distance
+  (`ParseCamera`, `Scene::FrameCanvas`, `SceneRuntimeContext::ApplySceneZoomAnimation`
+  and `ApplyCameraFillMode`), so applying the flag, or moving models and particles
+  to the scene's own distance, has to change them together, and needs a picture
+  comparison of the 3D-model scenes.
 - **Object kinds not drawn or not modelled.** A `shape` object draws only an effect of
   a single pass: its last effect is drawn onto the scene as a mesh, so a multi-pass
   last effect, which would draw into buffers first, is left out (the editor's
-  light-shaft effect has one pass).
+  light-shaft effect has one pass). A `sprite` object is read as a plain group and
+  draws nothing. Puppet morph targets (`MDMP`, blend shapes) are parsed and never read: no `MORPHING` combo, no
+  morph texture and no weight uniforms. Sound `spatialization`, `attenuation` and
+  `mindistance` are not read, so every sound plays unpositioned.
 - **File textures are sampled trilinearly.** Wallpaper Engine's sampler for a file
   texture is anisotropic (8x), which only shows on a surface seen at an angle (the
   local scene with 3D models), and it samples a shadow atlas through a comparison
