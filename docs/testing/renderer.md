@@ -720,8 +720,10 @@ into private textures; the three that draw skip visibly without a Metal device.
   `ShaderValue: … not found in glsl` line is authored leftovers, not a binding
   failure. Wallpaper Engine's own `clipping_mask` effect fails to translate (see
   [Shader pipeline](scene-regressions.md#shader-pipeline)).
-- Wallpaper Engine's `fur4` shader does not compile: its instanced shells read
-  `gl_InstanceID`, which the GLSL front end rejects.
+- Wallpaper Engine's `fur4` shader does not compile on its own: its instanced shells read
+  the dialect's cast macros (`CASTF` among them), which the compiler does not supply with
+  `CASTI`, `CASTU`, `CAST4U`, `DECLARE_SAMPLER2D_PARAMETER` and `MAKE_SAMPLER2D_ARGUMENT`.
+  Its redeclared `gl_InstanceID` is no longer the obstacle.
 - The `perspective` flag of an image layer is read by no parser (`WPTextObject`
   and `WPModelObject` read theirs); image layers always draw through the
   orthographic camera.

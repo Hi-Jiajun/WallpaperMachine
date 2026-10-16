@@ -2063,6 +2063,93 @@ TEST_F(MetalSceneDraw, ADepthTestedDrawCullsTheSameFacesAsCompatibility)
     EXPECT_GT(card_pixels["away-back-no-depth"], 1000u);
 }
 
+TEST_F(MetalSceneDraw, ACompositingEffectSeesTheScreenUprightOnBothRenderers)
+{
+    // An effect that composes a layer over the screen (Wallpaper Engine's
+    // `effectcomposebackground`, the first pass of refraction and the like)
+    // turns its screen coordinate over under `#if HLSL`, for the Direct3D
+    // convention this renderer shares. Over a background red at the top and
+    // blue below, a transparent layer carrying such an effect must show the
+    // same red top and blue bottom inside its bounds as around them.
+    std::map<bool, RendererPicture> pictures;
+    for (const bool native : { false, true }) {
+        const std::string name    = native ? "compose-upright-native" : "compose-upright-compat";
+        const auto        project = WriteFixture(root_ / name);
+        const auto        file    = [&](const std::string& path, const std::string& text) {
+            std::filesystem::create_directories((root_ / name / path).parent_path());
+            std::ofstream(root_ / name / path) << text;
+        };
+        const std::string vertex =
+            "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\n"
+            "attribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+            "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+            "  v_TexCoord = a_TexCoord;\n}\n";
+        file("shaders/metal_probe.frag",
+             "varying vec2 v_TexCoord;\nvoid main() {\n  gl_FragColor = v_TexCoord.y < 0.5 ? "
+             "vec4(1.0, 0.0, 0.0, 1.0) : vec4(0.0, 0.0, 1.0, 1.0);\n}\n");
+        file("shaders/clear_probe.vert", vertex);
+        file("shaders/clear_probe.frag", "void main() {\n  gl_FragColor = vec4(0.0);\n}\n");
+        file("shaders/through.vert", vertex);
+        file("shaders/through.frag",
+             "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\n"
+             "void main() {\n  gl_FragColor = texture2D(g_Texture0, v_TexCoord);\n}\n");
+        file("shaders/composebg.vert",
+             "uniform mat4 g_ModelViewProjectionMatrix;\nuniform mat4 g_EffectModelViewProjectionMatrix;\n"
+             "attribute vec3 a_Position;\nattribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\n"
+             "varying vec3 v_ScreenCoord;\nvoid main() {\n"
+             "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+             "  v_TexCoord = a_TexCoord;\n"
+             "  v_ScreenCoord = (g_EffectModelViewProjectionMatrix * vec4(a_Position, 1.0)).xyw;\n"
+             "#if HLSL\n  v_ScreenCoord.y = -v_ScreenCoord.y;\n#endif\n}\n");
+        file("shaders/composebg.frag",
+             "uniform sampler2D g_Texture0;\nuniform sampler2D g_Texture1;\nvarying vec2 v_TexCoord;\n"
+             "varying vec3 v_ScreenCoord;\nvoid main() {\n  vec4 layer = texture2D(g_Texture0, v_TexCoord);\n"
+             "  vec2 uv = v_ScreenCoord.xy / v_ScreenCoord.z * 0.5 + 0.5;\n"
+             "  gl_FragColor = vec4(mix(texture2D(g_Texture1, uv).rgb, layer.rgb, layer.a), 1.0);\n}\n");
+        const std::string pass =
+            R"("cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled")";
+        file("materials/clear.json",
+             R"({"passes":[{"shader":"clear_probe","blending":"translucent",)" + pass + "}]}");
+        file("materials/util/composebg.json",
+             R"({"passes":[{"shader":"composebg","blending":"normal",)" + pass +
+                 R"(,"textures":[null,"_rt_FullFrameBuffer"]}]})");
+        file("materials/through.json",
+             R"({"passes":[{"shader":"through","blending":"normal",)" + pass + R"(,"textures":[null]}]})");
+        file("effects/compose/effect.json",
+             R"({"name":"compose","passes":[{"material":"materials/util/composebg.json","compose":true},)"
+             R"({"material":"materials/through.json"}]})");
+        file("models/bg.json", R"({"width":384,"height":256,"material":"materials/tile.json"})");
+        file("models/fg.json", R"({"width":384,"height":256,"material":"materials/clear.json"})");
+        file("layout.json",
+             R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+             R"("general":{"clearcolor":[0,0,0],"bloom":false,"cameraparallax":false,)"
+             R"("orthogonalprojection":{"width":384,"height":256}},)"
+             R"("objects":[{"id":1,"name":"bg","image":"models/bg.json","origin":[192,128,0],)"
+             R"("scale":[1,1,1],"angles":[0,0,0],"visible":true},)"
+             R"({"id":2,"name":"fg","image":"models/fg.json","origin":[192,128,0],)"
+             R"("scale":[0.5,0.5,1],"angles":[0,0,0],"visible":true,)"
+             R"("effects":[{"file":"effects/compose/effect.json","id":3,"visible":true}]}]})");
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+        pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
+        ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+    }
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        const auto& rgb = pictures[native].rgb;
+        ASSERT_EQ(rgb.size(), 384u * 256u * 3u);
+        const auto at = [&rgb](int x, int y) {
+            const std::size_t i = (static_cast<std::size_t>(y) * 384u + static_cast<std::size_t>(x)) * 3u;
+            return std::array<int, 3> { rgb[i], rgb[i + 1], rgb[i + 2] };
+        };
+        // The layer covers x 96..288, y 64..192.
+        EXPECT_EQ(at(192, 70), at(20, 70)) << "the screen under the layer's top is not the screen's";
+        EXPECT_EQ(at(192, 186), at(20, 186)) << "the screen under the layer's bottom is not the screen's";
+        EXPECT_NE(at(20, 70), at(20, 186)) << "the background has no up or down to get wrong";
+    }
+}
+
 TEST_F(MetalSceneDraw, AnIntermediateTargetIsDrawnCopiedAndResampledInOneFrame)
 {
     // The shape an effect chain lowers to: the author's layer drawn into an

@@ -731,7 +731,8 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   compiles it for SPIR-V and Metal, and
   `every_asset_shader_that_requires_lighting_compiles_lit_on_both_backends`
   does so for Wallpaper Engine's own lit shaders when
-  `WALLPAPER_MACHINE_ASSETS_ROOT` names them (`fur4` is excluded: its `gl_InstanceID` does not compile lit or unlit).
+  `WALLPAPER_MACHINE_ASSETS_ROOT` names them (`fur4` is excluded: its instanced shells read the
+  dialect's `CASTF` cast macro, which the compiler does not supply, lit or unlit).
   After a shader-crate change, rebuild
   `target/release/libshader.a` (`cargo build -p shader --features ffi --release`)
   before the CMake test binaries, or they link the old compiler.
@@ -995,6 +996,64 @@ Rust regressions in `crates/shader/tests` (`legalize`, `preprocess`,
   (`crates/shader/src/pipeline/revision.rs`) is part of the cache key. Bump it
   whenever codegen can produce different output for source that already
   compiled; each bump invalidates previously compiled programs.
+- **`HLSL` is true, as in Wallpaper Engine** — a stage sees `GLSL`, `HLSL` and
+  `HLSL_SM40` defined as 1 (`crates/shader/src/preprocess/macros.rs`).
+  Wallpaper Engine compiles its shaders as HLSL: it prepends `#define HLSL 1` and
+  `#define HLSL_SM40 1` and never defines `GLSL`, which stays defined here so the
+  `#if GLSL` paths shaders pick for the backend language stay picked. `HLSL`
+  used to be 0, which `#ifdef HLSL` cannot tell from 1 but `#if HLSL` can: every
+  such block was skipped. The first pass of each compositing effect
+  (`effectcomposebackground`, and the `COPYBG` and `TEX` paths of the god rays,
+  shine and clipping mask effects) turns `v_ScreenCoord.y` over only there, so a
+  layer composed over the screen sampled it mirrored vertically on both renderers
+  (`MetalSceneDraw.ACompositingEffectSeesTheScreenUprightOnBothRenderers` reads
+  a red-over-blue screen back through such an effect). Taking those blocks put
+  the others in play, each handled by a rule that is not tied to a shader:
+  - A stage-qualified declaration of a builtin variable the backend provides
+    (`in uint gl_VertexID;` and `in uint gl_InstanceID;`, which Wallpaper
+    Engine's morph, instancing and shadow stages write) is dropped
+    (`PlannedDeclaration::BuiltinRedeclaration`). It had become a vertex
+    attribute of that name, which compiles and reads whatever sits at its
+    location. The `builtin_variables` strategy spells the uses `gl_VertexIndex`
+    and `gl_InstanceIndex`, which Naga types `uint` as the declaration did, so
+    `gl_VertexID + g_MorphOffsets[1]` and `CASTF(gl_InstanceID)` need no
+    conversion, and the compiled program lists neither as a vertex input. A
+    `gl_` builtin the backend lacks (`gl_ViewportIndex`) keeps its former
+    handling, so the shadow caster stages (their shadow maps are not drawn) still
+    compile.
+  - The `mat3 inverse(mat3)` of `common_perspective.h` is an ordinary user
+    function: Naga calls it in place of its builtin on both targets, and a stage
+    that declares any `inverse` gets no generated Metal helper, as before. It is
+    the exact adjugate-over-determinant inverse.
+  - The `pow(falloff + FLT_MIN, exponent)` light falloff of `common_pbr_2.h` has
+    a positive base even where the falloff is 0, so it is defined and finite. It
+    differs from the earlier `mix`/`step` form, which offset the base by 6.1e-5,
+    by at most 0.1 for exponents of 0.25 and above and by under 0.001 from 1 to
+    16; with a zero exponent it lights beyond the radius, as it does there.
+  - A brace-list array initializer (the kernel of `bokeh`) is read by Naga as it
+    stands, on both targets.
+  Pipeline revision 15 recompiles programs built while the macro was 0. Across
+  the 1,269 (scene, shader, combos) programs of the local scene library, compiled
+  for SPIR-V and MSL (2,538 compilations), every program that compiled still
+  compiles and none that failed was fixed; 2,126 outputs are unchanged and the
+  other 412 differ only in those blocks (author `inverse` 224, light falloff 164,
+  bokeh kernel 20, screen coordinate 8, four of them in two). With the dialect's
+  cast macros defined, the shipped `generic3`, `generic4` and `shadowcaster`
+  vertex stages with `MORPHING`, and `fur4` with its instancing, compile where
+  they stopped at `gl_VertexID` and `gl_InstanceID`. Known and not handled: the compiler does
+  not supply the dialect's own prelude macros `CASTI`, `CASTU`, `CASTF`,
+  `CAST4U`, `DECLARE_SAMPLER2D_PARAMETER` and `MAKE_SAMPLER2D_ARGUMENT`, so those
+  stages, and the morph-target stages that pass a sampler to a function
+  (`foliage4`, `chroma4`), do not compile on their own; and Naga has no
+  `gl_ViewportIndex`. Tests: `preprocess`
+  (`default_macros_are_wallpaper_engines_direct3d_dialect_plus_glsl`,
+  `every_spelling_of_the_hlsl_test_takes_the_direct3d_branch`), `legalize`
+  (`a_redeclared_vertex_builtin_makes_no_attribute_and_its_uses_reach_the_builtin`
+  and the macro, qualifier and brace-list cases beside it), `naga_metal` (the
+  vertex and instance index as `[[vertex_id]]`/`[[instance_id]]` and SPIR-V
+  builtins; the author's `inverse` on both targets) and `pipeline` (the screen
+  coordinate, the kernel, the falloff, the vertex inputs, and the shipped
+  `effectcomposebackground` and `generic4` stages when the assets are present).
 - **Repairs for permissive-path shaders** — the pipeline handles undersized
   cross-stage varying declarations, conditional helper headers, source-defined
   `log10`, legacy scalar/vector argument conversion, compound assignment

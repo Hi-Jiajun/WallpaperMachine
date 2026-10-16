@@ -67,6 +67,13 @@ this app's own windows is not a click on the wallpaper, so neither scripts
 dragged onto the desktop before the button is let go. A press the wallpaper did get is
 always released, wherever the pointer ends up.
 
+An effect that composes its layer over the screen (refraction among them) reads
+that screen the right way up on both renderers. The shader compiler defines `HLSL`
+and `HLSL_SM40` as Wallpaper Engine does, so the Direct3D branches of an effect's own
+shaders are the ones compiled: the flipped screen coordinate of the compositing
+pass, a brace-listed sample kernel, and a light falloff that stays defined beyond a
+light's radius.
+
 Scene lighting is the author's own shader reading the light positions and
 premultiplied colours, which both renderers fill from the scene's lights the same
 way. Both renderers apply a material's depth state and cull mode the same way: a

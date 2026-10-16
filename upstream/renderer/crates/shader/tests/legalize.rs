@@ -4655,3 +4655,236 @@ fn widened_scalar_uniform_array_component_subscript_reads_the_element() {
     assert!(!source.contains(".x["), "{source}");
     compile_for_both_targets(&legalized, "a component subscript on a scalar element must compile");
 }
+
+/// Compiles one legalized stage of either kind for both renderers.
+fn compile_stage_for_both_targets(
+    stage: ShaderStageKind,
+    legalized: &CodegenStageSource,
+    expectation: &str,
+) {
+    for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+        if let Err(error) = NagaCompiler.compile_stage(target, stage, legalized) {
+            panic!(
+                "{expectation} ({target:?}): {}\n{}",
+                error.to_miette_report(),
+                legalized.source()
+            );
+        }
+    }
+}
+
+/// The idiom Wallpaper Engine's morph and instancing shaders open with: the
+/// Direct3D dialect declares the vertex and instance index as inputs, and
+/// reads them as unsigned integers.
+const DIRECT3D_INDEX_BUILTINS: &str = concat!(
+    "attribute vec3 a_Position;\n",
+    "in uint gl_VertexID;\n",
+    "in uint gl_InstanceID;\n",
+    "uniform uint g_MorphOffsets[4];\n",
+    "uniform mat4 g_ViewProjection[6];\n",
+    "varying float v_Shell;\n",
+    "void main() {\n",
+    "    uint morphMapOffset = gl_VertexID + g_MorphOffsets[1u];\n",
+    "    v_Shell = float(gl_InstanceID) / 3.0 + float(morphMapOffset % 4u);\n",
+    "    gl_Position = g_ViewProjection[gl_InstanceID] * vec4(a_Position, 1.0);\n",
+    "}\n",
+);
+
+#[test]
+fn a_redeclared_vertex_builtin_makes_no_attribute_and_its_uses_reach_the_builtin() {
+    // `in uint gl_VertexID;` can only restate a builtin. Taken for a stage
+    // input it compiled as a vertex attribute of that name, and the morph
+    // offset read whatever sat at that location instead of the vertex index.
+    let legalized = legalize(ShaderStageKind::Vertex, DIRECT3D_INDEX_BUILTINS);
+    let source = legalized.source();
+
+    assert!(!source.contains("gl_VertexID"), "{source}");
+    assert!(!source.contains("gl_InstanceID"), "{source}");
+    assert!(
+        source.contains("uint morphMapOffset = gl_VertexIndex + "),
+        "uint + uint reads the builtin unconverted:\n{source}"
+    );
+    assert!(source.contains("float(gl_InstanceIndex)"), "{source}");
+    assert!(source.contains("g_ViewProjection[gl_InstanceIndex]"), "{source}");
+    assert!(
+        source.contains("layout(location = 0) in vec3 a_Position;"),
+        "{source}"
+    );
+    assert_eq!(
+        source.matches("layout(location").count(),
+        2,
+        "only the attribute and the varying take a location:\n{source}"
+    );
+    compile_stage_for_both_targets(
+        ShaderStageKind::Vertex,
+        &legalized,
+        "a stage reading the vertex and instance index must compile",
+    );
+}
+
+#[test]
+fn an_index_builtin_read_through_a_macro_is_renamed_where_the_macro_is_written() {
+    let source = concat!(
+        "attribute vec3 a_Position;\n",
+        "in uint gl_VertexID;\n",
+        "#define VERTEX_NUMBER gl_VertexID\n",
+        "varying float v_Index;\n",
+        "void main() {\n",
+        "    v_Index = float(VERTEX_NUMBER);\n",
+        "    gl_Position = vec4(a_Position, 1.0);\n",
+        "}\n",
+    );
+    let legalized = legalize(ShaderStageKind::Vertex, source);
+
+    assert!(
+        legalized.source().contains("#define VERTEX_NUMBER gl_VertexIndex"),
+        "{}",
+        legalized.source()
+    );
+    compile_stage_for_both_targets(
+        ShaderStageKind::Vertex,
+        &legalized,
+        "a macro naming the vertex index must compile",
+    );
+}
+
+#[test]
+fn a_builtin_is_dropped_whatever_its_qualifier_and_one_the_backend_lacks_is_not() {
+    // Wallpaper Engine's shadow-casting vertex stage declares the instance index
+    // it reads and the viewport index it writes. Naga provides the first, and
+    // restating `gl_Position` is as redundant as restating the instance
+    // index. It has no `gl_ViewportIndex`, so that declaration stays the
+    // output it always was and the stage keeps compiling.
+    let source = concat!(
+        "uniform mat4 g_ViewportViewProjectionMatrices[6];\n",
+        "in uint gl_InstanceID;\n",
+        "out vec4 gl_Position;\n",
+        "varying uint gl_ViewportIndex;\n",
+        "attribute vec3 a_Position;\n",
+        "varying vec2 v_Uv;\n",
+        "void main() {\n",
+        "    v_Uv = a_Position.xy;\n",
+        "    gl_ViewportIndex = gl_InstanceID;\n",
+        "    gl_Position = g_ViewportViewProjectionMatrices[gl_InstanceID] * vec4(a_Position, 1.0);\n",
+        "}\n",
+    );
+    let legalized = legalize(ShaderStageKind::Vertex, source);
+    let source = legalized.source();
+
+    assert!(!source.contains("in uint gl_Instance"), "{source}");
+    assert!(!source.contains("vec4 gl_Position;"), "{source}");
+    assert!(source.contains("out uint gl_ViewportIndex;"), "{source}");
+    assert!(source.contains("layout(location = 0) in vec3 a_Position;"), "{source}");
+    compile_stage_for_both_targets(
+        ShaderStageKind::Vertex,
+        &legalized,
+        "the shadow-casting vertex stage must keep compiling",
+    );
+}
+
+#[test]
+fn an_index_restated_through_attribute_or_varying_is_dropped_and_not_given_a_location() {
+    // The older qualifiers restate a builtin as surely as `in` and `out`: the
+    // vertex index read through `attribute`, and a fragment stage's own
+    // position through `varying`. Neither takes an interface location, so the
+    // stage's real varyings keep theirs.
+    let vertex = concat!(
+        "attribute uint gl_VertexID;\n",
+        "attribute vec3 a_Position;\n",
+        "varying vec2 v_Uv;\n",
+        "void main() {\n",
+        "    v_Uv = vec2(float(gl_VertexID), 0.0);\n",
+        "    gl_Position = vec4(a_Position, 1.0);\n",
+        "}\n",
+    );
+    let legalized = legalize(ShaderStageKind::Vertex, vertex);
+    let source = legalized.source();
+    assert!(!source.contains("gl_VertexID"), "{source}");
+    assert!(source.contains("gl_VertexIndex"), "{source}");
+    assert!(source.contains("layout(location = 0) in vec3 a_Position;"), "{source}");
+    compile_stage_for_both_targets(ShaderStageKind::Vertex, &legalized, "a restated index must compile");
+
+    let fragment = concat!(
+        "varying vec4 gl_FragCoord;\n",
+        "varying vec2 v_Uv;\n",
+        "void main() {\n",
+        "    gl_FragColor = vec4(v_Uv, gl_FragCoord.x, 1.0);\n",
+        "}\n",
+    );
+    let legalized = legalize(ShaderStageKind::Fragment, fragment);
+    let source = legalized.source();
+    assert!(!source.contains("vec4 gl_FragCoord;"), "{source}");
+    assert!(source.contains("layout(location = 0) in vec2 v_Uv;"), "{source}");
+    compile_stage_for_both_targets(ShaderStageKind::Fragment, &legalized, "a restated position must compile");
+}
+
+#[test]
+fn a_name_the_backend_cannot_compile_as_a_builtin_keeps_its_declaration() {
+    // An index declared as the author's own `int`, and the clip distance the
+    // backend recognises but cannot compile as a builtin, stay the variables
+    // they were: dropping either would stop the stage compiling.
+    let source = concat!(
+        "in int gl_VertexID;\n",
+        "out float gl_ClipDistance[1];\n",
+        "attribute vec3 a_Position;\n",
+        "void main() {\n",
+        "    int index = gl_VertexID;\n",
+        "    gl_ClipDistance[0] = 1.0;\n",
+        "    gl_Position = vec4(a_Position + vec3(float(index)), 1.0);\n",
+        "}\n",
+    );
+    let legalized = legalize(ShaderStageKind::Vertex, source);
+    let source = legalized.source();
+    assert!(source.contains("int gl_VertexID;"), "{source}");
+    assert!(!source.contains("gl_VertexIndex"), "{source}");
+    assert!(source.contains("gl_ClipDistance[1];"), "{source}");
+    compile_stage_for_both_targets(
+        ShaderStageKind::Vertex,
+        &legalized,
+        "a stage whose gl_ names are its own variables must keep compiling",
+    );
+}
+
+#[test]
+fn a_user_name_that_only_contains_gl_is_still_an_interface() {
+    let source = concat!(
+        "attribute vec3 a_Position;\n",
+        "attribute vec2 a_gl_Extra;\n",
+        "varying vec2 v_gl_Uv;\n",
+        "void main() {\n",
+        "    v_gl_Uv = a_gl_Extra;\n",
+        "    gl_Position = vec4(a_Position, 1.0);\n",
+        "}\n",
+    );
+    let legalized = legalize(ShaderStageKind::Vertex, source);
+    let source = legalized.source();
+
+    assert!(source.contains("layout(location = 1) in vec2 a_gl_Extra;"), "{source}");
+    assert!(source.contains("layout(location = 0) out vec2 v_gl_Uv;"), "{source}");
+}
+
+#[test]
+fn brace_initialized_arrays_compile_on_both_backends() {
+    // Wallpaper Engine's bokeh effect spells its sample kernel with a brace
+    // list for the Direct3D dialect. The list may be a macro, a vector per
+    // element, end in a comma, and sit in a function body.
+    let source = concat!(
+        "#define KERNEL vec2(0,0),vec2(0.5,0),vec2(-0.5,0.25)\n",
+        "#define kernelSampleCount 3\n",
+        "const vec2 kernel[kernelSampleCount] = {KERNEL};\n",
+        "const float weight[3] = {1, 0.5, 0.25,};\n",
+        "const vec2 corners[2] = {{0.0, 1.0}, {2.0, 3.0}};\n",
+        "void main() {\n",
+        "    uint taps[2] = {1, 2};\n",
+        "    vec2 sum = vec2(0.0);\n",
+        "    for (int i = 0; i < kernelSampleCount; i++) {\n",
+        "        sum += kernel[i] * weight[i] + corners[i % 2] * float(taps[i % 2]);\n",
+        "    }\n",
+        "    gl_FragColor = vec4(sum, 0.0, 1.0);\n",
+        "}\n",
+    );
+    let legalized = legalize(ShaderStageKind::Fragment, source);
+
+    assert!(legalized.source().contains("= {KERNEL};"), "{}", legalized.source());
+    compile_for_both_targets(&legalized, "brace-initialized arrays must compile");
+}

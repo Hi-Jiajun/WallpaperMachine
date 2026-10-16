@@ -2763,8 +2763,8 @@ fn every_asset_shader_that_requires_lighting_compiles_lit_on_both_backends() {
         );
         return;
     };
-    // fur4 is left out: its instanced shells read `gl_InstanceID`, which the GLSL front end
-    // rejects, lit or unlit.
+    // fur4 is left out: its instanced shells read the dialect's `CASTF` cast
+    // macro, which the compiler does not supply, lit or unlit.
     for shader in ["genericimage4", "generic4", "genericparticle", "genericropeparticle",
                    "foliage4", "chroma4"] {
         let (Some(vertex), Some(fragment)) = (
@@ -2803,6 +2803,67 @@ fn every_asset_shader_that_requires_lighting_compiles_lit_on_both_backends() {
                 "{shader} {target:?}: {members:?}");
             assert!(members.contains(&("g_LPoint_Origin".to_owned(), 3)),
                 "{shader} {target:?}: {members:?}");
+        }
+    }
+}
+
+#[test]
+fn asset_vertex_stages_with_if_hlsl_blocks_compile_on_both_backends() {
+    let test = "asset_vertex_stages_with_if_hlsl_blocks_compile_on_both_backends";
+    let Some(root) = asset_shader_root() else {
+        eprintln!(
+            "skipping {test}: no Wallpaper Engine assets/shaders directory. Set \
+             WALLPAPER_MACHINE_ASSETS_ROOT to run it."
+        );
+        return;
+    };
+    // The cast macros the shipped morph shaders use are part of the dialect's
+    // own prelude, which the compiler does not supply (yet); define the ones
+    // the vertex stages below read.
+    let prelude = "#define CASTU(x) uint(x)\n#define CASTF(x) float(x)\n";
+    let fragment = concat!(
+        "varying vec2 v_TexCoord;\nuniform sampler2D g_Texture0;\n",
+        "void main() { gl_FragColor = texSample2D(g_Texture0, v_TexCoord); }\n",
+    );
+    // Each pair puts a shipped `#if HLSL` block in the compiled source: the
+    // screen coordinate flip of a compositing effect, and the redeclared
+    // vertex index of a morph target shader, which the stage reads as `uint`.
+    let cases: [(&str, &str, &[(&str, &str)]); 3] = [
+        ("effectcomposebackground", "", &[]),
+        ("generic4", prelude, &[("MORPHING", "1")]),
+        ("generic4", prelude, &[("MORPHING", "1"), ("MORPHING_NORMALS", "1"), ("SKINNING", "1"),
+                                ("BONECOUNT", "4"), ("LIGHTING", "1")]),
+    ];
+    for (shader, prelude, combos) in cases {
+        let Some(vertex) = corpus_source_or_skip(&root.join(format!("{shader}.vert")), test) else {
+            continue;
+        };
+        for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+            let mut builder = ShaderProgramRequest::builder(ShaderName::new(shader).unwrap())
+                .target(target)
+                .stage(ShaderStageSource::new(ShaderStageKind::Vertex, format!("{prelude}{vertex}")))
+                .stage(ShaderStageSource::new(ShaderStageKind::Fragment, fragment));
+            for (name, value) in combos {
+                builder = builder.combo(ShaderComboValue::new(ComboName::new(*name).unwrap(), *value));
+            }
+            let request = builder.build().expect("asset request should be valid");
+            let program = ShaderPipeline::new(AssetShaderProvider, NagaCompiler)
+                .compile(&request)
+                .unwrap_or_else(|error| {
+                    panic!("{shader} {combos:?} should compile for {target:?}: {error:?}")
+                });
+            let vertex_source = legalized_stage(&program, ShaderStageKind::Vertex);
+            assert!(!vertex_source.contains("gl_VertexID"), "{shader} {target:?}");
+            if shader == "effectcomposebackground" {
+                assert!(vertex_source.contains("v_ScreenCoord.y = -v_ScreenCoord.y;"), "{target:?}");
+            } else {
+                assert!(vertex_source.contains("gl_VertexIndex"), "{shader} {target:?}");
+                assert!(
+                    !program.reflection().vertex_inputs().iter()
+                        .any(|input| input.name().starts_with("gl_")),
+                    "{shader} {target:?}: no builtin is a vertex input"
+                );
+            }
         }
     }
 }
@@ -3393,6 +3454,198 @@ fn pipeline_shares_vector_uniform_with_scalar_prefix_in_other_stage() {
         "uniform vec2 u_size;\nattribute vec2 a_Position;\nvoid main() { gl_Position=vec4(a_Position*u_size,0,1); }",
         "uniform float u_size;\nvoid main() { gl_FragColor=vec4(u_size); }");
     let _ = pipeline().compile(&request).expect("stage-local scalar view of a shared vector uniform");
+}
+
+/// Compiles one program from vertex and fragment source, for either backend.
+fn compile_program(
+    name: &str,
+    target: ShaderTarget,
+    vertex: &str,
+    fragment: &str,
+) -> shader::CompiledShaderProgram {
+    let request = ShaderProgramRequest::builder(ShaderName::new(name).unwrap())
+        .target(target)
+        .stage(ShaderStageSource::new(ShaderStageKind::Vertex, vertex))
+        .stage(ShaderStageSource::new(ShaderStageKind::Fragment, fragment))
+        .build()
+        .unwrap();
+    pipeline()
+        .compile(&request)
+        .unwrap_or_else(|error| panic!("{name} should compile for {target:?}: {error:?}"))
+}
+
+/// Returns one stage's legalized source from a compiled program.
+fn legalized_stage(program: &shader::CompiledShaderProgram, kind: ShaderStageKind) -> &str {
+    program
+        .stages()
+        .iter()
+        .find(|stage| stage.kind() == kind)
+        .and_then(CompiledShaderStage::legalized_source)
+        .expect("the stage keeps its legalized source")
+}
+
+#[test]
+fn a_compositing_effect_turns_the_screen_coordinate_over_under_if_hlsl() {
+    // Wallpaper Engine's `effectcomposebackground`, the first pass of every
+    // effect that composes a layer over the screen, flips `v_ScreenCoord.y`
+    // under `#if HLSL` for the Direct3D convention this renderer shares.
+    // While the macro was 0 the block was skipped, and every such effect
+    // sampled the screen mirrored vertically.
+    let vertex = concat!(
+        "uniform mat4 g_ModelViewProjectionMatrix;\n",
+        "uniform mat4 g_EffectModelViewProjectionMatrix;\n",
+        "attribute vec3 a_Position;\n",
+        "attribute vec2 a_TexCoord;\n",
+        "varying vec2 v_TexCoord;\n",
+        "varying vec3 v_ScreenCoord;\n",
+        "void main() {\n",
+        "    gl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n",
+        "    v_TexCoord = a_TexCoord;\n",
+        "    v_ScreenCoord = mul(vec4((a_Position), 1.0), g_EffectModelViewProjectionMatrix).xyw;\n",
+        "#if HLSL\n",
+        "    v_ScreenCoord.y = -v_ScreenCoord.y;\n",
+        "#endif\n",
+        "#if !HLSL\n",
+        "    v_ScreenCoord.x = -v_ScreenCoord.x;\n",
+        "#endif\n",
+        "}\n",
+    );
+    let fragment = concat!(
+        "uniform sampler2D g_Texture0;\n",
+        "uniform sampler2D g_Texture1;\n",
+        "varying vec2 v_TexCoord;\n",
+        "varying vec3 v_ScreenCoord;\n",
+        "void main() {\n",
+        "    vec2 screen = v_ScreenCoord.xy / v_ScreenCoord.z * 0.5 + 0.5;\n",
+        "    gl_FragColor = texSample2D(g_Texture0, v_TexCoord) + texSample2D(g_Texture1, screen);\n",
+        "}\n",
+    );
+    for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+        let program = compile_program("compose_background", target, vertex, fragment);
+        let source = legalized_stage(&program, ShaderStageKind::Vertex);
+        assert!(source.contains("v_ScreenCoord.y = -v_ScreenCoord.y;"), "{target:?}: {source}");
+        assert!(!source.contains("v_ScreenCoord.x = -v_ScreenCoord.x;"), "{target:?}: {source}");
+    }
+}
+
+#[test]
+fn a_bokeh_style_kernel_compiles_from_its_if_hlsl_brace_list_on_both_backends() {
+    // The kernel is a brace list under `#if HLSL` and an array constructor
+    // otherwise, both spelled with the same macro of commas. The first branch
+    // is the one compiled now.
+    let fragment = concat!(
+        "#define KERNEL vec2(0,0),vec2(0.5,0),vec2(-0.5,0.25),vec2(0,-1)\n",
+        "#define kernelSampleCount 4\n",
+        "#if HLSL\n",
+        "const vec2 kernel[kernelSampleCount] = {KERNEL};\n",
+        "#else\n",
+        "const vec2 kernel[kernelSampleCount] = vec2[kernelSampleCount](KERNEL);\n",
+        "#endif\n",
+        "varying vec2 v_TexCoord;\n",
+        "uniform sampler2D g_Texture0;\n",
+        "void main() {\n",
+        "    vec4 sum = vec4(0.0);\n",
+        "    for (int i = 0; i < kernelSampleCount; i++) {\n",
+        "        sum += texSample2D(g_Texture0, v_TexCoord + kernel[i] * 0.01);\n",
+        "    }\n",
+        "    gl_FragColor = sum / float(kernelSampleCount);\n",
+        "}\n",
+    );
+    let vertex = concat!(
+        "attribute vec3 a_Position;\nattribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\n",
+        "void main() { gl_Position = vec4(a_Position, 1.0); v_TexCoord = a_TexCoord; }\n",
+    );
+    for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+        let program = compile_program("bokeh_kernel", target, vertex, fragment);
+        let source = legalized_stage(&program, ShaderStageKind::Fragment);
+        assert!(source.contains("= {KERNEL};"), "{target:?}: {source}");
+        assert!(!source.contains("vec2[kernelSampleCount](KERNEL)"), "{target:?}: {source}");
+    }
+}
+
+#[test]
+fn the_direct3d_light_falloff_is_defined_for_zero_and_stays_finite_on_both_backends() {
+    // `common_pbr_2.h` raises the falloff to the light's exponent as
+    // `pow(falloff + FLT_MIN, exponent)` under `#if HLSL`, so the base is
+    // positive even beyond the light's radius, where the falloff is exactly 0.
+    // The constant is the smallest normal float, the one thing that survives
+    // an `f32` round trip through the generated source untouched.
+    let vertex = concat!(
+        "attribute vec3 a_Position;\nvarying float v_Distance;\n",
+        "void main() { v_Distance = a_Position.z; gl_Position = vec4(a_Position, 1.0); }\n",
+    );
+    let fragment = concat!(
+        "uniform vec3 g_LightColor;\n",
+        "uniform float g_Radius;\n",
+        "uniform float g_Exponent;\n",
+        "varying float v_Distance;\n",
+        "vec3 Radiance(vec3 lightColor, float distance, float radius, float exponent) {\n",
+        "    float falloff = saturate(1.0 - distance / radius);\n",
+        "    // Ensure x > 0 && y >= 0 to avoid undefined behavior\n",
+        "#if HLSL\n",
+        "    vec3 radiance = lightColor * pow(falloff + 1.17549435e-38, exponent);\n",
+        "#else\n",
+        "    float flt_min = 6.103515625e-5;\n",
+        "    vec3 radiance = lightColor * mix(0.0, pow(falloff + flt_min, exponent), step(0.0, falloff - flt_min));\n",
+        "#endif\n",
+        "    return radiance;\n",
+        "}\n",
+        "void main() {\n",
+        "    gl_FragColor = vec4(Radiance(g_LightColor, v_Distance, g_Radius, g_Exponent), 1.0);\n",
+        "}\n",
+    );
+    for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+        let program = compile_program("light_falloff", target, vertex, fragment);
+        let source = legalized_stage(&program, ShaderStageKind::Fragment);
+        assert!(source.contains("pow(falloff + 1.17549435e-38, exponent)"), "{target:?}: {source}");
+        assert!(!source.contains("flt_min"), "{target:?}: {source}");
+        if target == ShaderTarget::MetalMsl {
+            let msl = program
+                .stages()
+                .iter()
+                .find(|stage| stage.kind() == ShaderStageKind::Fragment)
+                .and_then(CompiledShaderStage::metal)
+                .expect("Metal stage")
+                .source();
+            // The MSL writer spells the constant out in decimal; a compiler
+            // that rounds correctly reads it back as the smallest normal.
+            let spelled = "0.000000000000000000000000000000000000011754944";
+            assert_eq!(spelled.parse::<f32>().unwrap().to_bits(), f32::MIN_POSITIVE.to_bits());
+            assert!(
+                msl.contains(&format!(" + {spelled}, ")),
+                "the smallest normal float reaches MSL exactly:\n{msl}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_redeclared_vertex_index_is_no_vertex_input_of_the_compiled_program() {
+    // Reflection feeds the renderer's vertex layout: a phantom `gl_VertexID`
+    // input would ask for an attribute no mesh has.
+    let vertex = concat!(
+        "attribute vec3 a_Position;\n",
+        "#if HLSL\n",
+        "in uint gl_VertexID;\n",
+        "#endif\n",
+        "uniform uint g_MorphOffsets[4];\n",
+        "varying float v_Offset;\n",
+        "void main() {\n",
+        "    v_Offset = float(gl_VertexID + g_MorphOffsets[1u]);\n",
+        "    gl_Position = vec4(a_Position, 1.0);\n",
+        "}\n",
+    );
+    let fragment = "varying float v_Offset;\nvoid main() { gl_FragColor = vec4(v_Offset); }\n";
+    for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+        let program = compile_program("morph_offset", target, vertex, fragment);
+        let names: Vec<_> = program
+            .reflection()
+            .vertex_inputs()
+            .iter()
+            .map(|input| input.name().to_owned())
+            .collect();
+        assert_eq!(names, ["a_Position"], "{target:?}");
+    }
 }
 
 fn pipeline() -> DefaultShaderPipeline<InMemoryShaderSourceProvider> {
