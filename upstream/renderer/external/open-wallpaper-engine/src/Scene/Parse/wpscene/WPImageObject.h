@@ -55,10 +55,12 @@ public:
     int32_t                      id;
     std::string                  name;
     bool                         visible { true };
-    /// `visible` as written when a user property decides it: `visible` above
-    /// is then only the editor's default, which the parser replaces with the
-    /// property's current value. Null for a fixed or scripted visibility.
+    /// `visible` as written when a user property or a script decides it:
+    /// `visible` above is then only the editor's default. A property's current
+    /// value replaces it as the scene loads; a script keeps deciding it while
+    /// the scene runs (`scripted_visible`). Null for a fixed visibility.
     nlohmann::json               visible_setting;
+    bool                         scripted_visible { false };
     int32_t                      version;
     std::vector<WPMaterial>      materials;
     std::vector<WPMaterialPass>  passes;

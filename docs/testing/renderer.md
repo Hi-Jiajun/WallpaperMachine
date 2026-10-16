@@ -755,7 +755,8 @@ into private textures; the three that draw skip visibly without a Metal device.
 - **Object kinds not drawn or not modelled.** A `shape` object draws only an effect of
   a single pass: its last effect is drawn onto the scene as a mesh, so a multi-pass
   last effect, which would draw into buffers first, is left out (the editor's
-  light-shaft effect has one pass). A `sprite` object is read as a plain group and
+  light-shaft effect has one pass). Its effects' visibility is read once: one a script
+  switches keeps the value the scene file stores. A `sprite` object is read as a plain group and
   draws nothing. Puppet morph targets (`MDMP`, blend shapes) are parsed and never read: no `MORPHING` combo, no
   morph texture and no weight uniforms. Sound `spatialization`, `attenuation` and
   `mindistance` are not read, so every sound plays unpositioned.

@@ -2008,6 +2008,13 @@ void ResolveTextLayerFont(TextLayerState& state, fs::VFS& vfs, const std::string
     state.resolved_font_data     = SharedFontData {};
 }
 
+// Whether an effect is part of the chain a layer is built with: one that is
+// visible, or one a script may switch on later. Wallpaper Engine keeps every
+// effect of a layer and runs the ones its effect object says are visible.
+bool EffectIsBuilt(const wpscene::WPImageEffect& effect) {
+    return effect.visible || effect.scripted_visible;
+}
+
 /// The margin Wallpaper Engine keeps around a text card on each axis. It sizes the
 /// card by `2 * padding` and insets the text by `padding`, but only for a layer
 /// that draws through effect passes, composites with a colour blend (any mode
@@ -2019,7 +2026,7 @@ Eigen::Vector2f ResolveTextCardPadding(const wpscene::WPTextObject& obj, bool sc
     constexpr float kMaxCardPadding = 512.0f;
     const bool has_effect_pass = std::any_of(
         obj.effects.begin(), obj.effects.end(), [](const wpscene::WPImageEffect& effect) {
-            return effect.visible && ! effect.materials.empty();
+            return EffectIsBuilt(effect) && ! effect.materials.empty();
         });
     const bool composites = (obj.colorBlendMode != 0 && obj.colorBlendMode != kAdditiveColorBlendMode) ||
                             obj.ledsource;
@@ -2097,18 +2104,32 @@ void RegisterLayerAlpha(ParseContext& context, std::string_view runtime_name,
 // default. It is decided here, when the scene loads: building every hidden
 // effect would cost passes and memory, so a running scene holds the property at
 // this value (SceneRuntimeContext::NoteLoadOnlyProperty) and a changed one
-// takes a reload.
+// takes a reload. An effect a script switches is built whatever its value, and
+// follows the script while the scene runs (`RegisterScriptedEffectVisibility`).
 void ResolveUserEffectVisibility(ParseContext& context,
                                  std::vector<wpscene::WPImageEffect>& effects,
                                  std::string_view runtime_name) {
     if (context.scene->runtime == nullptr) return;
     auto& runtime = *context.scene->runtime;
     for (auto& effect : effects) {
-        if (effect.visible_setting.is_null()) continue;
+        if (effect.visible_setting.is_null() || effect.scripted_visible) continue;
         effect.visible =
             ResolveBoolSetting(runtime, effect.visible_setting, runtime_name)->getBool();
         runtime.NoteLoadOnlyProperty(UserPropertyName(effect.visible_setting));
     }
+}
+
+// Hands a built effect its visibility: fixed, or followed from the script that
+// decides it.
+void RegisterScriptedEffectVisibility(ParseContext& context,
+                                      const wpscene::WPImageEffect& source,
+                                      const std::shared_ptr<SceneImageEffect>& effect,
+                                      std::string_view runtime_name) {
+    effect->visible = source.visible;
+    if (! source.scripted_visible || context.scene->runtime == nullptr) return;
+    auto& runtime = *context.scene->runtime;
+    runtime.RegisterEffectVisibility(
+        effect, ResolveBoolSetting(runtime, source.visible_setting, runtime_name));
 }
 
 // The keys of a text object that are baked into the card's pixels when the layer
@@ -2200,7 +2221,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         ResolveTextEffectCapacity(obj, context, layout_size.cwiseMax(raster_size),
                                   std::any_of(obj.effects.begin(), obj.effects.end(),
                                               [&](const wpscene::WPImageEffect& effect) {
-                                                  return effect.visible &&
+                                                  return EffectIsBuilt(effect) &&
                                                          (! color_blend_effect.has_value() ||
                                                           &effect != &obj.effects[*color_blend_effect]);
                                               }));
@@ -2659,6 +2680,47 @@ void RegisterMaterialConstants(ParseContext& context, std::shared_ptr<SceneMater
     }
 }
 
+// An effect that draws a chain's input through unchanged with Wallpaper
+// Engine's passthrough material, writing the chain's output. `slot`, when given,
+// receives the material slot, for a layer colour that tints every pass.
+std::shared_ptr<SceneImageEffect> MakePassthroughEffect(
+    ParseContext& context, const std::string& input, const ShaderValueMap& base_const_svs,
+    const std::string& runtime_name, std::string_view layer_name,
+    std::shared_ptr<SceneMaterial>* slot = nullptr) {
+    auto&               vfs    = *context.vfs;
+    auto                effect = std::make_shared<SceneImageEffect>();
+    auto                node   = std::make_shared<SceneNode>();
+    wpscene::WPMaterial wp_material;
+    nlohmann::json      json;
+    if (! PARSE_JSON(fs::GetFileContent(vfs, "/assets/materials/util/effectpassthrough.json"), json) ||
+        ! wp_material.FromJson(json)) {
+        LOG_ERROR("failed to parse the passthrough material for '%s'",
+                  std::string(layer_name).c_str());
+        return nullptr;
+    }
+    if (wp_material.textures.empty()) wp_material.textures.resize(1);
+    wp_material.textures[0] = input;
+    SceneMaterial     material;
+    WPShaderValueData sv_data;
+    WPShaderInfo      shader_info;
+    shader_info.baseConstSvs = base_const_svs;
+    if (! LoadMaterial(vfs, wp_material, context.scene.get(), node.get(), &material, &sv_data,
+                       &shader_info)) {
+        LOG_ERROR("failed to load the passthrough material for '%s'",
+                  std::string(layer_name).c_str());
+        return nullptr;
+    }
+    LoadConstvalue(material, wp_material, shader_info);
+    auto mesh = std::make_shared<SceneMesh>();
+    mesh->AddMaterial(std::move(material));
+    if (slot != nullptr) *slot = mesh->MaterialSlotPtr();
+    RegisterMaterialConstants(context, mesh->MaterialSlotPtr(), wp_material, shader_info, runtime_name);
+    node->AddMesh(mesh);
+    context.shader_updater->SetNodeData(node.get(), sv_data);
+    effect->nodes.push_back({ std::string(SpecTex_Default), node });
+    return effect;
+}
+
 void AttachEffectsToNode(ParseContext& context,
                          SceneNode& node,
                          int32_t layer_id,
@@ -2728,8 +2790,9 @@ void AttachEffectsToNode(ParseContext& context,
     scene.renderTargets[effect_ppong_b] = scene.renderTargets.at(effect_ppong_a);
     scene.renderTargets[effect_ppong_b].bind = { .enable = true, .name = effect_ppong_a };
 
+    int scripted_effects = 0, fixed_effects = 0;
     for (const auto& effect : effects) {
-        if (! effect.visible) continue;
+        if (! EffectIsBuilt(effect)) continue;
 
         auto image_effect = std::make_shared<SceneImageEffect>();
         const std::string inRT { effect_ppong_a };
@@ -2831,9 +2894,20 @@ void AttachEffectsToNode(ParseContext& context,
         }
 
         if (effect_materials_ok) {
+            RegisterScriptedEffectVisibility(context, effect, image_effect, runtime_name);
             effect_layer->AddEffect(image_effect);
+            (effect.scripted_visible ? scripted_effects : fixed_effects)++;
         } else {
             LOG_ERROR("effect '%s' failed to load", effect.name.c_str());
+        }
+    }
+    // As for an image layer: while a script has every effect off, the chain
+    // ends in a passthrough so the layer is still drawn.
+    if (scripted_effects > 0 && fixed_effects == 0) {
+        if (auto fallback = MakePassthroughEffect(context, effect_ppong_a, base_const_svs,
+                                                  runtime_name, node.Name())) {
+            fallback->fallback = true;
+            effect_layer->AddEffect(fallback);
         }
     }
 }
@@ -4006,7 +4080,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
 
     int32_t count_eff = 0;
     for (const auto& wpeffobj : wpimgobj.effects) {
-        if (wpeffobj.visible) {
+        if (EffectIsBuilt(wpeffobj)) {
             count_eff++;
         }
     }
@@ -4394,57 +4468,22 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             }
             scene.renderTargets[effect_ppong_b] = scene.renderTargets.at(effect_ppong_a);
         }
+        // Draws the layer's own picture through unchanged: the whole chain of
+        // a compose layer without effects, and the fallback of a chain whose
+        // effects a script can all switch off.
+        const auto make_passthrough_effect = [&]() -> std::shared_ptr<SceneImageEffect> {
+            std::shared_ptr<SceneMaterial> slot;
+            auto effect = MakePassthroughEffect(context, effect_ppong_a, baseConstSvs,
+                                                runtime_name, wpimgobj.name, &slot);
+            if (effect != nullptr && user_color != nullptr) user_color_materials.push_back(slot);
+            return effect;
+        };
         if (render_as_compose && wpimgobj.effects.empty()) {
-            auto                passthrough_effect = std::make_shared<SceneImageEffect>();
-            auto                passthrough_node   = std::make_shared<SceneNode>();
-            wpscene::WPMaterial passthrough_wp_material;
-            nlohmann::json      passthrough_json;
-            if (PARSE_JSON(fs::GetFileContent(vfs, "/assets/materials/util/effectpassthrough.json"),
-                           passthrough_json) &&
-                passthrough_wp_material.FromJson(passthrough_json)) {
-                if (passthrough_wp_material.textures.empty()) {
-                    passthrough_wp_material.textures.resize(1);
-                }
-                passthrough_wp_material.textures[0] = effect_ppong_a;
-                SceneMaterial     passthrough_material;
-                WPShaderValueData passthrough_sv_data;
-                WPShaderInfo      passthrough_shader_info;
-                passthrough_shader_info.baseConstSvs = baseConstSvs;
-                if (LoadMaterial(vfs,
-                                 passthrough_wp_material,
-                                 context.scene.get(),
-                                 passthrough_node.get(),
-                                 &passthrough_material,
-                                 &passthrough_sv_data,
-                                 &passthrough_shader_info)) {
-                    LoadConstvalue(
-                        passthrough_material, passthrough_wp_material, passthrough_shader_info);
-                    auto passthrough_mesh = std::make_shared<SceneMesh>();
-                    passthrough_mesh->AddMaterial(std::move(passthrough_material));
-                    if (user_color != nullptr) {
-                        user_color_materials.push_back(passthrough_mesh->MaterialSlotPtr());
-                    }
-                    RegisterMaterialConstants(context,
-                                              passthrough_mesh->MaterialSlotPtr(),
-                                              passthrough_wp_material,
-                                              passthrough_shader_info, runtime_name);
-                    passthrough_node->AddMesh(passthrough_mesh);
-                    context.shader_updater->SetNodeData(passthrough_node.get(),
-                                                        passthrough_sv_data);
-                    passthrough_effect->nodes.push_back(
-                        { std::string(SpecTex_Default), passthrough_node });
-                    imgEffectLayer->AddEffect(passthrough_effect);
-                } else {
-                    LOG_ERROR("failed to load compose passthrough material for '%s'",
-                              wpimgobj.name.c_str());
-                }
-            } else {
-                LOG_ERROR("failed to parse compose passthrough material for '%s'",
-                          wpimgobj.name.c_str());
-            }
+            if (auto passthrough = make_passthrough_effect()) imgEffectLayer->AddEffect(passthrough);
         }
 
         int32_t i_eff = -1;
+        int     scripted_effects = 0, fixed_effects = 0;
         for (const auto& wpeffobj : wpimgobj.effects) {
             i_eff++;
             // Wallpaper Engine draws the passthrough that blends the layer
@@ -4452,7 +4491,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             // alpha are already in what it blends, from the layer's first pass.
             const bool blends_onto_screen =
                 color_blend_effect.has_value() && &wpeffobj == &wpimgobj.effects[*color_blend_effect];
-            if (! wpeffobj.visible) {
+            if (! EffectIsBuilt(wpeffobj)) {
                 i_eff--;
                 continue;
             }
@@ -4580,10 +4619,22 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 imgEffect->nodes.push_back({ matOutRT, spEffNode });
             }
 
-            if (eff_mat_ok)
+            if (eff_mat_ok) {
+                RegisterScriptedEffectVisibility(context, wpeffobj, imgEffect, runtime_name);
                 imgEffectLayer->AddEffect(imgEffect);
-            else {
+                (wpeffobj.scripted_visible ? scripted_effects : fixed_effects)++;
+            } else {
                 LOG_ERROR("effect \'%s\' failed to load", wpeffobj.name.c_str());
+            }
+        }
+        // A chain whose every effect a script can switch off still has to draw
+        // the layer when they are all off: Wallpaper Engine then draws it as a
+        // layer without effects. Here the chain ends in a passthrough that runs
+        // only while no other effect does (SceneImageEffectLayer::ResolveEffect).
+        if (scripted_effects > 0 && fixed_effects == 0) {
+            if (auto fallback = make_passthrough_effect()) {
+                fallback->fallback = true;
+                imgEffectLayer->AddEffect(fallback);
             }
         }
     }

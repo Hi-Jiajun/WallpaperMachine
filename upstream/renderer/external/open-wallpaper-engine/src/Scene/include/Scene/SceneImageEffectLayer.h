@@ -19,6 +19,11 @@ enum class MeshUpdate : uint8_t;
 struct SceneImageEffectNode {
     std::string                output; // render target
     std::shared_ptr<SceneNode> sceneNode;
+    /// `output` and the material's textures as the parser wrote them, with the
+    /// chain's ping-pong placeholders still in, so the chain can be resolved
+    /// again when the set of visible effects changes.
+    std::string                authored_output;
+    std::vector<std::string>   authored_textures;
 };
 
 struct SceneImageEffect {
@@ -31,9 +36,21 @@ struct SceneImageEffect {
         std::string dst;
         std::string src;
         i32         afterpos { 0 }; // start at 1, 0 for begin at all
+        std::string authored_dst;
+        std::string authored_src;
     };
     std::vector<Command>            commands;
     std::list<SceneImageEffectNode> nodes;
+    /// Whether the effect runs: a script can switch it while the scene runs
+    /// (`SceneRuntimeContext::RegisterEffectVisibility`), and the chain is then
+    /// resolved again over the effects that run.
+    bool visible { true };
+    /// A passthrough that closes the chain only while no other effect runs, so
+    /// a layer whose effects a script has all switched off is still drawn.
+    bool fallback { false };
+    /// Set by `SceneImageEffectLayer::ResolveEffect`: the effect is part of the
+    /// chain as last resolved.
+    bool included { true };
 };
 
 class SceneImageEffectLayer {
@@ -71,5 +88,6 @@ private:
     BlendMode                  m_final_blend;
 
     std::vector<std::shared_ptr<SceneImageEffect>> m_effects;
+    bool                                           m_authored_captured { false };
 };
 } // namespace wallpaper

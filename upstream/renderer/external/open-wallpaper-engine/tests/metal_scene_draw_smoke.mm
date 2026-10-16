@@ -2217,6 +2217,119 @@ std::filesystem::path WriteColorBlendFixture(const std::filesystem::path& root,
     return project;
 }
 
+/// The fixture's red card under `effects_json`, which may name two effects:
+/// `swap` trades red and green, `half` halves red and green and writes 0.5 blue.
+/// Both read the effect before them, so the colour says which ran, and in which
+/// order. The passthrough is the plain copy Wallpaper Engine's is.
+std::filesystem::path WriteScriptedEffectFixture(const std::filesystem::path& root,
+                                                 std::string_view            effects_json)
+{
+    const auto project = WriteFixture(root);
+    const auto file    = [&](const std::string& path, const std::string& text) {
+        std::filesystem::create_directories((root / path).parent_path());
+        std::ofstream(root / path) << text;
+    };
+    const std::string vertex =
+        "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\n"
+        "attribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+        "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+        "  v_TexCoord = a_TexCoord;\n}\n";
+    const auto effect = [&](const std::string& name, const std::string& body) {
+        file("shaders/" + name + ".vert", vertex);
+        file("shaders/" + name + ".frag",
+             "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+             "  vec4 c = texture2D(g_Texture0, v_TexCoord);\n  gl_FragColor = " + body + ";\n}\n");
+        file("materials/" + name + ".json",
+             R"({"passes":[{"shader":")" + name + R"(","blending":"normal","cullmode":"nocull",)"
+             R"("depthtest":"disabled","depthwrite":"disabled","textures":[null]}]})");
+    };
+    file("shaders/metal_probe.frag", "void main() {\n  gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);\n}\n");
+    effect("swap", "vec4(c.g, c.r, c.b, c.a)");
+    effect("half", "vec4(c.r * 0.5, c.g * 0.5, 0.5, c.a)");
+    effect("through", "c");
+    file("effects/swap/effect.json", R"({"name":"swap","passes":[{"material":"materials/swap.json"}]})");
+    file("effects/half/effect.json", R"({"name":"half","passes":[{"material":"materials/half.json"}]})");
+    file("materials/util/effectpassthrough.json",
+         R"({"passes":[{"shader":"through","blending":"normal","cullmode":"nocull",)"
+         R"("depthtest":"disabled","depthwrite":"disabled","textures":[null]}]})");
+    file("layout.json",
+         R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+         R"("general":{"clearcolor":[0,0,0],"bloom":false,"cameraparallax":false,)"
+         R"("orthogonalprojection":{"width":384,"height":256}},)"
+         R"("objects":[{"id":1,"name":"tile","image":"models/tile.json","origin":[192,128,0],)"
+         R"("scale":[1,1,1],"angles":[0,0,0],"visible":true,"effects":)" + std::string(effects_json) +
+         "}]}");
+    return project;
+}
+
+TEST_F(MetalSceneDraw, AnEffectAScriptSwitchesIsFollowedWhileTheSceneRunsOnBothRenderers)
+{
+    // Wallpaper Engine keeps every effect of a layer and runs those its effect
+    // object says are visible, frame by frame; a script deciding `visible` is
+    // how day and night wallpapers switch their grading. Here `swap` runs only
+    // from 0.5 s to 1 s, before an always-on `half`: off, the card is half red;
+    // on, half green; off again, half red, with `half` reading whichever buffer
+    // the effect before it wrote.
+    const std::string effects =
+        R"([{"file":"effects/swap/effect.json","id":2,"visible":{"value":false,)"
+        R"("script":"export function update() { return engine.runtime >= 0.5 && engine.runtime < 1.0; }"}},)"
+        R"({"file":"effects/half/effect.json","id":3,"visible":true}])";
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        for (const auto& [frames, expected] :
+             { std::pair<int, std::array<int, 3>> { 10, { 128, 0, 128 } },
+               { 45, { 0, 128, 128 } },
+               { 90, { 128, 0, 128 } } }) {
+            SCOPED_TRACE(frames);
+            const std::string name = std::string("scripted-effect-") +
+                                     (native ? "native-" : "compat-") + std::to_string(frames);
+            const auto  project = WriteScriptedEffectFixture(root_ / name, effects);
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, frames, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
+            ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+            const std::size_t centre = (128u * 384u + 192u) * 3u;
+            for (std::size_t c = 0; c < 3; ++c) {
+                EXPECT_NEAR(picture.rgb[centre + c], expected[c], 2) << "channel " << c;
+            }
+        }
+    }
+}
+
+TEST_F(MetalSceneDraw, ALayerWhoseEffectsAScriptHasAllSwitchedOffIsStillDrawnOnBothRenderers)
+{
+    // With its only effect switched off, Wallpaper Engine draws the layer as a
+    // layer without effects. The chain cannot be left empty: its last pass is
+    // what puts the layer on screen.
+    const std::string effects =
+        R"([{"file":"effects/swap/effect.json","id":2,"visible":{"value":true,)"
+        R"("script":"export function update() { return engine.runtime >= 0.5; }"}}])";
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        for (const auto& [frames, expected] :
+             { std::pair<int, std::array<int, 3>> { 10, { 255, 0, 0 } }, { 45, { 0, 255, 0 } } }) {
+            SCOPED_TRACE(frames);
+            const std::string name = std::string("scripted-off-") +
+                                     (native ? "native-" : "compat-") + std::to_string(frames);
+            const auto  project = WriteScriptedEffectFixture(root_ / name, effects);
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, frames, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
+            ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+            const std::size_t centre = (128u * 384u + 192u) * 3u;
+            for (std::size_t c = 0; c < 3; ++c) {
+                EXPECT_NEAR(picture.rgb[centre + c], expected[c], 2) << "channel " << c;
+            }
+            const std::size_t corner = (4u * 384u + 4u) * 3u;
+            EXPECT_EQ(picture.rgb[corner], 0) << "the card spread past its bounds";
+        }
+    }
+}
+
 TEST_F(MetalSceneDraw, ACompositingEffectSeesTheScreenUprightOnBothRenderers)
 {
     // An effect that composes a layer over the screen (Wallpaper Engine's

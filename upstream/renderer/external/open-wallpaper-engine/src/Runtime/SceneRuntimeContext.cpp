@@ -1517,6 +1517,20 @@ void SceneRuntimeContext::RegisterNodeVisibility(std::string name, SceneNode* no
     };
 }
 
+void SceneRuntimeContext::RegisterEffectVisibility(std::shared_ptr<SceneImageEffect> effect,
+                                                   std::unique_ptr<DynamicValue> value) {
+    if (effect == nullptr || value == nullptr) return;
+    // The value as the scene loads is what the first graph is built with, so
+    // only a later switch asks for a rebuild.
+    effect->visible = value->getBool();
+    RegisterDynamicValueListener(std::move(value), [this, effect](const DynamicValue& current) {
+        const bool visible = current.getBool();
+        if (effect->visible == visible) return;
+        effect->visible       = visible;
+        m_scene_graph_mutated = true;
+    });
+}
+
 void SceneRuntimeContext::ApplyNodeOriginAnimation(NodeVec3Binding& binding) {
     if (binding.animation == nullptr || binding.animation->playback == nullptr) return;
     const auto& animation = *binding.animation;

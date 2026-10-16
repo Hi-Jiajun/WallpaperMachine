@@ -417,7 +417,14 @@ parallax switch, amount and cursor influence, which decide whether the bloom
 passes exist and which passes follow the cursor. A scene setting bound to a
 property loads with the property's current value, saved choices included. A preview of a document holds a
 load-only property at the value the scene read, for every layer that uses it, and
-reports it as deferred; only loading the scene applies it. A sound layer's volume
+reports it as deferred; only loading the scene applies it. An effect whose
+`visible` a script decides is different: it is built with its layer and
+follows the script, as Wallpaper Engine's effect object does. A switch resolves
+the layer's effect chain again over the effects that run and rebuilds the render
+graph before the next frame, so nothing is paid per frame. While a script has
+every effect of a layer off, the chain ends in a passthrough: Wallpaper Engine
+draws such a layer as one without effects, so that state costs one layer-sized
+pass more here, and a text layer keeps its effect padding. A sound layer's volume
 is live too: a slider bound to it sets the stream's volume when the slider moves,
 and nothing else does, so a volume a script set stays until its own slider moves.
 

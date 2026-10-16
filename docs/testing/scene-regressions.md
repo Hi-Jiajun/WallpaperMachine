@@ -1375,6 +1375,13 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   `RenderGraph.addColorBlendLayersAddOntoTheSceneWithoutSamplingIt` that a mode 31
   layer, with and without an effect, draws additively onto the scene with no
   passthrough, no screen copy and no pass sampling the screen.
+- **Scripted effect visibility** — `MetalSceneDraw.AnEffectAScriptSwitchesIsFollowedWhileTheSceneRunsOnBothRenderers`
+  switches an effect on and off again with a script, ahead of an effect that is
+  always on: the picture must follow each switch, and the later effect must read
+  the buffer the effect before it wrote, so the chain is resolved again from its
+  placeholders. `MetalSceneDraw.ALayerWhoseEffectsAScriptHasAllSwitchedOffIsStillDrawnOnBothRenderers`
+  switches a layer's only effect off: the passthrough at the end of the chain
+  must still draw the layer, inside its bounds.
 - **`colorBlendMode` on puppets** — `RenderGraph.puppetColorBlendModeSamplesTheScreenOnlyWhereItDrawsOnScreen`
   in `rendergraph_smoke`. A layer's `colorBlendMode` mixes it with the screen
   behind it, so only the pass that draws onto the screen may sample it. On a

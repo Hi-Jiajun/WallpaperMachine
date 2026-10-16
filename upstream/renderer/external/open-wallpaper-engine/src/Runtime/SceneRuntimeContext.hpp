@@ -40,6 +40,7 @@ struct SceneMaterial;
 class ScriptedDynamicValue;
 class SceneNode;
 class SceneImageEffectLayer;
+struct SceneImageEffect;
 class Scene;
 class WPSoundStream;
 struct ScriptHostContext;
@@ -255,6 +256,12 @@ public:
     void          SetLayerTemplateLoader(std::function<bool(std::string_view)> loader);
     void          RegisterNodeVisibility(std::string name, SceneNode* node,
                                          std::unique_ptr<DynamicValue> value);
+    /// An effect whose `visible` a script decides, as Wallpaper Engine's
+    /// effect object does: its chain is built with it, and a switch marks the
+    /// scene graph changed so the host resolves the chain again over the
+    /// effects that run and rebuilds the render graph before the next frame.
+    void          RegisterEffectVisibility(std::shared_ptr<SceneImageEffect> effect,
+                                           std::unique_ptr<DynamicValue> value);
     void          RegisterNodeTranslate(std::string name, SceneNode* node,
                                         std::unique_ptr<DynamicValue> value,
                                         std::shared_ptr<const NodeOriginAnimation> animation = {});

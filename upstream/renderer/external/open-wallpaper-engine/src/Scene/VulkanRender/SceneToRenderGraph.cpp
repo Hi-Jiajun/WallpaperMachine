@@ -366,6 +366,9 @@ static void ToGraphPass(
 
         for (usize i = 0; i < effs->EffectCount(); i++) {
             auto& eff     = effs->GetEffect(i);
+            // An effect a script has switched off, or the fallback while
+            // another effect runs, is not part of the chain this graph draws.
+            if (! eff->included) continue;
             auto commands = eff->commands;
             std::stable_sort(commands.begin(), commands.end(), [](const auto& a, const auto& b) {
                 return a.afterpos < b.afterpos;

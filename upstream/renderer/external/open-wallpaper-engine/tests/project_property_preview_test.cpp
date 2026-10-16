@@ -1146,7 +1146,18 @@ TEST(ScenePropertyPreview, AReloadedSceneShowsItsOwnLoadedValuesAndNothingLeaksA
 // A preview that holds load-only properties and moves live ones adds no work that
 // advances with time, so the on-demand idle analysis needs no change for it.
 TEST(ScenePropertyPreview, PreviewingAddsNoTimeAdvancingWork) {
-    const auto loaded = LoadOnly(false, {});
+    // Without the effect a script switches: that script runs every frame, as a
+    // visibility script must, which would hide any work a preview added.
+    std::string objects = LoadOnlyObjects(false);
+    const std::string scripted =
+        R"(     {"file":"effects/scripted/effect.json","id":12,
+      "visible":{"script":"'use strict'; export function update(value) { return value; }","value":true}},
+)";
+    const auto at = objects.find(scripted);
+    ASSERT_NE(at, std::string::npos);
+    objects.erase(at, scripted.size());
+    const auto loaded =
+        Load(objects, kLoadOnlyAuthored, &kLoadOnlyAuthored, kLoadOnlyFiles);
     ASSERT_NE(loaded, nullptr);
     auto& runtime = loaded->runtime();
     runtime.Tick(1.0 / 60.0);
