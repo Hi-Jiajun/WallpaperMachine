@@ -32,7 +32,7 @@ extension PanelController {
       try await run(.direct) {
         let id = try installedWallpaperID(id)
         try await store.activateWallpaperEverywhereAsync(id: id)
-        if hidesAfterActivating, store.supportPrompt?.isPending != true, !store.commands.isBusy {
+        if hidesAfterActivating, duePrompt == nil, !store.commands.isBusy {
           hideApplication()
         }
       }
@@ -89,7 +89,7 @@ extension PanelController {
         }
         // Get out of the way so the freshly applied wallpaper is visible, unless another switch
         // is already waiting to replace it.
-        if hidesAfterActivating, store.supportPrompt?.isPending != true,
+        if hidesAfterActivating, duePrompt == nil,
           !store.commands.hasWaiting(slot: slot)
         {
           hideApplication()

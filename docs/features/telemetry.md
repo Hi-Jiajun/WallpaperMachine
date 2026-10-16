@@ -136,8 +136,7 @@ and Cloudflare's request logs keep it for up to 7 days. The website's
   - counting is always turned off again.
 - `TelemetryClientTests`: the request is one POST with the app's user agent, and
   anything but a 2xx is a failure.
-- `SupportPromptStoreTests` and `WebPanelSupportPromptTests`: the one-time question,
-  end to end through the bundled page.
-- `WebPanelTelemetryTests`: the Settings switch round-trips, **Show in Finder** writes
-  the report it would send, and the guide answers the question only if its switch was
-  shown.
+- `SupportPromptStoreTests` and `PanelPerformanceDataTests`: the one-time question,
+  through the panel's presenter; the Settings switch round-trips, **Show in Finder**
+  writes the report it would send, and the guide answers the question only once its
+  switch was shown and commits the switch as a draft.

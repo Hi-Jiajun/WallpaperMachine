@@ -1088,9 +1088,16 @@ never to `.shared`.
   registered shortcut's press is read as its combination and never runs its action),
   `LibrarySettingsPresentationTests`, `SettingsSectionsRenderTests` and `SettingsBRenderTests`
   (every section in the narrowest and widest column, light and dark, in every language).
-- First-run guide and support prompt: `FirstRunModelTests`, `FirstRunDraftTests`,
-  `SteamSignInPhaseTests`, `SupportPromptPresenterTests` and `WelcomeRenderTests`; see
+- First-run guide and the one-time prompts: `FirstRunModelTests`, `FirstRunDraftTests`,
+  `SteamSignInPhaseTests`, `SupportPromptPresenterTests`, `WelcomeRenderTests` and
+  `PanelPerformanceDataTests` (the Settings switch round-trips and **Show in Finder** writes the
+  report it would send, the performance data question asked once of someone who finished the
+  guide earlier and answered from the presenter, the guide answering it only once its
+  Preferences page was shown and committing its switch as a draft); see
   [first run](../features/first-run.md).
+- Sharing: `PanelSharingTests` (a Workshop wallpaper shares its Workshop page with the website,
+  any other id has no Share, the app is shared with the website in the panel's language, **Star on
+  GitHub** in About and in the star prompt open the repository and answer the star prompt).
 
 Not covered: the sidebar material and its Reduce Transparency and inactive looks, the sidebar
 selection highlight, the toolbar's glass, popover placement, sheets on a real window, hover,
@@ -1242,8 +1249,34 @@ install and a no-login smoke run (see [README.md](README.md#opt-in-layers)).
 
 `SupportPromptStoreTests` — a downloaded wallpaper qualifies only after a
 successful activation, a pending prompt survives relaunch and further downloads,
-and a presented prompt never returns. `Support/` also holds the shared fixtures
+and a presented prompt never returns. Across the three prompts: one a day in
+priority order, the performance data question only for someone who finished the
+guide without it, the star prompt after 14 days and 5 days of use (one day counts
+once) and not after the star was chosen, and state saved by earlier builds still
+loads. `Support/` also holds the shared fixtures
 (`TemporaryDefaults`, `TestAppLanguage`, bridge snapshots).
+
+## Telemetry
+
+`TelemetryServiceTests`, `TelemetrySamplerTests` and `TelemetryClientTests` run
+against a fake uploader, a fake counter source, a `URLProtocol` stub and a
+temporary spool folder. They cover:
+
+- nothing written or sent while it is off;
+- one upload a day, carrying only rows not sent before;
+- rows kept after a failed upload;
+- local deletion and the deletion request when turned off, asked for again at the
+  next launch until confirmed;
+- a report built from home paths, user names, local folders and pixiv ids that
+  carries none of them;
+- the previous run's ending, length and memory pressure;
+- frame rows as deltas between two readings;
+- paused, covered, switched and invalidated windows reporting nothing;
+- counters always turned off again;
+- the POST and its user agent.
+
+Not covered: the live website endpoint, and the energy cost of a frame window
+([telemetry](../features/telemetry.md#frame-windows)).
 
 ## SystemMedia
 

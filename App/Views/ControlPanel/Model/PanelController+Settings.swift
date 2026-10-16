@@ -310,6 +310,20 @@ extension PanelController {
     try await change { try await store.setVerboseLoggingAsync(enabled: enabled) }
   }
 
+  /// `telemetry`: **Send performance data** (docs/features/telemetry.md). Choosing here, or in the
+  /// guide, answers the one-time question. The switch is disabled without a service; a stale control
+  /// must not stall the guide's Continue, which stops at the first refusal, so it is only logged.
+  func setSendsPerformanceData(_ enabled: Bool) async throws {
+    try await change {
+      guard let telemetry = store.telemetry else {
+        AppLog.warn("telemetry: the switch was changed but sending is unavailable in this run")
+        return
+      }
+      telemetry.setEnabled(enabled)
+      store.supportPrompt?.recordTelemetryAsked()
+    }
+  }
+
   /// `inspectWebWallpapers`: lets Safari's Develop menu attach to running web wallpapers.
   func setInspectsWebWallpapers(_ enabled: Bool) async throws {
     try await change {

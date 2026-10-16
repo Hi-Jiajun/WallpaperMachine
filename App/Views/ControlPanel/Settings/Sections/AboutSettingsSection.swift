@@ -6,6 +6,7 @@ import SwiftUI
 struct AboutSettingsSection: View {
   private static let versions = SettingsItem.Group("versions")
   private static let updates = SettingsItem.Group("updates", title: "Updates")
+  private static let share = SettingsItem.Group("share", title: "Spread the word")
   private static let credits = SettingsItem.Group("credits")
 
   static let appVersion = SettingsItem(
@@ -34,6 +35,10 @@ struct AboutSettingsSection: View {
       "Updates are checked against the latest published GitHub Release. Download and restart-install happen only after you confirm."
   )
 
+  static let shareApp = SettingsItem(
+    id: "about.share", section: .about, group: share, title: "Share WallpaperMachine…",
+    keywords: ["Star on GitHub"])
+
   static let creditsItem = SettingsItem(
     id: "about.credits", section: .about, group: credits, title: "GNU General Public License v2",
     note:
@@ -41,7 +46,8 @@ struct AboutSettingsSection: View {
   )
 
   static let items = [
-    appVersion, gitRevision, updateStatus, updateActions, updateNotes, updateFootnote, creditsItem,
+    appVersion, gitRevision, updateStatus, updateActions, updateNotes, updateFootnote, shareApp,
+    creditsItem,
   ]
 
   @Environment(PanelController.self) private var controller
@@ -52,6 +58,7 @@ struct AboutSettingsSection: View {
       if !controller.settings.search.isActive { AboutProductHeader() }
       SettingsGroup(Self.versions, in: .about) { AboutVersionRows() }
       SettingsGroup(Self.updates, in: .about) { AboutUpdatesRows() }
+      SettingsGroup(Self.share, in: .about) { AboutShareRow() }
       SettingsGroup(Self.credits, in: .about) { AboutCreditsRow() }
     }
     // Row buttons share one size across Settings.
@@ -300,6 +307,37 @@ private struct AboutUpdatesRows: View {
 }
 
 // MARK: - Credits
+
+/// **Share WallpaperMachine…** opens the system share menu with the website; **Star on GitHub**
+/// opens the repository and counts as the star the star prompt would ask for.
+private struct AboutShareRow: View {
+  @Environment(PanelController.self) private var controller
+
+  var body: some View {
+    let item = AboutSettingsSection.shareApp
+    if controller.settings.search.shows(item) {
+      let share = controller.appShare
+      HStack(spacing: 8) {
+        ShareLink(
+          item: share.url, subject: Text(verbatim: share.subject),
+          message: Text(verbatim: share.message)
+        ) {
+          Text("Share WallpaperMachine…")
+        }
+        Button("Star on GitHub") {
+          controller.launch(PanelActionCoordinator.key("starRepository")) {
+            try await controller.starRepository()
+          }
+        }
+        Spacer(minLength: 0)
+      }
+      .padding(.horizontal, 12)
+      .padding(.vertical, 10)
+      .accessibilityElement(children: .contain)
+      .accessibilityIdentifier(item.id)
+    }
+  }
+}
 
 private struct AboutCreditsRow: View {
   @Environment(PanelController.self) private var controller

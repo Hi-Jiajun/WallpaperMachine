@@ -51,32 +51,32 @@ struct WelcomeOverlayHost: View {
   }
 }
 
-/// The first-wallpaper offer: star the project or become a supporter, once. Both are links the
-/// person opens by choosing; nothing is starred or paid by opening one. **Not now**, the close
-/// button and Escape all just leave.
+/// The one-time prompts, one at a time: after the first downloaded wallpaper, star the project or
+/// become a supporter; later, a GitHub star; for someone who finished the guide before it offered
+/// the switch, whether to send performance data. Links open only when chosen; nothing is starred or
+/// paid by opening one. **Not now**, the close button and Escape all just leave.
 struct SupportPromptSheet: View {
   let presenter: SupportPromptPresenter
 
   @Environment(\.panelTheme) private var theme
 
   var body: some View {
+    let prompt = presenter.prompt ?? .support
     WelcomeColumn(spacing: 18) {
       HStack(alignment: .top, spacing: 12) {
         WelcomeColumn(spacing: 6) {
           // The prompt's words can be selected and copied; the labels of its buttons cannot, so
           // a click anywhere on a choice makes the choice.
-          Text("Feeling good?")
+          title(prompt)
             .font(.system(size: 19, weight: .bold))
             .tracking(-0.2)
             .accessibilityAddTraits(.isHeader)
             .textSelection(.enabled)
-          Text(
-            "Your first downloaded wallpaper is up and running. Enjoying WallpaperMachine? You can help it grow."
-          )
-          .font(.system(size: 13))
-          .lineSpacing(2)
-          .foregroundStyle(theme.surface.muted.color)
-          .textSelection(.enabled)
+          lead(prompt)
+            .font(.system(size: 13))
+            .lineSpacing(2)
+            .foregroundStyle(theme.surface.muted.color)
+            .textSelection(.enabled)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         Button {
@@ -90,23 +90,22 @@ struct SupportPromptSheet: View {
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .help(L("Dismiss support prompt"))
-        .accessibilityLabel(L("Dismiss support prompt"))
+        .help(closeLabel(prompt))
+        .accessibilityLabel(closeLabel(prompt))
       }
-      WelcomeColumn(spacing: 8) {
-        WelcomeActionRow(
-          symbol: "star", color: .orange, title: Text("Star on GitHub"),
-          note: Text("Help others discover WallpaperMachine."), trailingSymbol: "arrow.up.right"
-        ) { choose(.star) }
-        WelcomeActionRow(
-          symbol: "heart", color: theme.surface.heart.color, title: Text("Become a Supporter"),
-          note: Text("Support development with a one-time contribution."),
-          trailingSymbol: "arrow.up.right"
-        ) { choose(.supporter) }
-      }
-      .disabled(presenter.isChoosing)
+      WelcomeColumn(spacing: 8) { choices(prompt) }
+        .disabled(presenter.isChoosing)
       if let error = presenter.error { WelcomeNotice(style: .error, message: error) }
       HStack {
+        if prompt == .telemetry {
+          Button {
+            presenter.showPerformanceDataDetails()
+          } label: {
+            Label("What is sent", systemImage: "arrow.up.right")
+          }
+          .buttonStyle(.link)
+          .disabled(presenter.isChoosing)
+        }
         Spacer(minLength: 0)
         Button("Not now") { presenter.dismiss() }
           .buttonStyle(.welcomeCapsule)
@@ -118,6 +117,59 @@ struct SupportPromptSheet: View {
     .foregroundStyle(theme.surface.text.color)
     .background(theme.surface.background.color)
     .onAppear { presenter.sheetDidAppear() }
+  }
+
+  private func title(_ prompt: SupportPromptStore.Prompt) -> Text {
+    switch prompt {
+    case .support: Text("Feeling good?")
+    case .star: Text("Like WallpaperMachine?")
+    case .telemetry: Text("Send performance data?")
+    }
+  }
+
+  private func lead(_ prompt: SupportPromptStore.Prompt) -> Text {
+    switch prompt {
+    case .support:
+      Text(
+        "Your first downloaded wallpaper is up and running. Enjoying WallpaperMachine? You can help it grow."
+      )
+    case .star: Text("A star on GitHub helps other Mac users find it.")
+    case .telemetry:
+      Text(
+        "It helps find what makes wallpapers slow: how long they take to apply, their frame rate and energy use, and your Mac’s model, sent once a day. No names, files or account details."
+      )
+    }
+  }
+
+  private func closeLabel(_ prompt: SupportPromptStore.Prompt) -> String {
+    prompt == .support ? L("Dismiss support prompt") : L("Close")
+  }
+
+  @ViewBuilder
+  private func choices(_ prompt: SupportPromptStore.Prompt) -> some View {
+    switch prompt {
+    case .support:
+      WelcomeActionRow(
+        symbol: "star", color: .orange, title: Text("Star on GitHub"),
+        note: Text("Help others discover WallpaperMachine."), trailingSymbol: "arrow.up.right"
+      ) { choose(.star) }
+      WelcomeActionRow(
+        symbol: "heart", color: theme.surface.heart.color, title: Text("Become a Supporter"),
+        note: Text("Support development with a one-time contribution."),
+        trailingSymbol: "arrow.up.right"
+      ) { choose(.supporter) }
+    case .star:
+      WelcomeActionRow(
+        symbol: "star", color: .orange, title: Text("Star on GitHub"),
+        note: Text("Opens the project on GitHub."), trailingSymbol: "arrow.up.right"
+      ) { choose(.star) }
+    case .telemetry:
+      // Turns a setting on; nothing opens.
+      WelcomeActionRow(
+        symbol: "waveform.path.ecg", color: .teal, title: Text("Send performance data"),
+        note: Text("You can turn it off in Settings › Storage."), trailingSymbol: "checkmark"
+      ) { choose(.enableTelemetry) }
+    }
   }
 
   private func choose(_ choice: SupportPromptChoice) {

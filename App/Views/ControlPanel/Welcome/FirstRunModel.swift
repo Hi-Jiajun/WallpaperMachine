@@ -182,6 +182,9 @@ final class FirstRunModel {
     guard !navigationBusy else { return }
     step = destination
     error = nil
+    // The Preferences page carries the performance data switch, so it answers the one-time
+    // question; someone who leaves the guide before reaching it is asked once later instead.
+    if destination == .preferences { controller.store.supportPrompt?.recordTelemetryAsked() }
   }
 
   func next() { if let next = step.next { go(to: next) } }
@@ -485,12 +488,13 @@ final class FirstRunModel {
 
   // MARK: Page 4: preferences
 
-  /// What the engine and macOS report for the three drafted preferences.
+  /// What the engine, macOS and the telemetry service report for the drafted preferences.
   var savedPreferences: WelcomePreferenceValues {
     WelcomePreferenceValues(
       launchAtLogin: controller.generalSettings.launchAtLogin.isOn,
       keepsWindowsOnWallpaperClick: controller.desktopSettings.keepsWindowsOnWallpaperClick,
-      batteryMode: controller.store.settingsSnapshot.batteryMode)
+      batteryMode: controller.store.settingsSnapshot.batteryMode,
+      sendsPerformanceData: controller.performanceData?.isEnabled ?? false)
   }
 
   var shownPreferences: WelcomePreferenceValues { preferences.values(saved: savedPreferences) }
@@ -512,6 +516,7 @@ final class FirstRunModel {
         case .launchAtLogin(let enabled): try await controller.setLaunchAtLogin(enabled)
         case .keepsWindows(let keeps): try await controller.setKeepsWindowsOnWallpaperClick(keeps)
         case .batteryMode(let mode): try await controller.setBatteryMode(mode)
+        case .performanceData(let enabled): try await controller.setSendsPerformanceData(enabled)
         }
       }
     }
@@ -551,6 +556,12 @@ final class FirstRunModel {
   /// the row then says where to allow it.
   var canChangeLaunchAtLogin: Bool {
     !pending.contains(.preferences) && controller.generalSettings.launchAtLogin.isAvailable
+  }
+
+  /// Whether the Send performance data switch can be used: a run without the telemetry service
+  /// (tests, a diagnostic run) has nothing to turn on.
+  var canChangePerformanceData: Bool {
+    !pending.contains(.preferences) && controller.performanceData != nil
   }
 
   // MARK: Page 6: start

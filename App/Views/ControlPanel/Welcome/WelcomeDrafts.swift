@@ -98,28 +98,32 @@ struct WelcomePerformanceDraft: Equatable {
 
 // MARK: - Preferences
 
-/// What the Preferences page holds: the three settings **Continue** commits.
+/// What the Preferences page holds: the settings **Continue** commits.
 struct WelcomePreferenceValues: Equatable {
   var launchAtLogin: Bool
   var keepsWindowsOnWallpaperClick: Bool
   var batteryMode: BridgeBatteryMode
+  /// **Send performance data**, off until chosen (docs/features/telemetry.md).
+  var sendsPerformanceData = false
 }
 
 /// What the Preferences page has changed and not yet saved. The lock screen is not here: it applies
 /// at once.
 struct WelcomePreferenceDraft: Equatable {
-  enum Key: Hashable { case launchAtLogin, keepsWindows, batteryMode }
+  enum Key: Hashable { case launchAtLogin, keepsWindows, batteryMode, performanceData }
 
   enum Entry: Equatable {
     case launchAtLogin(Bool)
     case keepsWindows(Bool)
     case batteryMode(BridgeBatteryMode)
+    case performanceData(Bool)
 
     var key: Key {
       switch self {
       case .launchAtLogin: .launchAtLogin
       case .keepsWindows: .keepsWindows
       case .batteryMode: .batteryMode
+      case .performanceData: .performanceData
       }
     }
   }
@@ -139,6 +143,7 @@ struct WelcomePreferenceDraft: Equatable {
       case .launchAtLogin(let value): shown.launchAtLogin = value
       case .keepsWindows(let value): shown.keepsWindowsOnWallpaperClick = value
       case .batteryMode(let value): shown.batteryMode = value
+      case .performanceData(let value): shown.sendsPerformanceData = value
       }
     }
     return shown
@@ -151,6 +156,7 @@ struct WelcomePreferenceDraft: Equatable {
       case .launchAtLogin(let value): value != saved.launchAtLogin
       case .keepsWindows(let value): value != saved.keepsWindowsOnWallpaperClick
       case .batteryMode(let value): value != saved.batteryMode
+      case .performanceData(let value): value != saved.sendsPerformanceData
       }
     }
   }

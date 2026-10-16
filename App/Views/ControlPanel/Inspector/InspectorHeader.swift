@@ -170,8 +170,8 @@ struct InspectorActionRow: View {
   }
 }
 
-/// Preview, Show in Finder, Apply to all displays, the playlist, Reinstall, the problem report and
-/// the Trash.
+/// Preview, Show in Finder, Share, Apply to all displays, the playlist, Reinstall, the problem
+/// report and the Trash.
 struct InspectorMoreMenu: View {
   let row: LibraryRow
 
@@ -205,6 +205,15 @@ struct InspectorMoreMenu: View {
         }
       } label: {
         Label("Show in Finder", systemImage: "folder")
+      }
+      // Only a Workshop wallpaper has a page to share.
+      if let share = controller.wallpaperShare(row.id) {
+        ShareLink(
+          item: share.url, subject: Text(verbatim: share.subject),
+          message: Text(verbatim: share.message)
+        ) {
+          Label("Share…", systemImage: "square.and.arrow.up")
+        }
       }
       if offersAll {
         Button {

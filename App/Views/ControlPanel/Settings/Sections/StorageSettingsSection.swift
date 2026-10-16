@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Settings › Storage: the files you chose for wallpapers, what can be cleared, backups, and the
-/// switches and the report that help a bug get fixed.
+/// switches, the report and the performance data that help a bug get fixed.
 struct StorageSettingsSection: View {
   private static let userFiles = SettingsItem.Group("user-files", title: "Wallpaper files you chose")
   private static let caches = SettingsItem.Group("caches")
@@ -72,10 +72,20 @@ struct StorageSettingsSection: View {
     note:
       "Saves recent logs, the lock screen log, macOS crash, resource, spin and hang reports, which wallpapers were loading when WallpaperMachine quit unexpectedly, and a system summary as one .zip file to attach to a bug report. Home folder paths, your Mac user name and Steam account names are replaced.",
     keywords: ["Export…"])
+  static let performanceData = SettingsItem(
+    id: "storage.telemetry", section: .storage, group: troubleshooting,
+    title: "Send performance data",
+    note:
+      "Sends once a day: how long wallpapers take to apply, their frame rate and energy use, how the app quit, your Mac’s model, and the Workshop ids of the wallpapers measured. No names, files or account details. Turning it off asks for the sent data to be deleted."
+  )
+  static let performanceDataFile = SettingsItem(
+    id: "storage.telemetry-data", section: .storage, group: troubleshooting,
+    title: "Data to be sent", keywords: ["Show in Finder", "What is sent", "Nothing sent yet."])
 
   static let items = [
     userFilesFolder, userFilesClear, shaderCache, logs, downloadHistory, context, backupExport,
-    backupLibrary, backupRestore, verbose, webInspection, diagnostics,
+    backupLibrary, backupRestore, verbose, webInspection, diagnostics, performanceData,
+    performanceDataFile,
   ]
 
   var body: some View {
@@ -394,5 +404,54 @@ private struct StorageTroubleshootingRows: View {
       }
       .disabled(busy)
     }
+    StoragePerformanceDataRows()
+  }
+}
+
+/// **Send performance data** and, beside it, the report the next upload would send and what a
+/// report holds (docs/features/telemetry.md). Without a telemetry service the switch is disabled.
+private struct StoragePerformanceDataRows: View {
+  @Environment(PanelController.self) private var controller
+  @Environment(\.locale) private var locale
+
+  var body: some View {
+    let model = controller.displaysSettings
+    let state = controller.performanceData
+    let isOn = state?.isEnabled ?? false
+    SettingsRow(StorageSettingsSection.performanceData) {
+      Toggle(
+        noLabel,
+        isOn: model.binding(PanelActionCoordinator.key("setting", detail: "telemetry"), current: isOn) {
+          try await controller.setSendsPerformanceData($0)
+        }
+      )
+      .toggleStyle(.switch)
+      .labelsHidden()
+      .disabled(state == nil)
+    }
+    DisplaysRow(
+      item: StorageSettingsSection.performanceDataFile, note: isOn ? lastSent(state?.lastSentAt) : nil,
+      labelsControl: false
+    ) {
+      HStack(spacing: 8) {
+        Button("Show in Finder") {
+          controller.launch(PanelActionCoordinator.key("telemetryShowData")) {
+            try await controller.showPerformanceData()
+          }
+        }
+        .disabled(!isOn || controller.isBusy(PanelActionCoordinator.key("telemetryShowData")))
+        Button("What is sent") {
+          controller.launch(PanelActionCoordinator.key("telemetryDetails")) {
+            try controller.openPerformanceDataDetails()
+          }
+        }
+      }
+    }
+  }
+
+  private func lastSent(_ date: Date?) -> String {
+    guard let date else { return L("Nothing sent yet.") }
+    let day = date.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted).locale(locale))
+    return L("Last sent on \(day).")
   }
 }

@@ -1,9 +1,11 @@
-# First-run guide and support prompt
+# First-run guide and one-time prompts
 
-Two one-time offers on a Mac that has not seen them: the welcome guide that covers
-the first window, and a single request to star or support the project after the
-first downloaded wallpaper is applied. Each is shown once and remembered in the app's defaults.
-The panel they appear in is described in [control panel](control-panel.md).
+One-time offers on a Mac that has not seen them: the welcome guide that covers the
+first window, a single request to star or support the project after the first
+downloaded wallpaper is applied, a later request for a GitHub star, and one question
+about [performance data](telemetry.md) for someone who finished the guide before it
+had that switch. Each is shown once and remembered in the app's defaults. The panel
+they appear in is described in [control panel](control-panel.md).
 
 ## First run
 
@@ -64,8 +66,9 @@ have **Back**, and decision pages have **Skip**:
    no preset leaves every tile unchecked with a **Custom** note. They are drafts:
    **Continue** sends only what changed (the render scale, then the frame-rate
    limit), **Skip** discards them.
-4. **Preferences.** Launch at login and Keep windows in place when clicking the
-   wallpaper are switches. **On battery** is a menu: Keep running, Reduced quality
+4. **Preferences.** Launch at login, Keep windows in place when clicking the
+   wallpaper and [Send performance data](telemetry.md) (off) are switches; the last
+   is disabled in a run without the telemetry service. **On battery** is a menu: Keep running, Reduced quality
    or Pause. They are drafts: **Continue** commits only the ones that changed, in
    order, and stops at the first refusal; **Skip** discards them. Launch at
    login is disabled with its reason while the app is outside Applications. When the
@@ -134,3 +137,30 @@ defers hiding for this first offer. Only a displayed offer consumes the one-time
 flag; after that it never returns automatically, including after quitting or
 updating. Opening a link neither stars the repository nor makes a payment; the user
 finishes that action in their browser. See [Supporter details](../../SPONSORS.md).
+
+## Star prompt and the performance data question
+
+`SupportPromptStore` schedules all three prompts and `PanelController.pendingPrompt`
+names at most one; `SupportPromptPresenter` shows it in the same sheet with the same
+waiting rules as above (`SupportPromptSheet`). When several are due, the order is the
+performance data question, then the support prompt, then the star prompt, and no
+prompt appears on the same calendar day as another. Once one has been answered or
+dismissed, no other appears in that window.
+
+- **Send performance data?** asks once someone who finished the welcome guide before
+  it had the switch. **Send performance data** turns it on and opens nothing; **What is
+  sent** opens [telemetry.md](telemetry.md) on GitHub without closing the sheet.
+  Reaching the guide's Preferences page, or choosing in Settings, counts as having been
+  asked; someone who leaves the guide before that page is asked once afterwards. A run
+  without the telemetry service never asks.
+- **Like WallpaperMachine?** asks once for a GitHub star from someone who did not
+  choose **Star on GitHub** in the support prompt or in Settings → About. It waits
+  until 14 days after the first day the panel was on screen with a build that counts
+  it, and until the panel has been on screen on at least 5 different days. For an
+  existing user the 14 days start at the update. Someone who never downloads a
+  wallpaper, and so never sees the support prompt, gets it too.
+
+Settings → About also has **Share WallpaperMachine…**, the system share menu with the
+website's home page (the Chinese page for either Chinese app language), and **Star on
+GitHub**. A Workshop wallpaper's details offer **Share…**; see
+[control panel](control-panel.md#sharing-a-wallpaper).

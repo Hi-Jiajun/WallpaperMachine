@@ -1,6 +1,54 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Like WallpaperMachine?" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachineを気に入りましたか？"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "喜欢 WallpaperMachine 吗？"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "喜歡 WallpaperMachine 嗎？"}}}
+    },
+    "A star on GitHub helps other Mac users find it." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "GitHubでStarを付けると、ほかのMacユーザーが見つけやすくなります。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "在 GitHub 点个 Star，能让更多 Mac 用户找到它。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "在 GitHub 點個 Star，能讓更多 Mac 使用者找到它。"}}}
+    },
+    "Opens the project on GitHub." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "GitHubのプロジェクトページを開きます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "打开 GitHub 上的项目页面。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "開啟 GitHub 上的專案頁面。"}}}
+    },
+    "Send performance data?" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "パフォーマンスデータを送信しますか？"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "发送性能数据？"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "傳送效能資料？"}}}
+    },
+    "It helps find what makes wallpapers slow: how long they take to apply, their frame rate and energy use, and your Mac’s model, sent once a day. No names, files or account details." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "壁紙が重くなる原因を探すために使います。壁紙の適用にかかる時間、フレームレート、エネルギー使用量、Macのモデルを1日1回送信します。名前、ファイル、アカウント情報は含みません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "用于找出壁纸变慢的原因：每天发送一次壁纸的应用耗时、帧率和能耗，以及你的 Mac 型号。不包含名称、文件或账户信息。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "用來找出桌布變慢的原因：每天傳送一次桌布的套用耗時、影格率和能源用量，以及你的 Mac 機型。不包含名稱、檔案或帳號資訊。"}}}
+    },
+    "Send performance data" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "パフォーマンスデータを送信"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "发送性能数据"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "傳送效能資料"}}}
+    },
+    "You can turn it off in Settings › Storage." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "「設定」›「ストレージ」でオフにできます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "可以在“设置 › 存储”中关闭。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "可以在「設定 › 儲存空間」中關閉。"}}}
+    },
+    "What is sent" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "送信される内容"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "会发送哪些数据"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "會傳送哪些資料"}}}
+    },
+    "Share…" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "共有…"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "分享…"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "分享…"}}}
+    },
+    "Sends once a day: how long wallpapers take to apply, their frame rate and energy use, how the app quit, your Mac’s model, and the Workshop ids of the wallpapers measured. No names, files or account details. Turning it off asks for the sent data to be deleted." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "1日1回、壁紙の適用にかかる時間、フレームレート、エネルギー使用量、アプリの終了のしかた、Macのモデル、計測した壁紙のワークショップIDを送信します。名前、ファイル、アカウント情報は含みません。オフにすると、送信済みのデータの削除を依頼します。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "每天发送一次：壁纸的应用耗时、帧率和能耗，应用的退出方式，你的 Mac 型号，以及被测壁纸的创意工坊 ID。不包含名称、文件或账户信息。关闭后会请求删除已发送的数据。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "每天傳送一次：桌布的套用耗時、影格率和能源用量，App 的結束方式，你的 Mac 機型，以及受測桌布的工作坊 ID。不包含名稱、檔案或帳號資訊。關閉後會要求刪除已傳送的資料。"}}}
+    },
+    "Data to be sent" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "送信予定のデータ"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "待发送的数据"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "待傳送的資料"}}}
+    },
+    "Last sent on %@." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "最終送信日：%@"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "上次发送于 %@。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "上次傳送於 %@。"}}}
+    },
+    "Nothing sent yet." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "まだ送信していません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "尚未发送。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "尚未傳送。"}}}
+    },
+    "Spread the word" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "紹介する"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "推荐给朋友"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "推薦給朋友"}}}
+    },
+    "Share WallpaperMachine…" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachineを共有…"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "分享 WallpaperMachine…"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "分享 WallpaperMachine…"}}}
+    },
+    "Sends load times, frame rate, energy use and your Mac’s model once a day, to find what makes wallpapers slow. No names, files or account details." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "読み込み時間、フレームレート、エネルギー使用量、Macのモデルを1日1回送信し、壁紙が重くなる原因を探します。名前、ファイル、アカウント情報は含みません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "每天发送一次加载耗时、帧率、能耗和你的 Mac 型号，用于找出壁纸变慢的原因。不包含名称、文件或账户信息。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "每天傳送一次載入耗時、影格率、能源用量和你的 Mac 機型，用來找出桌布變慢的原因。不包含名稱、檔案或帳號資訊。"}}}
+    },
     "Plays on a Mac with WallpaperMachine: %@" : {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Plays on a Mac with WallpaperMachine: %@"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "用 WallpaperMachine 在 Mac 上播放：%@"}}, "zh-Hant": {"stringUnit": {"state": "translated", "value": "用 WallpaperMachine 在 Mac 上播放：%@"}}, "ja": {"stringUnit": {"state": "translated", "value": "WallpaperMachineでMacで再生できます：%@"}}}},
     "Wallpaper Engine wallpapers, now on macOS." : {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Wallpaper Engine wallpapers, now on macOS."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "Wallpaper Engine 壁纸，现已来到 macOS。"}}, "zh-Hant": {"stringUnit": {"state": "translated", "value": "Wallpaper Engine 桌布，現已登上 macOS。"}}, "ja": {"stringUnit": {"state": "translated", "value": "Wallpaper Engineの壁紙が、macOSで使えます。"}}}},
     "The data to be sent could not be written: %@" : {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "The data to be sent could not be written: %@"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "无法写入待发送的数据：%@"}}, "zh-Hant": {"stringUnit": {"state": "translated", "value": "無法寫入待傳送的資料：%@"}}, "ja": {"stringUnit": {"state": "translated", "value": "送信予定のデータを書き出せませんでした：%@"}}}},

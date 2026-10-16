@@ -220,6 +220,10 @@ final class PanelController {
   @ObservationIgnored var revealDiagnosticsReport: @MainActor (URL) -> Void = {
     DesktopActions.current.reveal([$0])
   }
+  /// Shows the performance data report the next upload would send, selected. Tests capture the call.
+  @ObservationIgnored var revealPerformanceData: @MainActor (URL) -> Void = {
+    DesktopActions.current.reveal([$0])
+  }
   // MARK: end M-settings state
 
   // MARK: Initialization
@@ -387,12 +391,14 @@ final class PanelController {
   }
 
   /// Re-evaluates what is gated on the window being visible and Settings being open: the energy
-  /// sampler and the per-display options fetch. The lifecycle observation calls this whenever one
-  /// of its inputs changes (visibility, navigation, a new snapshot); tests call it directly after
-  /// `presentation.show()` or a navigation.
+  /// sampler, the per-display options fetch and the day the panel counts as used. The lifecycle
+  /// observation calls this whenever one of its inputs changes (visibility, navigation, a new
+  /// snapshot); tests call it directly after `presentation.show()` or a navigation.
   func refreshVisibilityGatedWork() {
     updateEnergyMonitoring()
     displayOptions.refresh()
+    // A day the panel was on screen, for the star prompt; each calendar day counts once.
+    if isStarted, presentation.isVisible { store.supportPrompt?.recordPanelUse() }
   }
 
   /// Sampling costs about 3 ms of kernel calls every two seconds, so it runs only while the panel

@@ -225,12 +225,15 @@ the rest opens in a popover from the ⓘ beside the title.
   `project.yml`) and the Git revision. **Check for Updates** reads the latest GitHub
   Release; download and restart-install happen only after confirmation (see
   [updates](updates.md)). The application menu item **Check for Updates…** opens
-  this section.
+  this section. **Spread the word** has **Share WallpaperMachine…** and **Star on
+  GitHub** ([one-time prompts](first-run.md#star-prompt-and-the-performance-data-question)).
 - **Storage** holds the wallpaper files chosen for properties, **Clear unused
   caches…** with the shader cache, logs and completed downloads,
   [Backup](backup-restore.md), and ends with **Troubleshooting**: Detailed logging, *Allow inspecting web wallpapers*
-  (Safari's Web Inspector on the running pages) and the diagnostics report
-  export. See [Logs and diagnostics reports](diagnostics.md) and
+  (Safari's Web Inspector on the running pages), the diagnostics report
+  export and [Send performance data](telemetry.md) with **Show in Finder** (the report
+  the next upload would send) and **What is sent**. See
+  [Logs and diagnostics reports](diagnostics.md) and
   [inspecting a web wallpaper](diagnostics.md#inspecting-a-web-wallpaper).
 
 Rows wrap within their available width, and in a narrow column a control too wide
@@ -402,13 +405,13 @@ the user edits and sends the issue on GitHub. The same report is in the inspecto
 
 ### Sharing a wallpaper
 
-A Workshop wallpaper (its id is all digits), installed or on Discover, has **Share…**
-in the utility row. It opens the system share menu under the button with the
-wallpaper's title, its Steam Workshop page and the website's home page (the Chinese
-page for either Chinese app language). The page sends only the id and the button's
-frame; `WebPanelSharing.swift` builds both links from fixed parts, so nothing the page
-says becomes a URL. Local wallpapers have no share button: they have no page to
-share.
+A Workshop wallpaper (its id is all digits) has **Share…**: in the Installed
+inspector's **More actions** menu, and beside **View on Steam Workshop** on Discover.
+It opens the system share menu with the wallpaper's Steam Workshop page, and its title
+and the website's home page (the Chinese page for either Chinese app language) as the
+message. `PanelController+Sharing.swift` builds both links from fixed parts and the
+Workshop id, so nothing a wallpaper or Steam says becomes a URL. Local wallpapers have
+no Share: they have no page to share.
 
 ## Now Playing
 

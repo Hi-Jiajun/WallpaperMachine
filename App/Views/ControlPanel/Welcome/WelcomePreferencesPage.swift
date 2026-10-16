@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// Page four: a few preferences. Launch at login, On battery and Keep windows in place are drafts
-/// that **Continue** commits; Animate lock screen applies at once, like Settings, and says so.
+/// Page four: a few preferences. Launch at login, On battery, Keep windows in place and Send
+/// performance data are drafts that **Continue** commits; Animate lock screen applies at once, like
+/// Settings, and says so.
 struct WelcomePreferencesPage: View {
   @Environment(FirstRunModel.self) private var model
   @Environment(PanelController.self) private var controller
@@ -21,6 +22,7 @@ struct WelcomePreferencesPage: View {
         launchAtLoginRow(shown: shown, login: login, locked: isCommitting)
         batteryRow(shown: shown, locked: isCommitting)
         keepWindowsRow(shown: shown, locked: isCommitting)
+        performanceDataRow(shown: shown)
         lockScreenRow(lock: lock, row: lockRow)
       }
       .welcomeSurface()
@@ -98,6 +100,26 @@ struct WelcomePreferencesPage: View {
         .toggleStyle(.switch)
         .labelsHidden()
         .disabled(locked)
+    }
+  }
+
+  private func performanceDataRow(shown: WelcomePreferenceValues) -> some View {
+    WelcomePreferenceRow(
+      symbol: "waveform.path.ecg", color: .teal, title: Text("Send performance data")
+    ) {
+      note(
+        Text(
+          "Sends load times, frame rate, energy use and your Mac’s model once a day, to find what makes wallpapers slow. No names, files or account details."
+        ))
+    } control: {
+      Toggle(
+        isOn: Binding(
+          get: { shown.sendsPerformanceData },
+          set: { model.preferences.set(.performanceData($0)) })
+      ) { Text("Send performance data") }
+        .toggleStyle(.switch)
+        .labelsHidden()
+        .disabled(!model.canChangePerformanceData)
     }
   }
 

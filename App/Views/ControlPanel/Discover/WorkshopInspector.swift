@@ -297,12 +297,25 @@ private struct ItemActions: View {
         .buttonStyle(.panelSecondary(size: .regular, expands: true))
         .help(L("Open a live preview without changing your desktop"))
       }
-      Button {
-        model.viewOnSteam(item)
-      } label: {
-        Label("View on Steam Workshop", systemImage: "arrow.up.right.square")
+      HStack(spacing: 8) {
+        Button {
+          model.viewOnSteam(item)
+        } label: {
+          Label("View on Steam Workshop", systemImage: "arrow.up.right.square")
+        }
+        .buttonStyle(.panelSecondary(size: .regular, expands: true))
+        if let share = controller.wallpaperShare(item.id) {
+          ShareLink(
+            item: share.url, subject: Text(verbatim: share.subject),
+            message: Text(verbatim: share.message)
+          ) {
+            Image(systemName: "square.and.arrow.up")
+          }
+          .buttonStyle(.panelSecondary(size: .regular))
+          .help(L("Share…"))
+          .accessibilityLabel(L("Share…"))
+        }
       }
-      .buttonStyle(.panelSecondary(size: .regular, expands: true))
     }
   }
 

@@ -1,9 +1,9 @@
 import Foundation
 import Observation
 
-/// What can hold the first-wallpaper support offer back. The offer is a courtesy: the first-run
-/// guide, anything else that is modal, a wallpaper being switched and Steam or pixiv asking for a
-/// sign-in all come first, and it resumes by itself when they are done.
+/// What can hold a one-time prompt back. A prompt is a courtesy: the first-run guide, anything else
+/// that is modal, a wallpaper being switched and Steam or pixiv asking for a sign-in all come first,
+/// and it resumes by itself when they are done.
 struct SupportPromptGate: Equatable {
   /// The panel's window is on screen: visible, not minimised, not covered.
   var windowIsVisible = false
@@ -33,21 +33,22 @@ protocol DownloadDialogState: AnyObject {
 
 extension DownloadsModel: DownloadDialogState {}
 
-/// When the support prompt may be on screen and what its buttons do.
+/// When a one-time prompt may be on screen and what its buttons do.
 ///
-/// Whether there is an offer is the store's (`SupportPromptStore`, through
-/// `PanelController.supportPromptPending`). Whether it may appear now is the gate's. Once the sheet
-/// has been seen the offer is spent for good, so the presenter keeps that one presentation: when
-/// the guide, a popover or a sign-in takes the window it closes the sheet without dismissing it and
-/// brings the same sheet back afterwards. A deliberate choice, **Not now** or Escape ends it.
+/// Whether there is a prompt, and which, is the store's (`SupportPromptStore`, through
+/// `PanelController.pendingPrompt`). Whether it may appear now is the gate's. Once the sheet has
+/// been seen that prompt is spent for good, so the presenter keeps that one presentation: when the
+/// guide, a popover or a sign-in takes the window it closes the sheet without dismissing it and
+/// brings the same sheet back afterwards. A deliberate choice, **Not now** or Escape ends it, and no
+/// other prompt follows in this window (the store allows one a day).
 @MainActor
 @Observable
 final class SupportPromptPresenter {
   unowned let controller: PanelController
 
-  /// The offer was on screen at least once: the store counts it as spent.
-  private(set) var hasBeenShown = false
-  /// The person answered or left; the offer never returns in this window.
+  /// The prompt this window put on screen, once it was seen: the store counts it as spent.
+  private(set) var presented: SupportPromptStore.Prompt?
+  /// The person answered or left; no prompt returns in this window.
   private(set) var isDismissed = false
   /// A link choice is being opened.
   private(set) var isChoosing = false
@@ -55,6 +56,12 @@ final class SupportPromptPresenter {
   private(set) var error: String?
 
   init(controller: PanelController) { self.controller = controller }
+
+  /// The prompt was on screen at least once.
+  var hasBeenShown: Bool { presented != nil }
+
+  /// The prompt the sheet shows: the one already seen, or the one waiting.
+  var prompt: SupportPromptStore.Prompt? { presented ?? controller.pendingPrompt }
 
   /// What holds the offer back now; every input is read from observable state, so a view that asks
   /// is asked again when one changes.
@@ -74,25 +81,27 @@ final class SupportPromptPresenter {
 
   var canPresent: Bool { gate.allowsPresentation }
 
-  /// Whether the sheet should be up: an offer is waiting, or one that was already shown is
+  /// Whether the sheet should be up: a prompt is waiting, or one that was already shown is
   /// interrupted, and nothing holds it back.
   var wantsPresentation: Bool {
     guard !isDismissed else { return false }
     return (hasBeenShown || controller.supportPromptPending) && canPresent
   }
 
-  /// The sheet is on screen. The first time, the offer is spent. A sheet of a window nobody can see
+  /// The sheet is on screen. The first time, its prompt is spent. A sheet of a window nobody can see
   /// is not shown, so it spends nothing and counts as not yet seen.
   func sheetDidAppear() {
-    guard !hasBeenShown, controller.presentation.isVisible else { return }
-    hasBeenShown = true
-    controller.supportPromptShown()
+    guard !hasBeenShown, controller.presentation.isVisible, let prompt = controller.pendingPrompt
+    else { return }
+    presented = prompt
+    controller.supportPromptShown(prompt)
   }
 
-  /// **Star on GitHub** and **Become a Supporter**. A link that cannot be opened keeps the offer
-  /// open with the reason, so the other row, a retry and **Not now** all remain.
+  /// **Star on GitHub**, **Become a Supporter** and **Send performance data**. A link that cannot be
+  /// opened keeps the prompt open with the reason, so the other row, a retry and **Not now** all
+  /// remain.
   func choose(_ choice: SupportPromptChoice) async {
-    guard !isDismissed, !isChoosing else { return }
+    guard !isDismissed, !isChoosing, let prompt else { return }
     if choice == .dismiss {
       dismiss()
       return
@@ -101,18 +110,30 @@ final class SupportPromptPresenter {
     error = nil
     defer { isChoosing = false }
     do {
-      try await controller.supportPromptChoice(choice)
+      try await controller.supportPromptChoice(choice, for: prompt)
       isDismissed = true
     } catch {
       self.error = error.localizedDescription
     }
   }
 
+  /// **What is sent** on the performance data question: the document on GitHub, without closing
+  /// the sheet. A link that cannot be opened says so in the sheet.
+  func showPerformanceDataDetails() {
+    error = nil
+    do {
+      try controller.openPerformanceDataDetails()
+    } catch {
+      self.error = error.localizedDescription
+    }
+  }
+
   /// **Not now**, the close button and Escape. Leaving is always available, so the sheet goes first
-  /// and spending the offer follows, whatever that does.
+  /// and spending the prompt follows, whatever that does.
   @discardableResult
   func dismiss() -> Task<Void, Never> {
+    let prompt = prompt ?? .support
     isDismissed = true
-    return Task { [controller] in try? await controller.supportPromptChoice(.dismiss) }
+    return Task { [controller] in try? await controller.supportPromptChoice(.dismiss, for: prompt) }
   }
 }
