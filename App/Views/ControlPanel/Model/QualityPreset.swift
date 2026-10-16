@@ -129,19 +129,3 @@ enum RenderScaleChoices {
     scale == 1 ? L("100% (native)") : percent(scale)
   }
 }
-
-/// The note under a display's frame rate when the Performance settings hold it down.
-enum PerformanceLimit {
-  /// The rate a display is limited to, or nil when nothing limits it below `saved`. The engine's
-  /// ceiling already includes the cap and the reduced-quality frame rate, whatever lowered it, so it
-  /// is not worked out again here; a ceiling at or above the saved rate is no limit, and the
-  /// display's own refresh is not a Performance setting.
-  static func limitedFps(saved: Int, effectiveCap: UInt32?) -> Int? {
-    guard let effectiveCap, Int(effectiveCap) < saved else { return nil }
-    return Int(effectiveCap)
-  }
-
-  @MainActor static func note(limitedTo fps: Int) -> String {
-    L("Limited to \(fps) fps by Performance settings")
-  }
-}

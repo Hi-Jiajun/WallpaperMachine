@@ -95,10 +95,13 @@ extension PanelController {
       sceneRenderers: settings.sceneRenderers.map(SceneRendererReport.init))
   }
 
-  /// The rate a display is limited to by the Performance settings, nil when nothing limits it below
-  /// `saved` (a display's saved frame rate). Settings › Displays and the inspector note it.
-  func performanceLimitedFps(saved: Int) -> Int? {
-    PerformanceLimit.limitedFps(saved: saved, effectiveCap: store.settingsSnapshot.effectiveFrameRateCap)
+  /// The frame-rate ceiling in force and the setting that sets it, nil while there is none.
+  var frameRateCeiling: FrameRateCeiling? { FrameRateCeiling(store.settingsSnapshot) }
+
+  /// The ceiling where it holds a display below `saved`, the display's own frame rate; nil when
+  /// nothing does. Settings › Displays notes it and opens the page of the setting that sets it.
+  func frameRateLimit(saved: Int) -> FrameRateCeiling? {
+    frameRateCeiling?.limiting(saved: saved)
   }
 
   var librarySteamSettings: LibrarySteamSettings {

@@ -109,6 +109,111 @@ final class QualityReportTests: PanelTestCase {
     XCTAssertNil(scale(0.75, 1, supported: false).effectiveText)
   }
 
+  // MARK: Naming what overrides a choice
+
+  /// A ceiling is put down to the setting that set it: the saved Frame rate limit, or the Reduced
+  /// quality choice in force. With On battery on Keep running and the low-battery rule reducing
+  /// quality, nothing may send the user to a Frame rate limit that reads No limit.
+  func testTheFrameRateCeilingIsPutDownToTheSettingThatSetsIt() {
+    XCTAssertNil(FrameRateCeiling(savedCap: nil, effectiveCap: nil, causes: []), "No ceiling at all")
+    XCTAssertNil(FrameRateCeiling(savedCap: nil, effectiveCap: nil, causes: [.lowBattery]))
+
+    let saved = FrameRateCeiling(savedCap: 45, effectiveCap: 45, causes: [])
+    XCTAssertEqual(saved?.fps, 45)
+    XCTAssertEqual(saved?.source, .frameRateLimit)
+    XCTAssertEqual(saved?.section, .performance)
+
+    let lowBattery = FrameRateCeiling(savedCap: nil, effectiveCap: 30, causes: [.lowBattery])
+    XCTAssertEqual(lowBattery?.fps, 30)
+    XCTAssertEqual(
+      lowBattery?.source, .reducedQuality(.lowBattery),
+      "No limit saved: only the low-battery rule's Reduced quality can hold it to 30")
+    XCTAssertEqual(lowBattery?.section, .playback, "The rule is changed under Playback & Power")
+
+    XCTAssertEqual(
+      FrameRateCeiling(savedCap: 60, effectiveCap: 30, causes: [.battery])?.source,
+      .reducedQuality(.battery))
+    XCTAssertEqual(
+      FrameRateCeiling(savedCap: 24, effectiveCap: 24, causes: [.lowBattery])?.source,
+      .frameRateLimit, "The saved limit is lower than the profile's rate, so the profile lowers nothing")
+    XCTAssertEqual(
+      FrameRateCeiling(savedCap: nil, effectiveCap: 30, causes: [.heat, .battery])?.source,
+      .reducedQuality(.heat), "The cause named first is the one blamed")
+  }
+
+  func testAFrameRateCeilingLimitsOnlyADisplaySetAboveIt() throws {
+    let ceiling = try XCTUnwrap(FrameRateCeiling(savedCap: nil, effectiveCap: 24, causes: [.lowPowerMode]))
+    XCTAssertEqual(ceiling.limiting(saved: 30), ceiling)
+    XCTAssertNil(ceiling.limiting(saved: 24), "A ceiling that does not lower the rate is not a limit")
+    XCTAssertNil(ceiling.limiting(saved: 20))
+  }
+
+  /// Each source has its own note and its own way to the page it is changed on, and no note leaves
+  /// a placeholder or names Performance for a limit Performance did not set.
+  func testTheFrameRateNoteNamesItsSourceAndOpensThePageItIsChangedOn() throws {
+    try pinPanelLanguageToEnglish()
+    let performance = try XCTUnwrap(FrameRateCeiling(savedCap: 24, effectiveCap: 24, causes: []))
+    XCTAssertEqual(performance.note, "Limited to 24 fps by Performance settings")
+    XCTAssertEqual(performance.section.openTitle, "Open Performance")
+    let lowBattery = try XCTUnwrap(FrameRateCeiling(savedCap: nil, effectiveCap: 30, causes: [.lowBattery]))
+    XCTAssertEqual(lowBattery.note, "Limited to 30 fps while the battery is low")
+    XCTAssertEqual(lowBattery.section.openTitle, "Open Playback & Power")
+
+    var notes = Set<String>()
+    for cause in QualityCause.allCases {
+      let ceiling = try XCTUnwrap(FrameRateCeiling(savedCap: nil, effectiveCap: 30, causes: [cause]))
+      XCTAssertTrue(ceiling.note.contains("30"), ceiling.note)
+      XCTAssertFalse(ceiling.note.contains("%") || ceiling.note.contains("Performance"), ceiling.note)
+      notes.insert(ceiling.note)
+    }
+    XCTAssertEqual(notes.count, QualityCause.allCases.count, "Every cause is named in words of its own")
+  }
+
+  /// What Quick Settings says under Quality and On battery: the cause holding quality down, so a
+  /// choice that a Reduced quality condition overrides never reads as the one in force.
+  func testQuickSettingsNameWhatOverridesTheChoiceTheyShow() throws {
+    try pinPanelLanguageToEnglish()
+    let lowBattery = report(
+      Case(lowBattery: .reduceQuality, batteryPercent: 18, onBattery: true, throttle: [.lowBattery]))
+    XCTAssertEqual(lowBattery.inForceText, "The battery is low. Reduced quality is in use.")
+    XCTAssertEqual(
+      lowBattery.onBatteryText, lowBattery.inForceText,
+      "On battery reads Keep running while the low-battery rule reduces quality: the card says so")
+
+    let pluggedInHot = report(Case(thermal: .reduceQuality, throttle: [.heat]))
+    XCTAssertEqual(pluggedInHot.inForceText, "The Mac is hot. Reduced quality is in use.")
+    XCTAssertNil(pluggedInHot.onBatteryText, "Plugged in, the battery choice does nothing to explain")
+
+    XCTAssertNil(report(Case(onBattery: true)).inForceText, "Nothing lowers quality")
+    XCTAssertNil(report(Case(onBattery: true)).onBatteryText)
+    XCTAssertEqual(
+      report(Case(batteryMode: .reducedQuality, onBattery: true)).onBatteryText,
+      "On battery. Reduced quality is in use.")
+  }
+
+  /// Effective now names a frame-rate ceiling that a Reduced quality choice sets: the Frame rate
+  /// limit slider shows only the saved limit, which may read No limit. A ceiling the saved limit
+  /// sets needs no line, since the slider already shows it.
+  func testEffectiveNowNamesAFrameRateTheReducedProfileHoldsDown() throws {
+    try pinPanelLanguageToEnglish()
+    func make(
+      saved: UInt32?, effective: UInt32?, throttle: [BridgeQualityThrottleCause] = []
+    ) -> QualityReport {
+      let settings = BridgeSnapshotFixtures.settings(
+        frameRateCap: saved, onBatteryPower: true, qualityThrottle: throttle,
+        effectiveFrameRateCap: effective)
+      return QualityReport.make(
+        settings: settings, lowPowerModeAction: .keepRunning, thermalAction: .keepRunning,
+        lowBatteryAction: .reduceQuality, batteryPercent: 18)
+    }
+    XCTAssertEqual(
+      make(saved: nil, effective: 30, throttle: [.lowBattery]).effectiveFrameRateText,
+      "Limited to 30 fps while the battery is low")
+    XCTAssertNil(make(saved: 30, effective: 30).effectiveFrameRateText, "The slider shows a saved limit")
+    XCTAssertNil(make(saved: 24, effective: 24, throttle: [.lowBattery]).effectiveFrameRateText)
+    XCTAssertNil(make(saved: nil, effective: nil).effectiveFrameRateText)
+  }
+
   func testTheThermalNoteDiffersForReducedQualityAndNeverLeavesAPlaceholder() throws {
     try pinPanelLanguageToEnglish()
     for level in ThermalLevel.allCases {

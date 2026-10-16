@@ -41,6 +41,8 @@ struct PerformanceSettingsSection: View {
     note:
       "Renders at a lower resolution and scales the result to fill the same area. Size and position on screen don’t change.",
     keywords: ["Not applicable to the wallpapers currently running", "100% (native)"])
+  /// What the engine uses now where it differs from the saved Frame rate limit and render scale,
+  /// and which condition lowers them.
   static let renderScaleEffective = SettingsItem(
     id: "performance.render-scale-effective", section: .performance, group: quality,
     title: "Effective now")
@@ -133,13 +135,14 @@ struct PerformanceSettingsSection: View {
   ]
 
   /// The live rows this page leaves out while they have nothing to say, by the values its body
-  /// draws them from: Effective now while the saved scale is the one in force, In force now while no
-  /// scene has a backend, and Shared decode in use while nothing is shared.
+  /// draws them from: Effective now while the saved frame-rate limit and scale are the ones in
+  /// force, In force now while no scene has a backend, and Shared decode in use while nothing is
+  /// shared.
   @MainActor
   static func unofferedItems(_ controller: PanelController) -> Set<String> {
     let performance = controller.performanceSettings
     var hidden: [SettingsItem] = []
-    if performance.quality.effectiveText == nil { hidden.append(renderScaleEffective) }
+    if performance.quality.effectiveNowText == nil { hidden.append(renderScaleEffective) }
     if performance.optimization.text == nil { hidden.append(sceneInForce) }
     if performance.sharedDecode.text == nil { hidden.append(sharedDecodeInUse) }
     return Set(hidden.map(\.id))
@@ -183,8 +186,18 @@ struct PerformanceSettingsSection: View {
             }, isEnabled: performance.canChangeRenderScale
           ) { try await controller.setRenderScale(Double($0)) }
         }
-        if let effective = performance.quality.effectiveText {
-          SettingsRow(Self.renderScaleEffective) { SettingsStatusText(effective) }
+        if let effective = performance.quality.effectiveNowText {
+          SettingsRow(Self.renderScaleEffective) {
+            SettingsStatusText(text: effective) {
+              // A condition's Reduced quality is chosen under Playback & Power, not on this page.
+              if performance.quality.cause != nil {
+                Button(SettingsSection.playback.openTitle) {
+                  controller.settings.select(.playback)
+                }
+                .controlSize(.small)
+              }
+            }
+          }
         }
         SettingsRow(Self.sceneResolution) {
           SettingsMenuControl(

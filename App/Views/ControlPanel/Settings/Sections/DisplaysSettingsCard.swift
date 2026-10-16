@@ -237,15 +237,15 @@ struct DisplaysPlaybackDisclosure: View {
         .disabled(playbackOff)
       }
 
-      if let limit = model.frameRateLimitNote(of: display) {
+      if let limit = model.frameRateLimit(of: display) {
         HStack(spacing: 8) {
-          Text(verbatim: limit)
+          Text(verbatim: limit.note)
             .font(.system(size: 11.5))
             .foregroundStyle(theme.surface.muted.color)
             .frame(maxWidth: .infinity, alignment: .leading)
-          Button("Open Performance") {
-            controller.launch(PanelActionCoordinator.key("openPerformance")) {
-              try await controller.openPerformance()
+          Button(limit.section.openTitle) {
+            controller.launch(PanelActionCoordinator.key("openSettings")) {
+              try await controller.openSettings(limit.section)
             }
           }
         }

@@ -56,6 +56,13 @@ was run.
       the rest, a disclosure holding a match opens and closes again when the search
       clears, Escape clears the field, and a word nothing contains reads "No settings
       match …".
+- [ ] On a laptop on battery, set **On battery** to Keep running and **When the battery is
+      low** to Reduced quality at a level above the current charge: Quick Settings' On
+      battery and Quality modules read "The battery is low. Reduced quality is in use.",
+      Performance's **Effective now** reads "Limited to 30 fps while the battery is low"
+      while the Frame rate limit slider reads No limit, and a display set above 30 fps notes
+      the same limit in Settings → Displays and the inspector, whose button opens Playback &
+      Power. Set the low-battery rule to Keep running: every one of those lines goes away.
 
 ## Appearance
 

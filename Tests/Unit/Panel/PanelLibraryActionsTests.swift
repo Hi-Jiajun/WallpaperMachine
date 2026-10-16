@@ -410,9 +410,11 @@ final class PanelLibraryActionsTests: PanelTestCase {
       XCTAssertEqual(panel.navigation.selection, .wallpaper)
       XCTAssertEqual(panel.store.appSnapshot.selectedWallpaperId, "c")
 
-      try await controller.openPerformance()
+      try await controller.openSettings(.performance)
       XCTAssertEqual(panel.navigation.selection, .settings)
       XCTAssertEqual(panel.navigation.settingsSection, .performance)
+      try await controller.openSettings(.playback)
+      XCTAssertEqual(panel.navigation.settingsSection, .playback)
     }
   }
 

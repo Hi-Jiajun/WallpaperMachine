@@ -174,7 +174,10 @@ the rest opens in a popover from the ⓘ beside the title.
   segmented controls: the **Quality** preset (Low, Medium, High; Custom shows when
   the values match none), **On battery** (on a Mac with a battery, or when it is
   not Keep running), **When windows cover the desktop** and **Appearance**
-  (System, Light, Dark). Each module has a chevron to its full section.
+  (System, Light, Dark). Each module has a chevron to its full section. While a
+  condition lowers quality, Quality names it under its segments in place of its hint,
+  and On battery does too while the Mac runs on battery, so a choice another rule
+  overrides never reads as the one in force ([performance](performance.md)).
 - **General** starts with the [Language](#language) picker (Interface), then Startup
   (**Launch at login** and **Hide window after applying a wallpaper**) and Help (the
   [welcome guide](first-run.md), **Show again**).
@@ -516,11 +519,13 @@ can no longer be chosen stays stored (the menu bar and automation read it) and t
 Per-display enablement, independent/mirror mode, mirror source, scaling, scale
 factor, frame rate, mute and volume live in **Settings → Displays**, beside each
 independent display's **Playlist** (see [playlists](playlists.md)). When the frame-rate
-ceiling in force is below the saved frame rate, the field notes `Limited to N fps
-by Performance settings` and can open Settings → Performance. The ceiling is the one the
-engine reports (`effectiveFrameRateCap`): the Performance cap lowered by the
-reduced-quality frame rate while that is in force, whether from the battery, Low Power
-Mode, heat or a low battery. The inspector's per-display frame-rate field shows the same
+ceiling in force is below the saved frame rate, the field notes it and names what set
+it: `Limited to N fps by Performance settings` with a button to Settings → Performance
+while the Performance cap holds it, or `Limited to N fps while the battery is low` (on
+battery, in Low Power Mode, while the Mac is hot) with a button to Settings → Playback &
+Power while a Reduced quality choice does. The ceiling is the one the engine reports
+(`effectiveFrameRateCap`): the Performance cap lowered by the reduced-quality frame rate
+while that is in force. The inspector's per-display frame-rate field shows the same
 note. Saved frame rates are never rewritten.
 
 The inspector's per-display sections also hold **Horizontal position**, **Vertical

@@ -5141,6 +5141,18 @@
     "Limited to %lld fps by Performance settings" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "パフォーマンス設定により%lld fpsに制限されています"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "受性能设置限制为 %lld fps"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "已由「效能」設定限制為 %lld fps"}}}
     },
+    "Limited to %lld fps while the Mac is hot" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "Macが高温のため%lld fpsに制限されています"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "Mac 过热，限制为 %lld fps"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "Mac 過熱，限制為 %lld fps"}}}
+    },
+    "Limited to %lld fps in Low Power Mode" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "低電力モードのため%lld fpsに制限されています"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "低电量模式下限制为 %lld fps"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "低耗電模式下限制為 %lld fps"}}}
+    },
+    "Limited to %lld fps while the battery is low" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "バッテリー残量が少ないため%lld fpsに制限されています"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "电量低，限制为 %lld fps"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "電量低，限制為 %lld fps"}}}
+    },
+    "Limited to %lld fps on battery" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "バッテリー駆動中のため%lld fpsに制限されています"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "使用电池时限制为 %lld fps"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "使用電池時限制為 %lld fps"}}}
+    },
     "Open Performance" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "パフォーマンス設定を開く"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "打开性能设置"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "開啟效能設定"}}}
     },

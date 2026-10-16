@@ -38,9 +38,10 @@ extension PanelController {
     try await navigate(.wallpaper)
   }
 
-  /// Reveals Settings › Performance and opens Settings: the link from a quality note.
-  func openPerformance() async throws {
-    navigation.revealSettingsSection(.performance)
+  /// Reveals `section` and opens Settings: the link from a note that names a setting on another
+  /// page, such as a frame-rate limit and the page of the setting that sets it.
+  func openSettings(_ section: SettingsSection) async throws {
+    navigation.revealSettingsSection(section)
     try await navigate(.settings)
   }
 

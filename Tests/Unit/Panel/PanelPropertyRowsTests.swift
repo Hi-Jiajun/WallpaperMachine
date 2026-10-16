@@ -446,7 +446,7 @@ final class PanelPropertyRowsTests: PanelTestCase {
       ])
     var inputs = InspectorOptions.Inputs()
     inputs.nativePlayerDisplays = [7]
-    inputs.frameRateCap = 45
+    inputs.frameRateCeiling = FrameRateCeiling(savedCap: 45, effectiveCap: 45, causes: [])
     let options = InspectorOptions.make(snapshot, inputs: inputs)
 
     XCTAssertEqual(options.displays.count, 2)
@@ -457,7 +457,14 @@ final class PanelPropertyRowsTests: PanelTestCase {
     XCTAssertEqual(
       options.displays.map(\.isDrawnByNativePlayer), [true, false],
       "only the display this wallpaper's native player draws on ignores a position")
-    XCTAssertEqual(options.displays.map(\.limitedFrameRate), [nil, 45], "the cap shows only where it is below the saved rate")
+    XCTAssertEqual(
+      options.displays.map(\.frameRateLimit?.fps), [nil, 45],
+      "the cap shows only where it is below the saved rate")
+    inputs.frameRateCeiling = FrameRateCeiling(savedCap: nil, effectiveCap: 30, causes: [.lowBattery])
+    XCTAssertEqual(
+      InspectorOptions.make(snapshot, inputs: inputs).displays.map(\.frameRateLimit?.source),
+      [nil, .reducedQuality(.lowBattery)],
+      "a limit the low-battery rule sets is put down to it, not to Performance")
     XCTAssertEqual(options.displays[0].scalingFactor, 1.25)
     XCTAssertEqual(options.displays[0].maximumFrameRate, 60)
     XCTAssertTrue(options.offersPosition)

@@ -721,9 +721,10 @@ final class DisplaysSettingsModelTests: SettingsBTestCase {
     }
   }
 
-  /// The note under a display's Frame rate reads the display's own saved rate against what
-  /// Performance allows now (the rule itself is `PerformanceLimit`'s, tested on its own).
-  func testTheFrameRateNoteOfADisplayComparesItsOwnRateWithWhatPerformanceAllows() async throws {
+  /// The note under a display's Frame rate reads the display's own saved rate against the ceiling in
+  /// force, and names the setting that set it (the rule itself is `FrameRateCeiling`'s, tested on
+  /// its own).
+  func testTheFrameRateNoteOfADisplayComparesItsOwnRateWithTheCeilingInForce() async throws {
     try await withPanel { panel in
       try SettingsBFixtures.populate(panel)
       let controller = panel.controller
@@ -733,12 +734,23 @@ final class DisplaysSettingsModelTests: SettingsBTestCase {
       let second = try XCTUnwrap(rows["2"])
       XCTAssertEqual(primary.fps, 30)
       XCTAssertEqual(second.fps, 24)
-      XCTAssertNil(model.frameRateLimitNote(of: primary), "nothing limits it below its own rate")
+      XCTAssertNil(model.frameRateLimit(of: primary), "nothing limits it below its own rate")
 
+      panel.store.settingsSnapshot.frameRateCap = 24
       panel.store.settingsSnapshot.effectiveFrameRateCap = 24
-      let note = try XCTUnwrap(model.frameRateLimitNote(of: primary), "30 fps is held to 24")
-      XCTAssertTrue(note.contains("24"), note)
-      XCTAssertNil(model.frameRateLimitNote(of: second), "a display set to the ceiling is not limited")
+      let limit = try XCTUnwrap(model.frameRateLimit(of: primary), "30 fps is held to 24")
+      XCTAssertEqual(limit.fps, 24)
+      XCTAssertEqual(limit.section, .performance, "the saved Frame rate limit holds it")
+      XCTAssertNil(model.frameRateLimit(of: second), "a display set to the ceiling is not limited")
+
+      // No limit saved, On battery on Keep running, the low-battery rule reducing quality: the note
+      // must not send the user to a Frame rate limit that reads No limit.
+      panel.store.settingsSnapshot.frameRateCap = nil
+      panel.store.settingsSnapshot.onBatteryPower = true
+      panel.store.settingsSnapshot.qualityThrottle = [.lowBattery]
+      let lowBattery = try XCTUnwrap(model.frameRateLimit(of: primary))
+      XCTAssertEqual(lowBattery.source, .reducedQuality(.lowBattery))
+      XCTAssertEqual(lowBattery.section, .playback)
     }
   }
 }

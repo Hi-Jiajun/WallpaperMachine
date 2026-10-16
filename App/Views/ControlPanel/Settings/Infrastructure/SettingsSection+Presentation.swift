@@ -18,6 +18,13 @@ extension SettingsSection {
     }
   }
 
+  /// The link that opens this page from a note on another one: "Open Performance", "Open Playback &
+  /// Power".
+  @MainActor var openTitle: String {
+    self == .performance
+      ? L("Open Performance") : L("Open \(PanelLocale.shared.string(resolving: title))")
+  }
+
   /// The sentence under the title of the page.
   var summary: LocalizedStringResource {
     switch self {

@@ -2,7 +2,8 @@ import SwiftUI
 
 /// Settings › Quick Settings: the switches people change most as tiles, and the three choices they
 /// reach for most as segments, each leading to its full section. Every tile and segment is the
-/// same setting as its full row, so the two stay in step.
+/// same setting as its full row, so the two stay in step. A choice another setting overrides right
+/// now says so under its segments: Quality and On battery name the condition holding quality down.
 struct QuickSettingsSection: View {
   // Tiles
   static let openAtLogin = SettingsItem(
@@ -102,12 +103,17 @@ struct QuickSettingsSection: View {
     if showsAny {
       VStack(spacing: 10) {
         if search.shows(Self.quality) {
-          QuickModule(item: Self.quality, section: .performance) {
+          QuickModule(
+            item: Self.quality, section: .performance, status: controller.qualityReport.inForceText
+          ) {
             PerformanceQualityPresetControl()
           }
         }
         if search.shows(Self.onBattery), controller.playbackSettings.offersBatteryMode {
-          QuickModule(item: Self.onBattery, section: .playback) {
+          QuickModule(
+            item: Self.onBattery, section: .playback,
+            status: controller.qualityReport.onBatteryText
+          ) {
             SettingsSegmentsControl(
               key: "batteryMode", saved: controller.playbackSettings.batteryMode,
               options: [BridgeBatteryMode.keepRunning, .reducedQuality, .pause].map {
@@ -142,10 +148,12 @@ struct QuickSettingsSection: View {
 }
 
 /// A Quick Settings module: a card with the section's tile, the name, a way into the section, the
-/// short choice and an optional line under it.
+/// short choice and an optional line under it: `status` while another setting overrides the choice,
+/// which takes the place of the item's note, or the note.
 private struct QuickModule<Control: View>: View {
   let item: SettingsItem
   let section: SettingsSection
+  var status: String? = nil
   @ViewBuilder var control: Control
 
   @Environment(PanelController.self) private var controller
@@ -175,8 +183,8 @@ private struct QuickModule<Control: View>: View {
       }
       control
         .accessibilityLabel(Text(verbatim: settings.text(item.title)))
-      if let note = item.note {
-        Text(verbatim: settings.text(note))
+      if let line = status ?? item.note.map(settings.text) {
+        Text(verbatim: line)
           .font(.system(size: 11.5))
           .foregroundStyle(theme.surface.muted.color)
       }

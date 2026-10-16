@@ -86,26 +86,28 @@ final class QualityPresetTests: PanelTestCase {
     XCTAssertEqual(RenderScaleChoices.percent(.infinity), "Unavailable")
   }
 
-  /// A display's frame rate is held to the ceiling the engine reports, whatever lowered it, so the
-  /// note appears for a throttle as it did for the battery profile.
-  func testADisplayFrameRateNoteCountsTheThrottle() throws {
-    XCTAssertNil(PerformanceLimit.limitedFps(saved: 30, effectiveCap: nil), "No ceiling, no note")
-    XCTAssertEqual(PerformanceLimit.limitedFps(saved: 30, effectiveCap: 24), 24)
-    XCTAssertNil(PerformanceLimit.limitedFps(saved: 30, effectiveCap: 30), "A ceiling that does not lower the rate is not a limit")
-    XCTAssertNil(PerformanceLimit.limitedFps(saved: 30, effectiveCap: 45))
-    XCTAssertEqual(PerformanceLimit.limitedFps(saved: 30, effectiveCap: 20), 20)
-
-    try pinPanelLanguageToEnglish()
-    XCTAssertEqual(PerformanceLimit.note(limitedTo: 24), "Limited to 24 fps by Performance settings")
-  }
-
-  func testTheControllerReportsTheLimitFromTheEnginesCeiling() async throws {
+  /// A display's frame rate is held to the ceiling the engine reports, whatever lowered it, and the
+  /// limit is put down to the setting that set it (the rule itself is `FrameRateCeiling`'s).
+  func testTheControllerReportsTheLimitFromTheEnginesCeilingAndItsSource() async throws {
     try await withPanel { panel in
+      panel.store.settingsSnapshot.frameRateCap = 24
       panel.store.settingsSnapshot.effectiveFrameRateCap = 24
-      XCTAssertEqual(panel.controller.performanceLimitedFps(saved: 30), 24)
-      XCTAssertNil(panel.controller.performanceLimitedFps(saved: 20))
+      XCTAssertEqual(panel.controller.frameRateLimit(saved: 30)?.fps, 24)
+      XCTAssertEqual(panel.controller.frameRateLimit(saved: 30)?.source, .frameRateLimit)
+      XCTAssertNil(panel.controller.frameRateLimit(saved: 20))
+
+      // On battery reads Keep running, no limit is saved, and the low-battery rule reduces quality.
+      panel.store.settingsSnapshot.batteryMode = .keepRunning
+      panel.store.settingsSnapshot.onBatteryPower = true
+      panel.store.settingsSnapshot.frameRateCap = nil
+      panel.store.settingsSnapshot.qualityThrottle = [.lowBattery]
+      panel.store.settingsSnapshot.effectiveFrameRateCap = 30
+      XCTAssertEqual(panel.controller.frameRateLimit(saved: 60)?.source, .reducedQuality(.lowBattery))
+      XCTAssertEqual(panel.controller.frameRateLimit(saved: 60)?.section, .playback)
+
+      panel.store.settingsSnapshot.qualityThrottle = []
       panel.store.settingsSnapshot.effectiveFrameRateCap = nil
-      XCTAssertNil(panel.controller.performanceLimitedFps(saved: 30))
+      XCTAssertNil(panel.controller.frameRateLimit(saved: 30))
     }
   }
 }

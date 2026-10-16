@@ -66,13 +66,11 @@ final class DisplaysSettingsModel {
 
   // MARK: Frame rate
 
-  /// The frame rate Performance holds `display` to, below the one it is set to, as the note under
-  /// its Frame rate row says it; nil when nothing limits it. The display's own saved rate is what
-  /// is compared, never rewritten.
-  func frameRateLimitNote(of display: DisplayRow) -> String? {
-    controller.performanceLimitedFps(saved: Int(display.fps)).map {
-      L("Limited to \($0) fps by Performance settings")
-    }
+  /// The ceiling that holds `display` below the frame rate it is set to, and the setting that sets
+  /// it, for the note under its Frame rate row; nil when nothing limits it. The display's own saved
+  /// rate is what is compared, never rewritten.
+  func frameRateLimit(of display: DisplayRow) -> FrameRateCeiling? {
+    controller.frameRateLimit(saved: Int(display.fps))
   }
 
   // MARK: Values on the way

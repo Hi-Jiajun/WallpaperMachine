@@ -53,8 +53,67 @@ enum QualityCause: String, CaseIterable, Sendable {
   }
 }
 
+/// The frame-rate ceiling the engine holds wallpapers to now, and the setting that sets it: the saved
+/// Frame rate limit, or the Reduced quality choice of the cause named first. Settings › Displays,
+/// the inspector and Performance › Effective now name it and open the page it is changed on, so a
+/// limit is never put down to a setting that did not set it (a Frame rate limit reading No limit
+/// cannot explain 30 fps that the low-battery rule asked for).
+struct FrameRateCeiling: Equatable, Sendable {
+  enum Source: Equatable, Sendable {
+    /// Performance › Frame rate limit.
+    case frameRateLimit
+    /// The reduced-quality profile, asked for by this cause's Reduced quality choice.
+    case reducedQuality(QualityCause)
+  }
+
+  let fps: Int
+  let source: Source
+
+  /// `effectiveCap` is the engine's ceiling, which already folds the saved cap and the profile's
+  /// rate together; nil is no ceiling. One below the saved cap, or with none saved, can only be the
+  /// profile's, so it is the first cause's. Otherwise the saved cap holds it, even while a cause is
+  /// in force, because the profile then lowers nothing.
+  init?(savedCap: UInt32?, effectiveCap: UInt32?, causes: [QualityCause]) {
+    guard let effectiveCap else { return nil }
+    fps = Int(effectiveCap)
+    if let cause = causes.first, savedCap.map({ effectiveCap < $0 }) ?? true {
+      source = .reducedQuality(cause)
+    } else {
+      source = .frameRateLimit
+    }
+  }
+
+  /// The ceiling in force in `settings`, put down to the causes the engine reports.
+  init?(_ settings: BridgeSettingsSnapshot) {
+    self.init(
+      savedCap: settings.frameRateCap, effectiveCap: settings.effectiveFrameRateCap,
+      causes: QualityCause.inForce(
+        throttle: settings.qualityThrottle, batteryMode: settings.batteryMode,
+        onBatteryPower: settings.onBatteryPower))
+  }
+
+  /// This ceiling where it holds a display below `saved`, the display's own frame rate; nil where
+  /// it does not. The display's own refresh is not a setting, so it is not a limit here.
+  func limiting(saved: Int) -> FrameRateCeiling? { fps < saved ? self : nil }
+
+  /// The page the setting that sets it is changed on.
+  var section: SettingsSection { source == .frameRateLimit ? .performance : .playback }
+
+  /// "Limited to 30 fps while the battery is low" and its siblings.
+  @MainActor var note: String {
+    switch source {
+    case .frameRateLimit: L("Limited to \(fps) fps by Performance settings")
+    case .reducedQuality(.heat): L("Limited to \(fps) fps while the Mac is hot")
+    case .reducedQuality(.lowPowerMode): L("Limited to \(fps) fps in Low Power Mode")
+    case .reducedQuality(.lowBattery): L("Limited to \(fps) fps while the battery is low")
+    case .reducedQuality(.battery): L("Limited to \(fps) fps on battery")
+    }
+  }
+}
+
 /// What the Performance and Playback sections say about quality being lowered: whether the shared
-/// reduced-quality profile is worth showing, which cause is named, and the render scale in force.
+/// reduced-quality profile is worth showing, which cause is named, and the render scale and
+/// frame-rate ceiling in force.
 struct QualityReport: Equatable {
   /// The causes in force, most specific first. Empty while nothing lowers quality.
   var causes: [QualityCause]
@@ -66,9 +125,36 @@ struct QualityReport: Equatable {
   var preferredRenderScale: Float
   /// Whether any running wallpaper can honour a render scale.
   var renderScaleSupported: Bool
+  /// The frame-rate ceiling in force and what sets it; nil while there is none.
+  var frameRate: FrameRateCeiling?
+  /// Whether the Mac runs on battery, which is when the On battery choice applies at all.
+  var onBatteryPower: Bool
 
   /// The first cause, the one the sentences name.
   var cause: QualityCause? { causes.first }
+
+  /// What Quick Settings' Quality card says while something lowers quality below the preset it
+  /// shows: the cause. Nil while the usual settings are in use.
+  @MainActor var inForceText: String? { cause?.statusText }
+
+  /// What Quick Settings' On battery card says while the Mac runs on battery and quality is lower
+  /// than the user's settings, so Keep running that a low-battery, Low Power Mode or heat rule
+  /// overrides never reads as the choice in force. Nil plugged in, where the choice does nothing.
+  @MainActor var onBatteryText: String? { onBatteryPower ? inForceText : nil }
+
+  /// Effective now's frame-rate line: the ceiling a Reduced quality choice sets, which the Frame
+  /// rate limit slider cannot show (it shows the saved limit, perhaps No limit). Nil while the
+  /// saved limit is what holds frames, or nothing does.
+  @MainActor var effectiveFrameRateText: String? {
+    guard let frameRate, frameRate.source != .frameRateLimit else { return nil }
+    return frameRate.note
+  }
+
+  /// Everything Effective now says, the frame-rate line first; nil while it has nothing to add.
+  @MainActor var effectiveNowText: String? {
+    let lines = [effectiveFrameRateText, effectiveText].compactMap { $0 }
+    return lines.isEmpty ? nil : lines.joined(separator: "\n")
+  }
 
   /// "Effective now" is worth a row only while a scale the engine uses differs from the saved one
   /// (the published values are compared, not the menu's steps, so it disappears the moment quality
@@ -105,7 +191,8 @@ struct QualityReport: Equatable {
         || lowPowerModeAction.reducesQuality || thermalAction.reducesQuality
         || (batteryPercent != nil && lowBatteryAction.reducesQuality),
       renderScale: settings.renderScale, preferredRenderScale: settings.preferredRenderScale,
-      renderScaleSupported: settings.renderScaleSupported)
+      renderScaleSupported: settings.renderScaleSupported, frameRate: FrameRateCeiling(settings),
+      onBatteryPower: settings.onBatteryPower)
   }
 }
 

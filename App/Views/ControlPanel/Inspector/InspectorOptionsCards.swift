@@ -189,11 +189,14 @@ struct DisplayCard: View {
       .disabled(controller.isInspectorControlDisabled(options, key: modeKey))
       ScaleFactorRow(options: options, display: display)
       FrameRateRow(options: options, display: display)
-      if let limit = display.limitedFrameRate {
+      if let limit = display.frameRateLimit {
         InspectorCardRow {
           VStack(alignment: .leading, spacing: 4) {
-            InspectorNote(verbatim: L("Limited to \(limit) fps by Performance settings"))
-            openPerformance
+            InspectorNote(verbatim: limit.note)
+            Button(limit.section.openTitle) {
+              controller.launch("openSettings") { try await controller.openSettings(limit.section) }
+            }
+            .buttonStyle(.inspectorLink)
           }
         }
       }
@@ -212,13 +215,6 @@ struct DisplayCard: View {
         .disabled(options.isLocked)
       }
     }
-  }
-
-  private var openPerformance: some View {
-    Button("Open Performance") {
-      controller.launch("openPerformance") { try await controller.openPerformance() }
-    }
-    .buttonStyle(.inspectorLink)
   }
 }
 
@@ -461,7 +457,7 @@ private struct PositionRows: View {
             "This video is drawn by the native video player, which keeps it centered. Choose Compatibility for Video playback in Performance settings to move it."
           )
           Button("Open Performance") {
-            controller.launch("openPerformance") { try await controller.openPerformance() }
+            controller.launch("openSettings") { try await controller.openSettings(.performance) }
           }
           .buttonStyle(.inspectorLink)
         case .explains:

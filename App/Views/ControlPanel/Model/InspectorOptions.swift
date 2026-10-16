@@ -78,8 +78,8 @@ extension InspectorOptions {
     /// macOS's own video player draws this wallpaper on the display, and it keeps a video centred
     /// whatever the position says.
     let isDrawnByNativePlayer: Bool
-    /// The Performance settings' frame-rate limit when it is below the saved frame rate.
-    let limitedFrameRate: Int?
+    /// The frame-rate ceiling in force, and what sets it, when it is below the saved frame rate.
+    let frameRateLimit: FrameRateCeiling?
   }
 
   /// Where the wallpaper sits on a display: fractions from 0 (left, top) to 1 (right, bottom) of
@@ -315,8 +315,8 @@ extension InspectorOptions {
     var sceneMedia: SystemMediaAvailability?
     /// Physical display ids macOS's native video player draws this wallpaper on.
     var nativePlayerDisplays: Set<UInt32> = []
-    /// The Performance settings' frame-rate limit in force.
-    var frameRateCap: UInt32?
+    /// The frame-rate ceiling in force and the setting that sets it.
+    var frameRateCeiling: FrameRateCeiling?
     var isLocked = false
     /// The language the rows are worded in; the panel's own when nil.
     var locale: PanelLocale?
@@ -346,14 +346,13 @@ extension InspectorOptions {
 
   private static func displayRow(_ row: BridgeDisplayConfigRow, inputs: Inputs) -> DisplayRow {
     let physicalID = ResolvedDisplayTitles.liveDisplayID(row.displayId, title: row.title)
-    let cap = inputs.frameRateCap
     return DisplayRow(
       id: row.displayId, title: inputs.titles.title(row.title, displayId: row.displayId),
       isEnabled: row.enabled, scalingMode: row.scalingMode, scalingFactor: row.scalingFactor,
       frameRate: Int(row.targetFps), maximumFrameRate: Int(row.maxFps),
       position: Position(x: row.framing.panX, y: row.framing.panY),
       isDrawnByNativePlayer: physicalID.map { inputs.nativePlayerDisplays.contains($0) } ?? false,
-      limitedFrameRate: cap.flatMap { $0 < row.targetFps ? Int($0) : nil })
+      frameRateLimit: inputs.frameRateCeiling?.limiting(saved: Int(row.targetFps)))
   }
 
   @MainActor

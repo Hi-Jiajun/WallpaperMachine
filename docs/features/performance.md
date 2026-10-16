@@ -5,6 +5,10 @@ Performance** (Energy use, Quality and Advanced) and **Settings → Playback & P
 (the [Playback](#playback) rules). Quick Settings, the section Settings opens on,
 repeats a few of them as tiles and segmented controls (the Quality preset, **On
 battery** and **When windows cover the desktop**) that change the same preferences.
+While a condition lowers quality, the Quality module says so under its segments in
+place of its hint, and so does **On battery** while the Mac runs on battery (`The
+battery is low. Reduced quality is in use.`), so **Keep running** that the
+low-battery, Low Power Mode or heat rule overrides never reads as the choice in force.
 Every engine control is applied through the bridge and the page re-renders from the
 snapshot the engine returns, so the page never shows a setting the engine did not
 accept. Playback choices that the app owns (muting everything, other-app audio,
@@ -198,8 +202,14 @@ display's refresh, the global cap, and the reduced-quality frame rate while redu
 quality is in force, whatever the reason: the battery, Low Power Mode, heat or a low
 battery. Saved per-wallpaper frame rates are never rewritten. When the ceiling the
 engine reports in force (`effectiveFrameRateCap`, which already holds all of that)
-is below the saved rate, the inspector and **Settings → Displays** say so and offer
-**Open Performance**.
+is below the saved rate, the inspector and **Settings → Displays** say so and name
+the setting that set it (`FrameRateCeiling`): `Limited to N fps by Performance
+settings` with **Open Performance** while the saved cap holds it, or `Limited to N fps
+while the battery is low` (`on battery`, `in Low Power Mode`, `while the Mac is hot`)
+with **Open Playback & Power** while a Reduced quality choice does. A ceiling below the
+saved cap, or with none saved, can only be the reduced-quality profile's, so it is put
+down to the cause named first; one equal to the saved cap is the cap's, since the
+profile then lowers nothing.
 
 For Web wallpapers a limit below the rate the page draws at (60, or the display's
 refresh when that is lower) is enforced on the page's `requestAnimationFrame`, so
@@ -240,7 +250,12 @@ replaces it. Whenever the effective `renderScale` differs from the saved
 `preferredRenderScale`, **Effective now** shows the scale the engine published. It
 names the cause only while reduced quality is actually in force: heat, Low Power
 Mode, a low battery or the battery, in that order when several hold. Otherwise it
-says only that the saved setting is not in effect.
+says only that the saved setting is not in effect. Above that line it also names a
+frame-rate ceiling that a Reduced quality choice sets (`Limited to 30 fps while the
+battery is low`), which the **Frame rate limit** slider cannot show because it shows
+the saved limit, perhaps **No limit**; a ceiling the saved limit sets gets no line.
+While a cause is in force the row offers **Open Playback & Power**, where those
+choices are made.
 
 ### 2D scene resolution
 
@@ -465,7 +480,10 @@ whether the reconfigure restores it, is not established here: the tests drive th
 with scripted frame counters.
 
 **On battery** is one choice. **Keep running** leaves quality alone. **Pause**
-stops wallpapers until the Mac is plugged in. **Reduced quality** is the choice
+stops wallpapers until the Mac is plugged in. The low-battery, Low Power Mode and heat
+rules below apply on top of it whatever it says, so with **Keep running** here a low
+battery set to Reduced quality still holds wallpapers to the reduced frame rate; the
+On battery module in Quick Settings and the frame-rate notes say when that happens. **Reduced quality** is the choice
 that makes the page show **Render scale when reduced** (100% / 75% / 50%, default
 75%) and **Frame rate when reduced** (1–240 fps, default 30) underneath, plus a
 **Reduced quality** line that says why quality is lower right now. This is one
@@ -527,10 +545,12 @@ conditions are observed as above).
   wallpapers, because reducing is no longer enough; choosing Reduced quality is not
   a promise never to pause, and the row's note says so. The fair ("warm") state is
   ignored, as it is for **Pause** and **Stop**, which act from serious.
-- **It follows the cause.** **Effective now** and the **Reduced quality** line name
-  the cause (heat, Low Power Mode, a low battery or the battery, in that order when
-  several hold), and the frame-rate note on **Settings → Displays** counts the
-  reduced-quality frame rate whichever reason lowered it.
+- **It follows the cause.** **Effective now**, the **Reduced quality** line and Quick
+  Settings' Quality and On battery modules name the cause (heat, Low Power Mode, a
+  low battery or the battery, in that order when several hold), and the frame-rate
+  note on **Settings → Displays** and in the inspector counts the reduced-quality
+  frame rate whichever reason lowered it, names that reason and opens Playback &
+  Power rather than Performance.
 - **Cost.** Each change of the render scale rebuilds a scene's render graph, the
   same cost as unplugging the Mac with **On battery** set to Reduced quality, and
   there is no hold-down: a Mac whose thermal state flaps at the serious boundary

@@ -179,7 +179,11 @@ struct DisplaysSettingsSection: View {
     id: "displays.scale-factor", section: .displays, inside: playback, title: "Scale factor")
   static let frameRate = SettingsItem(
     id: "displays.frame-rate", section: .displays, inside: playback, title: "Frame rate",
-    keywords: ["Limited to \(60) fps by Performance settings", "Open Performance"])
+    keywords: [
+      "Limited to \(60) fps by Performance settings", "Open Performance",
+      "Limited to \(60) fps while the Mac is hot", "Limited to \(60) fps in Low Power Mode",
+      "Limited to \(60) fps while the battery is low", "Limited to \(60) fps on battery",
+    ])
   static let mute = SettingsItem(
     id: "displays.mute", section: .displays, inside: playback, title: "Mute audio")
   static let volume = SettingsItem(
