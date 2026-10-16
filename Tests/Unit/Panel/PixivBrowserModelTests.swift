@@ -384,7 +384,7 @@ final class PixivBrowserModelTests: MediaPanelTestCase {
       }
       return PixivFixtures.ranking([PixivFixtures.rankingEntry(.init(id: 301), rank: 1)])
     }
-    let transport = HeldOriginalsTransport(fixture: fixture, gate: gate)
+    let transport = PixivHeldTransport(fixture: fixture, originals: gate)
     try await withPanel(pixivTransport: transport) { panel in
       let controller = panel.controller
       let model = controller.pixivBrowser
@@ -491,22 +491,5 @@ final class PixivBrowserModelTests: MediaPanelTestCase {
       PixivHeaderRow.signInStyle(forWidth: 450), .short, "a label stays where there is room")
     XCTAssertEqual(PixivHeaderRow.signInStyle(forWidth: 280), .hidden)
     XCTAssertEqual(PixivHeaderRow.signInStyle(forWidth: 0), .hidden)
-  }
-}
-
-/// Holds pixiv's originals at `gate` and answers everything else from `fixture`.
-private struct HeldOriginalsTransport: PixivTransport {
-  let fixture: PixivFixtureTransport
-  let gate: PixivGate
-
-  func data(from url: URL, session: String?) async throws -> Data {
-    try await fixture.data(from: url, session: session)
-  }
-
-  func image(
-    from url: URL, limit: Int, progress: @escaping @Sendable (Int64, Int64?) -> Void
-  ) async throws -> Data {
-    if url.path.contains("/img-original/") { try await gate.pass() }
-    return try await fixture.image(from: url, limit: limit, progress: progress)
   }
 }

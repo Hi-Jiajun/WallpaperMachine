@@ -34,7 +34,7 @@ final class PixivFixtureTransport: PixivTransport, @unchecked Sendable {
     }
 }
 
-/// Holds every image request until opened, optionally retaining cancellation cleanup too.
+/// Holds every request that passes it until opened, optionally retaining cancellation cleanup too.
 final class PixivGate: @unchecked Sendable {
     private let lock = NSLock()
     private let finishesOnCancellation: Bool
@@ -71,6 +71,29 @@ final class PixivGate: @unchecked Sendable {
             return Array(held.values)
         }
         for continuation in released { continuation.resume() }
+    }
+}
+
+/// Answers from `fixture`, holding originals at `originals` and rankings and searches at `listings`.
+///
+/// A held request ends as soon as its task is cancelled, as a real transfer does. A semaphore in
+/// a fixture's answer would keep a concurrency-pool thread until it timed out, out of reach of
+/// cancellation, and a panel that shuts down would wait for that thread.
+struct PixivHeldTransport: PixivTransport {
+    let fixture: PixivFixtureTransport
+    var originals: PixivGate?
+    var listings: PixivGate?
+
+    func data(from url: URL, session: String?) async throws -> Data {
+        if url.path == "/ranking.php" || url.path.hasPrefix("/ajax/search/") { try await listings?.pass() }
+        return try await fixture.data(from: url, session: session)
+    }
+
+    func image(
+        from url: URL, limit: Int, progress: @escaping @Sendable (Int64, Int64?) -> Void
+    ) async throws -> Data {
+        if url.path.contains("/img-original/") { try await originals?.pass() }
+        return try await fixture.image(from: url, limit: limit, progress: progress)
     }
 }
 

@@ -202,6 +202,18 @@ state the model or view reports (`PanelFixture.waitUntil`) rather than for a
 duration. `waitUntil`'s two-second default is short for a loaded machine; a new
 panel test that waits on real work gives it a longer timeout.
 
+A test double that holds an answer suspends the task, never the thread:
+`PixivGate` and `PixivHeldTransport` (`Tests/Unit/Pixiv/`) hold pixiv's
+answers until the test opens the gate or the request is cancelled. A
+`DispatchSemaphore` in a fixture's answer blocks a concurrency-pool thread that
+cancellation cannot reach, so a fixture that shuts down waits out its timeout, and
+the answer lets itself through when the test runs slowly. A timed-out wait is also
+reported by Xcode's thread performance checker, and XCTest symbolicates that report
+on the main thread; like a failed assertion's symbolication, it has held a test
+until its time allowance ran out. Work off the main actor needs its own sync point:
+a nonisolated `async` double such as `ManualSleep` runs on the global executor, so
+flushing the main queue does not show it has run; wait for the state it records.
+
 A failed assertion in the app-hosted bundle can take about two minutes to
 report while XCTest symbolicates the failing frame, so a failure inside a loop
 or a hosted panel can read as a hang or a timeout; look for the assertion in the

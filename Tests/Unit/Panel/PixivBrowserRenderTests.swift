@@ -15,7 +15,7 @@ final class PixivBrowserRenderTests: MediaPanelTestCase {
   private enum Listing {
     case works, hidden, nothing, failing
     /// pixiv answers only when the gate opens, so the page is loading until then.
-    case held(DispatchSemaphore)
+    case held(PixivGate)
   }
 
   @MainActor
@@ -33,14 +33,11 @@ final class PixivBrowserRenderTests: MediaPanelTestCase {
     init(
       test: MediaPanelTestCase, language: String = "en", dark: Bool = false,
       listing: Listing = .works, count: Int = 6, membersOnly: Set<Int> = [],
-      originals: DispatchSemaphore? = nil, viewState: PanelViewState? = nil
+      originals: PixivGate? = nil, viewState: PanelViewState? = nil
     ) throws {
       let image = try PanelTestCase.gif(frames: 1, brightness: 0.6)
       let transport = PixivFixtureTransport(respondingToSession: { url, _ in
-        if url.host == "i.pximg.net" {
-          if url.path.contains("/img-original/") { _ = originals?.wait(timeout: .now() + 10) }
-          return image
-        }
+        if url.host == "i.pximg.net" { return image }
         if url.path.hasSuffix("/pages") {
           let id = Int(url.pathComponents.dropLast().last ?? "") ?? 0
           if membersOnly.contains(id) { return PixivFixtures.membersOnlyPages() }
@@ -53,9 +50,7 @@ final class PixivBrowserRenderTests: MediaPanelTestCase {
           return PixivFixtures.ranking(
             (0..<3).map { PixivFixtures.rankingEntry(.init(id: 400 + $0, sexual: 1), rank: $0 + 1) }
           )
-        case .held(let gate):
-          _ = gate.wait(timeout: .now() + 10)
-        case .works: break
+        case .held, .works: break
         }
         return PixivFixtures.ranking(
           (0..<count).map {
@@ -69,9 +64,13 @@ final class PixivBrowserRenderTests: MediaPanelTestCase {
           })
       })
       self.transport = transport
+      var listings: PixivGate?
+      if case .held(let gate) = listing { listings = gate }
       let made = test.makeStore()
       fixture = try PanelFixture(
-        store: made.store, bridge: made.bridge, displayTitles: .renderer, pixivTransport: transport)
+        store: made.store, bridge: made.bridge, displayTitles: .renderer,
+        pixivTransport: PixivHeldTransport(
+          fixture: transport, originals: originals, listings: listings))
       if let viewState { fixture.navigation.viewState = viewState }
       let root = fixture.root
       let library = fixture.library
@@ -216,7 +215,7 @@ final class PixivBrowserRenderTests: MediaPanelTestCase {
   /// would leave its `WALLPAPER_MACHINE_HOME` to the next test of the process.
   private func host(
     listing: Listing = .works, count: Int = 6, membersOnly: Set<Int> = [],
-    originals: DispatchSemaphore? = nil, viewState: PanelViewState? = nil
+    originals: PixivGate? = nil, viewState: PanelViewState? = nil
   ) throws -> Hosted {
     let hosted = try Hosted(
       test: self, listing: listing, count: count, membersOnly: membersOnly, originals: originals,
@@ -276,7 +275,7 @@ final class PixivBrowserRenderTests: MediaPanelTestCase {
     }
     await dark.close()
 
-    let gate = DispatchSemaphore(value: 0)
+    let gate = PixivGate()
     for (listing, name) in [
       (Listing.hidden, "every work hidden"), (.nothing, "nothing found"), (.failing, "an error"),
       (.held(gate), "loading"),
@@ -287,7 +286,7 @@ final class PixivBrowserRenderTests: MediaPanelTestCase {
         try await hosted.layout(at: size)
         assertFits(hosted, size, "\(name) \(Int(size.width))")
       }
-      gate.signal()
+      if case .held = listing { gate.open() }
       await hosted.close()
     }
   }
@@ -334,9 +333,8 @@ final class PixivBrowserRenderTests: MediaPanelTestCase {
   }
 
   func testATileIsAButtonThatSelectsAndOffersWhatItsDoubleClickDoes() async throws {
-    let gate = DispatchSemaphore(value: 0)
+    let gate = PixivGate()
     let hosted = try host(originals: gate)
-    defer { for _ in 0..<4 { gate.signal() } }
     let controller = hosted.controller
     try await controller.navigate(.pixiv)
     try await hosted.fixture.waitUntil(timeout: 5) { hosted.fixture.pixiv.hasLoaded }
@@ -367,7 +365,7 @@ final class PixivBrowserRenderTests: MediaPanelTestCase {
     try await Task.sleep(for: .milliseconds(200))
     XCTAssertEqual(actionNames(tile()), [], "nothing to offer while the page downloads")
 
-    gate.signal()
+    gate.open()
     try await hosted.fixture.waitUntil(timeout: 10) {
       hosted.fixture.pixiv.downloads.download(for: "pixiv-303-p0")?.status == .finished
     }
@@ -444,9 +442,8 @@ final class PixivBrowserRenderTests: MediaPanelTestCase {
   func testAtTheSmallestWindowThePillGivesWayToTheDownloadsButtonAndTheInspectorToggle()
     async throws
   {
-    let gate = DispatchSemaphore(value: 0)
-    let hosted = try host(originals: gate)
-    defer { for _ in 0..<4 { gate.signal() } }
+    // The saves stay under way until the panel closes, which cancels them.
+    let hosted = try host(originals: PixivGate())
     try await loadAndSelect(hosted)
     let controller = hosted.controller
     for work in ["302", "304", "306"] { try await controller.pixivDownload(workID: work, page: 0) }
@@ -480,8 +477,8 @@ final class PixivBrowserRenderTests: MediaPanelTestCase {
   }
 
   func testWhileASaveIsUnderWayTheRingAndThePillAreThereAndStillFit() async throws {
-    let gate = DispatchSemaphore(value: 0)
-    let hosted = try Hosted(test: self, originals: gate)
+    let gate = PixivGate()
+    let hosted = try host(originals: gate)
     try await loadAndSelect(hosted)
     let controller = hosted.controller
     XCTAssertFalse(PixivActivityPill.isActive(in: controller))
@@ -504,7 +501,7 @@ final class PixivBrowserRenderTests: MediaPanelTestCase {
     XCTAssertEqual(
       hosted.contentToolbarItems.count, idle + 2, "the pill and the downloads button join the toolbar")
 
-    gate.signal()
+    gate.open()
     try await hosted.fixture.waitUntil(timeout: 10) {
       hosted.fixture.pixiv.downloads.download(for: "pixiv-302-p0")?.status == .finished
     }
