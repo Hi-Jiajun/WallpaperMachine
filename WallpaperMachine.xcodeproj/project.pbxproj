@@ -549,6 +549,7 @@
 		992FF06C1A7340982190EDCA /* RuntimeCounters.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37504A9CCC0640CBE43CC077 /* RuntimeCounters.swift */; };
 		99534CABD1208CB8BA73AFF6 /* LibraryGridGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6EC5E3998BF893CC778F993 /* LibraryGridGeometry.swift */; };
 		996B247AABAA68B8444D2CFE /* DesktopSpaceWallpaperAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40FE110E98FAF4EF4380F4C5 /* DesktopSpaceWallpaperAPI.swift */; };
+		99A11F74A5A34D9CCAB8C159 /* PanelController+Telemetry.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1B3DAB93DA7537625DE3370 /* PanelController+Telemetry.swift */; };
 		99BF86AC13F82EC26F985AB5 /* WallpaperPreviewRequestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15174393218ABE63129E7AE0 /* WallpaperPreviewRequestTests.swift */; };
 		9ACB2E046DB75B5BF0508422 /* VideoLetterboxStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A656C465663350212B687389 /* VideoLetterboxStoreTests.swift */; };
 		9AE00A87CC730F2CFC79C564 /* WorkshopTileCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A78969ADCDE8C2577D5E2C3 /* WorkshopTileCell.swift */; };
@@ -573,6 +574,7 @@
 		9FCD5CA66127157C08229914 /* LockScreenExtensionDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54D083DFC306D84FF7805D1 /* LockScreenExtensionDiagnostics.swift */; };
 		9FF4E9D827903C5D1E80CFB9 /* DragDrivers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A021AF465EA630EEE493659 /* DragDrivers.swift */; };
 		A037861283CAD6F0C98D5825 /* WelcomeRenderHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F27C606169E4C7857D00CC /* WelcomeRenderHarness.swift */; };
+		A0BC2E97F11D7128B283E67D /* PanelController+Sharing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DDE526D7622F81D67E776A4 /* PanelController+Sharing.swift */; };
 		A1F370CC5C1335F6A5710759 /* LockScreenFirstFrameTiming.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44C205FD9BDCF04601082706 /* LockScreenFirstFrameTiming.swift */; };
 		A27EA3F426B23B3458152F98 /* EnergyReadoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF79B5DE7B32F6ABF7CA4193 /* EnergyReadoutTests.swift */; };
 		A2BC2BDF3FAAEA87C5BBE36A /* SettingsItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D1E1228B99F5F6C4DF22B35 /* SettingsItem.swift */; };
@@ -848,6 +850,7 @@
 		EE88E5CF198F07B4D4B738B1 /* PanelViewStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 768008A7AF11956F882F5575 /* PanelViewStateTests.swift */; };
 		EEF9C591AE30A377AFCFE40F /* LockScreenIdleExitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56534C81E185DAA1A7932E25 /* LockScreenIdleExitTests.swift */; };
 		EFEB2FCAD29F092EB043CDDF /* PixivTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = E347156459471DE3892D68F9 /* PixivTransport.swift */; };
+		F04EBD677004F83FC7EB478F /* PanelPerformanceDataTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E136E3DCA347C0378337CC09 /* PanelPerformanceDataTests.swift */; };
 		F09F737652A1736EACC95071 /* WallpaperBackupStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C307C3E83F2ED8E86FE4F051 /* WallpaperBackupStore.swift */; };
 		F0FFC309AE03A890A5DD83F9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07A8672C9A03D8353209ACD5 /* AppDelegate.swift */; };
 		F160CDA1BAB98921C61BF6B0 /* ShortcutsRecorderModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A208D0ED001C715FFE78AA7 /* ShortcutsRecorderModelTests.swift */; };
@@ -1190,6 +1193,7 @@
 		3BF334E75BC43C66F8401792 /* helpers.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = helpers.m; sourceTree = "<group>"; };
 		3C5258CBE8C673E610A9EFAC /* WallpaperWindowAuditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperWindowAuditor.swift; sourceTree = "<group>"; };
 		3C8974F216D6D53EF2E8A833 /* TelemetryEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryEnvironment.swift; sourceTree = "<group>"; };
+		3DDE526D7622F81D67E776A4 /* PanelController+Sharing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PanelController+Sharing.swift"; sourceTree = "<group>"; };
 		3DF5B91B81811840C352F19D /* LibraryMetricsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryMetricsService.swift; sourceTree = "<group>"; };
 		3E2B1947CC9F24C0766CBF82 /* ShortcutsRecorderModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutsRecorderModel.swift; sourceTree = "<group>"; };
 		3E2E89F0347F7EFC1B86F666 /* WebSignInWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSignInWindow.swift; sourceTree = "<group>"; };
@@ -1763,6 +1767,7 @@
 		DFB39220D40F063E09E07B98 /* PanelDisplayActionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelDisplayActionsTests.swift; sourceTree = "<group>"; };
 		E073B7B38AED0C011B07149F /* NativeVideoLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVideoLayout.swift; sourceTree = "<group>"; };
 		E0EEA4091D472E1E05C1EF92 /* PanelController+Pixiv.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PanelController+Pixiv.swift"; sourceTree = "<group>"; };
+		E136E3DCA347C0378337CC09 /* PanelPerformanceDataTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelPerformanceDataTests.swift; sourceTree = "<group>"; };
 		E15865E00CD33B17E4AC2F4B /* GeneralSettingsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneralSettingsSection.swift; sourceTree = "<group>"; };
 		E1F7C715A065AACB4253181C /* ControlPanelLaunch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlPanelLaunch.swift; sourceTree = "<group>"; };
 		E202D148DE3FDD2027C9430D /* WelcomePreferencesPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomePreferencesPage.swift; sourceTree = "<group>"; };
@@ -1823,6 +1828,7 @@
 		F0E481186B5E539877D0DB6E /* TransferEstimatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransferEstimatorTests.swift; sourceTree = "<group>"; };
 		F17611FE37BEDBA683549A23 /* WorkshopDownloadCheckpoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkshopDownloadCheckpoint.swift; sourceTree = "<group>"; };
 		F18BF115F531E75AACEFCD83 /* PanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelController.swift; sourceTree = "<group>"; };
+		F1B3DAB93DA7537625DE3370 /* PanelController+Telemetry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PanelController+Telemetry.swift"; sourceTree = "<group>"; };
 		F1F3C06EF88D99DE255EF961 /* ClientPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientPreferences.swift; sourceTree = "<group>"; };
 		F316D9CE01AA6DEC91F9C86D /* PanelMediaActionRoutingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelMediaActionRoutingTests.swift; sourceTree = "<group>"; };
 		F360902C71DCC21E369297DC /* InstalledBrowserModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstalledBrowserModelTests.swift; sourceTree = "<group>"; };
@@ -2782,6 +2788,7 @@
 				F316D9CE01AA6DEC91F9C86D /* PanelMediaActionRoutingTests.swift */,
 				1AFCE87311B928E524CD26DF /* PanelOrganizationFixtures.swift */,
 				A9EA2BE99A7E72DD14A6776D /* PanelPageTransitionTests.swift */,
+				E136E3DCA347C0378337CC09 /* PanelPerformanceDataTests.swift */,
 				F3E588E6EA345A009663542A /* PanelPerformanceSettingsTests.swift */,
 				E58E0A9D3223429FECDD51AC /* PanelPixivActionsTests.swift */,
 				57DF499336B4D792A094886E /* PanelPlanActionsTests.swift */,
@@ -2997,9 +3004,11 @@
 				F58E9BBB875B75579395EB5E /* PanelController+Settings.swift */,
 				EED05DA08219243792860D27 /* PanelController+SettingsUI.swift */,
 				AC4846E881029BD781497317 /* PanelController+SettingsValues.swift */,
+				3DDE526D7622F81D67E776A4 /* PanelController+Sharing.swift */,
 				5C052F88AF9C988C0D9BBC8D /* PanelController+SteamSetup.swift */,
 				D1189A86AAC7BBC7B7F3017C /* PanelController+Storage.swift */,
 				88C3BB28662735F163B91028 /* PanelController+Support.swift */,
+				F1B3DAB93DA7537625DE3370 /* PanelController+Telemetry.swift */,
 				F7EB1896FA5FF18F63204A3A /* PanelController+Updates.swift */,
 				AE4494AFBA1049EC719E7B41 /* PanelController+WallpaperSettings.swift */,
 				F905919A5BA823070E3CB0C4 /* PanelController+Workshop.swift */,
@@ -3863,6 +3872,7 @@
 				DF6DE53FDB7E4F8E448D6ED4 /* PanelMediaActionRoutingTests.swift in Sources */,
 				2E7A5B9565F33DD39E67A2C1 /* PanelOrganizationFixtures.swift in Sources */,
 				43D7981656FFE43C41A59253 /* PanelPageTransitionTests.swift in Sources */,
+				F04EBD677004F83FC7EB478F /* PanelPerformanceDataTests.swift in Sources */,
 				94F154EF13127AB5A2FCED84 /* PanelPerformanceSettingsTests.swift in Sources */,
 				9EBA0A7E17F805CDB5704BB8 /* PanelPixivActionsTests.swift in Sources */,
 				B3ADAF82E350698F6CAB992C /* PanelPlanActionsTests.swift in Sources */,
@@ -4281,9 +4291,11 @@
 				04B4C553154FE7A0F3971E39 /* PanelController+Settings.swift in Sources */,
 				43CD50C090260FC0DD27DF7C /* PanelController+SettingsUI.swift in Sources */,
 				DB2DFFCAC2A586BF1247FA8D /* PanelController+SettingsValues.swift in Sources */,
+				A0BC2E97F11D7128B283E67D /* PanelController+Sharing.swift in Sources */,
 				9B89CEED8A7C3CB541BEC3F8 /* PanelController+SteamSetup.swift in Sources */,
 				D588D8B0B383B37DF0E0618C /* PanelController+Storage.swift in Sources */,
 				9C800AC83F8E4C72D5B341AD /* PanelController+Support.swift in Sources */,
+				99A11F74A5A34D9CCAB8C159 /* PanelController+Telemetry.swift in Sources */,
 				3E34D9C31AB66DD9204DF9D9 /* PanelController+Updates.swift in Sources */,
 				B087E116E145490DA22913AD /* PanelController+WallpaperSettings.swift in Sources */,
 				4CAF46441BE4C1F9F0609E9E /* PanelController+Workshop.swift in Sources */,
