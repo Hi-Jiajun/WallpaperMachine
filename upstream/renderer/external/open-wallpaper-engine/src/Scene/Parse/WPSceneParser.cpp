@@ -1358,7 +1358,12 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
     const auto base_svs     = pWPShaderInfo->svs;
     const auto base_alias   = pWPShaderInfo->alias;
     const auto base_defTexs = pWPShaderInfo->defTexs;
-    const auto base_combos  = pWPShaderInfo->combos;
+    auto       base_combos  = pWPShaderInfo->combos;
+    // Fog is compiled into a pass only once its effective `FOG` combo -- the
+    // material's or the shader's own default -- is known to be on, which the
+    // first compile tells; the pass is then compiled again with fog.
+    const bool scene_fog = pScene->fog_distance || pScene->fog_height;
+    bool       fog_applied = false;
 
     std::string reflection_json;
     auto        textures = BuildMaterialTextureList(base_textures, pWPShaderInfo->defTexs);
@@ -1428,6 +1433,17 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
         DeduplicateDefaultTextures(pWPShaderInfo->defTexs);
 
         auto next_textures = BuildMaterialTextureList(base_textures, pWPShaderInfo->defTexs);
+        if (scene_fog && ! fog_applied) {
+            fog_applied     = true;
+            const auto fog  = pWPShaderInfo->combos.find("FOG");
+            if (fog != pWPShaderInfo->combos.end() && fog->second != "0") {
+                base_combos["FOG_DIST"]     = pScene->fog_distance ? "1" : "0";
+                base_combos["FOG_HEIGHT"]   = pScene->fog_height ? "1" : "0";
+                base_combos["FOG_COMPUTED"] = "1";
+                textures                    = std::move(next_textures);
+                continue;
+            }
+        }
         if (next_textures == textures) {
             break;
         }
@@ -3277,6 +3293,8 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
     scene.opaque_first = ! sc.general.isOrtho && sc.general.transparentsorting;
     scene.hdr = sc.general.hdr;
     scene.light_config = ParseSceneLightConfig(sc.general.lightconfig);
+    scene.fog_distance = sc.general.fogdistance;
+    scene.fog_height   = sc.general.fogheight;
     if (context.request != nullptr && context.request->project_properties != nullptr) {
         SceneRuntimeBootstrap bootstrap {
             .canvas_width       = scene.ortho[0],
@@ -3308,6 +3326,19 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
 
         gb["g_LightAmbientColor"]  = sc.general.ambientcolor;
         gb["g_LightSkylightColor"] = sc.general.skylightcolor;
+        // Fog runs from its start to its end, density from its start density
+        // to its end density: (start, end - start, start density, density span).
+        const auto& g              = sc.general;
+        gb["g_FogDistanceColor"]   = g.fogdistancecolor;
+        gb["g_FogDistanceParams"]  = std::array { g.fogdistancestart,
+                                                  g.fogdistanceend - g.fogdistancestart,
+                                                  g.fogdistancestartdensity,
+                                                  g.fogdistanceenddensity - g.fogdistancestartdensity };
+        gb["g_FogHeightColor"]     = g.fogheightcolor;
+        gb["g_FogHeightParams"]    = std::array { g.fogheightstart,
+                                                  g.fogheightend - g.fogheightstart,
+                                                  g.fogheightstartdensity,
+                                                  g.fogheightenddensity - g.fogheightstartdensity };
         // std140 mat3 is three vec4 columns (48 bytes). A mat4 identity is 64
         // bytes and spills into the following view-projection uniform.
         gb["g_NormalModelMatrix"] = std::array<float, 12> {

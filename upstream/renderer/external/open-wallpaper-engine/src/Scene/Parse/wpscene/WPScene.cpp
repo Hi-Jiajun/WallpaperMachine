@@ -120,12 +120,16 @@ bool WPSceneGeneral::FromJson(const nlohmann::json& json, uint16_t pkg_version) 
 	    GET_JSON_NAME_VALUE_NOWARN(json, "fogdistancestart", fogdistancestart);
 	    GET_JSON_NAME_VALUE_NOWARN(json, "fogdistanceend", fogdistanceend);
 	    GET_JSON_NAME_VALUE_NOWARN(json, "fogdistancecolor", fogdistancecolor);
+	    GET_JSON_NAME_VALUE_NOWARN(json, "fogdistancestartdensity", fogdistancestartdensity);
+	    GET_JSON_NAME_VALUE_NOWARN(json, "fogdistanceenddensity", fogdistanceenddensity);
     }
     if (WantsVersion(pkg_version, 23)) {
 	    GET_JSON_NAME_VALUE_NOWARN(json, "fogheight", fogheight);
 	    GET_JSON_NAME_VALUE_NOWARN(json, "fogheightstart", fogheightstart);
 	    GET_JSON_NAME_VALUE_NOWARN(json, "fogheightend", fogheightend);
 	    GET_JSON_NAME_VALUE_NOWARN(json, "fogheightcolor", fogheightcolor);
+	    GET_JSON_NAME_VALUE_NOWARN(json, "fogheightstartdensity", fogheightstartdensity);
+	    GET_JSON_NAME_VALUE_NOWARN(json, "fogheightenddensity", fogheightenddensity);
     }
     if (WantsVersion(pkg_version, 21) &&
         json.contains("lightconfig") && json.at("lightconfig").is_object()) {

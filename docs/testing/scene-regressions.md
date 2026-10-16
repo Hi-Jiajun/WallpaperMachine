@@ -737,8 +737,8 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   unlit pass); `pipeline.rs`
   `a_lit_pass_gets_wallpaper_engines_light_arrays_sized_by_the_scene_on_both_backends`
   compiles it for SPIR-V and Metal, and
-  `every_asset_shader_that_requires_lighting_compiles_lit_on_both_backends`
-  does so for Wallpaper Engine's own lit shaders when
+  `every_asset_shader_that_requires_lighting_compiles_lit_and_fogged_on_both_backends`
+  does so, with both fogs, for Wallpaper Engine's own lit shaders when
   `WALLPAPER_MACHINE_ASSETS_ROOT` names them (`fur4` is excluded: its instanced shells read the
   dialect's `CASTF` cast macro, which the compiler does not supply, lit or unlit).
   `SceneSchema.LightsOfEachKindFillWallpaperEnginesLightingArrays` checks every
@@ -748,7 +748,10 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   `SceneSchema.TheNormalMatrixIsTheDrawsRotationWithoutItsScale` the per-draw
   normal matrix; `MetalSceneDraw.ALayerLitByScenePointAndDirectionalLightsIsTheSameOnBothRenderers`
   the lit pixels on both renderers.
-  `SceneSchema.ATextureSlotsTexelIsTheStepOfTheTextureItSamples` checks that
+  `SceneSchema.FogIsCompiledIntoPassesWhoseFogComboIsOnWithWallpaperEnginesParameters`
+  checks that scene fog reaches a pass whose `FOG` combo is on (and only such a
+  pass) with Wallpaper Engine's parameter layout, and
+  `SceneSchema.ATextureSlotsTexelIsTheStepOfTheTextureItSamples` that
   `g_Texture<N>Texel` is (1 / width, 1 / height, width, height) of the sampled
   texture. After a shader-crate change, rebuild
   `target/release/libshader.a` (`cargo build -p shader --features ffi --release`)

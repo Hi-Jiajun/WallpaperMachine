@@ -91,7 +91,11 @@ names, the first ones in scene order. A lit pass reuses its last image only whil
 the lights it reads are unchanged. `g_NormalModelMatrix` is each draw's own rotation
 and `g_LightSkylightColor` the scene's skylight; `g_Texture<N>Texel` is the step of
 the texture a slot samples, as for Wallpaper Engine's morph-target and downsample
-shaders. Shadow maps, spot cookies and
+shaders. Distance and height fog
+(`fogdistance`, `fogheight` with their start, end, densities and colours, Wallpaper
+Engine's defaults where they are left out) are compiled into every pass whose `FOG`
+combo is on, the material's own or its shader's default, and applied by the
+author's `common_fog.h`. Shadow maps, spot cookies and
 volumetric light shafts are not drawn: a light that casts a shadow lights as if
 nothing did, which is also what Wallpaper Engine shows when nothing in the scene
 casts one. Both renderers apply a material's depth state and cull mode the same way: a

@@ -2218,6 +2218,66 @@ TEST(SceneSchema, LightsFollowTheirUserPropertyScriptAndIntensityTimeline) {
     EXPECT_NE(scene->shaderValueUpdater->LightStateHash(planet.get(), 0), lit_hash);
 }
 
+TEST(SceneSchema, FogIsCompiledIntoPassesWhoseFogComboIsOnWithWallpaperEnginesParameters) {
+    std::map<std::string, std::string> files;
+    AddLeafModelSceneFiles(files);
+    files["/shaders/foggy.vert"] = R"(
+attribute vec3 a_Position;
+void main() { gl_Position = vec4(a_Position, 1.0); }
+)";
+    files["/shaders/foggy.frag"] = R"(// [COMBO] {"material":"fog","combo":"FOG","default":1}
+#if FOG_DIST
+uniform vec4 g_FogDistanceParams;
+#endif
+void main() {
+  vec4 color = vec4(1.0);
+#if FOG_COMPUTED && FOG_DIST
+  color.rgb *= g_FogDistanceParams.xyz;
+#endif
+  gl_FragColor = color;
+}
+)";
+    files["/mat/head.json"] = R"({"passes":[{"shader":"foggy","textures":["a.tex"]}]})";
+    files["/mat/eyes.json"] = R"({"passes":[{"shader":"foggy","textures":["a.tex"],"combos":{"FOG":0}}]})";
+    fs::VFS vfs;
+    ASSERT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+    audio::SoundManager sound_manager;
+    WPSceneParser       parser;
+    std::string json = PerspectiveSceneJson(R"([{"id":1,"name":"planet","model":"planet.mdl"}])");
+    const auto general = json.find("\"general\": {") + std::string("\"general\": {").size();
+    json.insert(general, R"("fogdistance":true,"fogdistancestart":2,"fogdistanceend":10,)"
+                         R"("fogdistancecolor":[0.5,0.5,0.5],)");
+    auto scene = parser.Parse("fog", json, vfs, sound_manager);
+    ASSERT_NE(scene, nullptr);
+    EXPECT_TRUE(scene->fog_distance);
+    EXPECT_FALSE(scene->fog_height);
+    auto node = FindRootChildByName(*scene, "planet");
+    ASSERT_NE(node, nullptr);
+    ASSERT_EQ(node->Mesh()->MaterialSlots().size(), 2u);
+
+    const auto& fogged = *node->Mesh()->MaterialSlotPtr(0);
+    ASSERT_NE(fogged.customShader.shader, nullptr);
+    ASSERT_TRUE(fogged.customShader.shader->rust_reflection_json.has_value());
+    EXPECT_NE(fogged.customShader.shader->rust_reflection_json->find("g_FogDistanceParams"),
+              std::string::npos)
+        << "a pass whose FOG combo is on was not compiled with distance fog";
+    // (start, end - start, start density, end density - start density), with
+    // Wallpaper Engine's default densities 0 and 1.
+    const auto& params = fogged.customShader.constValues.at("g_FogDistanceParams");
+    ASSERT_EQ(params.size(), 4u);
+    EXPECT_FLOAT_EQ(params[0], 2.0f);
+    EXPECT_FLOAT_EQ(params[1], 8.0f);
+    EXPECT_FLOAT_EQ(params[2], 0.0f);
+    EXPECT_FLOAT_EQ(params[3], 1.0f);
+
+    const auto& clear = *node->Mesh()->MaterialSlotPtr(1);
+    ASSERT_NE(clear.customShader.shader, nullptr);
+    ASSERT_TRUE(clear.customShader.shader->rust_reflection_json.has_value());
+    EXPECT_EQ(clear.customShader.shader->rust_reflection_json->find("g_FogDistanceParams"),
+              std::string::npos)
+        << "a pass that turns FOG off was compiled with fog";
+}
+
 TEST(SceneSchema, ATextureSlotsTexelIsTheStepOfTheTextureItSamples) {
     std::map<std::string, std::string> files;
     AddLeafModelSceneFiles(files);

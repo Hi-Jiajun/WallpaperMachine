@@ -730,6 +730,8 @@ into private textures; the three that draw skip visibly without a Metal device.
   the dialect's cast macros (`CASTF` among them), which the compiler does not supply with
   `CASTI`, `CASTU`, `CAST4U`, `DECLARE_SAMPLER2D_PARAMETER` and `MAKE_SAMPLER2D_ARGUMENT`.
   Its redeclared `gl_InstanceID` is no longer the obstacle.
+- **Fog keys bound to user properties are not followed.** The `general` fog keys
+  bound to user properties keep the value the scene loaded with.
 - The `perspective` flag of an image layer is read by no parser (`WPTextObject`
   and `WPModelObject` read theirs); image layers always draw through the
   orthographic camera.

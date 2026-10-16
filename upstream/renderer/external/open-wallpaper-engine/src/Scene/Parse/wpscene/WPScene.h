@@ -72,14 +72,20 @@ public:
     std::array<float, 3> gravitydirection { 0.0f, -1.0f, 0.0f };
     float                gravitystrength { 0.0f };
     bool                 transparentsorting { false };
+    // Wallpaper Engine's defaults for a scene that switches fog on and leaves
+    // the rest out.
     bool                 fogdistance { false };
-    float                fogdistancestart { 0.0f };
-    float                fogdistanceend { 0.0f };
-    std::array<float, 3> fogdistancecolor { 1.0f, 1.0f, 1.0f };
+    float                fogdistancestart { 1.0f };
+    float                fogdistanceend { 5.0f };
+    float                fogdistancestartdensity { 0.0f };
+    float                fogdistanceenddensity { 1.0f };
+    std::array<float, 3> fogdistancecolor { 0.0f, 0.0f, 0.0f };
     bool                 fogheight { false };
-    float                fogheightstart { 0.0f };
-    float                fogheightend { 0.0f };
-    std::array<float, 3> fogheightcolor { 1.0f, 1.0f, 1.0f };
+    float                fogheightstart { 1.0f };
+    float                fogheightend { -3.0f };
+    float                fogheightstartdensity { 0.0f };
+    float                fogheightenddensity { 1.0f };
+    std::array<float, 3> fogheightcolor { 0.0f, 0.0f, 0.0f };
     nlohmann::json       lightconfig;
 };
 

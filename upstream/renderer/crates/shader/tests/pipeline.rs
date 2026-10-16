@@ -2754,8 +2754,8 @@ fn an_unlit_pass_declares_no_light_arrays() {
 }
 
 #[test]
-fn every_asset_shader_that_requires_lighting_compiles_lit_on_both_backends() {
-    let test = "every_asset_shader_that_requires_lighting_compiles_lit_on_both_backends";
+fn every_asset_shader_that_requires_lighting_compiles_lit_and_fogged_on_both_backends() {
+    let test = "every_asset_shader_that_requires_lighting_compiles_lit_and_fogged_on_both_backends";
     let Some(root) = asset_shader_root() else {
         eprintln!(
             "skipping {test}: no Wallpaper Engine assets/shaders directory. Set \
@@ -2783,11 +2783,13 @@ fn every_asset_shader_that_requires_lighting_compiles_lit_on_both_backends() {
                     true,
                     TextureFormatHint::Rgba8,
                 ));
-            // Lit, as a scene with lights compiles them.
+            // Lit and fogged at once, as a scene with lights and both fogs
+            // compiles them.
             for (name, value) in [
                 ("LIGHTING", "1"), ("SCENE_ORTHO", "1"), ("HDR", "0"),
                 ("LIGHTS_POINT", "3"), ("LIGHTS_SPOT", "1"), ("LIGHTS_TUBE", "3"),
                 ("LIGHTS_DIRECTIONAL", "1"),
+                ("FOG_DIST", "1"), ("FOG_HEIGHT", "1"), ("FOG_COMPUTED", "1"),
             ] {
                 builder = builder.combo(ShaderComboValue::new(ComboName::new(name).unwrap(), value));
             }

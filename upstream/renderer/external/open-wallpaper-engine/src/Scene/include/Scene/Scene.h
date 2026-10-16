@@ -62,6 +62,10 @@ public:
     std::vector<std::unique_ptr<SceneLight>> lights;
     /// The light counts lit shaders are compiled for (`general.lightconfig`).
     SceneLightConfig                         light_config;
+    /// Distance and height fog (`general.fogdistance`, `general.fogheight`):
+    /// a pass whose `FOG` combo is on is compiled with `FOG_DIST`/`FOG_HEIGHT`.
+    bool                                     fog_distance { false };
+    bool                                     fog_height { false };
 
     std::shared_ptr<SceneNode>           sceneGraph;
     std::vector<std::shared_ptr<ScenePostProcess>> post_processes;
