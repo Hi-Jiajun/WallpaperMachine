@@ -68,9 +68,12 @@ does both halves; GitHub's auto-generated notes are not used. Once a version's
 tag exists, its section is not extended: the tag's build already bundled it, so
 a change that lands later belongs in the next release's notes.
 
-A bundled changelog section is both languages, in this order, and nothing else at `###`:
+A bundled changelog section is an optional banner line, then both languages, in
+this order, and nothing else at `###`:
 
 ```markdown
+![WallpaperMachine 0.2.0](Resources/ReleaseBanners/0.2.0.jpg)
+
 ### English
 
 One or two sentences on what the release means, omitted when the lists say it.
@@ -95,10 +98,33 @@ blocks; the app ignores it. The headings are:
 
 | Section | `####` English | `####` 简体中文 |
 |---|---|---|
+| highlights | Highlights | 亮点 |
 | breaking | Breaking changes | 不兼容变更 |
 | new | New | 新增 |
 | improved | Improved | 改进 |
 | fixed | Fixed | 修复 |
+
+Highlights appear only in feature releases (`x.y.0`): the three to five changes that
+define the release, which the other sections still list.
+
+### Release banners
+
+A feature release can carry a banner: a 3:1 picture (2400 × 800 pixels, JPEG or PNG)
+committed as `Resources/ReleaseBanners/x.y.z.jpg` or `.png` before the commit with the
+`release:` line. When the section is written, the script puts its image line above
+both languages, so the banner belongs to both translations:
+
+- `CHANGELOG.md` on GitHub shows it from the repository path.
+- The release page shows it from the version's tag on `raw.githubusercontent.com`,
+  above the English notes.
+- The app bundles the folder; the What's New window shows the banner of the version
+  it announces above its header, not those of skipped versions.
+
+Publishing refuses a banner line that names another version's file. Above
+`### English` only the image line is read; other text there is not shown.
+Banners are drawn for the product, not taken from Workshop wallpapers: their art
+belongs to their authors. Sections whose tag exists keep the banner they shipped
+with, so a banner never goes back into an older release.
 
 ### Written by the release-notes model
 
@@ -128,16 +154,20 @@ source of the notes: write them for the reader
 
 The instructions also carry the project's rules on claims, because CI commits the
 notes without review: no energy, battery or power-saving claims, nothing called
-fully supported or fully compatible, and opt-in features (Native Metal, native
-video, content pacing, on-demand scene idle, the animated lock screen) keep their
-optional, experimental or off-by-default qualifier in both languages. Places in
+fully supported or fully compatible, and opt-in features (native video, content
+pacing, on-demand scene idle, the animated lock screen) keep their optional,
+experimental or off-by-default qualifier in both languages; Native Metal is the
+default renderer and is never called optional. The model groups many commits about
+one area (text layers, particles, lighting) into one bullet that names what users
+see, keeping each section to about 15 bullets, and is told whether the version is a
+feature release, which decides whether it writes highlights. Places in
 the app are named the way the panel labels them, in English and in the zh-Hans
 catalog's words (`Settings` / `设置`); the prompt lists those names, so renaming a
 tab or a Settings section changes the list in `scripts/release_notes.py` in
 the same commit.
 
 The model answers with JSON. `summary` is `{"english", "chinese"}`. Each of
-`breaking`, `new`, `improved` and `fixed` is a list of the same pair, one object
+`highlights`, `breaking`, `new`, `improved` and `fixed` is a list of the same pair, one object
 per change, so the two languages cannot drift in length. The script renders that
 shape — `### English`, then `### 简体中文`, categories at `####`, then the compare
 link — and stops the run on a reply that is not that JSON, omits a language,

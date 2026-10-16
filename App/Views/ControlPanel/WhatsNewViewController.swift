@@ -3,22 +3,34 @@ import AppKit
 /// A native, nonmodal reading window with a choice of release-note translation.
 @MainActor
 final class WhatsNewViewController: NSViewController {
-    static let defaultContentSize = NSSize(width: 760, height: 720)
+    static let defaultContentSize = NSSize(width: 760, height: 800)
     private let announcement: WhatsNewStore.Announcement
     private let preferences: WhatsNewStore
     private let close: () -> Void
     private let initialLanguage: AppLanguage
+    private let bannerImage: (AppReleaseHistory.Banner) -> NSImage?
     private(set) var suppressionCheckbox: NSButton!
     private(set) var notesView: NSTextView!
     private(set) var languageControl: NSSegmentedControl!
+    /// The current release's banner, when it has one the bundle can show.
+    private(set) var bannerView: NSImageView?
 
     init(announcement: WhatsNewStore.Announcement, preferences: WhatsNewStore,
-         initialLanguage: AppLanguage, close: @escaping () -> Void) {
+         initialLanguage: AppLanguage,
+         bannerImage: @escaping (AppReleaseHistory.Banner) -> NSImage? = WhatsNewViewController.bundledBanner,
+         close: @escaping () -> Void) {
         self.announcement = announcement
         self.preferences = preferences
         self.close = close
         self.initialLanguage = initialLanguage
+        self.bannerImage = bannerImage
         super.init(nibName: nil, bundle: nil)
+    }
+
+    static func bundledBanner(_ banner: AppReleaseHistory.Banner) -> NSImage? {
+        Bundle.main.url(forResource: banner.fileName, withExtension: nil,
+                        subdirectory: AppReleaseHistory.Banner.directory)
+            .flatMap(NSImage.init(contentsOf:))
     }
 
     required init?(coder: NSCoder) { nil }
@@ -81,8 +93,39 @@ final class WhatsNewViewController: NSViewController {
             child.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(child)
         }
+        // Only the version being announced shows its banner: older ones are history.
+        if let banner = announcement.releases.first?.banner, let image = bannerImage(banner),
+           image.size.width > 0, image.size.height > 0 {
+            let bannerView = NSImageView(image: image)
+            bannerView.imageScaling = .scaleProportionallyUpOrDown
+            bannerView.wantsLayer = true
+            bannerView.layer?.cornerRadius = 10
+            bannerView.layer?.masksToBounds = true
+            bannerView.setAccessibilityLabel(banner.description)
+            // The picture's pixel size is not a size the window must make room for.
+            for axis in [NSLayoutConstraint.Orientation.horizontal, .vertical] {
+                bannerView.setContentCompressionResistancePriority(.defaultLow, for: axis)
+                bannerView.setContentHuggingPriority(.defaultLow, for: axis)
+            }
+            bannerView.translatesAutoresizingMaskIntoConstraints = false
+            view.addSubview(bannerView)
+            let fill = bannerView.trailingAnchor.constraint(equalTo: header.trailingAnchor)
+            fill.priority = .defaultHigh
+            NSLayoutConstraint.activate([
+                fill,
+                bannerView.topAnchor.constraint(equalTo: view.topAnchor, constant: 24),
+                bannerView.leadingAnchor.constraint(equalTo: header.leadingAnchor),
+                // A wide window must not grow the banner until it crowds out the notes.
+                bannerView.widthAnchor.constraint(lessThanOrEqualToConstant: Self.defaultContentSize.width - 48),
+                bannerView.heightAnchor.constraint(equalTo: bannerView.widthAnchor,
+                                                   multiplier: image.size.height / image.size.width),
+                header.topAnchor.constraint(equalTo: bannerView.bottomAnchor, constant: 20),
+            ])
+            self.bannerView = bannerView
+        } else {
+            header.topAnchor.constraint(equalTo: view.topAnchor, constant: 24).isActive = true
+        }
         NSLayoutConstraint.activate([
-            header.topAnchor.constraint(equalTo: view.topAnchor, constant: 24),
             header.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             header.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
             languageControl.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 16),

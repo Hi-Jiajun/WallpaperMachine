@@ -9,6 +9,17 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-15 — Native SwiftUI control panel
+
+- Change: the WKWebView control panel (WebUI/) is replaced by a native SwiftUI window (b5722da7, 511e3a86, 4767f8b4); typed PanelController actions, live language via per-language catalogs, DesktopActions test guard.
+- Gate: `python3 scripts/test.py` on the final tree (identical to main at 4767f8b4): Python script tests OK; native 3758 passed, 0 failed, 45 skipped of 3803.
+- Earlier full runs on the same tree failed only on load-sensitive waits (PanelDownloadActionsTests, PixivBrowserRenderTests, InstalledPageRenderTests); each was made to wait for state and passed alone and in the final gate.
+- Strings: `scripts/tests/test_localization_catalogs.py` and the new literal check `scripts/tests/test_panel_localization.py` pass; a SWIFT_EMIT_LOC_STRINGS extraction diff found no panel literal without a catalog key (only the pre-existing App Intents `%@`).
+- Regression tests added for two crashes found during integration: Installed→pixiv toolbar search swap (`PanelPageTransitionTests`) and the Installed grid's layout loop at 760×560 with scroll bars that take room (`InstalledPageRenderTests`).
+- Release: `python3 scripts/build.py --swift-only --configuration Release` from the final tree; delivered to build/Build/Products/Release/WallpaperMachine.app (no WebUI resources, signature verified).
+- Not checked (no desktop authorization): the real window — sidebar material, toolbar, full screen and Split View, hover/focus rings, VoiceOver and live drags were seen only in offscreen renders; `python3 scripts/test.py --ui` (updated for the native window) was not run.
+- Known noise: ~455 AppKit runtime warnings per run, all toolbar-title constraint conflicts in squeezed test windows.
+
 ## 2026-10-14 — Settings drawn like System Settings, with its own solid glyphs
 
 Settings restyled after a Claude Design mock-up: centred page cards, translucent grouped boxes, borderless pop-ups, small switches, the ⓘ beside each title, flattened Advanced, and a hand-drawn solid glyph set (WebUI/settings-glyphs.js) for sections and Quick Settings tiles. Layout bugs fixed on the way, plus search hiding an open disclosure whose title missed.

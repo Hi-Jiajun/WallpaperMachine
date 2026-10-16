@@ -25,6 +25,15 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-16 — Release banners and highlights in the changelog
+
+Feature releases can carry a bundled 3:1 banner (Resources/ReleaseBanners/x.y.z.jpg) shown in CHANGELOG.md, the GitHub release page and the What's New window; the release-notes model writes Highlights for x.y.0 and groups many commits per area. Banner for 1.5.0 added.
+
+- `python3 scripts/test.py` — exit 0; 3872 tests: 3827 passed, 45 skipped; test_release_notes.py 61 tests OK
+- `python3 scripts/test.py --only WhatsNewTests` / `--only AppUpdateTests` — passed while iterating
+- Visual: temporary offscreen XCTest snapshot of the What's New window with the bundled 1.5.0 banner (dark), banner above the header at 712 pt, notes below; probe deleted
+- Skipped: live --ai model run (no RELEASE_NOTES_API_KEY locally), so the 1.5.0 wording is written by CI at release; the raw.githubusercontent banner URL is checked only by unit test until v1.5.0 is tagged
+
 ## 2026-10-16 — Tabs in the title bar, Now Playing bar and one-colour title bar on top of the Filters sidebar
 
 - Rebased onto main's Filters sidebar (69955b77, cf9f5ebe): my own filters panel was dropped; the sidebar now slides from the window's leading edge, and Installed's has the Collections group at its top.
@@ -117,14 +126,3 @@ Headless only: no desktop, no audio, no app launch, no Release build.
 - Both renderers draw two local 1920x1080-canvas scenes byte for byte alike at 3456x2234 backed at 2x in both modes (`DrawTheSamePictureOnBothRenderers` with `WE_TEST_COMPARE_RESOLUTION`, 60 frames). Display mode crops show crisper edges and grain than Canvas at the same size; viewed offscreen, never on the desktop.
 - Cost, `LocalProjectEnergyIsMeasuredHeadlessly` (`WE_TEST_ENERGY_RESOLUTION`), 3456x2234 at 2x, 60 fps, 2 x 20 s per mode, canvas/display/display/canvas: a bloom and effect-chain scene on Native Metal 1.62 -> 3.42 ms own GPU time per frame, render targets 35 -> 94 MB, peak footprint 380 -> 455 MB; on Compatibility 1.91 -> 3.27 ms and 399 -> 480 MB; a 26-layer scene of mostly author-sized buffers 1.76 -> 2.33 ms, 132 -> 160 MB, 515 -> 555 MB. CPU time per frame unchanged; energy not measured; footprint carries about 30 MB of run-to-run noise.
 - Not run: the full `python3 scripts/test.py` and `python3 scripts/check_renderer.py` gates, a desktop run, the lock screen (it never sets the choice and keeps the canvas), a Release build.
-
-## 2026-10-15 — Native SwiftUI control panel
-
-- Change: the WKWebView control panel (WebUI/) is replaced by a native SwiftUI window (b5722da7, 511e3a86, 4767f8b4); typed PanelController actions, live language via per-language catalogs, DesktopActions test guard.
-- Gate: `python3 scripts/test.py` on the final tree (identical to main at 4767f8b4): Python script tests OK; native 3758 passed, 0 failed, 45 skipped of 3803.
-- Earlier full runs on the same tree failed only on load-sensitive waits (PanelDownloadActionsTests, PixivBrowserRenderTests, InstalledPageRenderTests); each was made to wait for state and passed alone and in the final gate.
-- Strings: `scripts/tests/test_localization_catalogs.py` and the new literal check `scripts/tests/test_panel_localization.py` pass; a SWIFT_EMIT_LOC_STRINGS extraction diff found no panel literal without a catalog key (only the pre-existing App Intents `%@`).
-- Regression tests added for two crashes found during integration: Installed→pixiv toolbar search swap (`PanelPageTransitionTests`) and the Installed grid's layout loop at 760×560 with scroll bars that take room (`InstalledPageRenderTests`).
-- Release: `python3 scripts/build.py --swift-only --configuration Release` from the final tree; delivered to build/Build/Products/Release/WallpaperMachine.app (no WebUI resources, signature verified).
-- Not checked (no desktop authorization): the real window — sidebar material, toolbar, full screen and Split View, hover/focus rings, VoiceOver and live drags were seen only in offscreen renders; `python3 scripts/test.py --ui` (updated for the native window) was not run.
-- Known noise: ~455 AppKit runtime warnings per run, all toolbar-title constraint conflicts in squeezed test windows.

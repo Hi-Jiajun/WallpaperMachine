@@ -179,8 +179,11 @@ one is offered exactly once afterwards.
 
 On the first launch of a newer version, a separate, nonmodal **What’s New** window
 shows the installed version and every release since the last announced version,
-newest first. It opens with a 760 × 720-point content area and resizes down to
-600 × 480. **English / 简体中文** tabs display one translation at a time for every
+newest first. It opens with a 760 × 800-point content area and resizes down to
+600 × 480. When the installed version has a bundled banner
+([release banners](../release.md#release-banners)), the banner sits above the
+header, at most as wide as the default window; skipped versions' banners are not
+shown. **English / 简体中文** tabs display one translation at a time for every
 release; the initial tab follows the app’s effective language (Settings → General
 → Language, including **System** matching, not the bundle’s launch-time language):
 Simplified or Traditional Chinese uses Simplified Chinese notes, English or

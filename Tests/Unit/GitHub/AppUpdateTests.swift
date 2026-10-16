@@ -102,6 +102,8 @@ final class AppUpdateTests: XCTestCase {
 
     func testReleaseNotesReadTheSectionsAndStopAtTheInstallFooter() throws {
         let body = """
+        ![WallpaperMachine 1.2.3](https://raw.githubusercontent.com/o/r/v1.2.3/Resources/ReleaseBanners/1.2.3.jpg)
+
         ### New
 
         - **panel** — Add a filter rail ([`aaa1111`](https://github.com/o/r/commit/aaa1111))

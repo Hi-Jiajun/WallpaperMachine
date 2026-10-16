@@ -748,7 +748,7 @@ bundles is in [build.md](build.md#packaging-and-installing).
 
 | Target | Type | Sources | Notes |
 |---|---|---|---|
-| `WallpaperMachine` | application | `App/`, `Shared/`, `Resources/StarterWallpaper` and `CHANGELOG.md` as resources, the MediaRemote adapter's Perl script and license | Embeds the extension and `MediaRemoteAdapter.framework`; uses `App/Resources/Info.plist` verbatim; `App/Resources/InfoPlist.xcstrings` is excluded from the build |
+| `WallpaperMachine` | application | `App/`, `Shared/`, `Resources/StarterWallpaper`, `Resources/ReleaseBanners` and `CHANGELOG.md` as resources, the MediaRemote adapter's Perl script and license | Embeds the extension and `MediaRemoteAdapter.framework`; uses `App/Resources/Info.plist` verbatim; `App/Resources/InfoPlist.xcstrings` is excluded from the build |
 | `MediaRemoteAdapter` | framework | `upstream/mediaremote-adapter/src` and `include` | Embedded in the app but not linked; the app runs its Perl entry point only while a wallpaper has media integration on |
 | `WallpaperMachineExtension` | extensionkit-extension | `Extension/`, `Shared/`, the starter preview image | Sandboxed, `APPLICATION_EXTENSION_API_ONLY`, Objective-C bridging header |
 | `WallpaperMachineTests` | bundle.unit-test | `Tests/Unit/` | Hosted in the app binary (`TEST_HOST`/`BUNDLE_LOADER`) |

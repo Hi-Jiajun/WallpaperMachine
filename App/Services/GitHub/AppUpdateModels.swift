@@ -141,6 +141,8 @@ struct ReleaseNotes: Equatable, Sendable {
             }
             // The compare link is the page's navigation, not something to read here.
             if trimmed.hasPrefix("**Full changelog**") { continue }
+            // A banner picture is shown, not read: its description is not a change.
+            if trimmed.hasPrefix("![") { continue }
             let isBullet = trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ")
             // A paragraph after a list closes it; it is a remark, not another entry.
             if !items.isEmpty, isBullet != bullets { flush(into: "") }

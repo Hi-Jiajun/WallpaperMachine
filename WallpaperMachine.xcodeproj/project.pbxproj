@@ -422,6 +422,7 @@
 		7160E7DFABE9241A5A21F001 /* ImageImportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49BC750DF18F6C33876E6B4C /* ImageImportTests.swift */; };
 		717CA75F9D43244FA5BF4853 /* PanelStoreRevisionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB437987D508E8BAA2043E2A /* PanelStoreRevisionsTests.swift */; };
 		718C6EA542E30C8C77B43606 /* InstalledTile.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5022897373F6017CF11DBD9 /* InstalledTile.swift */; };
+		718D63BA83FE7DEA20FC153C /* ReleaseBanners in Resources */ = {isa = PBXBuildFile; fileRef = 6DF9EE2A711A8DB805C71699 /* ReleaseBanners */; };
 		71AEB58718F60673BBD14735 /* SyntheticVideoFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC75867843E7AD620D17B481 /* SyntheticVideoFixture.swift */; };
 		71ED0F11477B73961796BA05 /* WallpaperAutomationPlannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92B929DC79D1A9B892C876B7 /* WallpaperAutomationPlannerTests.swift */; };
 		723D9B43323909E42FCBA267 /* DiscoverLinkButtonStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0FB0159378FF2B2407143CF /* DiscoverLinkButtonStyle.swift */; };
@@ -1386,6 +1387,7 @@
 		6D68D423C0DD775093AFA1B4 /* PanelBanners.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelBanners.swift; sourceTree = "<group>"; };
 		6DB327194441C18B9DEC9E74 /* MediaPanelTestCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaPanelTestCase.swift; sourceTree = "<group>"; };
 		6DF2208823BB88A3672258FC /* PropertyLabels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PropertyLabels.swift; sourceTree = "<group>"; };
+		6DF9EE2A711A8DB805C71699 /* ReleaseBanners */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ReleaseBanners; path = Resources/ReleaseBanners; sourceTree = SOURCE_ROOT; };
 		6E71B8530A8F0F68D7437E9C /* BridgeStoreDisplayLayouts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeStoreDisplayLayouts.swift; sourceTree = "<group>"; };
 		6EC35F53187B81FCB3BAFAAE /* ManualSleeper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualSleeper.swift; sourceTree = "<group>"; };
 		6F241FF6678F688FA949E4F0 /* PanelActionCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelActionCoordinatorTests.swift; sourceTree = "<group>"; };
@@ -2287,6 +2289,7 @@
 			isa = PBXGroup;
 			children = (
 				9B1CD89BC6FF6F548C7FD574 /* CHANGELOG.md */,
+				6DF9EE2A711A8DB805C71699 /* ReleaseBanners */,
 				DD1EDE652E69E06265483667 /* StarterWallpaper */,
 				5CFFD1ECBB78453BA7C8107D /* App */,
 				7969FA0C458133026D2B2B8C /* bin */,
@@ -3649,6 +3652,7 @@
 				FE96212C69824E07925EE2A8 /* CHANGELOG.md in Resources */,
 				798F7C72D4B903EC62721C12 /* LICENSE in Resources */,
 				0B102301E4157C85811DEE63 /* Localizable.xcstrings in Resources */,
+				718D63BA83FE7DEA20FC153C /* ReleaseBanners in Resources */,
 				C5F61FDF83684A1A3F4B75A4 /* StarterWallpaper in Resources */,
 				E7CC4AECE4171218D2EDF15A /* mediaremote-adapter.pl in Resources */,
 			);

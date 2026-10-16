@@ -17,6 +17,9 @@ is cut. The app bundles both languages. `--release-body` publishes only the Engl
 part and the compare link on GitHub, then adds the install footer. A hand-pushed
 tag with no section is written once, into the working tree, before the build.
 A recorded bilingual section is reused without another model request.
+A version with a banner picture in Resources/ReleaseBanners/ (named `x.y.z.png` or
+`x.y.z.jpg`) gets it as an image line above both languages; the app and the
+release page show it over the notes.
 A `##` heading that is not `x.y.z` — `## Unreleased`, a prerelease token, or a
 heading inside the notes — stops publishing. The app rejects that whole file, so
 the heading is not kept and not dropped.
@@ -51,6 +54,10 @@ from lib.paths import PROJECT_YML, ROOT
 
 MARK = markers()
 CHANGELOG = ROOT / "CHANGELOG.md"
+# A version's banner picture, bundled with the app and committed before the version is cut.
+BANNERS = Path("Resources") / "ReleaseBanners"
+BANNER_TYPES = (".png", ".jpg")
+BANNER = re.compile(r"^!\[(?P<alt>[^\]\n]*)\]\((?P<path>Resources/ReleaseBanners/(?P<name>[^/)\s]+))\)[ \t]*$", re.MULTILINE)
 APPLICATION = "WallpaperMachine"
 
 # `type(scope)!: subject`, the convention docs/conventions.md describes.
@@ -137,6 +144,7 @@ SQUASHED = re.compile(r"^\* (?=[a-z]+(?:\([^)]*\))?!?:)", re.MULTILINE)
 TRAILER = re.compile(r"^(?:(?:co-authored-by|signed-off-by|reviewed-by|claude-session):.*|-{3,}[ \t]*)$",
                      re.IGNORECASE | re.MULTILINE)
 MODEL_SECTIONS = (
+    ("highlights", "Highlights"),
     ("breaking", "Breaking changes"),
     ("new", "New"),
     ("improved", "Improved"),
@@ -147,6 +155,7 @@ MODEL_SECTIONS = (
 LANGUAGE_HEADINGS = {
     "english": {key: heading for key, heading in MODEL_SECTIONS},
     "chinese": {
+        "highlights": "亮点",
         "breaking": "不兼容变更",
         "new": "新增",
         "improved": "改进",
@@ -170,37 +179,50 @@ once in English, once in Simplified Chinese. The two say the same thing.
 Rules:
 - Write for people who use the app, not for its developers: what they can do now, \
 what works better, what no longer goes wrong. No code identifiers, file or class \
-names, commit hashes, test names or internal jargon.
+names, commit hashes, test names or internal jargon. Lead with the benefit and name \
+the thing the user sees (a wallpaper, a window, a setting), in the active voice: \
+"Text layers now show their outline and shadow", not "Implemented text outline \
+rendering". Do not open several bullets in a row with the same words.
 - Report only what the commits support. Never invent features, numbers, platforms or \
 dates. Leave a change out when you cannot tell whether users would notice it.
 - Leave out purely internal work: documentation, tests, CI, refactoring, build \
 tooling and verification records.
 - One bullet per user-visible change, in both languages. Merge commits that describe \
-the same change. Order each list by how much it matters to users. The chinese string \
+the same change. When many commits fix or extend one area (for example text layers, \
+particles or lighting in scenes), write one bullet for the area that names what users \
+will see, not one per commit; keep each section to about 15 bullets, so a long \
+release reads in a few minutes. Order each list by how much it matters to users. The chinese string \
 of a bullet is the english string's equivalent, not a summary of a different change \
 and not a copy of the English.
 - Each string is one plain sentence, at most 30 words, with no trailing period and no \
 Markdown, links or emoji. chinese is Simplified Chinese, not Traditional, not a \
-romanization, and not English with a character added. Keep product names \
-(WallpaperMachine, Steam, Workshop, macOS) as they are.
+romanization, and not English with a character added; write it the way a Chinese \
+Mac app would, not word for word. Keep product names (WallpaperMachine, Wallpaper \
+Engine, Steam, Workshop, pixiv, macOS) as they are.
 - Name places in the app the way the panel does: Settings 设置, General 通用, \
 Appearance 外观, Performance 性能, Playback 播放, Library & Steam 壁纸库与 Steam, \
 Library 壁纸库, Steam Workshop Steam 创意工坊, Collections 合集, Now Playing 正在播放, \
-About 关于, Lock screen 锁定屏幕.
+Downloads 下载, About 关于, Lock screen 锁定屏幕.
+- highlights: only when the user turn says this is a feature release, the three to \
+five changes that define it, most important first, each one sentence a user would \
+repeat to a friend. A highlight may sum up several bullets of the other sections, \
+which still list those changes. Otherwise an empty list.
 - breaking: changes that make users act or take away behaviour they relied on. new: \
 things users can do that they could not before. improved: faster, smoother or \
 clearer behaviour, performance included. fixed: problems that no longer happen, \
 described by what the user saw. A section is the same length in both languages.
-- summary: one or two sentences on what the release means for users, in both \
-languages, or empty strings in both when the lists say it all. Never fill only one.
+- summary: one or two sentences on what the release means for users, its theme \
+first, in both languages, or empty strings in both when the lists say it all. Never \
+fill only one. Do not list the changes again.
 - Claims: never claim energy, battery or power savings, even when a commit measured \
 less work. Never call anything fully supported or fully compatible. Keep \
-"optional", "experimental" or "off by default" on opt-in features such as the \
-Native Metal renderer, native video playback, content pacing and on-demand scene \
-idle, and on the animated lock screen. The Chinese keeps the same qualifier.
+"optional", "experimental" or "off by default" on opt-in features such as native \
+video playback, content pacing and on-demand scene idle, and on the animated lock \
+screen. Native Metal is the default scene renderer, not an option. The Chinese keeps \
+the same qualifier.
 
 Reply with only a JSON object, no prose and no code fence, with exactly these keys:
-{"summary": {"english": string, "chinese": string}, "breaking": [{"english": string, "chinese": string}], "new": [{"english": string, "chinese": string}], "improved": [{"english": string, "chinese": string}], "fixed": [{"english": string, "chinese": string}]}
+{"summary": {"english": string, "chinese": string}, "highlights": [{"english": string, "chinese": string}], "breaking": [{"english": string, "chinese": string}], "new": [{"english": string, "chinese": string}], "improved": [{"english": string, "chinese": string}], "fixed": [{"english": string, "chinese": string}]}
 Use an empty list for a section with nothing in it. Do not write headings; the \
 script adds them."""
 
@@ -356,6 +378,28 @@ def compare_link(previous, tag, repo):
     return f"**Full changelog**: https://github.com/{repo}/commits/{tag}"
 
 
+def banner_path(version, root=ROOT):
+    """The version's banner picture relative to `root`, as a POSIX path, or None."""
+    for suffix in BANNER_TYPES:
+        candidate = BANNERS / f"{display_version(version)}{suffix}"
+        if (Path(root) / candidate).is_file():
+            return candidate.as_posix()
+    return None
+
+
+def banner_line(version, root=ROOT):
+    """The image line a section opens with when the version has a banner, or None."""
+    path = banner_path(version, root)
+    return f"![{APPLICATION} {display_version(version)}]({path})" if path else None
+
+
+def recorded_banner(notes):
+    """`(alt, path)` of the banner line above the language blocks, or None."""
+    blocks = re.search(r"^### English[ \t]*$", notes, re.MULTILINE)
+    match = BANNER.search(notes, 0, blocks.start() if blocks else len(notes))
+    return (match.group("alt"), match.group("path")) if match else None
+
+
 def nothing_to_say(previous):
     span = f"since `{previous}`" if previous else "in this history"
     return f"No user-visible changes {span}."
@@ -406,10 +450,19 @@ def install_footer(version, target=None, built_from=None):
     return "\n".join(lines)
 
 
-def release_body(notes, version, built_from=None):
-    """What GitHub shows: English notes, the compare link, then the install footer."""
+def release_body(notes, version, built_from=None, repo=None):
+    """What GitHub shows: the banner, English notes, the compare link, then the install footer.
+
+    The banner is read from the version's tag, because the page is not served from the
+    repository; without a repository there is no address for it, and it is left out.
+    """
     english, chinese = language_blocks(require_bilingual(notes))
-    parts = [f"### English\n\n{english.strip()}"]
+    parts = []
+    banner = recorded_banner(notes)
+    if banner and repo:
+        alt, path = banner
+        parts.append(f"![{alt}](https://raw.githubusercontent.com/{repo}/v{display_version(version)}/{path})")
+    parts.append(f"### English\n\n{english.strip()}")
     parts.extend(line for line in chinese.splitlines() if line.startswith("**Full changelog**:"))
     parts.append(install_footer(version, deployment_target(), built_from))
     return "\n\n".join(parts) + "\n"
@@ -471,6 +524,11 @@ def body_parts(body):
     return tidy(text), parts
 
 
+def is_feature_release(version):
+    """`x.y.0`: a minor or major version, the ones that get highlights."""
+    return version_key(version)[2] == 0
+
+
 def model_prompt(version, previous, entries):
     """The user turn: the release, then its commits newest first.
 
@@ -481,7 +539,12 @@ def model_prompt(version, previous, entries):
     """
     since = f"since {previous}" if previous else "from the start of the history"
     noun = "commit" if len(entries) == 1 else "commits"
-    lines = [f"WallpaperMachine {display_version(version)}: {len(entries)} {noun} {since}, newest first.", ""]
+    lines = [f"WallpaperMachine {display_version(version)}: {len(entries)} {noun} {since}, newest first."]
+    if is_feature_release(version):
+        lines.append("This is a feature release: write its highlights.")
+    else:
+        lines.append("This is a patch release: leave highlights empty.")
+    lines.append("")
     budget = BODIES_BUDGET
 
     def add(text, indent):
@@ -656,12 +719,14 @@ def render_language(code, heading, notes, previous):
     return f"### {heading}\n\n" + "\n\n".join(parts)
 
 
-def render_model_notes(version, notes, previous=None, repo=None):
-    """Bilingual notes: `### English`, then `### 简体中文`, categories at `####`.
+def render_model_notes(version, notes, previous=None, repo=None, banner=None):
+    """Bilingual notes: the banner line, `### English`, then `### 简体中文`, categories at `####`.
 
-    The compare link follows both blocks, outside either language's prose.
+    The banner belongs to both languages, so it stands above them. The compare link
+    follows both blocks, outside either language's prose.
     """
-    parts = [render_language(code, heading, notes, previous) for code, heading in LANGUAGE_BLOCKS]
+    parts = [banner] if banner else []
+    parts += [render_language(code, heading, notes, previous) for code, heading in LANGUAGE_BLOCKS]
     link = compare_link(previous, f"v{display_version(version)}", repo)
     if link:
         parts.append(link)
@@ -751,6 +816,10 @@ def require_bundled_history(text):
             raise NotesError(f"Changelog repeats {'.'.join(str(part) for part in version)}.")
         seen.add(version)
         require_bilingual(body)
+        banner = recorded_banner(body)
+        number = ".".join(str(part) for part in version)
+        if banner and banner[1] not in {(BANNERS / f"{number}{suffix}").as_posix() for suffix in BANNER_TYPES}:
+            raise NotesError(f"The banner of {number} must be {BANNERS.as_posix()}/{number}.png or .jpg, not {banner[1]}.")
     return text
 
 
@@ -762,8 +831,9 @@ def write_with_model(version, previous, revision, repo=None, cwd=ROOT, transport
         change = classify(sha, subject, body)
         if change is not None:
             entries.append((sha, " ".join(subject.split()), body, change.group == "internal"))
+    banner = banner_line(version, cwd)
     if not entries:
-        return render_model_notes(version, empty_notes(), previous, repo)
+        return render_model_notes(version, empty_notes(), previous, repo, banner)
     url, model, key = model_settings(environ)
     payload = {
         "model": model,
@@ -773,7 +843,7 @@ def write_with_model(version, previous, revision, repo=None, cwd=ROOT, transport
         "messages": [{"role": "user", "content": model_prompt(version, previous, entries)}],
     }
     text = streamed_text((transport or stream)(url, key, payload))
-    return render_model_notes(version, parse_notes(text), previous, repo)
+    return render_model_notes(version, parse_notes(text), previous, repo, banner)
 
 
 def notes_for(version, previous, revision, repo=None, ai=False, cwd=ROOT, transport=None, environ=None):
@@ -947,7 +1017,7 @@ def main(argv=None):
             CHANGELOG.write_text(updated, encoding="utf-8")
             print(f"{MARK.ok} Wrote bilingual notes for {version} into {CHANGELOG.relative_to(ROOT)} before publish", file=sys.stderr)
         recorded = notes
-        body = release_body(notes, version, args.built_from)
+        body = release_body(notes, version, args.built_from, repo)
     else:
         if args.changelog:
             require_bundled_history(existing)

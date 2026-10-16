@@ -103,6 +103,40 @@ final class WhatsNewTests: XCTestCase {
         }
     }
 
+    func testOnlyTheAnnouncedVersionShowsItsBanner() throws {
+        let banner = "![WallpaperMachine 1.2.0](Resources/ReleaseBanners/1.2.0.jpg)\n"
+        let markdown = ["1.0.0", "1.1.0", "1.2.0"].map { version in
+            entry(version).replacingOccurrences(of: "### English", with: banner.replacingOccurrences(
+                of: "1.2.0", with: version) + "### English")
+        }.joined()
+        let history = try AppReleaseHistory(markdown: markdown)
+        XCTAssertEqual(history.entries.first?.banner,
+                       AppReleaseHistory.Banner(fileName: "1.2.0.jpg", description: "WallpaperMachine 1.2.0"))
+        XCTAssertEqual(history.entries.first?.english.sections.first?.items, ["Added a library filter."],
+                       "The banner line is not release prose")
+        _ = store("1.0.0").announcement(history: history, existingUser: false)
+        let announcement = try XCTUnwrap(store("1.2.0").announcement(history: history, existingUser: true))
+        var requested: [String] = []
+        let controller = WhatsNewViewController(
+            announcement: announcement, preferences: store("1.2.0"), initialLanguage: .english,
+            bannerImage: { banner in
+                requested.append(banner.fileName)
+                return NSImage(size: NSSize(width: 30, height: 10))
+            }, close: {})
+        controller.view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(requested, ["1.2.0.jpg"], "Skipped versions keep their banners to themselves")
+        let bannerView = try XCTUnwrap(controller.bannerView)
+        XCTAssertEqual(bannerView.accessibilityLabel(), "WallpaperMachine 1.2.0")
+        XCTAssertEqual(bannerView.frame.width / bannerView.frame.height, 3, accuracy: 0.01)
+        XCTAssertFalse(controller.notesView.string.contains("!["))
+
+        let missing = WhatsNewViewController(
+            announcement: announcement, preferences: store("1.2.0"), initialLanguage: .english,
+            bannerImage: { _ in nil }, close: {})
+        _ = missing.view
+        XCTAssertNil(missing.bannerView, "A banner the bundle lacks leaves the window as it was")
+    }
+
     func testDowngradeAndReturnDoNotRepeatAnAnnouncement() throws {
         let history = try history()
         _ = store("1.2.0").announcement(history: history, existingUser: false)

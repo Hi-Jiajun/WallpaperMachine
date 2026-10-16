@@ -6,6 +6,15 @@ struct AppReleaseHistory {
         let version: SemanticVersion
         let english: ReleaseNotes
         let chinese: ReleaseNotes
+        /// The picture above both translations, if the release has one.
+        var banner: Banner? = nil
+    }
+
+    /// A file in the bundle's `ReleaseBanners` folder, and what it shows.
+    struct Banner: Equatable, Sendable {
+        static let directory = "ReleaseBanners"
+        let fileName: String
+        let description: String
     }
 
     enum InvalidHistory: Error {
@@ -27,6 +36,7 @@ struct AppReleaseHistory {
         var english = ""
         var chinese = ""
         var language = ""
+        var banner: Banner?
         func finish() throws {
             guard let version else { return }
             guard !entries.contains(where: { $0.version == version }) else {
@@ -36,7 +46,7 @@ struct AppReleaseHistory {
                   let zh = ReleaseNotes(version: version.display, body: chinese) else {
                 throw InvalidHistory.missingTranslation
             }
-            entries.append(Entry(version: version, english: en, chinese: zh))
+            entries.append(Entry(version: version, english: en, chinese: zh, banner: banner))
         }
         for line in markdown.components(separatedBy: .newlines) {
             if line.hasPrefix("## ") {
@@ -51,10 +61,14 @@ struct AppReleaseHistory {
                 english = ""
                 chinese = ""
                 language = ""
+                banner = nil
             } else if line == "### English" {
                 language = "en"
             } else if line == "### 简体中文" {
                 language = "zh-Hans"
+            } else if version != nil, language.isEmpty {
+                // Above both languages only the banner line is read.
+                banner = Self.banner(line) ?? banner
             } else if version != nil {
                 if language == "en" { english += line + "\n" }
                 if language == "zh-Hans" { chinese += line + "\n" }
@@ -62,5 +76,17 @@ struct AppReleaseHistory {
         }
         try finish()
         self.entries = entries.sorted { $0.version > $1.version }
+    }
+
+    /// `![description](Resources/ReleaseBanners/name)`, the line `scripts/release_notes.py` writes.
+    private static func banner(_ line: String) -> Banner? {
+        let prefix = "](Resources/\(Banner.directory)/"
+        let text = line.trimmingCharacters(in: .whitespaces)
+        guard text.hasPrefix("!["), text.hasSuffix(")"), let middle = text.range(of: prefix) else { return nil }
+        let description = text[text.index(text.startIndex, offsetBy: 2)..<middle.lowerBound]
+        let fileName = text[middle.upperBound..<text.index(before: text.endIndex)]
+        guard !description.contains("]"), !fileName.isEmpty,
+              !fileName.contains(where: { $0 == "/" || $0 == ")" || $0.isWhitespace }) else { return nil }
+        return Banner(fileName: String(fileName), description: String(description))
     }
 }
