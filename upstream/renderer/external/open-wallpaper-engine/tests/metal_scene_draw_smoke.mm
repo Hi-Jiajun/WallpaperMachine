@@ -7286,7 +7286,11 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawTheSamePictureOnBothRenderers)
     // `WE_TEST_METAL_WARMUP_TICKS`, `WE_TEST_RANDOM_SEED` and
     // `WE_TEST_PROPERTIES` mean what they mean for the local-project run, and
     // `WE_TEST_COMPARE_SURFACE` is the layer's `<width>x<height>` (960x540).
+    // `WE_TEST_COMPARE_NATIVE_ONLY` draws the native picture alone, for a
+    // comparison with a reference from outside this harness (Wallpaper Engine's
+    // own frames): nothing is compared and only `-native.ppm` is written.
     const char* listed = std::getenv("WE_TEST_COMPARE_PROJECTS");
+    const bool  native_only = std::getenv("WE_TEST_COMPARE_NATIVE_ONLY") != nullptr;
     const auto  assets = LocalSceneAssetsRoot();
     if (listed == nullptr || *listed == '\0' || assets.empty() ||
         ! std::filesystem::is_directory(assets)) {
@@ -7325,6 +7329,7 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawTheSamePictureOnBothRenderers)
         std::map<bool, RendererPicture> pictures;
         std::string             scene_id;
         for (const bool native : { false, true }) {
+            if (native_only && ! native) continue;
             SetSceneRendererPreference(native ? SceneRendererPreference::NativeMetalPreferred
                                               : SceneRendererPreference::Compatibility);
             if (const char* seed = std::getenv("WE_TEST_RANDOM_SEED")) {
@@ -7387,25 +7392,28 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawTheSamePictureOnBothRenderers)
             }
             pictures[native] = std::move(picture);
         }
-        if (pictures.size() != 2) continue;
-        const auto& a = pictures[false];
-        const auto& b = pictures[true];
-        ASSERT_EQ(a.width, b.width);
-        ASSERT_EQ(a.height, b.height);
-        double      total = 0.0;
-        std::size_t off   = 0;
-        for (std::size_t i = 0; i < a.rgb.size(); i += 3) {
-            int worst = 0;
-            for (std::size_t c = 0; c < 3; ++c) {
-                const int d = std::abs(int(a.rgb[i + c]) - int(b.rgb[i + c]));
-                total += d;
-                worst = std::max(worst, d);
+        if (pictures.size() != (native_only ? 1u : 2u)) continue;
+        if (! native_only) {
+            const auto& a = pictures[false];
+            const auto& b = pictures[true];
+            ASSERT_EQ(a.width, b.width);
+            ASSERT_EQ(a.height, b.height);
+            double      total = 0.0;
+            std::size_t off   = 0;
+            for (std::size_t i = 0; i < a.rgb.size(); i += 3) {
+                int worst = 0;
+                for (std::size_t c = 0; c < 3; ++c) {
+                    const int d = std::abs(int(a.rgb[i + c]) - int(b.rgb[i + c]));
+                    total += d;
+                    worst = std::max(worst, d);
+                }
+                if (worst > 48) ++off;
             }
-            if (worst > 48) ++off;
+            std::printf(
+                "[ COMPARE  ] %s: mean abs difference %.3f, %.4f of pixels off by more than 48\n",
+                scene_id.c_str(), total / double(a.rgb.size()),
+                double(off) / double(a.rgb.size() / 3));
         }
-        std::printf("[ COMPARE  ] %s: mean abs difference %.3f, %.4f of pixels off by more than 48\n",
-                    scene_id.c_str(), total / double(a.rgb.size()),
-                    double(off) / double(a.rgb.size() / 3));
         if (output != nullptr && *output != '\0') {
             std::filesystem::create_directories(output);
             for (const auto& [native, picture] : pictures) {
