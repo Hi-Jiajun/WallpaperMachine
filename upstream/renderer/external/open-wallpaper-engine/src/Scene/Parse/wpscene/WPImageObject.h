@@ -92,6 +92,10 @@ public:
     // How the layer's texture (`_rt_imageLayerComposite_<id>`) is addressed
     // outside 0..1. Unspecified keeps the historical clamp.
     bool                       clampuvs { true };
+    // Point-samples the layer's own render targets (the ping-pong pair its
+    // effects run through and the composite other layers read), as a texture
+    // whose header asks for it is sampled. Off by default.
+    bool                       nointerpolation { false };
     bool                       visible { true };
     bool                       autosize { false };
     bool                       dynamic_origin { false };

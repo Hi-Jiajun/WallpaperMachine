@@ -172,6 +172,9 @@ void LoadHeader(fs::IBinaryStream& file, ImageHeader& header) {
             flags[WPTexFlagEnum::clampUVs] ? TextureWrap::CLAMP_TO_EDGE : TextureWrap::REPEAT;
         header.sample.minFilter = header.sample.magFilter =
             flags[WPTexFlagEnum::noInterpolation] ? TextureFilter::NEAREST : TextureFilter::LINEAR;
+        // The reference builds the sampler of a file texture from these flags: with
+        // `noInterpolation` it is point sampling for min, mag and the mip level.
+        header.sample.mipFilter = header.sample.magFilter;
         header.extraHeader["compo1"].val = flags[WPTexFlagEnum::compo1];
         header.extraHeader["compo2"].val = flags[WPTexFlagEnum::compo2];
         header.extraHeader["compo3"].val = flags[WPTexFlagEnum::compo3];

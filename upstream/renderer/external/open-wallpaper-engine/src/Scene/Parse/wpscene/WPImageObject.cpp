@@ -237,6 +237,7 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
 	GET_JSON_NAME_VALUE_NOWARN(json, "colorBlendMode", colorBlendMode);
     GET_JSON_NAME_VALUE_NOWARN(json, "copybackground", copybackground);
     GET_JSON_NAME_VALUE_NOWARN(json, "clampuvs", clampuvs);
+    GET_JSON_NAME_VALUE_NOWARN(json, "nointerpolation", nointerpolation);
     read_vec3_setting(json, "origin", &origin, &origin_setting, &dynamic_origin);
     read_vec3_setting(json, "scale", &scale, &scale_setting, &dynamic_scale);
     read_vec3_setting(json, "angles", &angles, &angles_setting, &dynamic_angles);

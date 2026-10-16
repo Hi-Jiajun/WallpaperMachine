@@ -2008,14 +2008,15 @@ bool MetalRender::Impl::encodeComposition(id<MTLCommandBuffer> command,
 
 id<MTLSamplerState> MetalRender::Impl::samplerFor(const TextureSample& sample)
 {
-    char key_bytes[5] = {
+    char key_bytes[6] = {
         static_cast<char>(sample.wrapS),
         static_cast<char>(sample.wrapT),
         static_cast<char>(sample.magFilter),
         static_cast<char>(sample.minFilter),
+        static_cast<char>(sample.mipFilter),
         '\0',
     };
-    const std::string key(key_bytes, 4);
+    const std::string key(key_bytes, 5);
     if (auto found = samplers.find(key); found != samplers.end()) return found->second;
 
     MTLSamplerDescriptor* descriptor = [MTLSamplerDescriptor new];
@@ -2023,7 +2024,11 @@ id<MTLSamplerState> MetalRender::Impl::samplerFor(const TextureSample& sample)
     descriptor.tAddressMode = ToMetalAddressMode(sample.wrapT);
     descriptor.magFilter    = ToMetalFilter(sample.magFilter);
     descriptor.minFilter    = ToMetalFilter(sample.minFilter);
-    descriptor.mipFilter    = MTLSamplerMipFilterLinear;
+    // Only a texture whose file asks for point sampling picks its mip level by
+    // point; see `TextureSample::mipFilter`.
+    descriptor.mipFilter    = sample.mipFilter == TextureFilter::NEAREST
+                                  ? MTLSamplerMipFilterNearest
+                                  : MTLSamplerMipFilterLinear;
     id<MTLSamplerState> state = [device newSamplerStateWithDescriptor:descriptor];
     if (state == nil) return nil;
     samplers.emplace(key, state);

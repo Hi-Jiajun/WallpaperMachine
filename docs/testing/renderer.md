@@ -735,6 +735,14 @@ into private textures; the three that draw skip visibly without a Metal device.
 - The `perspective` flag of an image layer is read by no parser (`WPTextObject`
   and `WPModelObject` read theirs); image layers always draw through the
   orthographic camera.
+- **File textures are sampled trilinearly.** Wallpaper Engine's sampler for a file
+  texture is anisotropic (8x), which only shows on a surface seen at an angle (the
+  local scene with 3D models), and it samples a shadow atlas through a comparison
+  sampler for the shadow pass that does not exist here; neither backend does either.
+  The anisotropy would cost fetches on every tilted surface, so it wants a
+  measurement before it lands. The exception is a texture whose header asks for
+  point sampling: both backends sample it with the mip level picked by point, as the
+  reference's sampler for that flag does.
 - **A lone `pixels_equal=false` on a large scene is not by itself a regression.**
   On an unmodified build a 4K scene's `frame-2` has been seen once to differ from
   its isolated twin by a few levels everywhere (no clock, label or single layer),

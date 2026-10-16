@@ -588,6 +588,33 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   the source layer says `"clampuvs": false` and clamps when it is true or absent;
   otherwise a model whose UVs run far outside 0..1 smears the composite's edge
   texels into solid bands.
+- **Layer targets: point sampling and wrap** — `LayerTextureReference.LayerTargetsFollowNointerpolationClampuvsAndTheTextureHeader`
+  and `.ACompositeFollowsItsLayersTextureHeaderWhateverIsParsedFirst` in
+  `layer_texture_reference_test` and
+  `MetalSceneDraw.AnImageLayersTargetsArePointSampledWhenItAsksOnBothRenderers`.
+  The ping-pong pair an image layer's effects run through, and the composite
+  another layer reads, are point-sampled when the layer sets `nointerpolation` or
+  its primary texture's header does, wrapped when `clampuvs` is off, clamped and
+  linear otherwise; per-effect buffers stay clamped and linear. The header is read
+  from the texture file (`LayerRenderTargetFilter`), because the composite of a layer
+  another layer reads is registered before the layer's own material is loaded: the
+  second test makes the point-sampled texture's only user the layer in question, in
+  three layer orders, with and without an effect chain (whose ping-pong pair has to
+  agree with the composite), and a texture with no flag or one that cannot be read
+  stays linear. The Metal test shows a 16 by 12 target 16 times larger on both
+  renderers: a smooth gradient by default and flat squares with `nointerpolation`.
+- **Mip level of point-sampled file textures** — `MetalSceneDraw.ATexturePointSampledByItsHeaderPicksItsMipLevelByPointOnBothRenderers`.
+  The reference builds the sampler of a file texture from a flags word that is the
+  texture's own (its two low bits are the `.tex` header's `noInterpolation` and
+  `clampUVs`): with `noInterpolation` the min, mag and mip filters are all point. `TextureSample::mipFilter` carries that, set by the `.tex`
+  parser from the flag and read by the Metal sampler and the Vulkan sampler (and the
+  Vulkan sampler cache's hash); every other sample, render targets and the
+  default-constructed `TextureSample {}` fallbacks among them, keeps the linear mip
+  filter. The test draws a seven-level chain, white then black, at 1.68 texels to the
+  pixel on both renderers: a header with the flag gives the black second level, one
+  without it the blend of the two. A render target has a single level, so its filter
+  has no mip to choose. No local scene shows the difference: its point-sampled
+  textures have one mip level or are magnified.
 - **Layers a wallpaper's properties hide** — `HiddenLayers.ALayerItsPropertiesHideStaysOutOfTheGraphUntilSomethingShowsIt`
   in `layer_texture_reference_test` (CPU, in the gate) and
   `MetalSceneDraw.ALayerItsPropertiesHideHoldsNoImagesUntilAScriptShowsIt` in

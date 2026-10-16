@@ -6,6 +6,7 @@
 #include "Fs/Fs.h"
 #include "Fs/MemBinaryStream.h"
 #include "Fs/VFS.h"
+#include "Image.hpp"
 #include "Runtime/SceneRuntimeContext.hpp"
 #include "Scene/Scene.h"
 #include "Scene/SceneCamera.h"
@@ -391,6 +392,190 @@ TEST(LayerTextureReference, CompositeAddressingFollowsTheSourceLayersClampUvs) {
     EXPECT_EQ(wrap_for(",\"clampuvs\":false"), repeat);
     EXPECT_EQ(wrap_for(",\"clampuvs\":true"), clamp);
     EXPECT_EQ(wrap_for(""), clamp);
+}
+
+// A texture whose header is all the parser reads: one pixel, `flags` as the
+// header carries them (bit 0 asks for point sampling, bit 1 for clamping).
+std::string TextureHeaderBytes(uint32_t flags) {
+    std::string bytes;
+    const auto  append = [&bytes](const void* data, std::size_t size) {
+        bytes.append(static_cast<const char*>(data), size);
+    };
+    const auto stamp = [&](const char* text) { append(text, 9); };
+    const auto i32   = [&](int32_t value) { append(&value, sizeof(value)); };
+    stamp("TEXV0005");
+    stamp("TEXI0001");
+    i32(9); // R8
+    append(&flags, sizeof(flags));
+    for (int index = 0; index < 4; ++index) i32(1);
+    i32(0);
+    stamp("TEXB0003");
+    i32(1);
+    i32(static_cast<int32_t>(ImageType::UNKNOWN));
+    i32(0);
+    return bytes;
+}
+
+// The render targets of an image layer are sampled by the passes of its effect
+// chain and by whoever reads its composite. Wallpaper Engine point-samples them
+// when the layer asks (`nointerpolation`) or when its texture's header does, and
+// wraps them instead of clamping when `clampuvs` is off.
+TEST(LayerTextureReference, LayerTargetsFollowNointerpolationClampuvsAndTheTextureHeader) {
+    const auto material = [](std::string_view texture) {
+        return std::string(R"({"passes":[{"blending":"translucent","cullmode":"nocull",)") +
+               R"("depthtest":"disabled","depthwrite":"disabled","shader":"genericimage",)" +
+               R"("textures":[")" + std::string(texture) + R"("]}]})";
+    };
+    auto files = CopyEffectFiles();
+    files["/img_linear.json"]   = R"({"width":64,"height":32,"material":"mat_linear.json"})";
+    files["/mat_linear.json"]   = material("linear");
+    files["/materials/linear.tex"] = TextureHeaderBytes(0);
+    files["/img_point.json"]    = R"({"width":64,"height":32,"material":"mat_point.json"})";
+    files["/mat_point.json"]    = material("point");
+    files["/materials/point.tex"] = TextureHeaderBytes(1);
+    files["/linked_mat.json"] =
+        R"({"passes":[{"shader":"genericimage","textures":["_rt_imageLayerComposite_14_a"]}]})";
+
+    fs::VFS vfs;
+    auto    parsed = ParseScene(vfs, R"([
+        {"id":10,"name":"plain","image":"img_linear.json",
+         "effects":[{"file":"effects/copy/effect.json","id":90,"visible":true}]},
+        {"id":11,"name":"nointerp","image":"img_linear.json","nointerpolation":true,
+         "effects":[{"file":"effects/copy/effect.json","id":91,"visible":true}]},
+        {"id":12,"name":"wrapped","image":"img_linear.json","clampuvs":false,
+         "effects":[{"file":"effects/copy/effect.json","id":92,"visible":true}]},
+        {"id":13,"name":"header","image":"img_point.json",
+         "effects":[{"file":"effects/copy/effect.json","id":93,"visible":true}]},
+        {"id":14,"name":"source","image":"img_point.json","visible":false},
+        {"id":15,"name":"reader","image":"linked.json","dependencies":[14]}
+      ])", files);
+    ASSERT_NE(parsed, nullptr);
+
+    const auto ping_pong = [&](std::string_view layer) {
+        SceneNode* node = nullptr;
+        for (auto& child : parsed->sceneGraph->GetChildren()) {
+            if (child->Name() == layer) node = child.get();
+        }
+        EXPECT_NE(node, nullptr) << layer;
+        if (node == nullptr) return TextureSample {};
+        const auto* target =
+            parsed->FindRenderTarget(std::string(WE_EFFECT_PPONG_PREFIX_A.data()) + node->Camera());
+        EXPECT_NE(target, nullptr) << layer;
+        const auto* other =
+            parsed->FindRenderTarget(std::string(WE_EFFECT_PPONG_PREFIX_B.data()) + node->Camera());
+        EXPECT_NE(other, nullptr) << layer;
+        if (target == nullptr || other == nullptr) return TextureSample {};
+        EXPECT_EQ(other->sample.wrapS, target->sample.wrapS) << layer;
+        EXPECT_EQ(other->sample.magFilter, target->sample.magFilter) << layer;
+        return target->sample;
+    };
+    const auto expect_sample = [](const TextureSample& sample, TextureWrap wrap,
+                                  TextureFilter filter, std::string_view what) {
+        EXPECT_EQ(sample.wrapS, wrap) << what;
+        EXPECT_EQ(sample.wrapT, wrap) << what;
+        EXPECT_EQ(sample.magFilter, filter) << what;
+        EXPECT_EQ(sample.minFilter, filter) << what;
+    };
+    expect_sample(ping_pong("plain"), TextureWrap::CLAMP_TO_EDGE, TextureFilter::LINEAR, "plain");
+    expect_sample(ping_pong("nointerp"), TextureWrap::CLAMP_TO_EDGE, TextureFilter::NEAREST,
+                  "nointerpolation");
+    expect_sample(ping_pong("wrapped"), TextureWrap::REPEAT, TextureFilter::LINEAR, "clampuvs off");
+    expect_sample(ping_pong("header"), TextureWrap::CLAMP_TO_EDGE, TextureFilter::NEAREST,
+                  "point-sampled texture header");
+
+    // The composite another layer reads takes the layer's filter as well.
+    const auto* composite = parsed->FindRenderTarget(LayerCompositeTargetKey(14));
+    ASSERT_NE(composite, nullptr);
+    expect_sample(composite->sample, TextureWrap::CLAMP_TO_EDGE, TextureFilter::NEAREST,
+                  "composite of a point-sampled layer");
+}
+
+// A layer another layer reads is given its composite before its own material
+// is loaded, so the filter the composite takes from the layer's texture header
+// cannot come from what an earlier layer loaded: a point-sampled texture that no
+// other layer has used yet must still give a point-sampled composite, in the
+// same filter as the layer's own ping-pong pair, whichever layer is parsed first.
+TEST(LayerTextureReference, ACompositeFollowsItsLayersTextureHeaderWhateverIsParsedFirst) {
+    const auto material = [](std::string_view texture) {
+        return std::string(R"({"passes":[{"blending":"translucent","cullmode":"nocull",)") +
+               R"("depthtest":"disabled","depthwrite":"disabled","shader":"genericimage",)" +
+               R"("textures":[")" + std::string(texture) + R"("]}]})";
+    };
+    const auto files = [&] {
+        auto files = CopyEffectFiles();
+        files["/img_point.json"]       = R"({"width":64,"height":32,"material":"mat_point.json"})";
+        files["/mat_point.json"]       = material("only_user");
+        files["/materials/only_user.tex"] = TextureHeaderBytes(1);
+        files["/img_other.json"]       = R"({"width":64,"height":32,"material":"mat_other.json"})";
+        files["/mat_other.json"]       = material("only_user");
+        files["/img_plain.json"]       = R"({"width":64,"height":32,"material":"mat_plain.json"})";
+        files["/mat_plain.json"]       = material("plain_user");
+        files["/materials/plain_user.tex"] = TextureHeaderBytes(0);
+        files["/linked_mat.json"] =
+            R"({"passes":[{"shader":"genericimage","textures":["_rt_imageLayerComposite_1_a"]}]})";
+        return files;
+    };
+    const auto filter_of_composite = [&](std::string_view objects, int32_t id) {
+        fs::VFS vfs;
+        auto    parsed = ParseScene(vfs, objects, files());
+        EXPECT_NE(parsed, nullptr);
+        const auto* target =
+            parsed == nullptr ? nullptr : parsed->FindRenderTarget(LayerCompositeTargetKey(id));
+        EXPECT_NE(target, nullptr);
+        return target == nullptr ? TextureFilter::LINEAR : target->sample.magFilter;
+    };
+
+    // The only layer to use a point-sampled texture, read by a later layer.
+    EXPECT_EQ(filter_of_composite(R"([
+        {"id":1,"name":"source","image":"img_point.json","visible":false},
+        {"id":2,"name":"reader","image":"linked.json","dependencies":[1]}
+      ])", 1), TextureFilter::NEAREST);
+    // And when it is the first of two to use it, or comes after the reader's
+    // other inputs: the same.
+    EXPECT_EQ(filter_of_composite(R"([
+        {"id":1,"name":"source","image":"img_point.json","visible":false},
+        {"id":3,"name":"later","image":"img_other.json"},
+        {"id":2,"name":"reader","image":"linked.json","dependencies":[1]}
+      ])", 1), TextureFilter::NEAREST);
+    EXPECT_EQ(filter_of_composite(R"([
+        {"id":3,"name":"earlier","image":"img_other.json"},
+        {"id":1,"name":"source","image":"img_point.json","visible":false},
+        {"id":2,"name":"reader","image":"linked.json","dependencies":[1]}
+      ])", 1), TextureFilter::NEAREST);
+    // A texture without the flag is not point-sampled however it is reached.
+    EXPECT_EQ(filter_of_composite(R"([
+        {"id":1,"name":"source","image":"img_plain.json","visible":false},
+        {"id":2,"name":"reader","image":"linked.json","dependencies":[1]}
+      ])", 1), TextureFilter::LINEAR);
+    // A layer whose texture cannot be read keeps the linear default rather than
+    // the point sampling of a header that was never read.
+    EXPECT_EQ(filter_of_composite(R"([
+        {"id":1,"name":"source","image":"image.json","visible":false},
+        {"id":2,"name":"reader","image":"linked.json","dependencies":[1]}
+      ])", 1), TextureFilter::LINEAR);
+
+    // With an effect chain of its own, the composite and the ping-pong pair
+    // registered after the material agree.
+    fs::VFS vfs;
+    auto    parsed = ParseScene(vfs, R"([
+        {"id":1,"name":"source","image":"img_point.json",
+         "effects":[{"file":"effects/copy/effect.json","id":90,"visible":true}]},
+        {"id":2,"name":"reader","image":"linked.json","dependencies":[1]}
+      ])", files());
+    ASSERT_NE(parsed, nullptr);
+    const auto* composite = parsed->FindRenderTarget(LayerCompositeTargetKey(1));
+    ASSERT_NE(composite, nullptr);
+    SceneNode* node = nullptr;
+    for (auto& child : parsed->sceneGraph->GetChildren()) {
+        if (child->Name() == "source") node = child.get();
+    }
+    ASSERT_NE(node, nullptr);
+    const auto* ping_pong =
+        parsed->FindRenderTarget(std::string(WE_EFFECT_PPONG_PREFIX_A.data()) + node->Camera());
+    ASSERT_NE(ping_pong, nullptr);
+    EXPECT_EQ(composite->sample.magFilter, TextureFilter::NEAREST);
+    EXPECT_EQ(ping_pong->sample.magFilter, composite->sample.magFilter);
+    EXPECT_EQ(ping_pong->sample.minFilter, composite->sample.minFilter);
 }
 
 TEST(LayerTextureReference, ExternalMaterialsKeepHiddenTransitiveProducers) {

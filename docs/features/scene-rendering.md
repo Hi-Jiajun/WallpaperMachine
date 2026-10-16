@@ -158,6 +158,15 @@ uploaded again; a script that produces it still runs on its own schedule every
 frame. Effect and video output of Native Metal has not been compared against real
 wallpapers.
 
+An image layer's own render targets, the pair its effects run through and the
+composite another layer reads, are point-sampled when the layer says
+`nointerpolation` or its primary texture's header does (read from the texture's
+file, not from what an earlier layer happened to load), wrapped when the layer says
+`clampuvs` is off, and clamped and linear otherwise. A texture file whose header asks
+for point sampling is also sampled with its mip level picked by point, as the
+reference's sampler for that flag does; a texture without the flag, and a render
+target, keep the blend of mip levels they always had.
+
 Desktop posters work on both backends and need no setting: each re-draws its final
 composition — fit, zoom, flip and position included — into an image of its own only
 when a poster is requested, including while the scene is idle or paused. The

@@ -62,6 +62,14 @@ VkFilter ToVkType(wallpaper::TextureFilter sam) {
     }
 }
 
+// Only a texture whose file asks for point sampling picks its mip level by
+// point; see `TextureSample::mipFilter`.
+VkSamplerMipmapMode ToVkMipmapMode(const wallpaper::TextureSample& sam) {
+    using namespace wallpaper;
+    return sam.mipFilter == TextureFilter::NEAREST ? VK_SAMPLER_MIPMAP_MODE_NEAREST
+                                                   : VK_SAMPLER_MIPMAP_MODE_LINEAR;
+}
+
 VkSamplerCreateInfo GenRenderTargetSamplerInfo() {
     return VkSamplerCreateInfo {
         .sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
@@ -141,7 +149,7 @@ VkSamplerCreateInfo GenSamplerInfo(TextureKey key) {
                                        .pNext            = nullptr,
                                        .magFilter        = ToVkType(sam.magFilter),
                                        .minFilter        = (ToVkType(sam.minFilter)),
-                                       .mipmapMode       = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+                                       .mipmapMode       = ToVkMipmapMode(sam),
                                        .addressModeU     = (ToVkType(sam.wrapS)),
                                        .addressModeV     = (ToVkType(sam.wrapT)),
                                        .addressModeW     = (ToVkType(sam.wrapT)),
@@ -753,6 +761,7 @@ std::size_t TextureKey::HashValue(const TextureKey& k) {
     utils::hash_combine(seed, (int)k.sample.wrapT);
     utils::hash_combine(seed, (int)k.sample.magFilter);
     utils::hash_combine(seed, (int)k.sample.minFilter);
+    utils::hash_combine(seed, (int)k.sample.mipFilter);
     return seed;
 }
 
@@ -857,7 +866,7 @@ ImageSlotsRef TextureCache::CreateTex(Image& image, TextureUploadSynchronization
             .pNext                   = nullptr,
             .magFilter               = ToVkType(sam.magFilter),
             .minFilter               = (ToVkType(sam.minFilter)),
-            .mipmapMode              = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+            .mipmapMode              = ToVkMipmapMode(sam),
             .addressModeU            = (ToVkType(sam.wrapS)),
             .addressModeV            = (ToVkType(sam.wrapT)),
             .addressModeW            = (ToVkType(sam.wrapT)),

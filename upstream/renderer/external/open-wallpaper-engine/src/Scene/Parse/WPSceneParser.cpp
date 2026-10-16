@@ -1792,17 +1792,19 @@ Eigen::Vector2f ResolveTextEffectCapacity(const wpscene::WPTextObject& obj,
 /// `camera_node` puts that camera on the card's centre.
 SceneCamera& RegisterLayerComposite(ParseContext& context, int32_t id, SceneNode& node,
                                     std::array<int32_t, 2> extent, bool clamp_uvs,
-                                    std::shared_ptr<SceneNode> camera_node) {
+                                    std::shared_ptr<SceneNode> camera_node,
+                                    TextureFilter filter = TextureFilter::LINEAR) {
     node.SetMustProduce(true);
     const auto key = LayerCompositeTargetKey(id);
     if (! context.scene->HasRenderTarget(key)) {
         // A consumer may tile a layer texture across a model (UVs far outside
         // 0..1). Clamping that smears the edge texels into solid bands; the
-        // layer's own `clampuvs` decides, like a packaged texture's flag.
+        // layer's own `clampuvs` decides, like a packaged texture's flag. A layer
+        // that point-samples (`nointerpolation`) is read the same way.
         const auto wrap = clamp_uvs ? TextureWrap::CLAMP_TO_EDGE : TextureWrap::REPEAT;
         context.scene->renderTargets[key] = SceneRenderTarget {
             .width = extent[0], .height = extent[1], .allowReuse = true,
-            .sample = { wrap, wrap, TextureFilter::LINEAR, TextureFilter::LINEAR },
+            .sample = { wrap, wrap, filter, filter },
             .format = context.scene->hdr ? TextureFormat::RGBA16F : TextureFormat::RGBA8,
         };
     }
@@ -3449,10 +3451,45 @@ void BuildBloomPostProcess(ParseContext& context, const wpscene::WPScene& sc) {
     bloom_render_target_rollback.Commit();
 }
 
+/// The filter Wallpaper Engine gives the render targets of an image layer: points
+/// when the layer asks (`nointerpolation`) or when the header of its primary
+/// texture does, and linear otherwise. A layer with no texture of its own, a
+/// composition layer, only has its own flag to go by. The header is read from the
+/// texture's file, not from what an earlier layer happened to load, so the answer
+/// does not depend on the order the layers are parsed in -- the composite of a
+/// layer another layer reads is registered before its own material is loaded.
+TextureFilter LayerRenderTargetFilter(const Scene& scene, const wpscene::WPImageObject& image) {
+    if (image.nointerpolation) return TextureFilter::NEAREST;
+    const auto& textures = image.material.textures;
+    if (textures.empty() || textures.front().empty()) return TextureFilter::LINEAR;
+    const auto& primary = textures.front();
+    if (const auto texture = scene.textures.find(primary); texture != scene.textures.end()) {
+        return texture->second.sample.magFilter == TextureFilter::NEAREST ? TextureFilter::NEAREST
+                                                                          : TextureFilter::LINEAR;
+    }
+    // A render target or a link texture has no header; neither does a file that
+    // could not be read, whose default sample is not a request for points.
+    if (IsSpecTex(primary) || scene.imageParser == nullptr) return TextureFilter::LINEAR;
+    const ImageHeader header = scene.imageParser->ParseHeader(primary);
+    if (header.mapWidth <= 0 || header.mapHeight <= 0) return TextureFilter::LINEAR;
+    return header.sample.magFilter == TextureFilter::NEAREST ? TextureFilter::NEAREST
+                                                             : TextureFilter::LINEAR;
+}
+
+/// How the pair of ping-pong targets an image layer's effects run through is
+/// sampled by the passes that read them, the layer's last draw among them:
+/// `LayerRenderTargetFilter`, and clamped or wrapped by `clampuvs`.
+TextureSample LayerRenderTargetSample(const Scene& scene, const wpscene::WPImageObject& image) {
+    const auto wrap   = image.clampuvs ? TextureWrap::CLAMP_TO_EDGE : TextureWrap::REPEAT;
+    const auto filter = LayerRenderTargetFilter(scene, image);
+    return { wrap, wrap, filter, filter };
+}
+
 void RegisterImageComposite(ParseContext& context, const wpscene::WPImageObject& object,
                              SceneNode& node) {
     RegisterLayerComposite(context, object.id, node, ResolveImageRenderExtent(object, context),
-                           object.clampuvs, context.effect_camera_node);
+                           object.clampuvs, context.effect_camera_node,
+                           LayerRenderTargetFilter(*context.scene, object));
 }
 
 // A scene setting bound to a user property takes the property's current value
@@ -3994,6 +4031,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 .width      = render_extent[0],
                 .height     = render_extent[1],
                 .allowReuse = true,
+                .sample     = LayerRenderTargetSample(scene, wpimgobj),
                 .format = scene.hdr ? TextureFormat::RGBA16F : TextureFormat::RGBA8,
             };
             if (wpimgobj.fullscreen) {

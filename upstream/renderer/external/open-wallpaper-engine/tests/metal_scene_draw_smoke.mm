@@ -4271,6 +4271,200 @@ TEST_F(MetalSceneDraw, ATextLayerIsParsedTranslatedAndDrawnByTheNativeBackend)
 
 namespace
 {
+/// A 16 by 12 layer with a copy effect, shown 16 times larger: its target holds
+/// one texel to every 16 pixels of the picture, so how the target is sampled is
+/// the whole of what separates a smooth gradient from a staircase.
+std::filesystem::path WriteMagnifiedEffectLayerFixture(const std::filesystem::path& root,
+                                                       std::string_view            object_fields)
+{
+    const auto project = WriteFixture(root);
+    const std::map<std::string, std::string> files {
+        { "models/small.json", R"({"width":16,"height":12,"material":"materials/tile.json"})" },
+        { "effects/probe.json",
+          R"({"name":"probe copy","passes":[{"material":"materials/copy.json"}]})" },
+        { "materials/copy.json",
+          R"({"passes":[{"shader":"probe_copy","blending":"translucent","cullmode":"nocull",)"
+          R"("depthtest":"disabled","depthwrite":"disabled","textures":[null]}]})" },
+        { "shaders/probe_copy.vert",
+          "uniform mat4 g_ModelViewProjectionMatrix;\n"
+          "attribute vec3 a_Position;\n"
+          "attribute vec2 a_TexCoord;\n"
+          "varying vec2 v_TexCoord;\n"
+          "void main() {\n"
+          "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+          "  v_TexCoord = a_TexCoord;\n"
+          "}\n" },
+        { "shaders/probe_copy.frag",
+          "uniform sampler2D g_Texture0;\n"
+          "varying vec2 v_TexCoord;\n"
+          "void main() {\n"
+          "  gl_FragColor = texture(g_Texture0, v_TexCoord);\n"
+          "}\n" },
+    };
+    for (const auto& [name, contents] : files) {
+        const auto path = root / name;
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream(path) << contents;
+    }
+    std::ofstream(root / "layout.json")
+        << R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+           R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0,0,0],)"
+           R"("cameraparallax":false,"orthogonalprojection":{"width":384,"height":256}},)"
+           R"("objects":[{"id":1,"name":"tile","image":"models/small.json","origin":[192,128,0],)"
+           R"("scale":[16,16,1],"angles":[0,0,0],"visible":true,)"
+           R"("effects":[{"file":"effects/probe.json","visible":true}])"
+        << object_fields << "}]}";
+    return project;
+}
+
+/// The share of horizontally adjacent pixels along the picture's middle row, across
+/// the layer, that are identical.
+double IdenticalNeighbourShare(const std::vector<uint8_t>& rgb, uint32_t width, uint32_t height)
+{
+    const std::size_t row = static_cast<std::size_t>(height / 2) * width;
+    std::size_t same = 0, total = 0;
+    for (uint32_t x = 70; x < 314; ++x, ++total) {
+        const std::size_t a = (row + x) * 3, b = (row + x + 1) * 3;
+        if (rgb[a] == rgb[b] && rgb[a + 1] == rgb[b + 1] && rgb[a + 2] == rgb[b + 2]) ++same;
+    }
+    return static_cast<double>(same) / static_cast<double>(total);
+}
+} // namespace
+
+TEST_F(MetalSceneDraw, AnImageLayersTargetsArePointSampledWhenItAsksOnBothRenderers)
+{
+    // The layer's effect chain draws into a 16 by 12 target that the layer then
+    // shows 16 times larger. By default the target is read with linear filtering
+    // and the gradient it holds comes out smooth; with `nointerpolation`, as
+    // Wallpaper Engine reads it, every texel is a flat square.
+    std::map<std::pair<bool, bool>, RendererPicture> pictures;
+    for (const bool point : { false, true }) {
+        for (const bool native : { false, true }) {
+            const std::string name = std::string(point ? "point-" : "linear-") +
+                                     (native ? "native" : "compat");
+            const auto project = WriteMagnifiedEffectLayerFixture(
+                root_ / name, point ? R"(,"nointerpolation":true)" : "");
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            if (native) {
+                const auto selection = SelectSceneBackend(*loaded.scene);
+                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            }
+            auto& picture = pictures[std::make_pair(point, native)];
+            picture       = DrawWithRenderer(*loaded.scene, native, 384, 256, 2, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
+            ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+        }
+    }
+    const auto pixels = [&](bool point, bool native) -> const std::vector<uint8_t>& {
+        return pictures[std::make_pair(point, native)].rgb;
+    };
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        EXPECT_LT(IdenticalNeighbourShare(pixels(false, native), 384, 256), 0.4)
+            << "the default target should be sampled linearly";
+        EXPECT_GT(IdenticalNeighbourShare(pixels(true, native), 384, 256), 0.8)
+            << "a nointerpolation layer's target should be point-sampled";
+    }
+    EXPECT_EQ(pixels(true, true), pixels(true, false))
+        << "the renderers disagree about a point-sampled layer";
+}
+
+namespace
+{
+/// A 64 by 64 texture with seven mip levels whose first level is white and whose
+/// others are black, so which level a sample came from shows in its brightness.
+void WriteMipChainTexture(const std::filesystem::path& path, uint32_t flags)
+{
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream texture(path, std::ios::binary);
+    const auto u32 = [&](uint32_t value) {
+        const char bytes[] { char(value), char(value >> 8), char(value >> 16), char(value >> 24) };
+        texture.write(bytes, sizeof(bytes));
+    };
+    texture.write("TEXV0005", 9);
+    texture.write("TEXI0001", 9);
+    u32(0); u32(flags);
+    for (int i = 0; i < 4; ++i) u32(64);
+    u32(0);
+    texture.write("TEXB0002", 9);
+    u32(1); // images
+    u32(7); // mip levels
+    for (uint32_t size = 64; size >= 1; size /= 2) {
+        u32(size); u32(size); u32(0); u32(0);
+        u32(size * size * 4);
+        const std::vector<char> texels(size_t(size) * size * 4, size == 64 ? char(255) : char(0));
+        std::vector<char> rgba = texels;
+        for (std::size_t i = 3; i < rgba.size(); i += 4) rgba[i] = char(255);
+        texture.write(rgba.data(), static_cast<std::streamsize>(rgba.size()));
+    }
+}
+
+/// A 38 pixel card showing the mip chain 64 texels wide: each pixel covers 1.68
+/// texels, so the mip level asked for sits three quarters of the way to the second.
+std::filesystem::path WriteMinifiedMipFixture(const std::filesystem::path& root, uint32_t flags)
+{
+    const auto project = WriteFixture(root);
+    WriteMipChainTexture(root / "materials/mipchain.tex", flags);
+    std::ofstream(root / "models/tile.json")
+        << R"({"width":38,"height":38,"material":"materials/tile.json"})";
+    std::ofstream(root / "materials/tile.json")
+        << R"({"passes":[{"shader":"metal_probe","blending":"translucent","cullmode":"nocull",)"
+           R"("depthtest":"disabled","depthwrite":"disabled","textures":["mipchain"]}]})";
+    std::ofstream(root / "shaders/metal_probe.frag")
+        << "uniform sampler2D g_Texture0;\n"
+           "varying vec2 v_TexCoord;\n"
+           "void main() {\n"
+           "  gl_FragColor = texture(g_Texture0, v_TexCoord);\n"
+           "}\n";
+    return project;
+}
+} // namespace
+
+TEST_F(MetalSceneDraw, ATexturePointSampledByItsHeaderPicksItsMipLevelByPointOnBothRenderers)
+{
+    // The reference builds the sampler of a file texture from the flags in its
+    // header; with `noInterpolation` the min, mag and mip filters are all point. The
+    // chain's first level is white and the rest black, drawn at 1.68 texels to the
+    // pixel: a point-sampled mip level is the second, black; a linearly blended one
+    // is three quarters of the way to it. A texture without the flag keeps the
+    // blend, the renderers' filtering until now.
+    for (const bool point : { false, true }) {
+        SCOPED_TRACE(point ? "noInterpolation" : "ordinary");
+        std::map<bool, RendererPicture> pictures;
+        for (const bool native : { false, true }) {
+            const std::string name = std::string("mip-") + (point ? "point" : "linear") +
+                                     (native ? "-native" : "-compat");
+            const auto project = WriteMinifiedMipFixture(root_ / name, point ? 1u : 0u);
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            if (native) {
+                const auto selection = SelectSceneBackend(*loaded.scene);
+                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            }
+            pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 2, 1.0 / 60.0);
+            ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+            ASSERT_EQ(pictures[native].rgb.size(), 384u * 256u * 3u);
+        }
+        for (const bool native : { false, true }) {
+            SCOPED_TRACE(native ? "native" : "compatibility");
+            const auto& rgb = pictures[native].rgb;
+            const std::size_t at = (std::size_t(128) * 384 + 192) * 3;
+            const int level = rgb[at];
+            if (point) {
+                EXPECT_LE(level, 8) << "the mip level was blended, not picked";
+            } else {
+                EXPECT_GE(level, 35) << "the ordinary texture lost the blend of its mip levels";
+                EXPECT_LE(level, 100) << "the ordinary texture lost the blend of its mip levels";
+            }
+        }
+    }
+}
+
+namespace
+{
 
 /// A hidden text layer another layer samples: the marquee's card covers the
 /// canvas and shows the title's composite across all of it. The title sits in
