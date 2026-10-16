@@ -1333,6 +1333,43 @@ void TextLayer::SetText(std::string text) {
     MarkCacheDirty();
 }
 
+void TextLayer::SetPointSize(float point_size) {
+    if (! std::isfinite(point_size) || point_size <= 0.0f || m_state.point_size == point_size) return;
+    m_state.point_size     = point_size;
+    m_state.dirty          = true;
+    m_state.layout_pending = true;
+    MarkCacheDirty();
+}
+
+void TextLayer::SetFont(std::string font_key, std::string kind, std::string identity,
+                        std::string path, SharedFontData data) {
+    if (m_state.font_key == font_key && m_state.resolved_font_kind == kind &&
+        m_state.resolved_font_identity == identity && m_state.resolved_font_path == path) {
+        return;
+    }
+    m_state.font_key               = std::move(font_key);
+    m_state.resolved_font_kind     = std::move(kind);
+    m_state.resolved_font_identity = std::move(identity);
+    m_state.resolved_font_path     = std::move(path);
+    m_state.resolved_font_data     = std::move(data);
+    m_state.dirty                  = true;
+    m_state.layout_pending         = true;
+    MarkCacheDirty();
+}
+
+void TextLayer::SetAlignment(std::string horizontal, std::string vertical, std::string anchor) {
+    if (m_state.horizontal_align == horizontal && m_state.vertical_align == vertical &&
+        m_state.anchor == anchor) {
+        return;
+    }
+    m_state.horizontal_align = std::move(horizontal);
+    m_state.vertical_align   = std::move(vertical);
+    m_state.anchor           = std::move(anchor);
+    m_state.dirty            = true;
+    m_state.layout_pending   = true;
+    MarkCacheDirty();
+}
+
 bool TextLayer::ApplyPreparedLayout(uint64_t revision, Eigen::Vector2f layout_size,
                                     Eigen::Vector2f raster_size) {
     if (revision <= m_prepared_revision || revision > m_state.cache_revision) return false;

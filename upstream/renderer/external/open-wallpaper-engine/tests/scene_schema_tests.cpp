@@ -1,5 +1,7 @@
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <limits>
@@ -8,6 +10,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 #include <cstring>
@@ -6898,4 +6901,383 @@ TEST(SceneSchema, ALayerCreatedFromAWorkshopModelIsSizedByItsPictureAndShows) {
     EXPECT_TRUE(created->Visible());
     EXPECT_TRUE(scene->runtime->NodeSize(created->Name()).isApprox(Eigen::Vector2f(12, 6)));
     EXPECT_EQ(scene->runtime->scriptErrorCount(), 0u);
+}
+
+// ---------------------------------------------------------------------------
+// SceneScript API parity: what needs the parser's own state.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+nlohmann::json ScriptParityScene(nlohmann::json objects) {
+    return {
+        { "camera", { { "center", { 0, 0, -1 } }, { "eye", { 0, 0, 0 } }, { "up", { 0, 1, 0 } } } },
+        { "general",
+          { { "ambientcolor", { 0, 0, 0 } },
+            { "skylightcolor", { 0, 0, 0 } },
+            { "clearcolor", { 0, 0, 0 } },
+            { "cameraparallax", false },
+            { "orthogonalprojection", { { "width", 640 }, { "height", 360 } } } } },
+        { "objects", std::move(objects) },
+    };
+}
+
+std::shared_ptr<Scene> ParseScriptParityScene(fs::VFS& vfs, const nlohmann::json& source) {
+    audio::SoundManager sound_manager;
+    WPSceneParser       parser;
+    ProjectProperties   properties;
+    return parser.Parse(SceneParseRequest {
+        .scene_id = "script-parity", .project_properties = &properties,
+    }, source.dump(), vfs, sound_manager);
+}
+
+void WaitForTextLayoutToSettle(SceneRuntimeContext& runtime, const std::string& layer) {
+    for (int attempt = 0; attempt < 400 && runtime.NodeTextDirty(layer); ++attempt) {
+        runtime.PumpTextLayerCache();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+}
+
+} // namespace
+
+// Layers are counted in the order the scene file declares them, found by their
+// scene.json id, and their object is readable: all from the parse, not from the
+// order scripts happened to register things in.
+TEST(SceneSchema, ScriptsEnumerateLayersInSceneFileOrderAndReadTheirScenesObjects) {
+    fs::VFS vfs;
+    MountSceneFiles(vfs);
+    const auto scene = ParseScriptParityScene(vfs, ScriptParityScene(nlohmann::json::array({
+        { { "id", 31 }, { "name", "first" }, { "image", "image.json" }, { "origin", { 10, 20, 0 } } },
+        { { "id", 7 }, { "name", "label" }, { "text", "hello" }, { "font", "Arial" }, { "pointsize", 24 } },
+        { { "id", 12 }, { "name", "last" }, { "image", "image.json" },
+          { "visible",
+            { { "value", true },
+              { "script",
+                "export function init(value) {\n"
+                "  const names = thisScene.enumerateLayers().map(l => l.name);\n"
+                "  if (names.join(',') !== 'first,label,last') throw new Error('order: ' + names.join(','));\n"
+                "  if (thisScene.getLayerCount() !== 3) throw new Error('count');\n"
+                "  if (thisScene.getLayerByID(31) !== thisScene.getLayer('first')) throw new Error('id 31');\n"
+                "  if (thisScene.getLayerByID(7) !== thisScene.getLayer(1)) throw new Error('id 7');\n"
+                "  const config = thisScene.getInitialLayerConfig(thisScene.getLayer('label'));\n"
+                "  if (config.text !== 'hello' || config.font !== 'Arial' || config.id !== 7) throw new Error('config');\n"
+                "  const own = thisScene.getInitialLayerConfig(thisLayer);\n"
+                "  if (own.image !== 'image.json' || own.name !== 'last') throw new Error('own config');\n"
+                "  return value;\n"
+                "}\n"
+                "export function update(value) { return value; }\n" } } } },
+    })));
+    ASSERT_NE(scene, nullptr);
+    ASSERT_NE(scene->runtime, nullptr);
+    scene->runtime->Tick(1.0 / 60.0);
+    for (const auto& error : scene->runtime->scriptErrors()) ADD_FAILURE() << error;
+    EXPECT_EQ(scene->runtime->LayerCount(), 3u);
+    EXPECT_EQ(scene->runtime->LayerNameAt(0), "first");
+    EXPECT_EQ(scene->runtime->LayerNameAt(1), "label");
+    EXPECT_EQ(scene->runtime->LayerNameForId(12), "last");
+    EXPECT_TRUE(scene->runtime->InitialLayerConfigRequested());
+}
+
+// A scene whose scripts never read the object list does not keep a copy of it.
+TEST(SceneSchema, ASceneWithoutLayerConfigReadersKeepsNoCopyOfItsObjects) {
+    fs::VFS vfs;
+    MountSceneFiles(vfs);
+    const auto scene = ParseScriptParityScene(vfs, ScriptParityScene(nlohmann::json::array({
+        { { "id", 1 }, { "name", "plain" }, { "image", "image.json" },
+          { "visible", { { "value", true }, { "script", "export function update(value) { return value; }" } } } },
+    })));
+    ASSERT_NE(scene, nullptr);
+    scene->runtime->Tick(1.0 / 60.0);
+    EXPECT_FALSE(scene->runtime->InitialLayerConfigRequested());
+    EXPECT_EQ(scene->runtime->InitialLayerConfigJson("plain"), "");
+}
+
+// createLayer({ text }) builds the layer as the scene file's own text layers are
+// built, so the new layer is a real one: it has a card, a material that takes
+// the color and alpha, a measured size, and a place in the scene.
+TEST(SceneSchema, CreateLayerBuildsATextLayerThroughTheParsersOwnTextPath) {
+    fs::VFS vfs;
+    MountSceneFiles(vfs);
+    const auto scene = ParseScriptParityScene(vfs, ScriptParityScene(nlohmann::json::array({
+        { { "id", 1 }, { "name", "label" }, { "text", "hello" }, { "font", "Arial" }, { "pointsize", 24 } },
+        { { "id", 2 }, { "name", "owner" }, { "image", "image.json" },
+          { "visible",
+            { { "value", true },
+              { "script",
+                "export function init(value) {\n"
+                "  const shadow = thisScene.createLayer({\n"
+                "    text: thisScene.getInitialLayerConfig(thisScene.getLayer('label')).text,\n"
+                "    font: thisScene.getLayer('label').font,\n"
+                "    pointsize: thisScene.getLayer('label').pointsize,\n"
+                "    color: '0.2 0.4 0.6', alpha: 0.5, name: 'shadow', horizontalalign: 'left'\n"
+                "  });\n"
+                "  shadow.origin = new Vec3(40, 50, 0);\n"
+                "  return value;\n"
+                "}\n"
+                "export function update(value) { return value; }\n" } } } },
+    })));
+    ASSERT_NE(scene, nullptr);
+    ASSERT_NE(scene->runtime, nullptr);
+    auto& runtime = *scene->runtime;
+    runtime.Tick(1.0 / 60.0);
+    for (const auto& error : runtime.scriptErrors()) ADD_FAILURE() << error;
+
+    const std::string name = runtime.ResolveLayerName("shadow");
+    ASSERT_TRUE(runtime.HasNodeNamed(name)) << "the new layer is reachable by the name it was given";
+    EXPECT_TRUE(name.starts_with("__we_text_")) << name;
+    EXPECT_EQ(runtime.NodeText(name), "hello");
+    const auto state = runtime.NodeTextState(name);
+    ASSERT_TRUE(state.has_value());
+    EXPECT_FLOAT_EQ(state->point_size, 24.0f);
+    EXPECT_EQ(state->font_key, "Arial");
+    EXPECT_EQ(state->horizontal_align, "left");
+    EXPECT_GT(runtime.NodeSize(name).x(), 0.0f) << "laid out like the scene's own text";
+    EXPECT_NEAR(runtime.NodeSize(name).x(), runtime.NodeSize("label").x(), 1e-3f);
+
+    SceneNode* node = nullptr;
+    for (const auto& child : scene->sceneGraph->GetChildren()) {
+        if (child->Name() == name) node = child.get();
+    }
+    ASSERT_NE(node, nullptr) << "the layer joined the scene graph";
+    ASSERT_NE(node->Mesh(), nullptr);
+    ASSERT_NE(node->Mesh()->Material(), nullptr);
+    const auto& constants = node->Mesh()->Material()->customShader.constValues;
+    ASSERT_TRUE(constants.contains("g_Color"));
+    EXPECT_FLOAT_EQ(constants.at("g_Color")[0], 0.2f);
+    EXPECT_FLOAT_EQ(constants.at("g_Color")[1], 0.4f);
+    EXPECT_FLOAT_EQ(constants.at("g_Color")[2], 0.6f);
+    EXPECT_FLOAT_EQ(constants.at("g_Alpha")[0], 0.5f);
+    EXPECT_TRUE(runtime.ConsumeSceneGraphMutationFlag());
+    EXPECT_EQ(runtime.LayerCount(), 3u);
+    EXPECT_EQ(runtime.LayerNameAt(2), name) << "created layers follow the scene's own";
+}
+
+// A text layer's style is changed by script through the parser's own font
+// resolution: a named system font resolves like the scene file's, a larger size
+// and a new alignment lay the text out again and keep the layer anchored.
+TEST(SceneSchema, ScriptsRestyleASceneTextLayerAndItIsLaidOutAgain) {
+    fs::VFS vfs;
+    MountSceneFiles(vfs);
+    const auto scene = ParseScriptParityScene(vfs, ScriptParityScene(nlohmann::json::array({
+        { { "id", 1 }, { "name", "clock" }, { "text", "12:30" }, { "font", "Arial" }, { "pointsize", 20 },
+          { "origin", { 320, 180, 0 } }, { "horizontalalign", "left" }, { "verticalalign", "top" } },
+        { { "id", 2 }, { "name", "owner" }, { "image", "image.json" },
+          { "visible",
+            { { "value", true },
+              { "script",
+                "export function init(value) { return value; }\n"
+                "export function update(value) { return value; }\n"
+                "export function cursorClick() {\n"
+                "  const clock = thisScene.getLayer('clock');\n"
+                "  clock.pointsize = clock.pointsize * 2;\n"
+                "  clock.font = 'systemfont_arial';\n"
+                "  clock.horizontalalign = 'right';\n"
+                "}\n" } } } },
+    })));
+    ASSERT_NE(scene, nullptr);
+    auto& runtime = *scene->runtime;
+    runtime.Tick(1.0 / 60.0);
+    WaitForTextLayoutToSettle(runtime, "clock");
+    const auto before        = runtime.NodeSize("clock");
+    const auto anchor_before = runtime.NodeTextState("clock")->anchor;
+    EXPECT_NE(anchor_before.find("left"), std::string::npos);
+
+    // The script's cursorClick runs when the pointer is over the owner's card.
+    runtime.DispatchCursorClick();
+    for (const auto& error : runtime.scriptErrors()) ADD_FAILURE() << error;
+
+    const auto state = runtime.NodeTextState("clock");
+    ASSERT_TRUE(state.has_value());
+    EXPECT_FLOAT_EQ(state->point_size, 40.0f);
+    EXPECT_EQ(state->font_key, "systemfont_arial");
+    EXPECT_EQ(state->resolved_font_kind, "system") << "resolved by the parser's own rule";
+    EXPECT_EQ(state->horizontal_align, "right");
+    // The authored vertical anchor survives a horizontal change.
+    EXPECT_NE(state->anchor.find("top"), std::string::npos);
+    EXPECT_NE(state->anchor.find("right"), std::string::npos);
+    EXPECT_EQ(state->anchor.find("left"), std::string::npos);
+
+    WaitForTextLayoutToSettle(runtime, "clock");
+    ASSERT_FALSE(runtime.NodeTextDirty("clock"));
+    const auto after = runtime.NodeSize("clock");
+    EXPECT_GT(after.x(), before.x());
+    EXPECT_GT(after.y(), before.y());
+}
+
+// A layer whose name is shared or empty is registered under a generated key, but
+// scripts see the name the scene file gave it.
+TEST(SceneSchema, ScriptsSeeTheAuthoredNameOfLayersTheParserRegisteredUnderGeneratedKeys) {
+    fs::VFS vfs;
+    MountSceneFiles(vfs);
+    const auto scene = ParseScriptParityScene(vfs, ScriptParityScene(nlohmann::json::array({
+        { { "id", 1 }, { "name", "twin" }, { "image", "image.json" } },
+        { { "id", 2 }, { "name", "twin" }, { "image", "image.json" } },
+        { { "id", 3 }, { "image", "image.json" } },
+        { { "id", 4 }, { "name", "solo" }, { "image", "image.json" },
+          { "visible",
+            { { "value", true },
+              { "script",
+                "export function init(value) {\n"
+                "  const names = thisScene.enumerateLayers().map(l => l.name);\n"
+                "  if (names.join(',') !== 'twin,twin,,solo') throw new Error('names: ' + names.join(','));\n"
+                "  if (thisScene.getLayerByID(2).name !== 'twin') throw new Error('id 2');\n"
+                "  if (thisScene.getLayerByID(2) === thisScene.getLayer('twin')) throw new Error('the twins are one');\n"
+                "  if (thisScene.getLayer('twin') !== thisScene.getLayer(0)) throw new Error('first twin');\n"
+                "  if (thisScene.getLayer(2).name !== '') throw new Error('nameless');\n"
+                "  if (thisScene.getLayerIndex(thisScene.getLayerByID(2)) !== 1) throw new Error('index');\n"
+                "  if (thisLayer.name !== 'solo') throw new Error('this');\n"
+                "  return value;\n"
+                "}\n"
+                "export function update(value) { return value; }\n" } } } },
+    })));
+    ASSERT_NE(scene, nullptr);
+    ASSERT_NE(scene->runtime, nullptr);
+    scene->runtime->Tick(1.0 / 60.0);
+    for (const auto& error : scene->runtime->scriptErrors()) ADD_FAILURE() << error;
+    EXPECT_EQ(scene->runtime->LayerCount(), 4u);
+    EXPECT_EQ(scene->runtime->LayerAuthoredName(scene->runtime->LayerNameAt(1)), "twin");
+    EXPECT_EQ(scene->runtime->LayerAuthoredName(scene->runtime->LayerNameAt(2)), "");
+}
+
+// A scene script runs `init` as it is registered. By then the layers' order and
+// ids, the scene file's objects, and the hooks that restyle and create text
+// layers are in place, as they are for every call after it.
+TEST(SceneSchema, ASceneScriptsInitSeesTheLayerOrderIdsObjectsAndTextHooks) {
+    fs::VFS vfs;
+    MountSceneFiles(vfs);
+    const auto scene = ParseScriptParityScene(vfs, ScriptParityScene(nlohmann::json::array({
+        { { "id", 31 }, { "name", "first" }, { "image", "image.json" } },
+        { { "id", 7 }, { "name", "label" }, { "text", "hello" }, { "font", "Arial" }, { "pointsize", 24 } },
+        { { "id", 12 }, { "name", "last" }, { "image", "image.json" },
+          { "visible",
+            { { "value", true },
+              { "script",
+                "engine.on('resizeScreen', function() {});\n"
+                "export function init(value) {\n"
+                "  const names = thisScene.enumerateLayers().map(l => l.name);\n"
+                "  if (names.join(',') !== 'first,label,last') throw new Error('order: ' + names.join(','));\n"
+                "  if (thisScene.getLayerByID(31) !== thisScene.getLayer('first')) throw new Error('id 31');\n"
+                "  if (thisScene.getLayerByID(7) !== thisScene.getLayer(1)) throw new Error('id 7');\n"
+                "  const config = thisScene.getInitialLayerConfig(thisScene.getLayer('label'));\n"
+                "  if (config === null || config.text !== 'hello' || config.id !== 7) throw new Error('config');\n"
+                "  thisScene.getLayer('label').font = 'systemfont_arial';\n"
+                "  const made = thisScene.createLayer({ text: 'from init', name: 'made', pointsize: 18 });\n"
+                "  if (thisScene.getLayer('made') !== made || thisScene.getLayerCount() !== 4) throw new Error('made');\n"
+                "  return value;\n"
+                "}\n" } } } },
+    })));
+    ASSERT_NE(scene, nullptr);
+    ASSERT_NE(scene->runtime, nullptr);
+    auto& runtime = *scene->runtime;
+    for (const auto& error : runtime.scriptErrors()) ADD_FAILURE() << error;
+    EXPECT_TRUE(runtime.InitialLayerConfigRequested());
+    EXPECT_EQ(runtime.sceneScriptCount(), 1u) << "the script ran as a scene script";
+    EXPECT_EQ(runtime.LayerCount(), 4u);
+    EXPECT_EQ(runtime.NodeTextState("label")->font_key, "systemfont_arial");
+    const auto made = runtime.ResolveLayerName("made");
+    ASSERT_TRUE(runtime.HasNodeNamed(made));
+    EXPECT_EQ(runtime.NodeText(made), "from init");
+}
+
+namespace {
+
+// A file system that says whether it was asked while it still existed.
+struct FsProbe {
+    std::atomic<int>  asked_alive { 0 };
+    std::atomic<int>  asked_after_death { 0 };
+    std::atomic<bool> dead { false };
+};
+
+class ProbeFs final : public fs::Fs {
+public:
+    explicit ProbeFs(std::shared_ptr<FsProbe> probe): m_probe(std::move(probe)) {}
+    ~ProbeFs() override { m_probe->dead = true; }
+
+    bool Contains(std::string_view) const override {
+        (m_probe->dead ? m_probe->asked_after_death : m_probe->asked_alive)++;
+        return false;
+    }
+    std::shared_ptr<fs::IBinaryStream>  Open(std::string_view) override { return nullptr; }
+    std::shared_ptr<fs::IBinaryStreamW> OpenW(std::string_view) override { return nullptr; }
+
+private:
+    std::shared_ptr<FsProbe> m_probe;
+};
+
+} // namespace
+
+// A script's destroy() runs while the scene's files, layers and registries still
+// exist: it can restyle a text layer, which asks the files for the font, and the
+// request is answered by a file system that is still there.
+TEST(SceneSchema, ScriptsEndWhileTheScenesFilesAndLayersStillExist) {
+    auto probe = std::make_shared<FsProbe>();
+    auto vfs   = std::make_unique<fs::VFS>();
+    MountSceneFiles(*vfs);
+    ASSERT_TRUE(vfs->Mount("/assets", std::make_unique<ProbeFs>(probe)));
+    auto scene = ParseScriptParityScene(*vfs, ScriptParityScene(nlohmann::json::array({
+        { { "id", 1 }, { "name", "label" }, { "text", "hello" }, { "font", "Arial" }, { "pointsize", 24 } },
+        { { "id", 2 }, { "name", "owner" }, { "image", "image.json" },
+          { "visible",
+            { { "value", true },
+              { "script",
+                "export function init(value) { return value; }\n"
+                "export function update(value) { return value; }\n"
+                "export function destroy() {\n"
+                "  thisScene.getLayer('label').font = 'fonts/probe.ttf';\n"
+                "  thisLayer.visible = true;\n"
+                "}\n" } } } },
+    })));
+    ASSERT_NE(scene, nullptr);
+    scene->vfs = std::move(vfs);  // as the player hands the scene its files
+    scene->runtime->Tick(1.0 / 60.0);
+    for (const auto& error : scene->runtime->scriptErrors()) ADD_FAILURE() << error;
+    const int asked_before = probe->asked_alive;
+
+    scene.reset();
+    EXPECT_GT(probe->asked_alive, asked_before) << "destroy() reached the files";
+    EXPECT_EQ(probe->asked_after_death, 0) << "and they were still there";
+    EXPECT_TRUE(probe->dead);
+}
+
+// Text layers a script makes and destroys over and over do not accumulate their
+// rasters: each one's texture goes once the graph that drew it is gone.
+TEST(SceneSchema, TextLayersAScriptMadeAndDestroyedLeaveNoTextureBehind) {
+    fs::VFS vfs;
+    MountSceneFiles(vfs);
+    const auto scene = ParseScriptParityScene(vfs, ScriptParityScene(nlohmann::json::array({
+        { { "id", 2 }, { "name", "owner" }, { "image", "image.json" } },
+    })));
+    ASSERT_NE(scene, nullptr);
+    auto& runtime = *scene->runtime;
+    auto* images  = dynamic_cast<RuntimeImageSource*>(scene->imageParser.get());
+    ASSERT_NE(images, nullptr);
+    const auto text_textures = [&] {
+        std::size_t count = 0;
+        for (const auto& [name, texture] : scene->textures) {
+            if (name.starts_with("runtime/text/")) ++count;
+        }
+        return count;
+    };
+    runtime.Tick(1.0 / 60.0);
+    const std::size_t baseline = text_textures();
+
+    for (int round = 0; round < 4; ++round) {
+        SCOPED_TRACE(round);
+        const auto name = runtime.CreateTextLayer(R"({"text":"x","pointsize":20,"visible":true})", "owner");
+        ASSERT_FALSE(name.empty());
+        const auto texture = TextTextureName(name);
+        EXPECT_TRUE(scene->textures.contains(texture));
+        EXPECT_TRUE(images->IsRuntimeImage(texture));
+        EXPECT_EQ(text_textures(), baseline + 1);
+
+        runtime.ConsumeSceneGraphMutationFlag();
+        EXPECT_TRUE(runtime.DestroyLayer(name));
+        EXPECT_TRUE(scene->textures.contains(texture)) << "the graph compiled before still samples it";
+        runtime.ConsumeSceneGraphMutationFlag();  // a graph without the layer was built
+        runtime.Tick(1.0 / 60.0);
+        EXPECT_FALSE(scene->textures.contains(texture));
+        EXPECT_FALSE(images->IsRuntimeImage(texture));
+        EXPECT_EQ(text_textures(), baseline);
+    }
+    EXPECT_TRUE(images->IsRuntimeImage("$mediaThumbnail")) << "the covers are never removed";
 }

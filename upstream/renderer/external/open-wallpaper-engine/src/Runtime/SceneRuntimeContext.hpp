@@ -155,6 +155,14 @@ public:
     /// Distinct from the cursor viewport above, which is scene world units,
     /// and from the rasterization size, which internal quality may reduce.
     void          SetScreenResolution(const Eigen::Vector2f& resolution);
+    /// The interface language scripts are told about in `applyGeneralSettings`,
+    /// as a lower-case BCP-47 tag (`en-us`, `zh-cn`). A tag in any case, or with
+    /// `_` for `-`, is normalized; nothing more is: mapping an operating-system
+    /// locale (`zh_Hans_CN`) to the tags Wallpaper Engine's scripts switch on
+    /// (`zh-cn`) is the caller's job. Nothing calls this yet, so scripts are
+    /// told `en-us`. Scripts that are running hear of a change on the next tick.
+    void          SetLanguage(std::string_view language);
+    const std::string& Language() const;
     void          SetCursorInput(float x, float y);
     void          SetCursorEnter(bool entered);
     void          SetCursorButton(int button, bool pressed);
@@ -162,9 +170,59 @@ public:
     void          BeginFrame();
     DynamicValue* FindPropertyValue(std::string_view name) const;
     void          RegisterScriptedValue(ScriptedDynamicValue* value);
+    /// A scripted value that goes away (a setting resolved only to read its first
+    /// value, a rolled-back layer) leaves the registry, so nothing reaches it
+    /// afterwards. `ScriptedValueRegistryToken` expires with the runtime, which
+    /// is how a value that outlives it knows there is no registry to leave.
+    void          UnregisterScriptedValue(ScriptedDynamicValue* value);
+    std::weak_ptr<void> ScriptedValueRegistryToken() const { return m_scripted_value_registry; }
     void          RegisterNode(std::string name, SceneNode* node);
     void          RegisterLayerAlias(std::string authored_name, std::string runtime_name);
     std::string   ResolveLayerName(std::string_view name) const;
+    /// The layers as `thisScene.getLayerCount()`, `getLayer(index)`,
+    /// `enumerateLayers()`, `getLayerIndex()` and `sortLayer()` count them: every
+    /// layer registered by name, in the order the scene file declares them, then
+    /// the ones scripts made. A hidden template a script's `createLayer` copies
+    /// from is not a layer of the scene. One order serves all five:
+    /// `SortLayer` changes it, and the draw order follows it.
+    ///
+    /// Only layers the parser instantiated are counted: an object the scene file
+    /// marks statically invisible (and no script or property can show) is never
+    /// built, so it has no index, no id and no place in this list.
+    std::size_t   LayerCount() const;
+    std::string   LayerNameAt(std::size_t index) const;
+    /// The position of a layer (by runtime name or authored name) in that order,
+    /// or -1 for a name that is not a layer.
+    int           LayerIndex(std::string_view name) const;
+    /// Moves a layer to position `index` of that order (clamped to the ends) and
+    /// puts it among its siblings in the scene graph where the order now says,
+    /// which is the order it is drawn in. False when nothing changed.
+    bool          SortLayer(std::string_view name, int index);
+    /// The name the scene file gives the layer registered as `runtime_name`,
+    /// which is what a script's `layer.name` reads. A layer whose authored name is
+    /// shared or empty is registered under a generated key; this is its own
+    /// name (possibly empty). A layer with no authored name on record answers
+    /// with the name it is registered under.
+    void          RegisterLayerAuthoredName(std::string runtime_name, std::string authored_name);
+    std::string   LayerAuthoredName(std::string_view runtime_name) const;
+    /// Puts the registered layers in the scene file's declaration order. Names
+    /// not listed keep the order they were registered in, after the listed ones.
+    void          SetLayerOrder(const std::vector<std::string>& names);
+    /// The scene.json `id` of a layer, which `getLayerByID` looks it up by.
+    void          RegisterLayerId(int32_t id, std::string name);
+    std::string   LayerNameForId(int32_t id) const;
+    /// A script reads `thisScene.getInitialLayerConfig(layer)` to copy what the
+    /// scene file says about a layer. The scene's object list is only kept when
+    /// a script asks for it (`InitialLayerConfigRequested`), since it holds
+    /// every script the scene carries.
+    void          RequestInitialLayerConfig();
+    bool          InitialLayerConfigRequested() const;
+    /// Answers for a layer's scene.json `id` with that object as JSON text.
+    using InitialLayerConfigProvider = std::function<std::string(int32_t id)>;
+    void          SetInitialLayerConfigProvider(InitialLayerConfigProvider provider);
+    /// The layer's own object from the scene file, as JSON text; empty when the
+    /// layer is unknown, was made by a script, or the object list was not kept.
+    std::string   InitialLayerConfigJson(std::string_view name) const;
     void          UnregisterNode(std::string_view name);
     void          RollbackNodeRegistration(
                      std::string_view name,
@@ -179,10 +237,17 @@ public:
     WPPuppetLayer* FindPuppetLayer(std::string_view name);
     // Mirrors the SceneScript IAnimationLayer operations. Unknown layers and
     // operations return 0.
+    /// Tells `addEndedCallback` listeners about the single-shot animation
+    /// layers that finished playing since the last call. Run once per tick.
+    void          DispatchPuppetLayerEvents();
     double        PuppetAnimationControl(std::string_view layer_name,
                                          std::string_view animation_layer,
                                          std::string_view operation, double value,
                                          bool has_value);
+    /// The authored name of the animation layer a script addressed by name or
+    /// by position; empty when the layer or the animation layer is unknown.
+    std::string   PuppetAnimationLayerName(std::string_view layer_name,
+                                           std::string_view animation_layer);
     void          RegisterLayerTemplate(std::string template_path, std::shared_ptr<SceneNode> node,
                                         Eigen::Vector2f size);
     // Called synchronously on a registry miss. The loader registers the requested
@@ -305,12 +370,15 @@ public:
     std::string     CreateLayerFromTemplate(std::string_view requested_template_path,
                                             std::string_view current_layer_name,
                                             std::string_view script_workshop_id = {});
-    // Removes a layer `CreateLayerFromTemplate` made: it leaves the scene graph
-    // and every registry at once, so whatever a script still holds for it
-    // reaches nothing. The node itself is kept until the graph has been rebuilt
-    // without it, as the graph compiled before still points at it. A layer the
-    // scene file made, or an unknown name, is left alone and answers false.
-    bool            DestroyLayer(std::string_view name);
+    // Removes a layer `CreateLayerFromTemplate` (or `CreateTextLayer`) made: it
+    // leaves the scene graph and every registry at once, so whatever a script
+    // still holds for it reaches nothing. So does every layer registered below it
+    // (a script can make one with `createLayer({ parent })`), and `destroyed`, if
+    // given, receives the runtime names of all of them. The nodes themselves are
+    // kept until the graph has been rebuilt without them, as the graph compiled
+    // before still points at them. A layer the scene file made, or an unknown
+    // name, is left alone and answers false.
+    bool            DestroyLayer(std::string_view name, std::vector<std::string>* destroyed = nullptr);
     Eigen::Vector3f NodeColor(std::string_view name) const;
     bool            SetNodeColor(std::string_view name, const Eigen::Vector3f& color);
     bool            SortNode(std::string_view name, int index);
@@ -361,10 +429,62 @@ public:
     bool            NodeTextDirty(std::string_view name) const;
     std::optional<TextLayerState> NodeTextState(std::string_view name) const;
     bool                          SetNodeText(std::string_view name, std::string text);
+    /// The text layer's style as scripts read and write it: `font`, `pointsize`,
+    /// `horizontalalign`, `verticalalign`. A write that changes anything makes
+    /// the layer lay out and draw again. `nullopt` / false for a layer that is
+    /// not text.
+    std::optional<std::string>    NodeTextStyle(std::string_view name, std::string_view property) const;
+    bool                          SetNodeTextStyle(std::string_view name, std::string_view property,
+                                                   std::string_view value);
+    /// How a font named by a script (`systemfont_arial`, `fonts/x.ttf`) becomes
+    /// the font fields of a text layer. Installed by the parser, which can read
+    /// the wallpaper's files.
+    using TextFontResolver = std::function<void(TextLayerState&, const std::string& font_key)>;
+    void                          SetTextFontResolver(TextFontResolver resolver);
+    /// Builds a text layer from the configuration a script passes `createLayer`
+    /// (scene.json keys as JSON text) and returns the new node, registered and
+    /// named but not yet attached to the scene graph. `object_id` is unique to it.
+    using TextLayerFactory = std::function<std::shared_ptr<SceneNode>(const std::string& config_json,
+                                                                      int32_t object_id)>;
+    void                          SetTextLayerFactory(TextLayerFactory factory);
+    /// `createLayer({text: ...})`: the layer's name, or empty when it could not
+    /// be made. It joins the scene beside `current_layer_name`.
+    std::string                   CreateTextLayer(std::string_view config_json,
+                                                  std::string_view current_layer_name);
+    /// `createLayer`'s `name`, `parent`, `size` and `parallaxDepth` for a layer
+    /// a script made, and the same properties of any layer afterwards.
+    bool                          NameLayer(std::string_view runtime_name, std::string authored_name);
+    bool                          SetNodeParent(std::string_view name, std::string_view parent_name);
+    bool                          SetNodeSize(std::string_view name, const Eigen::Vector2f& size);
+    /// `parallaxDepth`: how far the cursor moves a layer. A write reaches the
+    /// layer, its effect passes and the layers below it (Wallpaper Engine moves
+    /// a whole tree by its outermost layer's depth, so a write on a child
+    /// changes only that child's drift), and a layer that starts or stops
+    /// following the cursor asks for a new render graph.
+    Eigen::Vector2f               NodeParallaxDepth(std::string_view name) const;
+    bool                          SetNodeParallaxDepth(std::string_view name, const Eigen::Vector2f& depth);
     bool                          ClearNodeTextDirty(std::string_view name);
     void                          PumpTextLayerCache();
     bool                          SetNodeTextureFrame(std::string_view name, double frame);
     double                        NodeTextureFrame(std::string_view name) const;
+    /// `getTextureAnimation()`: the sprite sheet a layer draws. `play` lets it
+    /// run on from the frame it is at, `pause` holds that frame, `stop` holds
+    /// the first one; `rate` scales how fast it runs.
+    struct TextureAnimationInfo {
+        std::string name;
+        std::size_t frame_count { 0 };
+        double      duration { 0.0 };
+        double      fps { 0.0 };
+    };
+    std::optional<TextureAnimationInfo> NodeTextureAnimation(std::string_view name) const;
+    bool                          PlayNodeTextureAnimation(std::string_view name);
+    bool                          PauseNodeTextureAnimation(std::string_view name);
+    bool                          StopNodeTextureAnimation(std::string_view name);
+    bool                          NodeTextureAnimationPlaying(std::string_view name) const;
+    bool                          SetNodeTextureAnimationRate(std::string_view name, double rate);
+    double                        NodeTextureAnimationRate(std::string_view name) const;
+    /// The frame the sheet is on: the one a script pinned, else the one last drawn.
+    double                        NodeTextureAnimationFrame(std::string_view name) const;
     bool                          NodeHasVideoTexture(std::string_view name) const;
     bool                          NodeVideoTextureIsPlaying(std::string_view name) const;
     bool                          PlayNodeVideoTexture(std::string_view name);
@@ -416,6 +536,12 @@ public:
     bool                         AudioResponseActive() const;
     bool                         ConsumeSceneGraphMutationFlag();
     audio::AudioSpectrumSnapshot CurrentAudioSpectrumSnapshot() const;
+    /// Runs `destroy()` in every script that started, once, while everything
+    /// the scripts could reach still exists. `Scene` calls it first thing in its
+    /// destructor, before any of its members die: the runtime is declared above
+    /// the file system and the render-exclusion list it reads, which would be
+    /// gone by the time `~SceneRuntimeContext` ran. Safe to call again.
+    void                         TearDownScripts();
     void                         RecordScriptError(std::string message);
     std::size_t                  scriptErrorCount() const;
     const std::vector<std::string>& scriptErrors() const;
@@ -613,8 +739,18 @@ private:
     std::unordered_map<std::string, std::unique_ptr<DynamicValue>> m_property_values;
     std::vector<std::unique_ptr<DynamicValue>>                     m_owned_values;
     std::unordered_map<std::string, SceneNode*>                    m_nodes;
-    /// Registration order of `m_nodes`, back to front: the order the scene file lists them in.
+    /// Registration order of `m_nodes`, which `SetLayerOrder` reorders to the
+    /// scene file's and `SortLayer` changes.
     std::vector<std::string>                                       m_node_order;
+    /// Runtime key -> the name the scene file gave it, for layers registered
+    /// under a generated key (a shared or empty authored name).
+    std::unordered_map<std::string, std::string>                   m_layer_authored_names;
+    std::unordered_map<int32_t, std::string>                       m_layer_ids;
+    bool                                                           m_initial_layer_config_requested { false };
+    InitialLayerConfigProvider                                     m_initial_layer_config_provider;
+    TextFontResolver                                               m_text_font_resolver;
+    TextLayerFactory                                               m_text_layer_factory;
+    int32_t                                                        m_next_generated_text_id { 0x40000000 };
     std::unordered_map<std::string, std::string>                   m_layer_aliases;
     std::unordered_map<std::string, NodeVisibilityBinding>         m_node_visibility;
     std::unordered_map<std::string, NodeVec3Binding>               m_node_translate;
@@ -709,6 +845,7 @@ private:
     std::unordered_map<std::string, VideoTexturePlaybackBinding, StringHash, std::equal_to<>>
         m_video_texture_playback;
     std::unordered_map<std::string, std::weak_ptr<WPSoundStream>>  m_sound_layers;
+    std::shared_ptr<void>                                          m_scripted_value_registry { std::make_shared<char>() };
     std::vector<ScriptedDynamicValue*>                             m_scripted_values;
     std::unordered_map<ScriptedDynamicValue*, bool>                m_scripted_value_cursor_inside;
     // Who took each button's press, so its release reaches them wherever the
@@ -733,6 +870,10 @@ private:
     /// Destroyed layers no longer in the scene graph, kept alive until
     /// `ReleaseRetiredLayers` sees the graph rebuilt without them.
     std::vector<std::shared_ptr<SceneNode>>                        m_retired_layers;
+    /// Textures of text layers that were destroyed, dropped from the scene once
+    /// the graph that drew them is gone, so layers made and destroyed over and
+    /// over do not accumulate rasters.
+    std::vector<std::string>                                       m_retired_text_textures;
     /// Bounded: a wallpaper that requests on every cursor event while nothing
     /// drains must not grow this without limit, and the oldest request is the
     /// one a user has already stopped waiting for.
@@ -749,6 +890,9 @@ private:
     std::function<void()> m_audio_requirement_listener;
     bool m_media_integration_enabled { false };
     bool m_scene_graph_mutated { false };
+    /// The display's size or the language changed since the scripts were told.
+    bool m_screen_resize_pending { false };
+    bool m_general_settings_pending { false };
 };
 
 std::unique_ptr<SceneRuntimeContext> CreateSceneRuntimeContext(SceneRuntimeBootstrap bootstrap);

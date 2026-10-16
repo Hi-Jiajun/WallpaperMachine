@@ -53,8 +53,31 @@ public:
     void        SetName(std::string name) { m_name = std::move(name); }
     bool        Visible() const { return m_visible; }
     bool        SkipRenderPass() const { return m_skipRenderPass; }
+    /// A frame a script pinned the sprite sheet to; the sheet holds it until
+    /// `ClearTextureFrame` (a script's `play()`) lets it run again.
     const auto& TextureFrame() const { return m_textureFrame; }
     void SetTextureFrame(double frame) { m_textureFrame = frame; }
+    void ClearTextureFrame() { m_textureFrame.reset(); }
+    /// What a script's `pause()`, `stop()`, `play()` and `rate` say about the
+    /// sprite sheet the layer draws. The renderer advances the sheet by the
+    /// frame time scaled by `TextureAnimationStep`, which is zero while paused,
+    /// so a paused sheet holds the frame it is on.
+    bool   TextureAnimationPaused() const { return m_textureAnimationPaused; }
+    void   SetTextureAnimationPaused(bool paused) { m_textureAnimationPaused = paused; }
+    /// The rate a script set, as it set it: `rate` reads back what was written.
+    double TextureAnimationRate() const { return m_textureAnimationRate; }
+    void   SetTextureAnimationRate(double rate) { m_textureAnimationRate = rate; }
+    /// How far the sheet advances in `frame_time`: nothing while paused, or at a
+    /// rate that is not a positive speed a sheet could show. That range is
+    /// applied here, where the rate is used, and not to the value stored.
+    double TextureAnimationStep(double frame_time) const {
+        const bool usable = m_textureAnimationRate > 0.0 && m_textureAnimationRate < 1.0e6;
+        return m_textureAnimationPaused || ! usable ? 0.0 : frame_time * m_textureAnimationRate;
+    }
+    /// The sheet frame the renderer last drew, for a script that asks where the
+    /// animation is. Absent until a frame has drawn it.
+    const auto& TextureAnimationFrame() const { return m_textureAnimationFrame; }
+    void SetTextureAnimationFrame(double frame) { m_textureAnimationFrame = frame; }
     bool        MustProduce() const { return m_must_produce; }
     void        SetMustProduce(bool produce) { m_must_produce = produce; }
     /// Drawn only into its own composite, which another layer samples; never
@@ -137,6 +160,9 @@ private:
     bool        m_composite_only { false };
     bool        m_visibility_settled { false };
     std::optional<double> m_textureFrame;
+    bool                  m_textureAnimationPaused { false };
+    double                m_textureAnimationRate { 1.0 };
+    std::optional<double> m_textureAnimationFrame;
 
     bool            m_dirty;
     Eigen::Matrix4d m_trans;

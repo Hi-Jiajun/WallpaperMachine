@@ -396,7 +396,7 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   false, while the node is freed only once the graph has been rebuilt without it
   (`ScriptRuntimeCompat.DestroyLayerRemovesALayerTheScriptCreated`,
   `.ADestroyedLayerIsFreedOnlyOnceTheGraphNoLongerDrawsIt`). A layer from the
-  scene file, or one named by index, stays and the call answers false. Without
+  scene file stays and the call answers false. Without
   it, a script that rebuilds its layers when a setting changes threw
   `not a function` before building the new set.
 - **Timeline events** — `ScriptRuntimeCompat.*Timeline*Event*`, `*Marker*`,
@@ -561,6 +561,160 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   and goes back to sleep. A paused scene showing the change on resume comes from the
   same per-command frame request and is not exercised; a preview on a real display,
   and the hitch of a revealed layer compiling new pipelines, are not checked.
+- **SceneScript API parity with Wallpaper Engine 2.8.42** — the script API is
+  checked against what Wallpaper Engine's shipped script classes and modules and
+  the entry points and class members its binary registers do, not against what
+  this engine happened to expose. In `script_runtime_compat_test` unless named
+  otherwise:
+  - *Small fixes.* `SceneScriptMediaEventSmoke.PlaybackStatesAreNumberedAsWallpaperEngineNumbersThem`
+    (stopped 0, playing 1, paused 2; the literal and the constant must agree);
+    `.AnimationLayerCountIsThePuppetsNotTheNumberAskedFor` and
+    `.AnimationLayerCountIsZeroWithoutAPuppet`; `.WEMathConstantsAreNumbersAndMixInterpolates`
+    (`deg2rad` and `rad2deg` are the factors, not functions);
+    `.WEColorConvertsBetweenRgbAndHsvAndScales` (`rgb2hsv`, `normalizeColor`,
+    `expandColor`) and `.WEColorHsv2RgbDoesNotClampSaturationOrWrapHue` (a
+    saturation above 1 gives components outside 0..1, a hue of 1 or more goes
+    round the sextants again, a negative hue is black, as in Wallpaper Engine);
+    `.WEVectorReportsTheAngleOfADirection`;
+    `.LocalStorageDeleteRemovesAKeyAndRemoveStaysAnAlias`;
+    `.CursorScreenPositionIsInDisplayPixelsFromTheTop` (`input.cursorScreenPosition`
+    is the window-normalized pointer times `engine.screenResolution`, y from the
+    top; `input.cursorLeftDown` is the primary button). The typed Rust path
+    sends the same numbers: `wallpaper-core` `media::integration` tests
+    (`playback_state_serializes_as_the_numbers_scripts_compare_against`,
+    `playback_event_carries_the_script_number_not_a_host_numbering`) and
+    `wallpaper-bridge` `scene_media_playback_reaches_scripts_in_wallpaper_engines_numbers`
+    (the host's own numbering, playing 0, paused 1, stopped 2, is mapped to the
+    variants by name).
+  - *Vectors and matrices.* `.VectorsCarryTheWallpaperEngineMethodSet`,
+    `.VectorsBuildFromStringsAndPrintLikeWallpaperEngine`,
+    `.VectorsTheHostHandsOutAreTheGlobalClasses`, `.Mat4ComposesTransformsAndInvertsThem`,
+    `.Mat3HandlesTwoDimensionalTransforms`,
+    `.MatrixDeterminantAndInverseMatchValuesWorkedOutExactly` (a 4x4 and a 3x3
+    worked out in exact rational arithmetic, a swapped column, a singular matrix),
+    `.EulerAnglesTurnAboutXThenYThenZAndComeBackOut` (the order, the round trip
+    over the whole range and at +-90 degrees about y, a scale leaving the angles
+    alone) and `.MatrixDecompositionRebuildsTheMatrixAndMirroringIsANegativeXScale`
+    (also axis-angle, `lookAt` and `normalMatrix`).
+    `Vec2`/`Vec3`/`Vec4`/`Mat3`/`Mat4` are classes with Wallpaper Engine's method
+    set and semantics (`"x y z"` strings, `toString()` with spaces, a `Vec2` beside
+    a `Vec3` standing for its own components); the vectors the host builds
+    (`engine.canvasSize`, `thisLayer.origin`) are instances of them from the first
+    frame, not bare objects until something moves. The matrix routines
+    (determinant by expansion along columns, the inverse as adjugate over
+    determinant, rotations as products of elementary turns) are written from the
+    mathematics, not from Wallpaper Engine's file. The classes were also compared
+    method by method against Wallpaper Engine's own with randomized inputs outside
+    the repository (not a checked-in test, since that needs its files): no value
+    or class differs except two leniencies kept on purpose, a `Vec4` beside a
+    `Vec2` (the shipped one gives NaN for z and w, this one leaves them alone) and
+    a vector built from a wider vector or a plain object (the shipped one stores
+    the object in every component, this one takes the components). A singular
+    matrix has an inverse of non-finite numbers in both, though the sign of the
+    infinities can differ.
+  - *Layers.* `.SceneEnumeratesItsLayersInOrderAsTheObjectsGetLayerReturns`,
+    `.LayersAScriptCreatesJoinTheEnumerationAndLeaveItWhenDestroyed`,
+    `.InitialLayerConfigIsTheSceneFilesObjectForTheLayer`,
+    `.ASceneKeepsItsObjectListOnlyWhenAScriptReadsIt` and, with the real parser,
+    `SceneSchema.ScriptsEnumerateLayersInSceneFileOrderAndReadTheirScenesObjects`
+    and `.ASceneWithoutLayerConfigReadersKeepsNoCopyOfItsObjects`:
+    `getLayerCount` (a number), `getLayer(index)` (`null` out of range),
+    `enumerateLayers`, `getLayerByID` and `getLayer(name)` answer the same cached
+    wrapper objects, and `getInitialLayerConfig` a fresh parsed copy of the layer's
+    object each call; hidden templates are not layers. Only layers the parser
+    instantiated are counted: an object the scene file marks statically invisible
+    (and nothing can show) is never built, so it has no index and no id, and the
+    count and later indices differ from the scene file's object list by those.
+    `.LayersShowTheNameTheSceneFileGaveThemWhateverKeyTheyAreRegisteredUnder` and
+    `SceneSchema.ScriptsSeeTheAuthoredNameOfLayersTheParserRegisteredUnderGeneratedKeys`:
+    `layer.name` is the authored name (empty for an unnamed layer) even where the
+    layer is registered under a generated key because its name is shared or
+    empty; every call still goes by the key. `.OneLayerOrderServesIndexCountEnumerationAndSorting`
+    and `.SortingASiblingWithinItsGroupReordersOnlyThatGroup`: `getLayer(i)`,
+    `getLayerCount`, `enumerateLayers`, `getLayerIndex` and `sortLayer` are one
+    order; a sort moves the layer in it (clamped to the ends) and the draw order
+    among the layer's siblings follows, once.
+    `.DestroyLayerRemovesEveryLayerBelowItFromTheRuntime`,
+    `.ScriptsCanKeepUsingWrappersOfLayersDestroyedWithTheirParent` and
+    `.ANameFreedByDestroyLayerCanBeGivenAgainAndParentsAreChecked`: destroying a
+    layer destroys the layers a script made below it (none stays registered,
+    counted, named or findable; their nodes are freed together once the graph no
+    longer draws them), a name can be given again, and a layer cannot hang below
+    itself.
+  - *Entry points.* `.ApplyGeneralSettingsFollowsInitAndTheInterfaceLanguage`,
+    `.ASceneScriptIsToldTheLanguageAfterItsInit`, `.ResizeScreenReportsANewDisplaySizeToStartedScripts`,
+    `.ResizeScreenReachesSceneScriptsAndEngineOnListeners`,
+    `.DestroyRunsOnceForScriptsThatStartedWhenTheSceneIsTornDown`,
+    `.DestroyDoesNotRunForAScriptThatNeverStarted` and
+    `.AScriptedValueDestroyedBeforeTheRuntimeLeavesItsRegistry`: `destroy` pairs
+    with `init`; a scripted value that is destroyed first leaves the runtime's
+    list, so nothing ticks or ends it afterwards. `SceneSchema.ScriptsEndWhileTheScenesFilesAndLayersStillExist`:
+    the scene ends its scripts first thing in its own destructor, while its file
+    system and everything else still exist (the runtime is declared above them and
+    would otherwise end them after they were gone). `SceneSchema.ASceneScriptsInitSeesTheLayerOrderIdsObjectsAndTextHooks`:
+    a scene script's `init` runs after the layer order, ids, object list and
+    text hooks are installed (scene scripts start last in the parse). The
+    language scripts are told is always `en-us`: `SetLanguage` exists but nothing
+    calls it yet.
+  - *Animation layers.* `.ThisObjectIsTheAnimationLayerAScriptIsBoundTo`,
+    `.ThisObjectIsTheLayerForAScriptOnTheLayerItself`,
+    `.AnimationLayersAreOneObjectPerLayerAndKnowTheirOwnName`,
+    `.AnimationLayerEndedCallbacksFireWhenASingleShotFinishes`,
+    `.RemovedEndedCallbacksStaySilent` and
+    `.ALoopingAnimationLayerNeverEndsAndItsListenerStaysSilent`: a script on
+    `animationlayers[i]` has that animation layer as `thisObject`, which is the
+    same object `getAnimationLayer` gives for its name or its position and has the
+    layer's authored name; `addEndedCallback` listeners (one set per layer,
+    however it was asked for) run once per finish of a single-shot layer, from
+    the puppet state the renderer advances, and never for a looping one.
+  - *Sprite sheets.* `.PausedSpriteSheetHoldsItsFrameAndPlayResumesIt`,
+    `.StoppedSpriteSheetReturnsToItsFirstFrameAndSetFrameStillPins`,
+    `.SpriteSheetRateScalesPlaybackAndTheSheetDescribesItself`,
+    `.SpriteSheetRateReadsBackWhatWasWrittenAndOnlyAPositiveRateAdvancesIt` and
+    `.ALayerWithoutASpriteSheetReportsNoFrames`: `getTextureAnimation()` has
+    `play`/`pause`/`stop`/`isPlaying`/`rate`/`fps`/`frameCount`/`duration`/`name`;
+    the shader value updater advances the sheet by the frame time the node lets it
+    have, so a paused sheet holds its frame (driven through the real updater);
+    `rate` reads back what was written, and a rate that is not a positive speed
+    holds the sheet without changing what it reads.
+  - *Text layers.* `.TextLayerStyleIsReadAndWrittenThroughTheLayer`,
+    `.TextStyleOnAnotherKindOfLayerStaysAPlainProperty`,
+    `.TextStyleRejectsValuesTheLayerCannotUse`, `.TextAlignmentOnlyTakesTheWordsItIsDefinedFor`,
+    `.TextPointSizeSurvivesAReadModifyWriteWithoutLosingPrecision`,
+    `.CreateLayerMakesATextLayerFromItsConfiguration`,
+    `.CreateLayerWithoutAnythingToMakeStillThrowsAndWithoutAFactoryReportsIt` and, with the
+    real parser, `SceneSchema.CreateLayerBuildsATextLayerThroughTheParsersOwnTextPath`,
+    `.ScriptsRestyleASceneTextLayerAndItIsLaidOutAgain` and
+    `.TextLayersAScriptMadeAndDestroyedLeaveNoTextureBehind`: `font`, `pointsize`,
+    `horizontalalign` and `verticalalign` read and write the text layer, a write
+    lays it out again and keeps its anchor (setting one axis keeps the other's
+    authored edge); the alignments take only `left`/`center`/`right` and
+    `top`/`center`/`bottom` (anything else stays a plain property); the size reads
+    back as the float it is; a font is resolved by the parser's own rule;
+    `createLayer({ text, font, pointsize, color, alpha, ... })` parses a text
+    object as the scene file's own are parsed and joins the scene beside the layer
+    that made it, and when such a layer is destroyed its raster is dropped from
+    the scene once the graph that drew it is gone.
+  - *Image layers made by script.* `.CreateLayerHonoursSizeNameParentAndParallaxDepth`,
+    `.ASizedLayerHasItsOwnStretchedCardAndTheTemplateKeepsItsOwn`,
+    `.ParallaxDepthIsReadAndWrittenThroughTheShaderUpdater`,
+    `.ParallaxDepthIsTheDepthOfWhatIsDrawnAndAWriteReachesTheLayersBelow`,
+    `.ACreatedLayersParallaxDepthDecidesWhetherTheCursorMovesIt`,
+    `.CreateLayerWithAParentThatNamesNoLayerStaysBesideItsCreator` and
+    `.ALayerCreatedBelowAParentMovesWithItAndStaysOutOfTheRoot`: `size` stretches
+    the copy's own card (the template's geometry is shared with its copies, so the
+    copy gets one of its own) without touching texture coordinates, `name` makes the
+    layer reachable by it (and `destroyLayer` still takes the object), `parent`
+    moves it below that layer and its world place follows the parent (a parent
+    that names no layer leaves it beside its creator, not at the root), and
+    `parallaxDepth` is a property of every layer. A write reaches the layer, the
+    effect passes it is drawn through and the layers below it (Wallpaper Engine
+    moves a whole tree by its outermost layer's depth, so a write on a child
+    changes only that child's drift; layers above and beside keep theirs), and a
+    layer that starts or stops following the cursor asks for a new render graph.
+  - Not covered here: `localStorage` persistence, effects, bones, particles,
+    scene properties, the camera, `Intl`, and `getTransformMatrix`; host plumbing
+    for `SetLanguage` (scripts are told `en-us` until the host calls it).
 - **Scene commits in headless tests** — `scene_schema_tests` helpers wait for
   posted work with a render-looper round trip (`beginSurfaceReconfigure`) and a
   main-looper one (installing a pointer callback replays from the main looper)

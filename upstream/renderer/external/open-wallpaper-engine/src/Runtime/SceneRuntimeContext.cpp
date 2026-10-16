@@ -20,6 +20,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <functional>
@@ -514,7 +516,27 @@ SceneRuntimeContext::SceneRuntimeContext(SceneRuntimeBootstrap bootstrap)
     StartTextWorker();
 }
 
-SceneRuntimeContext::~SceneRuntimeContext() { StopTextWorker(); }
+SceneRuntimeContext::~SceneRuntimeContext() {
+    // Scripts end while the layers and values they could still touch exist.
+    TearDownScripts();
+    // From here on the registry is going away with the other members, and a
+    // scripted value destroyed with them has nothing to leave.
+    m_scripted_value_registry.reset();
+    StopTextWorker();
+}
+
+void SceneRuntimeContext::TearDownScripts() {
+    // A `destroy()` may create layers, which can register more scripts: those
+    // are never started, so only the ones present now are ended, by index.
+    const auto value_count  = m_scripted_values.size();
+    const auto script_count = m_scene_scripts.size();
+    for (std::size_t index = 0; index < value_count; ++index) {
+        if (auto* value = m_scripted_values[index]; value != nullptr) value->Destroy();
+    }
+    for (std::size_t index = 0; index < script_count; ++index) {
+        if (auto* script = m_scene_scripts[index].script.get(); script != nullptr) script->Destroy();
+    }
+}
 
 void SceneRuntimeContext::Tick(double frame_time) {
     ReleaseRetiredLayers();
@@ -524,6 +546,32 @@ void SceneRuntimeContext::Tick(double frame_time) {
     // programs start next tick, and no iterator survives a loader callback.
     const auto scripted_value_count = m_scripted_values.size();
     const auto scene_script_count = m_scene_scripts.size();
+    // What changed about the environment since the scripts last looked: the
+    // display's size and the interface language. A script that has not started
+    // learns the current ones from its own `init`.
+    if (m_screen_resize_pending || m_general_settings_pending) {
+        const bool resized  = m_screen_resize_pending;
+        const bool language = m_general_settings_pending;
+        m_screen_resize_pending     = false;
+        m_general_settings_pending = false;
+        for (std::size_t index = 0; index < scripted_value_count; ++index) {
+            auto* value = m_scripted_values[index];
+            if (value == nullptr) continue;
+            if (resized) value->DispatchResizeScreen(*m_host_context);
+            if (language) value->DispatchGeneralSettings(*m_host_context);
+        }
+        for (std::size_t index = 0; index < scene_script_count; ++index) {
+            auto* script = m_scene_scripts[index].script.get();
+            if (script == nullptr) continue;
+            if (resized) script->DispatchResizeScreen(*m_host_context);
+            if (language) script->DispatchGeneralSettings(*m_host_context);
+        }
+        // `engine.on('resizeScreen', ...)` listeners can only exist where a script does.
+        if (resized && (scripted_value_count != 0 || scene_script_count != 0)) {
+            m_script_engine->RunResizeScreenCallbacks(*m_host_context);
+        }
+    }
+    DispatchPuppetLayerEvents();
     for (auto& [texture_key, playback] : m_video_texture_playback) {
         (void)texture_key;
         if (playback.paused) continue;
@@ -780,8 +828,28 @@ void SceneRuntimeContext::UpdatePresentedMargins() {
 void SceneRuntimeContext::SetScreenResolution(const Eigen::Vector2f& resolution) {
     if (! resolution.allFinite()) return;
     if (resolution.x() <= 0.0f || resolution.y() <= 0.0f) return;
+    // A new size is news to the scripts, which are told on the next tick.
+    if (! SizeNearlyEqual(m_host_context->screen_resolution, resolution, 0.5f)) {
+        m_screen_resize_pending = true;
+    }
     m_host_context->screen_resolution = resolution;
 }
+
+void SceneRuntimeContext::SetLanguage(std::string_view language) {
+    std::string normalized;
+    normalized.reserve(language.size());
+    for (const char character : language) {
+        normalized.push_back(character == '_'
+                                 ? '-'
+                                 : static_cast<char>(std::tolower(static_cast<unsigned char>(character))));
+    }
+    if (normalized.empty()) normalized = "en-us";
+    if (normalized == m_host_context->language) return;
+    m_host_context->language = std::move(normalized);
+    m_general_settings_pending = true;
+}
+
+const std::string& SceneRuntimeContext::Language() const { return m_host_context->language; }
 
 void SceneRuntimeContext::SetCursorInput(float x, float y) {
     x                                          = std::clamp(x, 0.0f, 1.0f);
@@ -1116,6 +1184,15 @@ void SceneRuntimeContext::RegisterScriptedValue(ScriptedDynamicValue* value) {
     }
 }
 
+void SceneRuntimeContext::UnregisterScriptedValue(ScriptedDynamicValue* value) {
+    if (value == nullptr) return;
+    // Slots are emptied, not erased: a tick that is walking the list keeps its indices.
+    std::replace(m_scripted_values.begin(), m_scripted_values.end(), value,
+                 static_cast<ScriptedDynamicValue*>(nullptr));
+    m_scripted_value_cursor_inside.erase(value);
+    for (auto& [button, held] : m_scripted_value_cursor_held) std::erase(held, value);
+}
+
 void SceneRuntimeContext::RegisterNode(std::string name, SceneNode* node) {
     if (node == nullptr || name.empty()) return;
     std::string key     = std::move(name);
@@ -1163,6 +1240,7 @@ void SceneRuntimeContext::UnregisterNode(std::string_view name) {
     if (m_nodes.erase(key) != 0) {
         std::erase(m_node_order, key);
         m_node_rank_valid = false;
+        std::erase_if(m_layer_ids, [&key](const auto& entry) { return entry.second == key; });
     }
     m_node_size.erase(key);
     m_node_hit_masks.erase(key);
@@ -1179,6 +1257,8 @@ void SceneRuntimeContext::UnregisterNode(std::string_view name) {
     m_node_template_paths.erase(key);
     m_node_video_textures.erase(key);
     m_sound_layers.erase(key);
+    m_layer_authored_names.erase(key);
+    m_queued_text_revisions.erase(key);
 }
 
 void SceneRuntimeContext::RollbackNodeRegistration(
@@ -1211,6 +1291,8 @@ void SceneRuntimeContext::RollbackNodeRegistration(
 
     for (std::size_t index = previous->scripted_values_size; index < m_scripted_values.size();
          ++index) {
+        // A script that started before its layer was rolled back ends with it.
+        if (m_scripted_values[index] != nullptr) m_scripted_values[index]->Destroy();
         m_scripted_value_cursor_inside.erase(m_scripted_values[index]);
         // A press held across this teardown has nothing left to release onto,
         // and the pointer is about to dangle.
@@ -1361,7 +1443,11 @@ double SceneRuntimeContext::PuppetAnimationControl(std::string_view layer_name,
                                                    bool has_value) {
     auto* puppet = FindPuppetLayer(layer_name);
     if (puppet == nullptr) return 0.0;
+    // A question about the whole stack, answered before any one layer is named.
+    if (operation == "layerCount") return static_cast<double>(puppet->layerCount());
     const i32 index = puppet->findLayer(animation_layer);
+    // The stack index of the layer, which a listener is filed under.
+    if (operation == "index") return static_cast<double>(index);
     if (index < 0) return 0.0;
     if (operation == "play") return puppet->play(index) ? 1.0 : 0.0;
     if (operation == "pause") return puppet->pause(index) ? 1.0 : 0.0;
@@ -1380,6 +1466,12 @@ double SceneRuntimeContext::PuppetAnimationControl(std::string_view layer_name,
     if (operation == "setBlend") return puppet->setBlend(index, value) ? 1.0 : 0.0;
     if (operation == "setVisible") return puppet->setVisible(index, value != 0.0) ? 1.0 : 0.0;
     return 0.0;
+}
+
+std::string SceneRuntimeContext::PuppetAnimationLayerName(std::string_view layer_name,
+                                                          std::string_view animation_layer) {
+    auto* puppet = FindPuppetLayer(layer_name);
+    return puppet != nullptr ? puppet->layerName(puppet->findLayer(animation_layer)) : std::string {};
 }
 
 void SceneRuntimeContext::RegisterLayerTemplate(std::string                template_path,
@@ -2213,15 +2305,47 @@ std::string SceneRuntimeContext::CreateLayerFromTemplate(std::string_view reques
     return generated_name;
 }
 
-bool SceneRuntimeContext::DestroyLayer(std::string_view name) {
+namespace
+{
+// Every node at or below `root`, `root` first.
+std::vector<SceneNode*> SubtreeOf(SceneNode& root) {
+    std::vector<SceneNode*> nodes { &root };
+    for (std::size_t next = 0; next < nodes.size(); ++next) {
+        for (const auto& child : nodes[next]->GetChildren()) nodes.push_back(child.get());
+    }
+    return nodes;
+}
+} // namespace
+
+bool SceneRuntimeContext::DestroyLayer(std::string_view name, std::vector<std::string>* destroyed) {
     const auto created = m_script_created_layers.find(std::string(name));
     if (created == m_script_created_layers.end()) return false;
     const std::string key = *created;
-    m_script_created_layers.erase(created);
 
     const auto registered = m_nodes.find(key);
     SceneNode* node       = registered != m_nodes.end() ? registered->second : nullptr;
-    UnregisterNode(key);
+
+    // The layer and every layer registered below it: the nodes under this one
+    // are freed with it, so nothing may keep pointing at them.
+    std::vector<std::string> doomed { key };
+    if (node != nullptr && ! node->GetChildren().empty()) {
+        const auto                                 subtree = SubtreeOf(*node);
+        const std::unordered_set<const SceneNode*> below(subtree.begin() + 1, subtree.end());
+        for (const auto& [layer_name, layer_node] : m_nodes) {
+            if (layer_name != key && below.contains(layer_node)) doomed.push_back(layer_name);
+        }
+    }
+    for (const auto& layer_name : doomed) {
+        m_script_created_layers.erase(layer_name);
+        // The name a script gave the layer goes with it.
+        std::erase_if(m_layer_aliases,
+                      [&layer_name](const auto& alias) { return alias.second == layer_name; });
+        if (m_text_layers.contains(layer_name)) {
+            m_retired_text_textures.push_back(TextTextureName(layer_name));
+        }
+        UnregisterNode(layer_name);
+        if (destroyed != nullptr) destroyed->push_back(layer_name);
+    }
     if (node == nullptr || node->Parent() == nullptr) return true;
 
     auto&      siblings = node->Parent()->GetChildren();
@@ -2236,22 +2360,36 @@ bool SceneRuntimeContext::DestroyLayer(std::string_view name) {
 }
 
 void SceneRuntimeContext::ReleaseRetiredLayers() {
-    if (m_retired_layers.empty() || m_scene_graph_mutated) return;
+    if ((m_retired_layers.empty() && m_retired_text_textures.empty()) || m_scene_graph_mutated) {
+        return;
+    }
     // Their copies of the template's material bindings write to materials
-    // nothing draws any more.
+    // nothing draws any more. A retired layer takes the layers below it along,
+    // and each of those is forgotten too.
     std::unordered_set<const SceneMaterial*> materials;
-    for (const auto& node : m_retired_layers) {
-        if (node->Mesh() != nullptr && node->Mesh()->MaterialSlotPtr() != nullptr) {
-            materials.insert(node->Mesh()->MaterialSlotPtr().get());
-        }
-        if (m_scene != nullptr && m_scene->shaderValueUpdater != nullptr) {
-            m_scene->shaderValueUpdater->ForgetNode(node.get());
+    for (const auto& top : m_retired_layers) {
+        for (SceneNode* node : SubtreeOf(*top)) {
+            if (node->Mesh() != nullptr && node->Mesh()->MaterialSlotPtr() != nullptr) {
+                materials.insert(node->Mesh()->MaterialSlotPtr().get());
+            }
+            if (m_scene != nullptr && m_scene->shaderValueUpdater != nullptr) {
+                m_scene->shaderValueUpdater->ForgetNode(node);
+            }
         }
     }
     std::erase_if(m_material_constants, [&materials](const MaterialConstantBinding& binding) {
         const auto material = binding.material.lock();
         return material != nullptr && materials.contains(material.get());
     });
+    // The rasters of text layers that no longer exist.
+    if (m_scene != nullptr) {
+        auto* runtime_images = dynamic_cast<RuntimeImageSource*>(m_scene->imageParser.get());
+        for (const auto& texture : m_retired_text_textures) {
+            m_scene->textures.erase(texture);
+            if (runtime_images != nullptr) runtime_images->RemoveImage(texture);
+        }
+    }
+    m_retired_text_textures.clear();
     m_retired_layers.clear();
 }
 
@@ -2534,9 +2672,89 @@ bool SceneRuntimeContext::SetNodeTextureFrame(std::string_view name, double fram
 }
 
 double SceneRuntimeContext::NodeTextureFrame(std::string_view name) const {
+    return NodeTextureAnimationFrame(name);
+}
+
+double SceneRuntimeContext::NodeTextureAnimationFrame(std::string_view name) const {
     const auto it = m_nodes.find(std::string(name));
-    return it != m_nodes.end() && it->second != nullptr
-               ? it->second->TextureFrame().value_or(0.0) : 0.0;
+    if (it == m_nodes.end() || it->second == nullptr) return 0.0;
+    // The frame a script pinned, else the one the renderer last drew.
+    return it->second->TextureFrame().value_or(it->second->TextureAnimationFrame().value_or(0.0));
+}
+
+namespace
+{
+// The sprite sheet a layer draws: the first texture of its material that is one.
+const SceneTexture* SpriteSheetOf(const Scene* scene, SceneNode& node, std::string* key) {
+    if (scene == nullptr || node.Mesh() == nullptr) return nullptr;
+    const auto* material = node.Mesh()->Material();
+    if (material == nullptr) return nullptr;
+    for (const auto& texture : material->textures) {
+        const auto found = scene->textures.find(texture);
+        if (found == scene->textures.end() || found->second.spriteAnim.numFrames() == 0) continue;
+        if (key != nullptr) *key = texture;
+        return &found->second;
+    }
+    return nullptr;
+}
+} // namespace
+
+std::optional<SceneRuntimeContext::TextureAnimationInfo>
+SceneRuntimeContext::NodeTextureAnimation(std::string_view name) const {
+    const auto it = m_nodes.find(std::string(name));
+    if (it == m_nodes.end() || it->second == nullptr) return std::nullopt;
+    TextureAnimationInfo info;
+    const auto* sheet = SpriteSheetOf(m_scene, *it->second, &info.name);
+    if (sheet == nullptr) return std::nullopt;
+    info.frame_count = sheet->spriteAnim.numFrames();
+    for (std::size_t frame = 0; frame < info.frame_count; ++frame) {
+        const float frametime = sheet->spriteAnim.FrameAt(frame).frametime;
+        if (std::isfinite(frametime) && frametime > 0.0f) info.duration += frametime;
+    }
+    info.fps = info.duration > 0.0 ? static_cast<double>(info.frame_count) / info.duration : 0.0;
+    return info;
+}
+
+bool SceneRuntimeContext::PlayNodeTextureAnimation(std::string_view name) {
+    const auto it = m_nodes.find(std::string(name));
+    if (it == m_nodes.end() || it->second == nullptr) return false;
+    // The sheet runs on from the frame it was left on, a pinned one included.
+    it->second->ClearTextureFrame();
+    it->second->SetTextureAnimationPaused(false);
+    return true;
+}
+
+bool SceneRuntimeContext::PauseNodeTextureAnimation(std::string_view name) {
+    const auto it = m_nodes.find(std::string(name));
+    if (it == m_nodes.end() || it->second == nullptr) return false;
+    it->second->SetTextureAnimationPaused(true);
+    return true;
+}
+
+bool SceneRuntimeContext::StopNodeTextureAnimation(std::string_view name) {
+    const auto it = m_nodes.find(std::string(name));
+    if (it == m_nodes.end() || it->second == nullptr) return false;
+    it->second->SetTextureAnimationPaused(true);
+    it->second->SetTextureFrame(0.0);
+    return true;
+}
+
+bool SceneRuntimeContext::NodeTextureAnimationPlaying(std::string_view name) const {
+    const auto it = m_nodes.find(std::string(name));
+    return it != m_nodes.end() && it->second != nullptr && ! it->second->TextureAnimationPaused() &&
+           ! it->second->TextureFrame().has_value();
+}
+
+bool SceneRuntimeContext::SetNodeTextureAnimationRate(std::string_view name, double rate) {
+    const auto it = m_nodes.find(std::string(name));
+    if (it == m_nodes.end() || it->second == nullptr || ! std::isfinite(rate)) return false;
+    it->second->SetTextureAnimationRate(rate);
+    return true;
+}
+
+double SceneRuntimeContext::NodeTextureAnimationRate(std::string_view name) const {
+    const auto it = m_nodes.find(std::string(name));
+    return it != m_nodes.end() && it->second != nullptr ? it->second->TextureAnimationRate() : 1.0;
 }
 
 bool SceneRuntimeContext::NodeHasVideoTexture(std::string_view name) const {
@@ -3260,6 +3478,447 @@ const std::vector<std::string>& SceneRuntimeContext::scriptErrors() const {
 }
 
 void SceneRuntimeContext::ClearScriptErrors() { m_script_errors.clear(); }
+
+// ---------------------------------------------------------------------------
+// Layers as scripts enumerate and address them.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+// A template a script's `createLayer` copies from is loaded as a hidden layer
+// of this name. It is never part of the scene.
+bool IsHiddenTemplateName(const std::string& name) { return name.starts_with("__template:"); }
+} // namespace
+
+std::size_t SceneRuntimeContext::LayerCount() const {
+    return static_cast<std::size_t>(std::count_if(
+        m_node_order.begin(), m_node_order.end(),
+        [](const std::string& name) { return ! IsHiddenTemplateName(name); }));
+}
+
+std::string SceneRuntimeContext::LayerNameAt(std::size_t index) const {
+    for (const auto& name : m_node_order) {
+        if (IsHiddenTemplateName(name)) continue;
+        if (index-- == 0) return name;
+    }
+    return {};
+}
+
+int SceneRuntimeContext::LayerIndex(std::string_view name) const {
+    const std::string key = ResolveLayerName(name);
+    if (! m_nodes.contains(key) || IsHiddenTemplateName(key)) return -1;
+    int index = 0;
+    for (const auto& entry : m_node_order) {
+        if (IsHiddenTemplateName(entry)) continue;
+        if (entry == key) return index;
+        ++index;
+    }
+    return -1;
+}
+
+bool SceneRuntimeContext::SortLayer(std::string_view name, int index) {
+    const std::string key   = ResolveLayerName(name);
+    const auto        found = m_nodes.find(key);
+    if (found == m_nodes.end() || found->second == nullptr || IsHiddenTemplateName(key)) {
+        return false;
+    }
+
+    bool      changed = false;
+    const int current = LayerIndex(key);
+    if (current < 0) return false;
+    const int target = std::clamp(index, 0, std::max(0, static_cast<int>(LayerCount()) - 1));
+    if (target != current) {
+        // The layer ends up at `target`: before the one that stood there when it
+        // moves toward the front, after it when it moves toward the back.
+        const std::string anchor = LayerNameAt(static_cast<std::size_t>(target));
+        std::erase(m_node_order, key);
+        auto place = std::find(m_node_order.begin(), m_node_order.end(), anchor);
+        if (target > current && place != m_node_order.end()) ++place;
+        m_node_order.insert(place, key);
+        changed = true;
+    }
+
+    // Draw order is the order among siblings. The layer goes right after the
+    // nearest sibling that now precedes it in the layer order, or, with none,
+    // right before the nearest one that follows. Siblings that are not layers
+    // have no place in that order and stay where they are.
+    SceneNode* node   = found->second;
+    SceneNode* parent = node->Parent();
+    if (parent == nullptr) return changed;
+    const auto mine = static_cast<std::size_t>(
+        std::find(m_node_order.begin(), m_node_order.end(), key) - m_node_order.begin());
+    const SceneNode* earlier = nullptr;
+    const SceneNode* later   = nullptr;
+    for (std::size_t position = 0; position < m_node_order.size(); ++position) {
+        const auto entry = m_nodes.find(m_node_order[position]);
+        if (entry == m_nodes.end() || entry->second == nullptr || entry->second == node ||
+            entry->second->Parent() != parent) {
+            continue;
+        }
+        if (position < mine) {
+            earlier = entry->second;
+        } else if (later == nullptr) {
+            later = entry->second;
+        }
+    }
+    auto&      siblings = parent->GetChildren();
+    const auto index_without_node = [&](const SceneNode* mate) {
+        int at = 0;
+        for (const auto& child : siblings) {
+            if (child.get() == node) continue;
+            if (child.get() == mate) return at;
+            ++at;
+        }
+        return -1;
+    };
+    int desired = -1;
+    if (earlier != nullptr) {
+        const int at = index_without_node(earlier);
+        if (at >= 0) desired = at + 1;
+    } else if (later != nullptr) {
+        desired = index_without_node(later);
+    }
+    if (desired >= 0 && SortNodeInList(siblings, node, desired)) {
+        m_scene_graph_mutated = true;
+        changed               = true;
+    }
+    return changed;
+}
+
+void SceneRuntimeContext::RegisterLayerAuthoredName(std::string runtime_name,
+                                                    std::string authored_name) {
+    if (runtime_name.empty() || ! m_nodes.contains(runtime_name)) return;
+    m_layer_authored_names.insert_or_assign(std::move(runtime_name), std::move(authored_name));
+}
+
+std::string SceneRuntimeContext::LayerAuthoredName(std::string_view runtime_name) const {
+    const auto found = m_layer_authored_names.find(std::string(runtime_name));
+    return found != m_layer_authored_names.end() ? found->second : std::string(runtime_name);
+}
+
+void SceneRuntimeContext::SetLayerOrder(const std::vector<std::string>& names) {
+    std::vector<std::string>        order;
+    std::unordered_set<std::string> placed;
+    order.reserve(m_node_order.size());
+    for (const auto& name : names) {
+        if (m_nodes.contains(name) && placed.insert(name).second) order.push_back(name);
+    }
+    for (const auto& name : m_node_order) {
+        if (placed.insert(name).second) order.push_back(name);
+    }
+    m_node_order      = std::move(order);
+    m_node_rank_valid = false;
+}
+
+void SceneRuntimeContext::RegisterLayerId(int32_t id, std::string name) {
+    if (id == 0 || name.empty() || ! m_nodes.contains(name)) return;
+    m_layer_ids.insert_or_assign(id, std::move(name));
+}
+
+std::string SceneRuntimeContext::LayerNameForId(int32_t id) const {
+    const auto found = m_layer_ids.find(id);
+    return found != m_layer_ids.end() && m_nodes.contains(found->second) ? found->second
+                                                                          : std::string {};
+}
+
+void SceneRuntimeContext::RequestInitialLayerConfig() { m_initial_layer_config_requested = true; }
+
+bool SceneRuntimeContext::InitialLayerConfigRequested() const {
+    return m_initial_layer_config_requested;
+}
+
+void SceneRuntimeContext::SetInitialLayerConfigProvider(InitialLayerConfigProvider provider) {
+    m_initial_layer_config_provider = std::move(provider);
+}
+
+std::string SceneRuntimeContext::InitialLayerConfigJson(std::string_view name) const {
+    if (! m_initial_layer_config_provider) return {};
+    const std::string key = ResolveLayerName(name);
+    for (const auto& [id, layer] : m_layer_ids) {
+        if (layer == key) return m_initial_layer_config_provider(id);
+    }
+    return {};
+}
+
+// ---------------------------------------------------------------------------
+// Puppet animation layers: `addEndedCallback`.
+// ---------------------------------------------------------------------------
+
+void SceneRuntimeContext::DispatchPuppetLayerEvents() {
+    if (m_puppet_layers.empty()) return;
+    // A puppet nobody listens to is still drained, so its record stays small.
+    std::vector<std::pair<std::string, i32>> ended;
+    for (auto& [name, layer] : m_puppet_layers) {
+        for (const i32 index : layer.takeFinishedLayers()) ended.emplace_back(name, index);
+    }
+    if (m_scripted_values.empty() && m_scene_scripts.empty()) return;
+    // After collecting: a listener may play the layer again or create layers.
+    for (const auto& [name, index] : ended) {
+        m_script_engine->NotifyAnimationLayerEnded(*m_host_context, name, index);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Text layers: style a script changes, and layers a script creates.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+// The fewest digits (at least six) that read back as the very same float, so a
+// script that reads the size, adds a little and writes it again loses nothing.
+std::string FormatPointSize(float value) {
+    char buffer[32];
+    for (int digits = 6; digits <= 9; ++digits) {
+        std::snprintf(buffer, sizeof(buffer), "%.*g", digits, static_cast<double>(value));
+        if (std::strtof(buffer, nullptr) == value) break;
+    }
+    return buffer;
+}
+
+// What `horizontalalign` and `verticalalign` may be set to: Wallpaper Engine
+// registers them as enumerations, so anything else is not an alignment.
+bool IsAlignmentWord(bool horizontal, std::string_view value) {
+    return horizontal ? value == "left" || value == "center" || value == "right"
+                      : value == "top" || value == "center" || value == "bottom";
+}
+
+// The anchor string a text layer is placed by names an edge or two: "left",
+// "top", "bottomright". Setting one axis replaces that axis's words and keeps
+// the other's.
+std::string ReplaceAnchorAxis(std::string anchor, bool horizontal, std::string_view value) {
+    const std::array<std::string_view, 2> words =
+        horizontal ? std::array<std::string_view, 2> { "left", "right" }
+                   : std::array<std::string_view, 2> { "top", "bottom" };
+    for (const auto word : words) {
+        for (auto at = anchor.find(word); at != std::string::npos; at = anchor.find(word, at)) {
+            anchor.erase(at, word.size());
+        }
+    }
+    std::string squeezed;
+    for (const char character : anchor) {
+        if (character == ' ' && (squeezed.empty() || squeezed.back() == ' ')) continue;
+        squeezed.push_back(character);
+    }
+    while (! squeezed.empty() && squeezed.back() == ' ') squeezed.pop_back();
+    if (! value.empty() && value != "center") {
+        if (! squeezed.empty()) squeezed.push_back(' ');
+        squeezed.append(value);
+    }
+    return squeezed;
+}
+} // namespace
+
+std::optional<std::string> SceneRuntimeContext::NodeTextStyle(std::string_view name,
+                                                              std::string_view property) const {
+    const auto layer = m_text_layers.find(std::string(name));
+    if (layer == m_text_layers.end()) return std::nullopt;
+    const auto& state = layer->second.state();
+    if (property == "font") return state.font_key;
+    if (property == "pointsize") return FormatPointSize(state.point_size);
+    if (property == "horizontalalign") {
+        return state.horizontal_align.empty() ? std::string("center") : state.horizontal_align;
+    }
+    if (property == "verticalalign") {
+        return state.vertical_align.empty() ? std::string("center") : state.vertical_align;
+    }
+    return std::nullopt;
+}
+
+bool SceneRuntimeContext::SetNodeTextStyle(std::string_view name, std::string_view property,
+                                           std::string_view value) {
+    const std::string key(name);
+    const auto        layer = m_text_layers.find(key);
+    if (layer == m_text_layers.end()) return false;
+    if (property == "pointsize") {
+        char*       end    = nullptr;
+        const std::string text(value);
+        const float parsed = std::strtof(text.c_str(), &end);
+        if (end == text.c_str() || ! std::isfinite(parsed) || parsed <= 0.0f) return false;
+        layer->second.SetPointSize(parsed);
+        return true;
+    }
+    if (property == "font") {
+        TextLayerState resolved = layer->second.state();
+        if (m_text_font_resolver) {
+            m_text_font_resolver(resolved, std::string(value));
+        } else {
+            resolved.resolved_font_kind     = "family";
+            resolved.resolved_font_identity = value.empty() ? "default" : std::string(value);
+            resolved.resolved_font_path.clear();
+            resolved.resolved_font_data = SharedFontData {};
+        }
+        layer->second.SetFont(std::string(value), resolved.resolved_font_kind,
+                              resolved.resolved_font_identity, resolved.resolved_font_path,
+                              resolved.resolved_font_data);
+        return true;
+    }
+    if (property == "horizontalalign" || property == "verticalalign") {
+        const bool  horizontal = property == "horizontalalign";
+        if (! IsAlignmentWord(horizontal, value)) return false;
+        const auto& state      = layer->second.state();
+        std::string h          = state.horizontal_align;
+        std::string v          = state.vertical_align;
+        (horizontal ? h : v)   = std::string(value);
+        const std::string anchor = ReplaceAnchorAxis(state.anchor, horizontal, value);
+        layer->second.SetAlignment(std::move(h), std::move(v), anchor);
+        // The layer is placed by this anchor: moving it re-derives the offset
+        // from the same anchor point.
+        const auto binding = m_node_alignment.find(key);
+        if (binding != m_node_alignment.end() && binding->second.size_anchor) {
+            SetNodeAnchorAlignment(key, anchor, binding->second.origin);
+        }
+        return true;
+    }
+    return false;
+}
+
+void SceneRuntimeContext::SetTextFontResolver(TextFontResolver resolver) {
+    m_text_font_resolver = std::move(resolver);
+}
+
+void SceneRuntimeContext::SetTextLayerFactory(TextLayerFactory factory) {
+    m_text_layer_factory = std::move(factory);
+}
+
+std::string SceneRuntimeContext::CreateTextLayer(std::string_view config_json,
+                                                 std::string_view current_layer_name) {
+    if (! m_text_layer_factory || m_scene == nullptr || m_scene->sceneGraph == nullptr) return {};
+    auto node = m_text_layer_factory(std::string(config_json), m_next_generated_text_id++);
+    if (node == nullptr || node->Name().empty()) return {};
+    const std::string name = node->Name();
+
+    SceneNode* parent = nullptr;
+    if (const auto current = m_nodes.find(std::string(current_layer_name));
+        current != m_nodes.end() && current->second != nullptr) {
+        parent = current->second->Parent();
+    }
+    if (parent != nullptr) {
+        parent->AppendChild(node);
+    } else {
+        m_scene->sceneGraph->AppendChild(node);
+    }
+    m_script_created_layers.insert(name);
+    m_scene_graph_mutated = true;
+    return name;
+}
+
+// ---------------------------------------------------------------------------
+// What `createLayer` and the layer properties change about a layer.
+// ---------------------------------------------------------------------------
+
+bool SceneRuntimeContext::NameLayer(std::string_view runtime_name, std::string authored_name) {
+    const std::string key(runtime_name);
+    if (authored_name.empty() || ! m_nodes.contains(key)) return false;
+    RegisterLayerAlias(authored_name, key);
+    // A name another layer already has stays that layer's: this one is then
+    // still reached by the key it was registered under.
+    return ResolveLayerName(authored_name) == key;
+}
+
+bool SceneRuntimeContext::SetNodeParent(std::string_view name, std::string_view parent_name) {
+    const auto found = m_nodes.find(std::string(name));
+    if (found == m_nodes.end() || found->second == nullptr || m_scene == nullptr ||
+        m_scene->sceneGraph == nullptr) {
+        return false;
+    }
+    SceneNode* node       = found->second;
+    SceneNode* new_parent = m_scene->sceneGraph.get();
+    if (! parent_name.empty()) {
+        const auto parent = m_nodes.find(ResolveLayerName(parent_name));
+        if (parent == m_nodes.end() || parent->second == nullptr) return false;
+        new_parent = parent->second;
+    }
+    // A layer cannot hang below itself or below something that hangs below it.
+    for (const SceneNode* ancestor = new_parent; ancestor != nullptr; ancestor = ancestor->Parent()) {
+        if (ancestor == node) return false;
+    }
+    SceneNode* old_parent = node->Parent();
+    if (old_parent == nullptr) return false;
+    if (old_parent == new_parent) return true;
+
+    auto&      siblings = old_parent->GetChildren();
+    const auto entry    = std::find_if(siblings.begin(), siblings.end(), [node](const auto& child) {
+        return child.get() == node;
+    });
+    if (entry == siblings.end()) return false;
+    auto owned = *entry;
+    siblings.erase(entry);
+    new_parent->AppendChild(std::move(owned));
+    m_scene_graph_mutated = true;
+    return true;
+}
+
+bool SceneRuntimeContext::SetNodeSize(std::string_view name, const Eigen::Vector2f& size) {
+    const std::string key(name);
+    const auto        found = m_nodes.find(key);
+    if (found == m_nodes.end() || found->second == nullptr || ! size.allFinite() ||
+        size.x() <= 0.0f || size.y() <= 0.0f || m_text_layers.contains(key)) {
+        return false;
+    }
+    const Eigen::Vector2f previous = NodeSize(key);
+    if (previous.x() <= 0.0f || previous.y() <= 0.0f) return false;
+    if (SizeNearlyEqual(previous, size, 1.0e-3f)) return true;
+
+    // Only a plain card (one vertex array of positions and texture coordinates,
+    // no indices) is resized, by stretching its corners about the layer's
+    // centre. Its texture coordinates are kept, so a padded texture still maps.
+    auto* mesh = found->second->Mesh();
+    if (mesh == nullptr || mesh->VertexCount() == 0 || mesh->Submeshes().size() != 1 ||
+        mesh->IndexCount() != 0 || mesh->Submeshes().front().VertexCount() != 1) {
+        return false;
+    }
+    const auto& source = mesh->GetVertexArray(0);
+    const auto  offsets = source.GetAttrOffsetMap();
+    const auto  position = offsets.find(std::string(WE_IN_POSITION));
+    if (position == offsets.end()) return false;
+    std::vector<float> data(source.Data(), source.Data() + source.DataSize());
+    const float        scale_x = size.x() / previous.x();
+    const float        scale_y = size.y() / previous.y();
+    // The offsets are in bytes; the data is floats.
+    const std::size_t position_offset = position->second.offset / sizeof(float);
+    for (std::size_t vertex = 0; vertex < source.VertexCount(); ++vertex) {
+        float* point = data.data() + vertex * source.OneSize() + position_offset;
+        point[0] *= scale_x;
+        point[1] *= scale_y;
+    }
+    SceneVertexArray stretched(source.Attributes(), source.VertexCount());
+    stretched.SetVertexs(0, data);
+    stretched.SetID(source.ID());
+    // This layer's geometry becomes its own: a copy made from the same template
+    // shares the template's vertices, and must keep them.
+    SceneMesh replacement(mesh->UpdateDriver());
+    replacement.AddVertexArray(std::move(stretched));
+    mesh->ChangeMeshDataFrom(replacement);
+    mesh->SetDirty();
+    if (! mesh->Dynamic()) m_scene_graph_mutated = true;
+    RegisterNodeSize(key, size);
+    return true;
+}
+
+Eigen::Vector2f SceneRuntimeContext::NodeParallaxDepth(std::string_view name) const {
+    const auto found = m_nodes.find(std::string(name));
+    if (found == m_nodes.end() || found->second == nullptr || m_scene == nullptr ||
+        m_scene->shaderValueUpdater == nullptr) {
+        return Eigen::Vector2f::Zero();
+    }
+    const auto depth = m_scene->shaderValueUpdater->NodeParallaxDepth(found->second);
+    return Eigen::Vector2f(depth[0], depth[1]);
+}
+
+bool SceneRuntimeContext::SetNodeParallaxDepth(std::string_view name,
+                                               const Eigen::Vector2f& depth) {
+    const auto found = m_nodes.find(std::string(name));
+    if (found == m_nodes.end() || found->second == nullptr || m_scene == nullptr ||
+        m_scene->shaderValueUpdater == nullptr || ! depth.allFinite()) {
+        return false;
+    }
+    // A graph built while the layer stood still has it as a pass that never
+    // changes; one that starts following the cursor (or stops) needs a new one.
+    if (m_scene->shaderValueUpdater->SetNodeParallaxDepth(found->second, depth.x(), depth.y())) {
+        m_scene_graph_mutated = true;
+    }
+    return true;
+}
 
 std::unique_ptr<SceneRuntimeContext> CreateSceneRuntimeContext(SceneRuntimeBootstrap bootstrap) {
     return std::make_unique<SceneRuntimeContext>(std::move(bootstrap));

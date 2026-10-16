@@ -61,7 +61,7 @@ public:
         return m_runtime_images.find(name) != m_runtime_images.end();
     }
 
-    /// Changes whenever a name joins this source; names never leave it.
+    /// Changes whenever a name joins or leaves this source (`RemoveImage`).
     ///
     /// Lock-free, so a renderer can keep its per-slot `IsRuntimeImage` answers
     /// and only ask again when this moves.
@@ -178,6 +178,21 @@ public:
         if (m_runtime_images.size() != names_before) {
             m_names_generation.fetch_add(1, std::memory_order_release);
         }
+    }
+
+    /// Forgets the pixels given to `name`, for an image whose owner is gone (the
+    /// text layer a script made and destroyed), so images made and dropped over
+    /// and over do not accumulate. Only a render graph built without the owner
+    /// may call this: until then it still samples the image. The two cover slots
+    /// (`$`-names) are the source's own and are never removed. Answers whether
+    /// there was anything to remove.
+    bool RemoveImage(const std::string& name) {
+        if (name.empty() || name.front() == '$') return false;
+        std::lock_guard lock(m_mutex);
+        if (m_runtime_images.erase(name) == 0) return false;
+        m_versions.erase(name);
+        m_names_generation.fetch_add(1, std::memory_order_release);
+        return true;
     }
 
     /// Publishes what `from` currently holds under `to`, without copying pixels.

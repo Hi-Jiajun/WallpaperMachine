@@ -661,6 +661,7 @@ struct CursorStage {
         runtime->RegisterNodeSize(name, Eigen::Vector2f(size, size));
         nodes.push_back(node);
         order.push_back(name);
+        runtime->SetLayerOrder(order);
         if (! script) return;
         auto marker = std::make_shared<SceneNode>();
         marker->SetVisible(false);
@@ -843,6 +844,11 @@ TEST(MouseInput, TheBlockerInFrontFollowsTheLayerOrderAndAFrameInProgress) {
         stage.MoveTo(125.0f);
         EXPECT_FALSE(stage.Hovered("back")) << "behind the blocker";
         stage.MoveTo(300.0f);
+        // Bring `back` to the front of the blocker: nothing stands in front of it.
+        stage.order = { "front", "back" };
+        stage.runtime->SetLayerOrder(stage.order);
+        stage.MoveTo(125.0f);
+        EXPECT_TRUE(stage.Hovered("back")) << "after the order changed, it is in front";
         EXPECT_EQ(stage.runtime->scriptErrorCount(), 0u);
     }
     {

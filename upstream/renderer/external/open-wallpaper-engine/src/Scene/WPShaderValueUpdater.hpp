@@ -115,6 +115,8 @@ public:
     void UpdateUniforms(SceneNode*, uint32_t material_slot, sprite_map_t&,
                         const UpdateUniformOp&) override;
     void ForgetNode(SceneNode*) override;
+    bool SetNodeParallaxDepth(SceneNode*, float x, float y) override;
+    std::array<float, 2> NodeParallaxDepth(const SceneNode*) const override;
     void FrameEnd() override;
     uint64_t LightStateHash(SceneNode*, uint32_t material_slot) const override;
     uint32_t FrameVaryingUniforms(SceneNode*, uint32_t material_slot,
@@ -172,5 +174,10 @@ private:
 
     Map<void*, Map<uint32_t, WPShaderValueData>> m_nodeDataMap;
     Map<void*, Map<uint32_t, WPUniformInfo>> m_nodeUniformInfoMap;
+    /// For a layer drawn through effect passes, the nodes of those passes: the
+    /// ones whose record names the layer as its `parallax_layer`. They carry the
+    /// layer's depth, which is what `NodeParallaxDepth` reads and
+    /// `SetNodeParallaxDepth` writes for it.
+    Map<const SceneNode*, std::vector<void*>> m_parallaxPasses;
 };
 } // namespace wallpaper

@@ -188,6 +188,13 @@ public:
     bool                  layoutPending() const { return m_state.layout_pending; }
 
     void SetText(std::string text);
+    // What a script changes about how the text is set, as `thisLayer.pointsize`,
+    // `.font` and `.horizontalalign` / `.verticalalign` do. Each one that
+    // changes anything schedules a new layout and raster, as new text does.
+    void SetPointSize(float point_size);
+    void SetFont(std::string font_key, std::string kind, std::string identity, std::string path,
+                 SharedFontData data);
+    void SetAlignment(std::string horizontal, std::string vertical, std::string anchor);
     bool ApplyPreparedLayout(uint64_t revision, Eigen::Vector2f layout_size,
                              Eigen::Vector2f raster_size);
     void ClearDirty();

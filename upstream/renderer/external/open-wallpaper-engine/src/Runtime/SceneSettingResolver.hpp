@@ -31,14 +31,19 @@ enum class Vec3SettingSemantic
     AnglesDegrees,
 };
 
+// `animation_layer_index` is the animation layer of the layer a setting belongs
+// to when it is one of that animation layer's own (`animationlayers[i]`): its
+// script's `thisObject` is that animation layer. -1 for a setting of the layer.
 std::unique_ptr<DynamicValue> ResolveBoolSetting(
     SceneRuntimeContext& context,
     const nlohmann::json& value,
-    std::string_view current_layer_name = {});
+    std::string_view current_layer_name = {},
+    int animation_layer_index = -1);
 std::unique_ptr<DynamicValue> ResolveFloatSetting(
     SceneRuntimeContext& context,
     const nlohmann::json& value,
-    std::string_view current_layer_name = {});
+    std::string_view current_layer_name = {},
+    int animation_layer_index = -1);
 std::unique_ptr<DynamicValue> ResolveVec3Setting(
     SceneRuntimeContext& context,
     const nlohmann::json& value,

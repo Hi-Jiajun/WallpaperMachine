@@ -1968,6 +1968,46 @@ void AttachEffectsToNode(ParseContext& context,
                          bool preserve_effect_fbo_resolution,
                          const wpscene::WPImageEffect* screen_blend_effect = nullptr);
 
+// Fills the font fields of `state` for the font the scene (or a script) names:
+// a system font, a font the wallpaper ships, or a family by name.
+void ResolveTextLayerFont(TextLayerState& state, fs::VFS& vfs, const std::string& font_key) {
+    state.font_key = font_key;
+    constexpr std::string_view system_prefix = "systemfont_";
+    const auto                 filename      = std::filesystem::path(font_key).filename().string();
+    if (filename.starts_with(system_prefix)) {
+        state.resolved_font_kind     = "system";
+        state.resolved_font_identity = filename.substr(system_prefix.size());
+        state.resolved_font_path     = ResolveSystemFontPath(font_key);
+        state.resolved_font_data     = SharedFontData {};
+        return;
+    }
+
+    if (! font_key.empty()) {
+        std::string candidate = font_key;
+        if (candidate.starts_with("assets/")) candidate = "/" + candidate;
+        if (! candidate.starts_with('/')) candidate = "/assets/" + candidate;
+        if (vfs.Contains(candidate)) {
+            state.resolved_font_kind     = "asset";
+            state.resolved_font_identity = font_key;
+            state.resolved_font_path     = candidate;
+            state.resolved_font_data     = ReadVfsBytes(vfs, candidate);
+            return;
+        }
+        if (font_key.starts_with('/') && vfs.Contains(font_key)) {
+            state.resolved_font_kind     = "asset";
+            state.resolved_font_identity = font_key;
+            state.resolved_font_path     = font_key;
+            state.resolved_font_data     = ReadVfsBytes(vfs, font_key);
+            return;
+        }
+    }
+
+    state.resolved_font_kind     = "family";
+    state.resolved_font_identity = font_key.empty() ? "default" : font_key;
+    state.resolved_font_path     = ResolveSystemFontPath(state.resolved_font_identity);
+    state.resolved_font_data     = SharedFontData {};
+}
+
 /// The margin Wallpaper Engine keeps around a text card on each axis. It sizes the
 /// card by `2 * padding` and insets the text by `padding`, but only for a layer
 /// that draws through effect passes, composites with a colour blend (any mode
@@ -2032,38 +2072,7 @@ TextLayerState ResolveTextLayerState(const wpscene::WPTextObject& obj, fs::VFS& 
         },
     };
 
-    constexpr std::string_view system_prefix = "systemfont_";
-    const auto                 filename      = std::filesystem::path(font_key).filename().string();
-    if (filename.starts_with(system_prefix)) {
-        state.resolved_font_kind     = "system";
-        state.resolved_font_identity = filename.substr(system_prefix.size());
-        state.resolved_font_path     = ResolveSystemFontPath(font_key);
-        return state;
-    }
-
-    if (! font_key.empty()) {
-        std::string candidate = font_key;
-        if (candidate.starts_with("assets/")) candidate = "/" + candidate;
-        if (! candidate.starts_with('/')) candidate = "/assets/" + candidate;
-        if (vfs.Contains(candidate)) {
-            state.resolved_font_kind     = "asset";
-            state.resolved_font_identity = font_key;
-            state.resolved_font_path     = candidate;
-            state.resolved_font_data     = ReadVfsBytes(vfs, candidate);
-            return state;
-        }
-        if (font_key.starts_with('/') && vfs.Contains(font_key)) {
-            state.resolved_font_kind     = "asset";
-            state.resolved_font_identity = font_key;
-            state.resolved_font_path     = font_key;
-            state.resolved_font_data     = ReadVfsBytes(vfs, font_key);
-            return state;
-        }
-    }
-
-    state.resolved_font_kind     = "family";
-    state.resolved_font_identity = font_key.empty() ? "default" : font_key;
-    state.resolved_font_path     = ResolveSystemFontPath(state.resolved_font_identity);
+    ResolveTextLayerFont(state, vfs, font_key);
     return state;
 }
 
@@ -3088,7 +3097,8 @@ std::optional<NodeHitMask> BuildImageHitMask(ParseContext& context,
 }
 
 // Binds each authored animation layer's visible/rate/blend to user properties
-// (and scripts) so the shared puppet state follows the wallpaper settings.
+// (and scripts) so the shared puppet state follows the wallpaper settings. A
+// script bound there is about that animation layer: its `thisObject` is it.
 template <typename Object>
 void BindPuppetAnimationLayerSettings(ParseContext& context, const std::string& runtime_name,
                                       const Object& wpimgobj,
@@ -3104,21 +3114,21 @@ void BindPuppetAnimationLayerSettings(ParseContext& context, const std::string& 
         };
         if (setting.contains("visible") && is_dynamic(setting.at("visible"))) {
             runtime.RegisterDynamicValueListener(
-                ResolveBoolSetting(runtime, setting.at("visible"), runtime_name),
+                ResolveBoolSetting(runtime, setting.at("visible"), runtime_name, layer_index),
                 [layer, layer_index](const DynamicValue& value) mutable {
                     layer.setVisible(layer_index, value.getBool());
                 });
         }
         if (setting.contains("rate") && is_dynamic(setting.at("rate"))) {
             runtime.RegisterDynamicValueListener(
-                ResolveFloatSetting(runtime, setting.at("rate"), runtime_name),
+                ResolveFloatSetting(runtime, setting.at("rate"), runtime_name, layer_index),
                 [layer, layer_index](const DynamicValue& value) mutable {
                     layer.setRate(layer_index, value.getFloat());
                 });
         }
         if (setting.contains("blend") && is_dynamic(setting.at("blend"))) {
             runtime.RegisterDynamicValueListener(
-                ResolveFloatSetting(runtime, setting.at("blend"), runtime_name),
+                ResolveFloatSetting(runtime, setting.at("blend"), runtime_name, layer_index),
                 [layer, layer_index](const DynamicValue& value) mutable {
                     layer.setBlend(layer_index, value.getFloat());
                 });
@@ -5738,6 +5748,50 @@ void wallpaper::LoadMaterialConstantShaderValues(SceneMaterial& material,
     LoadMaterialConstantShaderValuesImpl(material, wpmat, info);
 }
 
+namespace
+{
+// What a layer made while the scene runs needs of the parse that built the scene.
+struct LazyParseInputs {
+    ShaderValueMap   globals;
+    LayerObjectIndex index;
+    bool             is_ortho { true };
+    bool             uses_models { false };
+};
+
+ParseContext MakeLazyParseContext(const std::shared_ptr<Scene>& scene, fs::VFS& vfs,
+                                  const LazyParseInputs& inputs) {
+    ParseContext lazy {};
+    lazy.scene                    = scene;
+    lazy.vfs                      = &vfs;
+    lazy.shader_updater           = static_cast<WPShaderValueUpdater*>(scene->shaderValueUpdater.get());
+    lazy.ortho_w                  = scene->ortho[0];
+    lazy.ortho_h                  = scene->ortho[1];
+    lazy.global_base_uniforms     = inputs.globals;
+    lazy.is_ortho                 = inputs.is_ortho;
+    lazy.uses_models              = inputs.uses_models;
+    lazy.effect_camera_node       = scene->cameras.at("effect")->GetAttachedNode();
+    lazy.global_camera_node       = scene->cameras.at("global")->GetAttachedNode();
+    lazy.global_perspective_camera_node =
+        scene->cameras.at("global_perspective")->GetAttachedNode();
+    return lazy;
+}
+
+// A parse that runs after the scene was built needs the shader compiler up and
+// the layer index in place, and leaves both as it found them.
+struct LazyShaderParseScope {
+    const LayerObjectIndex* previous;
+    explicit LazyShaderParseScope(const LayerObjectIndex& index) : previous(g_parse_layer_index) {
+        g_parse_layer_index = &index;
+        WPShaderParser::InitGlslang();
+    }
+    ~LazyShaderParseScope() {
+        g_pending_metal_translations.clear();
+        g_parse_layer_index = previous;
+        WPShaderParser::FinalGlslang();
+    }
+};
+} // namespace
+
 std::shared_ptr<Scene> WPSceneParser::Parse(const SceneParseRequest& request,
                                             const std::string& buf, fs::VFS& vfs,
                                             audio::SoundManager& sm) {
@@ -6046,12 +6100,6 @@ std::shared_ptr<Scene> WPSceneParser::Parse(const SceneParseRequest& request,
     RegisterLayerAttachments(context);
     SyncImageEffectFinalTransforms(context);
 
-    if (context.scene->runtime != nullptr) {
-        for (const auto& [layer_name, script_source] : context.pending_scene_scripts) {
-            context.scene->runtime->RegisterSceneScript(script_source, layer_name);
-        }
-    }
-
     BuildBloomPostProcess(context, sc);
 
     // Last, once the scene graph, the cameras and the textures are all in
@@ -6061,11 +6109,89 @@ std::shared_ptr<Scene> WPSceneParser::Parse(const SceneParseRequest& request,
     WPShaderParser::FinalGlslang();
     g_parse_layer_index = nullptr;
     if (context.scene->runtime != nullptr) {
-        context.scene->runtime->SetLayerTemplateLoader(
+        auto& runtime = *context.scene->runtime;
+        // Scripts count layers in the order the scene file declares them, look
+        // them up by their scene.json id, and read what the file says about one.
+        std::vector<std::string> declared_order;
+        for (const auto& object : *context.object_list) {
+            if (! object.is_object() || ! object.contains("id") || ! object.at("id").is_number()) {
+                continue;
+            }
+            const auto id   = object.at("id").get<int32_t>();
+            const auto node = context.layer_nodes.find(id);
+            if (node == context.layer_nodes.end() || node->second == nullptr ||
+                node->second->Name().empty()) {
+                continue;
+            }
+            declared_order.push_back(node->second->Name());
+            runtime.RegisterLayerId(id, node->second->Name());
+            // A layer registered under a generated key (its name is shared, or
+            // empty) is still called what the scene file calls it.
+            const auto authored = object.contains("name") && object.at("name").is_string()
+                                      ? object.at("name").get<std::string>()
+                                      : std::string {};
+            if (authored != node->second->Name()) {
+                runtime.RegisterLayerAuthoredName(node->second->Name(), authored);
+            }
+        }
+        runtime.SetLayerOrder(declared_order);
+        // The scene scripts below start here, and their `init` may read the
+        // object list. Whether they will is known from their source.
+        for (const auto& [layer_name, script_source] : context.pending_scene_scripts) {
+            (void)layer_name;
+            if (script_source.find("getInitialLayerConfig") != std::string::npos) {
+                runtime.RequestInitialLayerConfig();
+            }
+        }
+        if (runtime.InitialLayerConfigRequested()) {
+            runtime.SetInitialLayerConfigProvider(
+                [objects = std::make_shared<const nlohmann::json>(*context.object_list)](
+                    int32_t id) -> std::string {
+                    for (const auto& object : *objects) {
+                        if (object.is_object() && object.contains("id") &&
+                            object.at("id").is_number() && object.at("id").get<int32_t>() == id) {
+                            return object.dump();
+                        }
+                    }
+                    return {};
+                });
+        }
+        // A script that changes a text layer's `font` names a font the way the
+        // scene file does, and it is found the same way.
+        runtime.SetTextFontResolver([&vfs](TextLayerState& state, const std::string& font_key) {
+            ResolveTextLayerFont(state, vfs, font_key);
+        });
+
+        auto inputs = std::make_shared<LazyParseInputs>(LazyParseInputs {
+            .globals     = std::move(context.global_base_uniforms),
+            .index       = std::move(layer_index),
+            .is_ortho    = context.is_ortho,
+            .uses_models = context.uses_models,
+        });
+
+        // `createLayer({ text })`: the layer is parsed as a text object of the
+        // scene would be, from the configuration the script gave.
+        runtime.SetTextLayerFactory(
             [weak_scene = std::weak_ptr<Scene>(context.scene), &vfs,
-             globals = std::move(context.global_base_uniforms),
-             index = std::move(layer_index), is_ortho = context.is_ortho,
-             uses_models = context.uses_models](std::string_view path) {
+             inputs](const std::string& config_json, int32_t object_id) -> std::shared_ptr<SceneNode> {
+                auto scene = weak_scene.lock();
+                if (scene == nullptr) return nullptr;
+                nlohmann::json config = nlohmann::json::parse(config_json, nullptr, false);
+                if (! config.is_object()) return nullptr;
+                config["id"] = object_id;
+                wpscene::WPTextObject text;
+                if (! text.FromJson(config, vfs)) return nullptr;
+                ParseContext lazy = MakeLazyParseContext(scene, vfs, *inputs);
+                LazyShaderParseScope scope(inputs->index);
+                ParseTextObj(lazy, text);
+                FlushPendingMetalTranslations(*scene);
+                const auto node = lazy.layer_nodes.find(object_id);
+                return node != lazy.layer_nodes.end() ? node->second : nullptr;
+            });
+
+        runtime.SetLayerTemplateLoader(
+            [weak_scene = std::weak_ptr<Scene>(context.scene), &vfs,
+             inputs](std::string_view path) {
                 auto scene = weak_scene.lock();
                 if (scene == nullptr) return false;
                 // The runtime asks for more than one spelling of a path, so a
@@ -6093,33 +6219,8 @@ std::shared_ptr<Scene> WPSceneParser::Parse(const SceneParseRequest& request,
                                        static_cast<float>(header.mapHeight) };
                     }
                 }
-                ParseContext lazy {};
-                lazy.scene = scene;
-                lazy.vfs = &vfs;
-                lazy.shader_updater =
-                    static_cast<WPShaderValueUpdater*>(scene->shaderValueUpdater.get());
-                lazy.ortho_w = scene->ortho[0];
-                lazy.ortho_h = scene->ortho[1];
-                lazy.global_base_uniforms = globals;
-                lazy.is_ortho = is_ortho;
-                lazy.uses_models = uses_models;
-                lazy.effect_camera_node = scene->cameras.at("effect")->GetAttachedNode();
-                lazy.global_camera_node = scene->cameras.at("global")->GetAttachedNode();
-                lazy.global_perspective_camera_node =
-                    scene->cameras.at("global_perspective")->GetAttachedNode();
-                struct ShaderParseScope {
-                    const LayerObjectIndex* previous;
-                    explicit ShaderParseScope(const LayerObjectIndex& index)
-                        : previous(g_parse_layer_index) {
-                        g_parse_layer_index = &index;
-                        WPShaderParser::InitGlslang();
-                    }
-                    ~ShaderParseScope() {
-                        g_pending_metal_translations.clear();
-                        g_parse_layer_index = previous;
-                        WPShaderParser::FinalGlslang();
-                    }
-                } scope(index);
+                ParseContext lazy = MakeLazyParseContext(scene, vfs, *inputs);
+                LazyShaderParseScope scope(inputs->index);
                 ParseImageObj(lazy, image);
                 FlushPendingMetalTranslations(*scene);
                 // RegisterLayerTemplate owns the hidden source. Only its clones
@@ -6127,6 +6228,14 @@ std::shared_ptr<Scene> WPSceneParser::Parse(const SceneParseRequest& request,
                 return lazy.layer_nodes.contains(image.id) &&
                        lazy.layer_nodes.at(image.id)->Mesh() != nullptr;
             });
+
+        // Scene scripts run `init` as they are registered, so they start last:
+        // the layers' order and ids, the object list, the text hooks and the
+        // template loader are all in place for it, as they are for every later
+        // call, and the scene is built the way a script running in a frame sees it.
+        for (const auto& [layer_name, script_source] : context.pending_scene_scripts) {
+            runtime.RegisterSceneScript(script_source, layer_name);
+        }
     }
     return context.scene;
 }

@@ -685,11 +685,18 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, uint32_t material_sl
         updateOp(G_PARALLAXPOSITION, std::array { para[0], para[1] });
     }
 
+    bool reported_texture_frame = false;
     for (auto& [i, sp] : sprites) {
         if (sp.numFrames() == 0) continue;
+        // A pinned frame holds; otherwise the sheet advances by the frame time
+        // the layer's script lets it have (none while paused, scaled by `rate`).
         const auto& f = pNode->TextureFrame().has_value()
                             ? sp.SetFrame(*pNode->TextureFrame())
-                            : sp.GetAnimateFrame(m_scene->frameTime);
+                            : sp.GetAnimateFrame(pNode->TextureAnimationStep(m_scene->frameTime));
+        if (! reported_texture_frame) {
+            pNode->SetTextureAnimationFrame(static_cast<double>(sp.CurFrameIndex()));
+            reported_texture_frame = true;
+        }
         auto        grot   = WE_GLTEX_ROTATION_NAMES[i];
         auto        gtrans = WE_GLTEX_TRANSLATION_NAMES[i];
         updateOp(grot, std::array { f.xAxis[0], f.xAxis[1], f.yAxis[0], f.yAxis[1] });
@@ -752,11 +759,77 @@ void WPShaderValueUpdater::SetNodeData(void* nodeAddr, const WPShaderValueData& 
 void WPShaderValueUpdater::SetNodeData(void* nodeAddr, uint32_t material_slot,
                                        const WPShaderValueData& data) {
     m_nodeDataMap[nodeAddr][material_slot] = data;
+    if (data.parallax_layer != nullptr) {
+        auto& passes = m_parallaxPasses[data.parallax_layer];
+        if (std::find(passes.begin(), passes.end(), nodeAddr) == passes.end()) {
+            passes.push_back(nodeAddr);
+        }
+    }
+}
+
+// A layer a script made has no record here until it asks for a depth; then it
+// gets the default one, which differs from a layer with no record only in
+// following the cursor by the depth it was given. The layers below it that
+// already have a record, and the effect passes of each layer written, take the
+// same depth; a layer with none is not given one. The answer says whether any
+// record went from standing still to following the cursor or the reverse.
+bool WPShaderValueUpdater::SetNodeParallaxDepth(SceneNode* node, float x, float y) {
+    if (node == nullptr || ! std::isfinite(x) || ! std::isfinite(y)) return false;
+    const bool follows = x != 0.0f || y != 0.0f;
+    bool       changed = false;
+    const auto write   = [&](WPShaderValueData& data) {
+        const bool followed = data.parallaxDepth[0] != 0.0f || data.parallaxDepth[1] != 0.0f;
+        changed             = changed || followed != follows;
+        data.parallaxDepth  = { x, y };
+    };
+    const auto write_all = [&](void* key, bool create) {
+        auto found = m_nodeDataMap.find(key);
+        if (found == m_nodeDataMap.end()) {
+            if (! create) return;
+            found = m_nodeDataMap.emplace(key, Map<uint32_t, WPShaderValueData> {}).first;
+        }
+        if (found->second.empty()) found->second[0] = WPShaderValueData {};
+        for (auto& [slot, data] : found->second) write(data);
+    };
+    std::vector<SceneNode*> pending { node };
+    while (! pending.empty()) {
+        SceneNode* layer = pending.back();
+        pending.pop_back();
+        // A layer drawn through effect passes has its depth on them; its own node
+        // draws nothing of its own, so it is not given a record.
+        const auto passes     = m_parallaxPasses.find(layer);
+        const bool has_passes = passes != m_parallaxPasses.end() && ! passes->second.empty();
+        write_all(layer, layer == node && ! has_passes);
+        if (has_passes) {
+            for (void* pass : passes->second) write_all(pass, false);
+        }
+        for (const auto& child : layer->GetChildren()) pending.push_back(child.get());
+    }
+    return changed;
+}
+
+// A layer drawn through effects holds its depth on the passes, not on its own
+// node, so those are asked first.
+std::array<float, 2> WPShaderValueUpdater::NodeParallaxDepth(const SceneNode* node) const {
+    const auto depth_of = [this](void* key) -> std::optional<std::array<float, 2>> {
+        const auto slots = m_nodeDataMap.find(key);
+        if (slots == m_nodeDataMap.end() || slots->second.empty()) return std::nullopt;
+        const auto first = slots->second.find(0);
+        return (first != slots->second.end() ? first->second : slots->second.begin()->second)
+            .parallaxDepth;
+    };
+    if (const auto passes = m_parallaxPasses.find(node); passes != m_parallaxPasses.end()) {
+        for (void* pass : passes->second) {
+            if (const auto depth = depth_of(pass)) return *depth;
+        }
+    }
+    return depth_of(const_cast<SceneNode*>(node)).value_or(std::array<float, 2> { 0.0f, 0.0f });
 }
 
 void WPShaderValueUpdater::ForgetNode(SceneNode* node) {
     m_nodeDataMap.erase(node);
     m_nodeUniformInfoMap.erase(node);
+    m_parallaxPasses.erase(node);
 }
 
 void WPShaderValueUpdater::SetTexelSize(float x, float y) { m_texelSize = { x, y }; }

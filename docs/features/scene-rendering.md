@@ -63,6 +63,21 @@ properties, and a shaking scene keeps drawing while it shakes.
 `input.cursorWorldPosition` stays 2D (`z = 0`), so a scripted orbit drag may not
 match Wallpaper Engine.
 
+Scripts list the scene's layers through `thisScene`. `getLayer(index)`,
+`getLayerCount()`, `enumerateLayers()`, `getLayerIndex()` and `sortLayer()` share
+one order, the scene file's object order followed by the layers scripts made, and a
+sort moves a layer in it as well as in the draw order among its siblings.
+`layer.name` is the name the scene file gives the layer, empty for an unnamed one,
+whatever key the engine files it under. Only layers the parser built are counted:
+an object the scene file marks statically invisible, which nothing can show, is
+never built, so it has no index or id and the count differs from the object list
+by those. `destroyLayer` removes the layers a script made below the layer too.
+A scene script's `init` runs once the scene is built, so it sees all of that.
+`applyGeneralSettings({ language })` is always told `en-us`: the host does not
+yet pass the interface language on. `parallaxDepth` set on a layer reaches the
+layer, its effect passes and the layers below it, and one that starts or stops
+following the cursor rebuilds the render graph.
+
 A scene follows the cursor anywhere on its display, but, as in Wallpaper Engine, a
 mouse press counts only where it lands on the desktop: the wallpaper, Finder's icons or
 a desktop widget. A click in another app's window, in the menu bar or the Dock, or in

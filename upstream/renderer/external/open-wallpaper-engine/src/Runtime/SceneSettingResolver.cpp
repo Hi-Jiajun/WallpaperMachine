@@ -164,7 +164,8 @@ DynamicValueUniquePtr wrap_script_if_needed(
     const nlohmann::json& setting,
     std::string_view     current_layer_name,
     DynamicValueUniquePtr value,
-    ScriptedValueSemantic semantic = ScriptedValueSemantic::Generic)
+    ScriptedValueSemantic semantic = ScriptedValueSemantic::Generic,
+    int animation_layer_index = -1)
 {
     if (!setting.is_object() || !setting.contains("script") || !setting.at("script").is_string()) {
         return value;
@@ -191,7 +192,8 @@ DynamicValueUniquePtr wrap_script_if_needed(
         std::string(current_layer_name),
         std::move(script_properties),
         *value,
-        semantic);
+        semantic,
+        animation_layer_index);
     context.RegisterScriptedValue(scripted_value.get());
     return scripted_value;
 }
@@ -394,7 +396,8 @@ float ScalarAnimationPlayback::Value() const
 std::unique_ptr<DynamicValue> ResolveBoolSetting(
     SceneRuntimeContext& context,
     const nlohmann::json& setting,
-    std::string_view current_layer_name)
+    std::string_view current_layer_name,
+    int animation_layer_index)
 {
     auto value = std::make_unique<DynamicValue>(parse_bool(setting));
     value      = wrap_script_if_needed(
@@ -402,7 +405,8 @@ std::unique_ptr<DynamicValue> ResolveBoolSetting(
         setting,
         current_layer_name,
         std::move(value),
-        ScriptedValueSemantic::Generic);
+        ScriptedValueSemantic::Generic,
+        animation_layer_index);
     bind_user_property(context, setting, *value);
     return value;
 }
@@ -410,7 +414,8 @@ std::unique_ptr<DynamicValue> ResolveBoolSetting(
 std::unique_ptr<DynamicValue> ResolveFloatSetting(
     SceneRuntimeContext& context,
     const nlohmann::json& setting,
-    std::string_view current_layer_name)
+    std::string_view current_layer_name,
+    int animation_layer_index)
 {
     auto value = std::make_unique<DynamicValue>(parse_float(setting));
     value      = wrap_script_if_needed(
@@ -418,7 +423,8 @@ std::unique_ptr<DynamicValue> ResolveFloatSetting(
         setting,
         current_layer_name,
         std::move(value),
-        ScriptedValueSemantic::Generic);
+        ScriptedValueSemantic::Generic,
+        animation_layer_index);
     bind_user_property(context, setting, *value);
     return value;
 }

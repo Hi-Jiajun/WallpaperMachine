@@ -11,7 +11,14 @@ namespace wallpaper
 {
 
 Scene::Scene(): sceneGraph(std::make_shared<SceneNode>()) ,paritileSys(std::make_unique<ParticleSystem>(*this)) {}
-Scene::~Scene() = default;
+Scene::~Scene() {
+    // A script's `destroy()` may reach the file system, the render-exclusion list
+    // and the scene graph. Members die in reverse order of declaration, and the
+    // runtime is declared above the first two, so left to its own destructor it
+    // would end its scripts after those were gone. Ending them here, before any
+    // member is destroyed, is the one point at which all of it still exists.
+    if (runtime != nullptr) runtime->TearDownScripts();
+}
 
 void Scene::FrameCanvas(double zoom, const Eigen::Vector2f& offset) {
     const auto global = cameras.find("global");
