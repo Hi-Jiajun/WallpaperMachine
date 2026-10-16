@@ -235,12 +235,16 @@ exactly the given values over them, so a property it leaves out is back at the
 declared default whatever the scene loaded with. It adds no per-frame work.
 
 Nearly every property is a live binding and follows on the next tick: layer
-visibility, alpha, colour, origin, scale and angles, camera, clear colour, bloom,
+visibility, alpha, colour, origin, scale and angles, camera, clear colour, bloom
+strength, threshold and tint, parallax delay, the scene zoom,
 shader constants, rope and particle values, text, puppets, and the values a
-script reads and reacts to. Two readers decide once, while the scene loads, and
-are **load-only**: a material slot that a `scenetexture` property picks, and an
+script reads and reacts to. A few readers decide once, while the scene loads, and
+are **load-only**: a material slot that a `scenetexture` property picks, an
 effect an on/off or combo property builds or leaves out (every hidden effect
-would otherwise cost passes and memory). A preview of a document holds a
+would otherwise cost passes and memory), and the scene's bloom switch and its
+parallax switch, amount and cursor influence, which decide whether the bloom
+passes exist and which passes follow the cursor. A scene setting bound to a
+property loads with the property's current value, saved choices included. A preview of a document holds a
 load-only property at the value the scene read, for every layer that uses it, and
 reports it as deferred; only loading the scene applies it. A sound layer's volume
 is live too: a slider bound to it sets the stream's volume when the slider moves,

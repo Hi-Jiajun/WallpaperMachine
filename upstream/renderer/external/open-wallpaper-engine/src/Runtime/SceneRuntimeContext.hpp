@@ -204,6 +204,9 @@ public:
                                   std::shared_ptr<const MaterialConstantAnimation> animation = {});
     void RegisterSceneClearColor(std::unique_ptr<DynamicValue> value);
     void RegisterSceneZoomAnimation(std::shared_ptr<ScalarAnimationPlayback> animation);
+    /// A scene zoom bound to a user property or a script: applied now and
+    /// whenever the value changes.
+    void RegisterSceneZoom(std::unique_ptr<DynamicValue> zoom);
     /// A camera layer's timeline: one clock, and the zoom and origin curves it
     /// plays. `origin_base` is the authored origin a relative timeline offsets.
     struct CameraShotTimeline {
@@ -520,6 +523,7 @@ private:
     void ReleaseRetiredLayers();
     void ApplyMaterialConstantBinding(MaterialConstantBinding& binding);
     void ApplySceneZoomAnimation();
+    void ApplySceneZoom(double zoom);
     void ApplyCameraShots();
     void ApplyPerspectiveCameraShots(double seconds);
     void DispatchPendingAnimationEvents();

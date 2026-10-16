@@ -1,3 +1,4 @@
+#include <type_traits>
 #include "WPScene.h"
 
 #include <sstream>
@@ -48,7 +49,12 @@ void ReadScalarSetting(const nlohmann::json& json, const char* key, T& destinati
     if (! json.contains(key)) return;
     setting = json.at(key);
     const auto& value = UnwrapSettingValue(setting);
-    if (value.is_number()) destination = value.get<T>();
+    if constexpr (std::is_same_v<T, bool>) {
+        if (value.is_boolean()) destination = value.get<bool>();
+        else if (value.is_number()) destination = value.get<double>() != 0.0;
+    } else if (value.is_number()) {
+        destination = value.get<T>();
+    }
 }
 
 void ReadVec3Setting(const nlohmann::json& json, const char* key, std::array<float, 3>* destination,
@@ -83,17 +89,18 @@ bool WPSceneGeneral::FromJson(const nlohmann::json& json, uint16_t pkg_version) 
     GET_JSON_NAME_VALUE(json, "skylightcolor", skylightcolor);
     ReadVec3Setting(json, "clearcolor", &clearcolor, &clearcolor_setting, &dynamic_clearcolor);
 	GET_JSON_NAME_VALUE_NOWARN(json, "clearenabled", clearenabled);
-	GET_JSON_NAME_VALUE(json, "cameraparallax", cameraparallax);
-	GET_JSON_NAME_VALUE(json, "cameraparallaxamount", cameraparallaxamount);
-	GET_JSON_NAME_VALUE(json, "cameraparallaxdelay", cameraparallaxdelay);
-	GET_JSON_NAME_VALUE(json, "cameraparallaxmouseinfluence", cameraparallaxmouseinfluence);
-	GET_JSON_NAME_VALUE_NOWARN(json, "zoom", zoom);
+	ReadScalarSetting(json, "cameraparallax", cameraparallax, cameraparallax_setting);
+	ReadScalarSetting(json, "cameraparallaxamount", cameraparallaxamount, cameraparallaxamount_setting);
+	ReadScalarSetting(json, "cameraparallaxdelay", cameraparallaxdelay, cameraparallaxdelay_setting);
+	ReadScalarSetting(json, "cameraparallaxmouseinfluence", cameraparallaxmouseinfluence,
+	                  cameraparallaxmouseinfluence_setting);
+	ReadScalarSetting(json, "zoom", zoom, zoom_setting);
 	GET_JSON_NAME_VALUE_NOWARN(json, "fov", fov);
 	GET_JSON_NAME_VALUE_NOWARN(json, "nearz", nearz);
 	GET_JSON_NAME_VALUE_NOWARN(json, "farz", farz);
-	GET_JSON_NAME_VALUE_NOWARN(json, "bloom", bloom);
-	GET_JSON_NAME_VALUE_NOWARN(json, "bloomstrength", bloomstrength);
-	GET_JSON_NAME_VALUE_NOWARN(json, "bloomthreshold", bloomthreshold);
+	ReadScalarSetting(json, "bloom", bloom, bloom_setting);
+	ReadScalarSetting(json, "bloomstrength", bloomstrength, bloomstrength_setting);
+	ReadScalarSetting(json, "bloomthreshold", bloomthreshold, bloomthreshold_setting);
     if (WantsVersion(pkg_version, 10)) {
 	    GET_JSON_NAME_VALUE_NOWARN(json, "hdr", hdr);
 	    GET_JSON_NAME_VALUE_NOWARN(json, "norecompile", norecompile);
@@ -104,7 +111,7 @@ bool WPSceneGeneral::FromJson(const nlohmann::json& json, uint16_t pkg_version) 
         ReadScalarSetting(json, "bloomhdriterations", bloomhdriterations, bloomhdriterations_setting);
     }
     if (WantsVersion(pkg_version, 20)) {
-	    GET_JSON_NAME_VALUE_NOWARN(json, "bloomtint", bloomtint);
+	    ReadVec3Setting(json, "bloomtint", &bloomtint, &bloomtint_setting, &dynamic_bloomtint);
     }
     if (WantsVersion(pkg_version, 21)) {
 	    GET_JSON_NAME_VALUE_NOWARN(json, "perspectiveoverridefov", perspectiveoverridefov);

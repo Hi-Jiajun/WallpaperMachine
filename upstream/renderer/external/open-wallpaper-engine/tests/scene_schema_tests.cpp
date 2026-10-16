@@ -4217,6 +4217,98 @@ TEST(SceneSchema, ParserBuildsLdrBloomPostProcessWhenBloomEnabledWithoutHdr) {
     EXPECT_EQ(combine_rt->height, 360);
 }
 
+// Wallpaper Engine binds the scene's own settings to user properties like any
+// other: the property's value is the setting's. Bloom on or off and which
+// layers follow the cursor shape the scene, so they are read when it loads and
+// a change reloads it; strength, threshold, tint, parallax delay and zoom
+// follow the property while the scene runs.
+TEST(SceneSchema, SceneSettingsBoundToUserPropertiesFollowThem) {
+    fs::VFS vfs;
+    MountBloomSceneFiles(vfs);
+    audio::SoundManager sound_manager;
+    WPSceneParser       parser;
+    const std::string json = R"({
+      "camera": {"center":[0,0,0], "eye":[0,0,1], "up":[0,1,0]},
+      "general": {
+        "clearcolor":[0,0,0],
+        "bloom":{"user":"glow","value":false},
+        "bloomstrength":{"user":"glowstrength","value":1.0}, "bloomthreshold":0.25,
+        "bloomtint":{"user":"glowtint","value":"1 1 1"},
+        "cameraparallax":{"user":"parallax","value":false},
+        "cameraparallaxamount":{"user":"depth","value":0.2},
+        "cameraparallaxdelay":{"user":"lag","value":0.5},
+        "zoom":{"user":"lens","value":1.0},
+        "orthogonalprojection":{"width":640,"height":360}
+      },
+      "objects": []
+    })";
+    const ProjectProperties properties {
+        { "glow", RuntimeScalarValue::Bool(true) },
+        { "glowstrength", RuntimeScalarValue::Float(3.0f) },
+        { "glowtint", RuntimeScalarValue::String("0.5 0.25 1") },
+        { "parallax", RuntimeScalarValue::Bool(true) },
+        { "depth", RuntimeScalarValue::Float(0.8f) },
+        { "lag", RuntimeScalarValue::Float(1.5f) },
+        { "lens", RuntimeScalarValue::Float(2.0f) },
+    };
+    auto scene = parser.Parse(
+        SceneParseRequest { .scene_id = "bound-general", .project_properties = &properties }, json,
+        vfs, sound_manager);
+    ASSERT_NE(scene, nullptr);
+    ASSERT_NE(scene->runtime, nullptr);
+    auto& runtime = *scene->runtime;
+
+    // Read when the scene loads.
+    ASSERT_EQ(scene->post_processes.size(), 1u) << "the saved bloom choice was ignored";
+    const auto& parallax =
+        static_cast<WPShaderValueUpdater&>(*scene->shaderValueUpdater).CameraParallax();
+    EXPECT_TRUE(parallax.enable);
+    EXPECT_FLOAT_EQ(parallax.amount, 0.8f);
+    const auto load_only = runtime.LoadOnlyProperties();
+    for (const char* name : { "glow", "parallax", "depth" }) {
+        EXPECT_NE(std::find(load_only.begin(), load_only.end(), name), load_only.end()) << name;
+    }
+
+    // Followed while the scene runs.
+    const auto* extract = PostProcessPassAt(*scene->post_processes[0], 0);
+    ASSERT_NE(extract, nullptr);
+    const auto& constants = extract->node->Mesh()->Material()->customShader.constValues;
+    EXPECT_FLOAT_EQ(constants.at("g_BloomStrength")[0], 3.0f);
+    EXPECT_FLOAT_EQ(constants.at("g_BloomTint")[1], 0.25f);
+    EXPECT_FLOAT_EQ(parallax.delay, 1.5f);
+    EXPECT_DOUBLE_EQ(scene->cameras.at("global")->Width(), 320.0);
+    runtime.ApplyProjectPropertyOverride({
+        { "glowstrength", RuntimeScalarValue::Float(0.5f) },
+        { "glowtint", RuntimeScalarValue::String("1 0 0") },
+        { "lag", RuntimeScalarValue::Float(0.25f) },
+        { "lens", RuntimeScalarValue::Float(4.0f) },
+    });
+    EXPECT_FLOAT_EQ(constants.at("g_BloomStrength")[0], 0.5f);
+    EXPECT_FLOAT_EQ(constants.at("g_BloomTint")[1], 0.0f);
+    EXPECT_FLOAT_EQ(static_cast<WPShaderValueUpdater&>(*scene->shaderValueUpdater)
+                        .CameraParallax().delay, 0.25f);
+    EXPECT_DOUBLE_EQ(scene->cameras.at("global")->Width(), 160.0);
+}
+
+// A scene that switches parallax or HDR bloom on and leaves their settings out
+// gets Wallpaper Engine's defaults.
+TEST(SceneSchema, SceneSettingsLeftOutTakeWallpaperEnginesDefaults) {
+    wpscene::WPScene sc;
+    sc.FromJson(nlohmann::json::parse(R"({
+      "camera": {"center":[0,0,0], "eye":[0,0,1], "up":[0,1,0]},
+      "general": {"cameraparallax":true, "orthogonalprojection":{"width":640,"height":360}}
+    })"));
+    EXPECT_TRUE(sc.general.cameraparallax);
+    EXPECT_FLOAT_EQ(sc.general.cameraparallaxamount, 0.5f);
+    EXPECT_FLOAT_EQ(sc.general.cameraparallaxdelay, 0.1f);
+    EXPECT_FLOAT_EQ(sc.general.cameraparallaxmouseinfluence, 0.5f);
+    // The ambient and sky light are black.
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_FLOAT_EQ(sc.general.ambientcolor[i], 0.0f);
+        EXPECT_FLOAT_EQ(sc.general.skylightcolor[i], 0.0f);
+    }
+}
+
 TEST(SceneSchema, HdrBloomRejectsMissingHdrMaterialsRatherThanFallingBackToLdr) {
     fs::VFS vfs;
     MountBloomSceneFiles(vfs);

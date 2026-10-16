@@ -38,20 +38,30 @@ public:
     bool                 dynamic_clearcolor { false };
     bool                 clearenabled { true };
     bool                 cameraparallax { false };
-    float                cameraparallaxamount;
-    float                cameraparallaxdelay;
-    float                cameraparallaxmouseinfluence;
+    // Wallpaper Engine's defaults for a scene that leaves these out.
+    float                cameraparallaxamount { 0.5f };
+    float                cameraparallaxdelay { 0.1f };
+    float                cameraparallaxmouseinfluence { 0.5f };
+    nlohmann::json       cameraparallax_setting;
+    nlohmann::json       cameraparallaxamount_setting;
+    nlohmann::json       cameraparallaxdelay_setting;
+    nlohmann::json       cameraparallaxmouseinfluence_setting;
     bool                 isOrtho { true };
     Orthogonalprojection orthogonalprojection { 1920, 1080 };
     float                zoom { 1.0f };
+    nlohmann::json       zoom_setting;
     float                fov { 50.0f };
     float                nearz { 0.01f };
     float                farz { 10000.0f };
-    std::array<float, 3> ambientcolor { 0.2f, 0.2f, 0.2f };
-    std::array<float, 3> skylightcolor { 0.3f, 0.3f, 0.3f };
+    // Black, as Wallpaper Engine leaves them when a scene omits them.
+    std::array<float, 3> ambientcolor { 0.0f, 0.0f, 0.0f };
+    std::array<float, 3> skylightcolor { 0.0f, 0.0f, 0.0f };
     bool                 bloom { false };
     float                bloomstrength { 0.0f };
     float                bloomthreshold { 0.0f };
+    nlohmann::json       bloom_setting;
+    nlohmann::json       bloomstrength_setting;
+    nlohmann::json       bloomthreshold_setting;
     bool                 hdr { false };
     float                bloomhdrstrength { 2.0f };
     float                bloomhdrthreshold { 1.0f };
@@ -65,6 +75,8 @@ public:
     nlohmann::json       bloomhdriterations_setting;
     bool                 norecompile { false };
     std::array<float, 3> bloomtint { 1.0f, 1.0f, 1.0f };
+    nlohmann::json       bloomtint_setting;
+    bool                 dynamic_bloomtint { false };
     float                perspectiveoverridefov { 0.0f };
     bool                 windenabled { false };
     std::array<float, 3> winddirection { 0.0f, 0.0f, 1.0f };

@@ -1486,9 +1486,19 @@ void SceneRuntimeContext::RegisterSceneZoomAnimation(
     ApplySceneZoomAnimation();
 }
 
+void SceneRuntimeContext::RegisterSceneZoom(std::unique_ptr<DynamicValue> zoom) {
+    RegisterDynamicValueListener(std::move(zoom), [this](const DynamicValue& value) {
+        ApplySceneZoom(value.getFloat());
+    });
+}
+
 void SceneRuntimeContext::ApplySceneZoomAnimation() {
-    if (m_scene == nullptr || m_scene_zoom_animation == nullptr) return;
-    double zoom = m_scene_zoom_animation->Value();
+    if (m_scene_zoom_animation == nullptr) return;
+    ApplySceneZoom(m_scene_zoom_animation->Value());
+}
+
+void SceneRuntimeContext::ApplySceneZoom(double zoom) {
+    if (m_scene == nullptr) return;
     if (!std::isfinite(zoom) || zoom <= 0.0) zoom = 1.0;
     const auto dimension = [zoom](int32_t value) {
         return std::clamp(static_cast<double>(value) / zoom, 1.0,

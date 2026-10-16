@@ -12,6 +12,13 @@ Playback, backend, host and startup areas are in
 
 ## Cameras, parallax and cursor mapping
 
+- **Scene settings bound to user properties** — `SceneSchema.SceneSettingsBoundToUserPropertiesFollowThem`:
+  a scene loads with its bound bloom switch, parallax switch and amount at the
+  properties' current values and reports those properties as load-only; bloom
+  strength and tint, parallax delay and zoom follow a property change while it
+  runs. `SceneSchema.SceneSettingsLeftOutTakeWallpaperEnginesDefaults`: a scene
+  that leaves them out gets parallax amount 0.5, delay 0.1 and influence 0.5,
+  black ambient and sky light, and Wallpaper Engine's HDR bloom defaults.
 - **Camera zoom** — `scene_schema_tests --gtest_filter='SceneSchema.*CameraZoom*'`.
   Scene `general.zoom` may hold an authored scalar animation, not only a fixed
   camera scale.

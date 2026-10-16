@@ -131,6 +131,7 @@ public:
     void SetNodeData(void*, const WPShaderValueData&);
     void SetNodeData(void*, uint32_t material_slot, const WPShaderValueData&);
     void SetCameraParallax(const WPCameraParallax& value) { m_parallax = value; }
+    const WPCameraParallax& CameraParallax() const { return m_parallax; }
 
     struct PuppetAttachment {
         SceneNode* node;

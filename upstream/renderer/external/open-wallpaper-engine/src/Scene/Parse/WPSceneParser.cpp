@@ -3281,6 +3281,15 @@ void BuildHDRBloomPostProcess(ParseContext& context, const wpscene::WPSceneGener
                         HDRBloomBlend((*blend)[0], (*blend)[1]);
                 });
         }
+        if (general.dynamic_bloomtint) {
+            runtime.RegisterDynamicValueListener(
+                ResolveVec3Setting(runtime, general.bloomtint_setting),
+                [first](const DynamicValue& value) {
+                    const auto tint = value.getVec3();
+                    first->customShader.constValues["g_BloomTint"] =
+                        std::array<float, 3> { tint.x(), tint.y(), tint.z() };
+                });
+        }
     }
     scene.post_processes.push_back(std::move(bloom));
     rollback.Commit();
@@ -3346,6 +3355,32 @@ void BuildBloomPostProcess(ParseContext& context, const wpscene::WPScene& sc) {
                               blur_horizontal->shader_info);
     RegisterMaterialConstants(
         context, combine->node->Mesh()->MaterialSlotPtr(), combine->material, combine->shader_info);
+    if (context.scene->runtime != nullptr) {
+        // Strength, threshold and tint follow their user properties live, as
+        // Wallpaper Engine pushes them into the bloom material when they change.
+        auto&      runtime  = *context.scene->runtime;
+        const auto material = downsample_quarter->node->Mesh()->MaterialSlotPtr();
+        const auto& general = sc.general;
+        for (const auto& [setting, uniform] :
+             { std::pair { &general.bloomstrength_setting, "g_BloomStrength" },
+               std::pair { &general.bloomthreshold_setting, "g_BloomThreshold" } }) {
+            if (! HasDynamicSetting(*setting)) continue;
+            runtime.RegisterDynamicValueListener(
+                ResolveFloatSetting(runtime, *setting),
+                [material, name = std::string(uniform)](const DynamicValue& value) {
+                    material->customShader.constValues[name] = value.getFloat();
+                });
+        }
+        if (general.dynamic_bloomtint) {
+            runtime.RegisterDynamicValueListener(
+                ResolveVec3Setting(runtime, general.bloomtint_setting),
+                [material](const DynamicValue& value) {
+                    const auto tint = value.getVec3();
+                    material->customShader.constValues["g_BloomTint"] =
+                        std::array<float, 3> { tint.x(), tint.y(), tint.z() };
+                });
+        }
+    }
 
     bloom->steps.push_back(ScenePostProcessPass {
         .node   = std::move(downsample_quarter->node),
@@ -3375,6 +3410,22 @@ void RegisterImageComposite(ParseContext& context, const wpscene::WPImageObject&
                              SceneNode& node) {
     RegisterLayerComposite(context, object.id, node, ResolveImageRenderExtent(object, context),
                            object.clampuvs, context.effect_camera_node);
+}
+
+// A scene setting bound to a user property takes the property's current value
+// when the scene loads. Those that decide what the scene is built with -- the
+// bloom passes, which passes follow the cursor -- are read only then, and a
+// change to their property reloads the scene.
+template <typename T>
+void ResolveLoadOnlySceneSetting(SceneRuntimeContext& runtime, const nlohmann::json& setting,
+                                 T& value) {
+    if (! HasDynamicSetting(setting)) return;
+    if constexpr (std::is_same_v<T, bool>) {
+        value = ResolveBoolSetting(runtime, setting)->getBool();
+    } else {
+        value = ResolveFloatSetting(runtime, setting)->getFloat();
+    }
+    runtime.NoteLoadOnlyProperty(UserPropertyName(setting));
 }
 
 void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
@@ -3412,6 +3463,17 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
         if (sc.general.dynamic_clearcolor) {
             scene.runtime->RegisterSceneClearColor(ResolveVec3Setting(
                 *scene.runtime, sc.general.clearcolor_setting, {}, Vec3SettingSemantic::Generic));
+        }
+        auto& g = sc.general;
+        ResolveLoadOnlySceneSetting(*scene.runtime, g.bloom_setting, g.bloom);
+        ResolveLoadOnlySceneSetting(*scene.runtime, g.cameraparallax_setting, g.cameraparallax);
+        ResolveLoadOnlySceneSetting(*scene.runtime, g.cameraparallaxamount_setting,
+                                    g.cameraparallaxamount);
+        ResolveLoadOnlySceneSetting(*scene.runtime, g.cameraparallaxmouseinfluence_setting,
+                                    g.cameraparallaxmouseinfluence);
+        // Read live below; the scene is first built with the current value.
+        if (HasDynamicSetting(g.zoom_setting)) {
+            g.zoom = ResolveFloatSetting(*scene.runtime, g.zoom_setting)->getFloat();
         }
     }
     context.ortho_w = scene.ortho[0];
@@ -3459,6 +3521,17 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
         cam_para.mouseinfluence = sc.general.cameraparallaxmouseinfluence;
         cam_para.canvas_scene   = context.is_ortho;
         context.shader_updater->SetCameraParallax(cam_para);
+        if (context.scene->runtime != nullptr &&
+            HasDynamicSetting(sc.general.cameraparallaxdelay_setting)) {
+            context.scene->runtime->RegisterDynamicValueListener(
+                ResolveFloatSetting(*context.scene->runtime,
+                                    sc.general.cameraparallaxdelay_setting),
+                [updater = context.shader_updater, cam_para](const DynamicValue& value) {
+                    auto parallax  = cam_para;
+                    parallax.delay = value.getFloat();
+                    updater->SetCameraParallax(parallax);
+                });
+        }
     }
 }
 
@@ -5209,9 +5282,11 @@ std::shared_ptr<Scene> WPSceneParser::Parse(const SceneParseRequest& request,
     ParseLayerNodes(context, json.at("objects"));
     ParseCamera(context, sc);
     if (context.scene->runtime != nullptr && json.at("general").contains("zoom")) {
+        auto& runtime = *context.scene->runtime;
         if (auto animation = ResolveScalarAnimation(json.at("general").at("zoom"))) {
-            auto& runtime = *context.scene->runtime;
             runtime.RegisterSceneZoomAnimation(runtime.RegisterScalarAnimation("", std::move(*animation)));
+        } else if (HasDynamicSetting(sc.general.zoom_setting)) {
+            runtime.RegisterSceneZoom(ResolveFloatSetting(runtime, sc.general.zoom_setting));
         }
     }
 
