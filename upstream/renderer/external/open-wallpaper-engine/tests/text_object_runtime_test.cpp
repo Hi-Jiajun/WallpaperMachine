@@ -4787,6 +4787,106 @@ TEST(TextObjectRuntime, AddColorBlendTextIsDrawnAdditivelyOntoTheScene) {
     EXPECT_EQ(onto_scene, 1u);
 }
 
+TEST(TextObjectRuntime, ScreenAnchorOffsetsPinTheLayerToTheEdgeItNames) {
+    // Margins in scene units, y up: positive where the canvas is cropped.
+    const PresentedMargins margins { .left = 10.0f, .top = 4.0f, .right = 30.0f, .bottom = 6.0f };
+    const auto offset = [&](std::string_view name) {
+        return TextScreenAnchorOffset(ParseTextScreenAnchor(name), margins);
+    };
+    EXPECT_TRUE(offset("center").isApprox(Eigen::Vector2f(-10.0f, 1.0f)));
+    EXPECT_TRUE(offset("top").isApprox(Eigen::Vector2f(-10.0f, -4.0f)));
+    EXPECT_TRUE(offset("bottom").isApprox(Eigen::Vector2f(-10.0f, 6.0f)));
+    EXPECT_TRUE(offset("left").isApprox(Eigen::Vector2f(10.0f, 1.0f)));
+    EXPECT_TRUE(offset("right").isApprox(Eigen::Vector2f(-30.0f, 1.0f)));
+    EXPECT_TRUE(offset("topleft").isApprox(Eigen::Vector2f(10.0f, -4.0f)));
+    EXPECT_TRUE(offset("topright").isApprox(Eigen::Vector2f(-30.0f, -4.0f)));
+    EXPECT_TRUE(offset("bottomleft").isApprox(Eigen::Vector2f(10.0f, 6.0f)));
+    EXPECT_TRUE(offset("bottomright").isApprox(Eigen::Vector2f(-30.0f, 6.0f)));
+    EXPECT_TRUE(offset("none").isZero());
+    EXPECT_TRUE(offset("").isZero());
+    EXPECT_TRUE(offset("sideways").isZero());
+    // The canvas shown whole leaves every layer where it is.
+    for (const char* name : { "center", "top", "right", "bottomleft" }) {
+        EXPECT_TRUE(TextScreenAnchorOffset(ParseTextScreenAnchor(name), PresentedMargins {}).isZero());
+    }
+}
+
+TEST(TextObjectRuntime, ScreenAnchoredTextFollowsThePresentedAreaAndNothingElseDoes) {
+    TextSceneFixture fixture(R"([
+      {"id":1,"name":"top right","text":"a","font":"Arial","origin":[600,340,0],
+       "anchor":"topright","horizontalalign":"right","verticalalign":"top","visible":true},
+      {"id":2,"name":"left","text":"a","font":"Arial","origin":[40,180,0],
+       "anchor":"left","horizontalalign":"left","verticalalign":"center","visible":true},
+      {"id":3,"name":"centre","text":"a","font":"Arial","origin":[320,180,0],
+       "anchor":"center","horizontalalign":"center","verticalalign":"center","visible":true},
+      {"id":4,"name":"free","text":"a","font":"Arial","origin":[320,100,0],
+       "anchor":"none","horizontalalign":"center","verticalalign":"center","visible":true},
+      {"id":5,"name":"no key","text":"a","font":"Arial","origin":[320,100,0],
+       "horizontalalign":"center","verticalalign":"center","visible":true},
+      {"id":6,"name":"edge only","text":"a","font":"Arial","origin":[320,100,0],
+       "anchor":"bottomright","visible":true}
+    ])", "text-screen-anchor");
+    ASSERT_NE(fixture.scene, nullptr);
+    auto& runtime = *fixture.scene->runtime;
+    // Let the layers' first layout arrive, which places them around their origins.
+    for (int attempt = 0; attempt < 500 && runtime.TextLayoutInFlight(); ++attempt) {
+        runtime.PumpTextLayerCache();
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    ASSERT_FALSE(runtime.TextLayoutInFlight());
+    const auto names = { "top right", "left", "centre", "free", "no key", "edge only" };
+    std::map<std::string, Eigen::Vector3f> resting;
+    const auto placed = [&](const char* name) -> Eigen::Vector3f {
+        // The node itself, which the anchor offset and the layer's own alignment move.
+        return FindRootChild(*fixture.scene, name)->Translate();
+    };
+    for (const char* name : names) resting[name] = placed(name);
+
+    // `anchor` never names a point of the layer: a layer with only that key sits
+    // exactly where one with no key at all does.
+    EXPECT_TRUE(resting["edge only"].isApprox(resting["no key"]));
+
+    // The window shows 560 of the canvas's 640 columns, 10 columns in from the
+    // left (a pan), and all of its height.
+    runtime.SetCursorViewport(CursorViewport {
+        .origin = { 10.0f, 0.0f }, .size = { 560.0f, 360.0f },
+        .content_origin = { 10.0f, 0.0f }, .content_size = { 560.0f, 360.0f } });
+    const auto moved = [&](const char* name) -> Eigen::Vector3f {
+        return placed(name) - resting[name];
+    };
+    // left = 10, right = 640 - 570 = 70, top = bottom = 0.
+    EXPECT_TRUE(moved("top right").isApprox(Eigen::Vector3f(-70.0f, 0.0f, 0.0f)));
+    EXPECT_TRUE(moved("left").isApprox(Eigen::Vector3f(10.0f, 0.0f, 0.0f)));
+    EXPECT_TRUE(moved("centre").isApprox(Eigen::Vector3f(-30.0f, 0.0f, 0.0f)));
+    EXPECT_TRUE(moved("free").isZero());
+    EXPECT_TRUE(moved("no key").isZero());
+    EXPECT_TRUE(moved("edge only").isApprox(Eigen::Vector3f(-70.0f, 0.0f, 0.0f)));
+
+    // A display that shows more than the canvas moves the layers outward.
+    runtime.SetCursorViewport(CursorViewport {
+        .origin = { 0.0f, -45.0f }, .size = { 640.0f, 450.0f },
+        .content_origin = { 0.0f, 0.0f }, .content_size = { 640.0f, 360.0f } });
+    EXPECT_TRUE(moved("top right").isApprox(Eigen::Vector3f(0.0f, 45.0f, 0.0f)));
+    // Centred, the extra room is the same on both sides, so "center" stays put.
+    EXPECT_TRUE(moved("centre").isApprox(Eigen::Vector3f::Zero()));
+    EXPECT_TRUE(moved("free").isZero());
+
+    // Presenting the canvas whole puts everything back.
+    runtime.SetCursorViewport(CursorViewport {
+        .origin = { 0.0f, 0.0f }, .size = { 640.0f, 360.0f },
+        .content_origin = { 0.0f, 0.0f }, .content_size = { 640.0f, 360.0f } });
+    for (const char* name : names) {
+        EXPECT_TRUE(placed(name).isApprox(resting[name])) << name;
+    }
+}
+
+
+// ---------------------------------------------------------------------------
+// The font shader's outline, blur and drop shadow. The raster of a styled
+// layer holds three coverage masks, red the glyph, green the glyph with its
+// outline and blue the shadow, with room around the card for what they reach.
+// ---------------------------------------------------------------------------
+
 namespace
 {
 // The box of the pixels of one channel at or above `threshold`.

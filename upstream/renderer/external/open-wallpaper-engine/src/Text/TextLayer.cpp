@@ -1123,6 +1123,42 @@ Eigen::Vector2f TextLayerRasterSize(const TextLayerState& state) {
     return TextLayerRasterSizeForMeasured(state, MeasureTextLayerSize(state));
 }
 
+TextScreenAnchor ParseTextScreenAnchor(std::string_view name) {
+    constexpr std::pair<std::string_view, TextScreenAnchor> kAnchors[] = {
+        { "center", TextScreenAnchor::Center },
+        { "top", TextScreenAnchor::Top },
+        { "topright", TextScreenAnchor::TopRight },
+        { "right", TextScreenAnchor::Right },
+        { "bottomright", TextScreenAnchor::BottomRight },
+        { "bottom", TextScreenAnchor::Bottom },
+        { "bottomleft", TextScreenAnchor::BottomLeft },
+        { "left", TextScreenAnchor::Left },
+        { "topleft", TextScreenAnchor::TopLeft },
+    };
+    for (const auto& [text, anchor] : kAnchors) {
+        if (name == text) return anchor;
+    }
+    return TextScreenAnchor::None;
+}
+
+Eigen::Vector2f TextScreenAnchorOffset(TextScreenAnchor anchor, const PresentedMargins& margins) {
+    const float centre_x = (margins.left - margins.right) * 0.5f;
+    const float centre_y = (margins.bottom - margins.top) * 0.5f;
+    switch (anchor) {
+    case TextScreenAnchor::Center: return { centre_x, centre_y };
+    case TextScreenAnchor::Top: return { centre_x, -margins.top };
+    case TextScreenAnchor::Bottom: return { centre_x, margins.bottom };
+    case TextScreenAnchor::Left: return { margins.left, centre_y };
+    case TextScreenAnchor::Right: return { -margins.right, centre_y };
+    case TextScreenAnchor::TopLeft: return { margins.left, -margins.top };
+    case TextScreenAnchor::TopRight: return { -margins.right, -margins.top };
+    case TextScreenAnchor::BottomLeft: return { margins.left, margins.bottom };
+    case TextScreenAnchor::BottomRight: return { -margins.right, margins.bottom };
+    case TextScreenAnchor::None: break;
+    }
+    return Eigen::Vector2f::Zero();
+}
+
 TextLayerRenderBounds TextLayerRenderBoundsForRasterSize(const TextLayerState& state,
                                                          Eigen::Vector2f raster_size) {
     // The card is placed as the layout dictates; the room the style needs lies

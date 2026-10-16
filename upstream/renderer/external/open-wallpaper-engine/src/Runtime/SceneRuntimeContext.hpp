@@ -337,6 +337,9 @@ public:
     // re-derives the offset whenever a dynamic origin or scale replaces it.
     bool            SetNodeAnchorAlignment(std::string_view name, std::string alignment,
                                            const Eigen::Vector3f& origin);
+    // A text layer's `anchor`: pins it to an edge or corner of the area the
+    // display shows (`SetCursorViewport`), on top of wherever its origin puts it.
+    bool            SetNodeScreenAnchor(std::string_view name, TextScreenAnchor anchor);
     bool            SetNodeRotation(std::string_view name, const Eigen::Vector3f& value);
     Eigen::Vector3f NodeTranslate(std::string_view name) const;
     Eigen::Vector3f NodeScale(std::string_view name) const;
@@ -421,6 +424,11 @@ private:
         /// Node rotation `cached_translate` was derived for; the anchor sits
         /// in the layer's own axes, so turning the layer moves the offset.
         Eigen::Vector3f rotation { Eigen::Vector3f::Zero() };
+        /// The edge or corner of the presented area the node is pinned to, and
+        /// the shift that puts it there. The shift is in the parent's space, so
+        /// the node's own scale and rotation do not touch it.
+        TextScreenAnchor screen_anchor { TextScreenAnchor::None };
+        Eigen::Vector2f  screen_offset { Eigen::Vector2f::Zero() };
     };
     struct NodeVec3Binding {
         SceneNode*    node { nullptr };
@@ -523,6 +531,9 @@ private:
     void DispatchMediaPlaybackChanged(std::string_view name, bool playing);
     void ApplyNodeTransform(std::string_view name);
     void ApplyAnchoredNodeTransform(std::string_view name);
+    /// Re-derives the presented margins from the cursor viewport and moves every
+    /// layer pinned to a screen anchor if they changed.
+    void UpdatePresentedMargins();
     void RefreshNodeTransformBindings(const std::string& name);
     void ApplyNodeTransform(SceneNode& node, NodeAlignmentBinding& binding, const Eigen::Vector2f& size);
     /// Frees the layers `DestroyLayer` retired once the mutation they caused
@@ -645,6 +656,7 @@ private:
             return std::hash<std::string_view> {}(value);
         }
     };
+    PresentedMargins                                               m_presented_margins {};
     std::unordered_map<std::string, VideoTexturePlaybackBinding, StringHash, std::equal_to<>>
         m_video_texture_playback;
     std::unordered_map<std::string, std::weak_ptr<WPSoundStream>>  m_sound_layers;

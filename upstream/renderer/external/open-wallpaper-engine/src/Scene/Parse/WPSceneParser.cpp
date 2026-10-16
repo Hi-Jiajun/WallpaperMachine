@@ -1625,6 +1625,9 @@ std::string JsonStringOrObjectValue(const nlohmann::json& value, std::string_vie
     return {};
 }
 
+// The edge or corner of the layer's own box that its origin sits on. This is
+// `horizontalalign` and `verticalalign`; the layer's `anchor` is something else,
+// the screen edge the layer follows, and never names a point of the layer.
 std::string TextAnchorForObject(const wpscene::WPTextObject& obj) {
     if (! obj.horizontalalign.empty() || ! obj.verticalalign.empty()) {
         std::string anchor = obj.horizontalalign;
@@ -1634,7 +1637,6 @@ std::string TextAnchorForObject(const wpscene::WPTextObject& obj) {
         }
         return anchor;
     }
-    if (! obj.anchor.empty()) return obj.anchor;
     return obj.alignment;
 }
 
@@ -2263,6 +2265,10 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         }
         context.scene->runtime->SetNodeAnchorAlignment(
             runtime_name, anchor, Vector3f(obj.origin.data()));
+        // Pinned to the edge of what the display shows, where that differs from
+        // the canvas; the runtime moves it as the presentation changes.
+        context.scene->runtime->SetNodeScreenAnchor(runtime_name,
+                                                    ParseTextScreenAnchor(obj.anchor));
         RegisterNodeOriginSetting(*context.scene->runtime, node.get(), runtime_name,
                                   obj.origin_setting);
         if (obj.dynamic_scale) {

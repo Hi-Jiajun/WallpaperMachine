@@ -1015,13 +1015,18 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   not kept: their text is private, so nothing re-checks them. The other fixtures use
   a system font, so the tests state relations to the font's own metrics, not pixel
   counts, and the ground-truth tests skip where Arial is not installed.
-- **Text colour blend** —
+- **Text colour blend and screen anchor** —
   `TextObjectRuntime.ColorBlendModeMixesTextWithTheScreenThroughThePassthroughPass`
   and `.AddColorBlendTextIsDrawnAdditivelyOntoTheScene` (CPU, in the gate) and
   `MetalSceneDraw.ATextLayersColourBlendModeAppliesItsColourAndAlphaOnceOnBothRenderers`,
   which draws white text at half alpha over green on both renderers: mode 2 mixes
   half of white once (128, 159, 128), mode 31 adds half of it (128, 191, 128), and
-  the pictures are identical.
+  the pictures are identical. `.ScreenAnchorOffsetsPinTheLayerToTheEdgeItNames`
+  tabulates the nine anchors against the presented margins, and
+  `.ScreenAnchoredTextFollowsThePresentedAreaAndNothingElseDoes` moves anchored
+  layers with `SetCursorViewport` (a pan, a display that shows more than the canvas,
+  and back) while layers with `none`, no key, or only the key keep their place: the
+  `anchor` key is never a pivot.
 - **Outline, blur and drop shadow** — `TextObjectRuntime.OutlineGrowsTheGlyphByItsThicknessInPixels`,
   `.OutlineThicknessIsCappedWithTheGlyphAtlasAndNeverBelowOnePixel`,
   `.BlurSoftensEdgesOverItsSizeAndKeepsTheGlyphWhereItIs`,

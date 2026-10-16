@@ -755,7 +755,9 @@ into private textures; the three that draw skip visibly without a Metal device.
   a glyph that overlaps its neighbour's fill is drawn over it there, and the outline,
   blur and shadow are made here from the union of the glyphs, at their reach but not
   clipped to the atlas margin. `msdf` alone, `opaquebackground`, `backgroundcolor` and
-  `backgroundbrightness` are read and draw nothing. **The authored
+  `backgroundbrightness` are read and draw nothing. The screen `anchor` of a text layer
+  moves the layer in its parent's space, so its children move with it; whether
+  Wallpaper Engine's children inherit the shift is not established. **The authored
   `size` of a text object is kept**: Wallpaper Engine ignores it and sets the card from
   the layout every time the text is laid out (the text object's size function writes
   the layout box plus twice the padding, and its guard byte only keeps it from

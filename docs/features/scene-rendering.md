@@ -207,7 +207,10 @@ shadow colours follow a property or script bound to them while the scene runs. T
 switches, sizes and opacity are baked into the card's pixels, so a property bound to
 one is read once, as the scene loads, with the value the user has chosen, and is held
 at it by a preview of changed properties (a load-only property); a script or a
-timeline on one of them is not followed.
+timeline on one of them is not followed. `anchor` pins a text
+layer to an edge or corner of the area the display shows, on top of its origin and
+alignment: where the display's shape differs from the canvas's (Fill crops it, Fit or a
+pan adds room), the layer follows that edge, and a scene shown whole moves nothing.
 A text object that leaves keys out has Wallpaper Engine's defaults: 32 points,
 `maxwidth` 500 and `maxrows` 1.
 

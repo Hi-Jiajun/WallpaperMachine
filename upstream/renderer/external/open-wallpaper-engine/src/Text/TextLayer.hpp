@@ -117,6 +117,44 @@ struct TextLayerState {
     Eigen::Vector2f      raster_size { Eigen::Vector2f::Zero() };
 };
 
+/// Wallpaper Engine's text `anchor`: pins the layer to an edge or corner of the
+/// area the display actually shows, which is smaller or larger than the scene's
+/// canvas when the display's shape differs from it. It is separate from the
+/// layer's horizontal and vertical alignment, which place the text around the
+/// layer's own origin.
+enum class TextScreenAnchor
+{
+    None,
+    Center,
+    Top,
+    TopRight,
+    Right,
+    BottomRight,
+    Bottom,
+    BottomLeft,
+    Left,
+    TopLeft,
+};
+
+/// How far the presented area reaches into the scene's canvas on each side, in
+/// scene units: positive where the canvas is cropped, negative where the display
+/// shows more than the canvas. All zero when the display shows the canvas as is.
+struct PresentedMargins {
+    float left { 0.0f };
+    float top { 0.0f };
+    float right { 0.0f };
+    float bottom { 0.0f };
+
+    bool operator==(const PresentedMargins&) const = default;
+};
+
+/// The anchor named by a scene file; anything unnamed is `None`.
+TextScreenAnchor ParseTextScreenAnchor(std::string_view name);
+
+/// The shift an anchor adds to the layer's placement in its parent's space, y up:
+/// the layer follows the edge or corner of the presented area it is pinned to.
+Eigen::Vector2f TextScreenAnchorOffset(TextScreenAnchor anchor, const PresentedMargins& margins);
+
 struct TextLayerRenderBounds {
     float left { 0.0f };
     float right { 0.0f };

@@ -740,6 +740,32 @@ void SceneRuntimeContext::SetCursorViewport(const CursorViewport& viewport) {
     if (! viewport.content_origin.allFinite() || ! viewport.content_size.allFinite()) return;
     if (viewport.size.x() == 0.0f || viewport.size.y() == 0.0f) return;
     m_cursor_viewport = viewport;
+    UpdatePresentedMargins();
+}
+
+void SceneRuntimeContext::UpdatePresentedMargins() {
+    // The area the window shows, against the canvas the scene was authored for.
+    // A scene without an orthogonal canvas is not framed this way.
+    PresentedMargins margins;
+    const auto&      canvas = m_host_context->canvas_size;
+    const bool       framed = (m_scene == nullptr || ! m_scene->display_sized) &&
+                        canvas.x() > 0.0f && canvas.y() > 0.0f;
+    if (framed) {
+        const auto& origin = m_cursor_viewport.origin;
+        const auto& size   = m_cursor_viewport.size;
+        margins.left   = origin.x();
+        margins.bottom = origin.y();
+        margins.right  = canvas.x() - (origin.x() + size.x());
+        margins.top    = canvas.y() - (origin.y() + size.y());
+    }
+    if (margins == m_presented_margins) return;
+    m_presented_margins = margins;
+    for (auto& [name, binding] : m_node_alignment) {
+        if (binding.screen_anchor == TextScreenAnchor::None) continue;
+        binding.screen_offset   = TextScreenAnchorOffset(binding.screen_anchor, margins);
+        binding.transform_dirty = true;
+        ApplyNodeTransform(name);
+    }
 }
 
 /// Publishes the display's pixel resolution, which is what
@@ -2379,6 +2405,18 @@ bool SceneRuntimeContext::SetNodeAnchorAlignment(std::string_view name, std::str
     return true;
 }
 
+bool SceneRuntimeContext::SetNodeScreenAnchor(std::string_view name, TextScreenAnchor anchor) {
+    const auto iterator = m_nodes.find(std::string(name));
+    if (iterator == m_nodes.end() || iterator->second == nullptr) return false;
+
+    auto& binding = m_node_alignment[std::string(name)];
+    binding.screen_anchor   = anchor;
+    binding.screen_offset   = TextScreenAnchorOffset(anchor, m_presented_margins);
+    binding.transform_dirty = true;
+    ApplyNodeTransform(name);
+    return true;
+}
+
 bool SceneRuntimeContext::SetNodeRotation(std::string_view name, const Eigen::Vector3f& value) {
     if (const auto binding = m_node_rotation.find(std::string(name));
         binding != m_node_rotation.end() && binding->second.value != nullptr) {
@@ -2710,6 +2748,8 @@ void SceneRuntimeContext::ApplyNodeTransform(SceneNode& node, NodeAlignmentBindi
             offset = NodeRotationMatrix(binding.rotation) * offset;
         }
         binding.cached_translate = binding.origin + offset;
+        binding.cached_translate.x() += binding.screen_offset.x();
+        binding.cached_translate.y() += binding.screen_offset.y();
         binding.transform_dirty = false;
     }
     node.SetScale(binding.scale);
