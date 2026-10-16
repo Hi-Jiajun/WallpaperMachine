@@ -80,6 +80,10 @@ struct WPShaderValueData {
     SceneNode* effect_owner { nullptr };
     Eigen::Vector2f effect_extent { 2.0f, 2.0f };
     std::array<float, 2> parallaxDepth { 0.0f, 0.0f };
+    /// The layer whose outermost parent anchors this draw's parallax in a 2D
+    /// scene, for a draw that is not that layer's own node (an effect pass);
+    /// null for the layer's own draws.
+    SceneNode* parallax_layer { nullptr };
     // index + name
     std::vector<std::pair<usize, std::string>> renderTargets;
 

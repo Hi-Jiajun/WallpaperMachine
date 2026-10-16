@@ -2567,7 +2567,8 @@ void AttachEffectsToNode(ParseContext& context,
             }
 
             LoadConstvalue(material, wpmat, shader_info);
-            shader_value_data.parallaxDepth = parallax_depth;
+            shader_value_data.parallaxDepth  = parallax_depth;
+            shader_value_data.parallax_layer = &node;
             auto mesh = std::make_shared<SceneMesh>();
             mesh->AddMaterial(std::move(material));
             RegisterMaterialConstants(context, mesh->MaterialSlotPtr(), wpmat, shader_info, runtime_name);
@@ -4010,7 +4011,8 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                     ShaderValue::fromMatrix(Eigen::Matrix4f::Identity());
                 SceneMaterial     material;
                 WPShaderValueData svData;
-                svData.effect_owner = spImgNode.get();
+                svData.effect_owner   = spImgNode.get();
+                svData.parallax_layer = spImgNode.get();
                 svData.effect_extent = Eigen::Vector2f(
                     float(render_extent[0]), float(render_extent[1]));
                 if (! LoadMaterial(vfs,

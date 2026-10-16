@@ -548,16 +548,26 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, uint32_t material_sl
                 Vector2f mouseVec =
                     Scaling(1.0f, -1.0f) * (Vector2f { 0.5f, 0.5f } - Vector2f(&m_parallaxPos[0]));
                 mouseVec = mouseVec.cwiseProduct(ortho) * m_parallax.mouseinfluence;
-                // In a 2D scene parallax moves a layer by the cursor's offset
-                // from the centre of the view, scaled by the layer's depth.
-                // Where the layer sits plays no part: with the cursor centred
-                // every layer rests where it was authored, as Wallpaper
-                // Engine's own previews show. Offsetting by the layer's
-                // distance from the camera as well pushed a deep layer near the
-                // canvas edge -- a planet at the top of a 4K scene -- out of
-                // the frame. A 3D scene keeps that distance term: nothing
-                // checked so far says how its layers move.
+                // Parallax moves a layer by the cursor's offset from the
+                // centre of the view and by where the layer sits, scaled by
+                // its depth and the scene's amount.
                 Vector2f offset = mouseVec;
+                if (m_parallax.canvas_scene) {
+                    // Wallpaper Engine moves the whole tree under an outermost
+                    // layer by that layer's distance from the eased cursor
+                    // point, which rests at the centre of the view: with the
+                    // cursor centred a layer off the centre is pushed further
+                    // out by its depth. The outermost layer's current origin,
+                    // so a scripted or animated one carries its children.
+                    const SceneNode* root = nodeData->parallax_layer != nullptr
+                                                ? nodeData->parallax_layer
+                                                : pNode;
+                    while (root->Parent() != nullptr &&
+                           root->Parent() != m_scene->sceneGraph.get())
+                        root = root->Parent();
+                    offset += root->ModelTrans().block<2, 1>(0, 3).cast<float>() -
+                              camera->GetPosition().cast<float>().head<2>();
+                }
                 if (! m_parallax.canvas_scene) {
                     // Where the layer sits in the scene, not its parent-relative
                     // origin, which is near zero for the child of a centred group.

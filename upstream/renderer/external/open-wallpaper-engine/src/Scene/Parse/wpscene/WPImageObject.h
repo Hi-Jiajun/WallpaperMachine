@@ -79,7 +79,8 @@ public:
     std::array<float, 3>       scale { 1.0f, 1.0f, 1.0f };
     std::array<float, 3>       angles { 0.0f, 0.0f, 0.0f };
     std::array<float, 2>       size { 2.0f, 2.0f };
-    std::array<float, 2>       parallaxDepth { 0.0f, 0.0f };
+    // Wallpaper Engine's default for an object that leaves the key out.
+    std::array<float, 2>       parallaxDepth { 1.0f, 1.0f };
     std::array<float, 2>       cropoffset { 0.0f, 0.0f };
     std::array<float, 3>       color { 1.0f, 1.0f, 1.0f };
     int32_t                    colorBlendMode { 0 };

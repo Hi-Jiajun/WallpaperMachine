@@ -77,17 +77,20 @@ Playback, backend, host and startup areas are in
   sequential or random queuing and bounded catch-up; only selected paths advance,
   hidden paths add no animation demand, and curves are parsed once. Camera-path
   zoom, path events and camera-cut fades are not implemented.
-- **Camera parallax** — `ShaderValueUpdaterCompat.CameraParallaxFollowsTheCursorAndDepthNotThePosition`,
+- **Camera parallax** — `ShaderValueUpdaterCompat.CameraParallaxMovesEachLayerTreeByItsRootsDistanceFromTheCursor`,
   `.ZeroParallaxDelayFollowsTheCursorAtOnce` and
   `.ParallaxLayersAreReportedAsFollowingTheCursor` in `script_runtime_compat_test`;
   `SceneSchema.ParserCopiesImageParallaxDepthToPuppetMaterialSlots` in
   `scene_schema_tests`.
-  - In a 2D scene parallax moves a layer by the cursor's offset from the view
-    centre times its `parallaxDepth`, scaled by `cameraparallaxamount` and
-    `cameraparallaxmouseinfluence`. Where the layer sits, nested or not, plays no
-    part, so with the cursor centred every layer rests where it was authored;
-    adding the layer's distance from the camera pushes far layers out of frame.
-    3D scenes keep that distance term.
+  - In a 2D scene, as in Wallpaper Engine, parallax moves each layer tree by its
+    outermost layer's distance from the eased cursor point, times that layer's
+    `parallaxDepth` and `cameraparallaxamount`. The point rests at the view centre
+    and moves with the cursor by `cameraparallaxmouseinfluence`, so with the cursor
+    centred a layer off the centre already sits further out, by
+    `(origin - centre) x amount x depth`. Every layer of a tree, and every effect
+    pass of a layer, takes the outermost layer's current origin; a layer that
+    leaves `parallaxDepth` out has depth (1, 1). A layer under a depth-0 group does
+    not move. 3D scenes use each layer's own distance from the camera.
   - A pass parallax moves is reported as following the cursor (`kParallax`),
     judged for the camera the pass draws through: static reuse redraws its
     target, and an on-demand scene wakes for the pointer. A layer drawn into a
@@ -110,7 +113,7 @@ Playback, backend, host and startup areas are in
   `.ParentedPuppetSlotsFollowTheRootDepthAndKeepTheirLocalTransforms`; and
   `MetalSceneDraw.ParentedCardsStayJoinedWhileParallaxMovesAndReverses` in
   `metal_scene_draw_smoke`. Parented layers take the outermost parent's
-  `parallaxDepth`, including a zero or omitted one (Wallpaper Engine's
+  `parallaxDepth`, including a zero one or an omitted one, which is (1, 1) (Wallpaper Engine's
   [release notes](https://steamcommunity.com/app/431960/allnews/) confirm that
   the parent controls parallax on child layers). `ResolveLayerParallax`
   resolves it once at parse time, independent of declaration order and before

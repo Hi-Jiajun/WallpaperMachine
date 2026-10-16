@@ -173,7 +173,8 @@ public:
     std::array<float, 3>     origin { 0.0f, 0.0f, 0.0f };
     std::array<float, 3>     scale { 1.0f, 1.0f, 1.0f };
     std::array<float, 3>     angles { 0.0f, 0.0f, 0.0f };
-    std::array<float, 2>     parallaxDepth { 0.0f, 0.0f };
+    // Wallpaper Engine's default for an object that leaves the key out.
+    std::array<float, 2>     parallaxDepth { 1.0f, 1.0f };
     bool                     visible { true };
     bool                     dynamic_origin { false };
     bool                     dynamic_scale { false };

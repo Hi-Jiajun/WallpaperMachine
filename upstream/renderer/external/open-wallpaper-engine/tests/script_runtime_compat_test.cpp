@@ -3158,10 +3158,16 @@ TEST(ShaderValueUpdaterCompat, DayTimeUniformFollowsLocalClockAndWrapsAtMidnight
     EXPECT_NE(updater.FrameVaryingUniforms(node.get(), 0, "") & frame_varying_uniform::kDayTime, 0u);
 }
 
-TEST(ShaderValueUpdaterCompat, CameraParallaxFollowsTheCursorAndDepthNotThePosition) {
+// Wallpaper Engine moves every layer tree in a 2D scene by its outermost
+// layer's distance from the eased cursor point, times that layer's depth and
+// the scene's amount. The point rests at the centre of the view, so with the
+// cursor centred a layer off the centre is pushed further out; a cursor away
+// from the centre then moves every tree alike, by its depth.
+TEST(ShaderValueUpdaterCompat, CameraParallaxMovesEachLayerTreeByItsRootsDistanceFromTheCursor) {
     Scene scene;
     scene.ortho[0] = 3840;
     scene.ortho[1] = 2160;
+    scene.sceneGraph = std::make_shared<SceneNode>();
     auto camera      = std::make_shared<SceneCamera>(3840, 2160, -1.0f, 1.0f);
     auto camera_node = std::make_shared<SceneNode>();
     camera_node->SetTranslate(Eigen::Vector3f(1920, 1080, 0));
@@ -3177,11 +3183,12 @@ TEST(ShaderValueUpdaterCompat, CameraParallaxFollowsTheCursorAndDepthNotThePosit
     };
     WPShaderValueUpdater updater(&scene);
     updater.SetCameraParallax({ .enable = true, .amount = 0.5f, .delay = 0.5f,
-                                .mouseinfluence = 0.5f });
+                                .mouseinfluence = 0.5f, .canvas_scene = true });
     // How far the drawn layer sits from where its node places it.
-    const auto displacement = [&](SceneNode& node, float depth) {
+    const auto displacement = [&](SceneNode& node, float depth, SceneNode* anchor = nullptr) {
         WPShaderValueData data;
-        data.parallaxDepth = { depth, depth };
+        data.parallaxDepth  = { depth, depth };
+        data.parallax_layer = anchor;
         updater.SetNodeData(&node, data);
         updater.InitUniforms(&node, [](std::string_view name) { return name == "g_ModelMatrix"; });
         sprite_map_t sprites;
@@ -3197,26 +3204,37 @@ TEST(ShaderValueUpdaterCompat, CameraParallaxFollowsTheCursorAndDepthNotThePosit
 
     auto planet = layer();
     planet->SetTranslate(Eigen::Vector3f(1907, 2647, 0));
+    scene.sceneGraph->AppendChild(planet);
     auto group = std::make_shared<SceneNode>();
     group->SetTranslate(Eigen::Vector3f(1000, 500, 0));
+    scene.sceneGraph->AppendChild(group);
     auto nested = layer();
     nested->SetTranslate(Eigen::Vector3f(500, 200, 0));
     group->AppendChild(nested);
     auto centred = layer();
     centred->SetTranslate(Eigen::Vector3f(1920, 1080, 0));
+    scene.sceneGraph->AppendChild(centred);
+    // An effect pass of the planet: a node of its own, outside the tree.
+    auto planet_effect = layer();
 
-    EXPECT_LT(displacement(*planet, 0.5f).norm(), 1e-3f) << "an off-centre layer left its place";
-    EXPECT_LT(displacement(*nested, 0.5f).norm(), 1e-3f) << "a nested layer left its place";
+    // At rest: (origin - view centre) * amount * depth, the root's origin for
+    // the whole tree.
+    const Eigen::Vector2f planet_rest = displacement(*planet, 0.5f);
+    EXPECT_LT((planet_rest - Eigen::Vector2f(-3.25f, 391.75f)).norm(), 1e-2f);
+    EXPECT_LT((displacement(*nested, 0.5f) - Eigen::Vector2f(-230.0f, -145.0f)).norm(), 1e-2f)
+        << "a nested layer is not anchored at its outermost layer";
+    EXPECT_LT((displacement(*planet_effect, 0.5f, planet.get()) - planet_rest).norm(), 1e-2f)
+        << "an effect pass is not anchored at its layer";
+    EXPECT_LT(displacement(*centred, 0.5f).norm(), 1e-3f) << "a centred layer left its place";
 
     updater.MouseInput(1.0, 0.0);
     scene.frameTime = 10.0; // long enough for the eased cursor to arrive
     updater.FrameBegin();
     const Eigen::Vector2f moved = displacement(*centred, 0.5f);
     EXPECT_GT(moved.norm(), 1.0f) << "a cursor away from the centre must move the layer";
-    EXPECT_LT((displacement(*planet, 0.5f) - moved).norm(), 1e-3f);
-    EXPECT_LT((displacement(*nested, 0.5f) - moved).norm(), 1e-3f);
+    EXPECT_LT((displacement(*planet, 0.5f) - planet_rest - moved).norm(), 1e-2f);
     EXPECT_LT((displacement(*centred, 1.0f) - 2.0f * moved).norm(), 1e-3f);
-    EXPECT_LT(displacement(*centred, 0.0f).norm(), 1e-3f) << "depth zero stays put";
+    EXPECT_LT(displacement(*planet, 0.0f).norm(), 1e-3f) << "depth zero stays put";
 }
 
 // A parallax delay of zero is authored as "no smoothing": the cursor is

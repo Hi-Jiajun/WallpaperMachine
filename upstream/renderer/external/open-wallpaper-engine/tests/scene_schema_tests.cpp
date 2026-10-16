@@ -4444,7 +4444,8 @@ TEST(SceneSchema, ParallaxInheritanceResolvesRootsWithoutDependingOnDeclarationO
         if (reversed) std::reverse(objects.begin(), objects.end());
         EXPECT_EQ(objects[0]["parallaxDepth"], original[2]["parallaxDepth"]);
         EXPECT_EQ(objects[1]["parallaxDepth"], original[2]["parallaxDepth"]);
-        EXPECT_EQ(objects[3]["parallaxDepth"], nlohmann::json::array({0, 0}));
+        // A root without a depth has Wallpaper Engine's default, (1, 1).
+        EXPECT_EQ(objects[3]["parallaxDepth"], nlohmann::json::array({1, 1}));
         for (std::size_t i : {2u, 4u, 5u, 6u, 7u, 8u, 9u, 10u})
             EXPECT_EQ(objects[i], original[i]);
     }
@@ -4541,8 +4542,10 @@ TEST(SceneSchema, ParentedPuppetSlotsFollowTheRootDepthAndKeepTheirLocalTransfor
                         if (name == "g_ModelMatrix") model = value;
                     });
                 ASSERT_EQ(model.size(), 16u);
-                EXPECT_NEAR(model[12], 143.0f + (0.5f - x) * 640 * 2 * 0.75f, 1e-4);
-                EXPECT_NEAR(model[13], 137.0f + (0.5f - x) * 360 * 2 * -0.25f, 1e-4);
+                // The cursor's offset plus the root group's distance from the
+                // view centre (320, 180), both times the root's depth.
+                EXPECT_NEAR(model[12], 143.0f + ((0.5f - x) * 640 + (100 - 320)) * 2 * 0.75f, 1e-3);
+                EXPECT_NEAR(model[13], 137.0f + ((0.5f - x) * 360 + (80 - 180)) * 2 * -0.25f, 1e-3);
             }
         }
     }
