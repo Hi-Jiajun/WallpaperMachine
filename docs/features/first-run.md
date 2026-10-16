@@ -86,7 +86,7 @@ have **Back**, and decision pages have **Skip**:
    value it had when the guide opened. During a preference or lock-screen commit,
    Back, step navigation, Skip and Continue are all disabled so the guide cannot leave
    a partially submitted operation.
-5. **Tips.** Three one-line tips (browsing the Workshop, download then double-click to
+5. **Tips.** Three one-line tips (browsing **Steam Workshop**, download then double-click to
    apply, one wallpaper per display), then a compatibility card: not every wallpaper
    works (videos usually play, scenes are experimental, Application wallpapers cannot
    run), failures are reported with the inspector's report button, and pull
@@ -96,7 +96,8 @@ have **Back**, and decision pages have **Skip**:
    Pending jobs or setup requests offer **Finish sign-in**. Unsaved performance or
    preference drafts each add a row with their count and **Review**, which returns
    to that page without discarding them; closing does not auto-save the drafts.
-   **Browse the Workshop** ends the guide and opens Discover, **Import wallpapers**
+   **Browse the Workshop** ends the guide and opens **Steam Workshop** (its note points
+   to Browse → Steam Workshop in the sidebar), **Import wallpapers**
    ends it, shows Installed and opens the import picker, and **Start using the app**
    simply closes it. A note says the guide can be opened again from Settings →
    General.
@@ -114,7 +115,7 @@ be selected and copied.
 
 ## First wallpaper support prompt
 
-After a wallpaper downloaded through Discover or pixiv is successfully applied by
+After a wallpaper downloaded through Steam Workshop or pixiv is successfully applied by
 the user, the panel offers **Feeling good?** once, in a sheet on the panel window.
 **Star on GitHub** opens the project repository; **Become a Supporter** opens the
 website's pricing page (the Chinese page for either Chinese app language). Both

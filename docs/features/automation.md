@@ -91,7 +91,7 @@ and retained if restore rolls back.
 | Apply saved playlist | Copies a saved plan to the chosen display and starts it when playback can run. |
 | Apply wallpaper property preset | Applies a saved preset to its owning wallpaper on every display using it; rejects unapplied editor drafts. |
 | Apply display layout | Restores the saved wallpaper arrangement across its named displays, with full preflight and verified failure recovery. |
-| Open | Brings up the control panel, on Installed, Discover, pixiv or Settings when named. |
+| Open | Brings up the control panel, on Installed, Steam Workshop (`page=discover`), pixiv or Settings when named. |
 | Remove from display | Menu bar only, with no link: takes whatever the named display shows off it and leaves it empty, so its playlist waits ([a display you cleared](playlists.md#a-display-you-cleared)). It takes the display's turn in the command queue and removes what the display shows then; an empty display is left as it is. |
 
 Previous, Next, Random Wallpaper, Apply Wallpaper and Apply Saved Playlist act on the panel's target display unless a display is named, and

@@ -138,7 +138,7 @@ final class FirstRunModel {
     close()
   }
 
-  /// **Browse the Workshop**: ends the guide, then opens Discover.
+  /// **Browse the Workshop**: ends the guide, then opens Steam Workshop.
   @discardableResult
   func browse() -> Task<Void, Never> {
     finish()

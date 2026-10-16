@@ -4799,8 +4799,8 @@
     "The basics" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "基本操作"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "基本用法"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "基本操作"}}}
     },
-    "Browse wallpapers in Discover. No account needed." : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "「見つける」で壁紙をブラウズできます。アカウントは不要です。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "在“发现”中浏览壁纸，无需登录。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "在「探索」中瀏覽桌布，不需要帳號。"}}}
+    "Browse wallpapers in Steam Workshop. No account needed." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "「Steamワークショップ」で壁紙をブラウズできます。アカウントは不要です。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "在“Steam 创意工坊”中浏览壁纸，无需登录。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "在「Steam 工作坊」中瀏覽桌布，不需要帳號。"}}}
     },
     "Download one, then double-click it to apply." : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "壁紙をダウンロードしたら、ダブルクリックして適用します。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "下载后双击即可应用。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "下載桌布後，按兩下即可套用。"}}}
@@ -4841,8 +4841,8 @@
     "Browse the Workshop" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ワークショップをブラウズ"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "浏览创意工坊"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "瀏覽工作坊"}}}
     },
-    "Find wallpapers from Steam in Discover." : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "「見つける」でSteamの壁紙を探せます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "在“发现”中查找 Steam 上的壁纸。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "在「探索」中尋找 Steam 上的桌布。"}}}
+    "Find wallpapers from Steam in Browse → Steam Workshop." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "「ブラウズ」→「Steamワークショップ」でSteamの壁紙を探せます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "在“浏览 → Steam 创意工坊”中查找 Steam 上的壁纸。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "在「瀏覽 → Steam 工作坊」中尋找 Steam 上的桌布。"}}}
     },
     "Bring in wallpaper folders or files you already have." : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "手持ちの壁紙フォルダやファイルを読み込みます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "导入你已有的壁纸文件夹或文件。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "匯入你現有的桌布資料夾或檔案。"}}}

@@ -11,7 +11,7 @@ struct WelcomeTipsPage: View {
     WelcomeColumn(spacing: compact ? 18 : 22) {
       WelcomePageHeader(title: Text("The basics"))
       DividedRows(separatorInset: 54) {
-        tip("magnifyingglass", .blue, Text("Browse wallpapers in Discover. No account needed."))
+        tip("magnifyingglass", .blue, Text("Browse wallpapers in Steam Workshop. No account needed."))
         tip("arrow.down.circle", .green, Text("Download one, then double-click it to apply."))
         tip(
           "display", .orange,
@@ -82,7 +82,8 @@ struct WelcomeStartPage: View {
       WelcomeColumn(spacing: 8) {
         WelcomeActionRow(
           symbol: "magnifyingglass", color: theme.accent.control.color,
-          title: Text("Browse the Workshop"), note: Text("Find wallpapers from Steam in Discover."),
+          title: Text("Browse the Workshop"),
+          note: Text("Find wallpapers from Steam in Browse → Steam Workshop."),
           trailingSymbol: "chevron.right", isSuggested: true
         ) { model.browse() }
         WelcomeActionRow(
