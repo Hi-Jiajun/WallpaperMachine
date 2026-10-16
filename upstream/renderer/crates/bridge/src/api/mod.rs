@@ -2075,9 +2075,9 @@ impl WallpaperBridge {
     /// rasterizes at the size the author made it and stretches the result,
     /// which costs the least. The internal render scale divides whichever is
     /// chosen. Perspective scenes and plain videos ignore it. Running scenes
-    /// resize their render targets in place; nothing is reparsed and a pause
-    /// the user asked for is untouched (on Native Metal a scene's own video
-    /// layers are reopened, as for any render-scale change).
+    /// resize their render targets in place; nothing is reparsed, a scene's
+    /// own video layers stay open and carry on, and a pause the user asked for
+    /// is untouched.
     ///
     /// # Errors
     ///

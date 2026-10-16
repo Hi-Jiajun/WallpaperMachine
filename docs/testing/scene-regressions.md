@@ -1997,6 +1997,59 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   Wallpaper Engine moves the text by that much). A real clock (a
   left-aligned, padded layer through a skew effect) that stood 22 pixels right of
   Wallpaper Engine's, in a 3456-pixel frame, is within one.
+- **A video stays open and on its frame when the render graph is built again under it** —
+  `MetalSceneDraw.AVideoStaysOpenAndOnItsFrameWhenATextCardResizesTheGraphUnderItOnBothRenderers`
+  in `metal_scene_draw_smoke`, on both renderers. A 20 second 640 by 360 clip in one group of
+  pictures (the long clip of `synthetic_video.hpp`: one keyframe, and a bar that crosses the
+  picture once, so the column of the bar tells the frame) plays under a caption that draws
+  through an effect. A seek to 12 s decodes 360 frames, which takes 0.4 s and many draws. The
+  video clock is set to 12 s at the third draw and the scene is drawn at the pace of that clock,
+  every draw captured as a poster, until the picture shows the clock's frame (within two frames
+  of thirty a second). The wait is for the picture and not for a number of draws, so a machine
+  that is slow to seek only takes longer, and a run that never gets there (900 draws) fails
+  naming the frame it was on. Then the caption becomes a longer text, which makes the card
+  another size in texels and the host build the graph again. The picture is the draw that
+  follows the rebuild and must show the clip's frame for the clock (within four frames), and the
+  renderer's work counters must name the same decoder before and after
+  (`OWE_RC_VIDEO_SOURCE_INSTANCE`, with one source open). With the keeping switched off for the
+  run it fails on both renderers: the picture is the clip's frame 0 with the clock at frame 365,
+  and the decoder is another one (1 then 2 on Compatibility, 3 then 4 on Native Metal), which is
+  the build the test was written against.
+  `.AVideoTheRebuiltGraphLeavesOutIsClosedOnBothRenderers` is the other half: a property hides
+  the video layer in the tick that resizes the caption, so the graph built again leaves the layer
+  out (a layer hidden by a property nothing else writes is left out; one that `SetNodeVisible`
+  hides keeps its passes) and nothing in it binds the video that was playing. The decoder was
+  kept for the new graph and not taken back, so it must be closed with the compile: the number
+  of `.mp4` files the process holds open (a decoder holds its file for as long as it lives) is
+  back to what it was before the scene on both renderers, and fails with the closing of what was
+  kept taken out of either compile. It passes with the keeping switched off, being the other
+  side of the one above.
+  `.AVideoStaysOpenWhenARenderScaleChangeCompilesTheGraphAgainOnNativeMetal` applies a render
+  scale of one half to a Native Metal renderer that is drawing the video, through
+  `ApplyRenderScale` (the raster halves, so the graph was compiled again), and requires the same
+  decoder before and after; it fails with the `hold()` in `ApplyRenderScale` taken out (the
+  decoder is another one). `.AVideoSetAsideForACompileThatIsRefusedIsClosedOnNativeMetal`
+  releases the surface of a renderer that has drawn the video, clears its graph for a rebuild
+  and has the compile refused (a renderer with no surface compiles nothing): the `.mp4` files
+  the process holds open must be back to what they were before the scene, which fails with the
+  close in the refused compile taken out. The Compatibility renderer closes what a rebuild set
+  aside on its own refused compile (`m_device_lost`, `m_frame_faulted`) and on a clear that fails
+  after setting it aside; neither can be brought about without losing the device or faulting a
+  frame, so they have no scene test, and `CloseHeldVideos` they call is the one the cache tests
+  in [runtime regressions](runtime-regressions.md) close videos with.
+  Real wallpaper 3326873240 (Native Metal, 3456 by 2024 display size, real time, five packaged
+  4K videos, a clock under an effect;
+  `WE_TEST_COMPARE_REBUILD_AT=200 WE_TEST_COMPARE_STOP_AFTER_REBUILD=3`): the rebuild opens no
+  video and takes 0.05 s, where with the videos closed as before it opens all five and takes 1.4
+  s (1.2 to 3.4 s depending on the load); the picture three draws later is the picture of a run
+  that did not rebuild, pixel for pixel outside the box of the clock's digits, in both builds
+  (the seek of the first video opened lands while the later ones are still opening, so the head
+  of the clip is not seen on this wallpaper, only the wait is). With the local clock set so that
+  the minute turns over during the run (a fixed POSIX `TZ` offset, seconds included, that puts
+  the turn twelve seconds into the run), the clock caused the rebuild itself in some runs and
+  not in others: at draw 381 with the keeping (0.05 s, no video opened) and at draw 630 with the
+  videos closed (1.3 s, all five opened again), the pictures again equal to a run that did not
+  rebuild outside the clock's box.
 - **Alignment words and brightness** — `text_object_runtime_test`.
   `TextObjectRuntime.AlignmentKeysAreReadAsTheEnumRegistryReadsThem` parses a scene
   with every shape of the two keys (absent, each word, wrong case, empty, a longer

@@ -1027,7 +1027,9 @@ private:
     bool rebuildRenderGraph() {
         if (m_scene == nullptr) return true;
 
-        if (m_rg && ! m_render->clearLastRenderGraph()) {
+        // The same scene's graph again: its videos stay open for the compile below
+        // instead of starting over at the head of their clips.
+        if (m_rg && ! m_render->clearLastRenderGraphForRebuild()) {
             suspendAfterGraphFailure();
             return false;
         }

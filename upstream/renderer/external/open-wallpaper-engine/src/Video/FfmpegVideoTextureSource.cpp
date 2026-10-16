@@ -5,6 +5,7 @@
 #include "Video/VideoDecodePump.hpp"
 #include "Video/VideoFramePacing.hpp"
 #include "Video/VideoMetadata.hpp"
+#include "Video/VideoSeekPolicy.hpp"
 #include "Platform/Apple/FfmpegVideoInterop.hpp"
 #include "Utils/Logging.h"
 #include "Utils/Sha.hpp"
@@ -444,10 +445,13 @@ public:
             requestSeekLocked(desired_absolute_seconds);
         }
 
-        const double forward_resync_threshold =
-            std::max(1.0, m_frame_duration_seconds * static_cast<double>(kDecodedFrameQueueCapacity) * 2.0);
-        if (!m_display_frame_ready ||
-            desired_absolute_seconds > latestBufferedAbsoluteLocked() + forward_resync_threshold) {
+        const double forward_resync_threshold = ForwardResyncSeconds(
+            m_frame_duration_seconds, static_cast<double>(kDecodedFrameQueueCapacity),
+            m_seek_landing_lag_seconds);
+        if (!seekInFlightCoversLocked(desired_absolute_seconds, backward_threshold,
+                                      forward_resync_threshold) &&
+            (!m_display_frame_ready ||
+             desired_absolute_seconds > latestBufferedAbsoluteLocked() + forward_resync_threshold)) {
             requestSeekLocked(desired_absolute_seconds);
         }
         // A seek requested above, or a display frame just cleared, is work the
@@ -900,9 +904,32 @@ private:
     {
         m_requested_seek_absolute_seconds = std::max(0.0, absolute_seconds);
         m_seek_requested = true;
+        m_seek_awaiting_frame = true;
+        m_seek_requested_at = std::chrono::steady_clock::now();
         ++m_seek_ticket;
         ++m_seek_request_count;
         clearPendingFramesLocked();
+    }
+
+    [[nodiscard]] double secondsSinceSeekRequestedLocked() const
+    {
+        return std::chrono::duration<double>(std::chrono::steady_clock::now() - m_seek_requested_at).count();
+    }
+
+    /// Whether a seek that has been asked for and has not yet delivered a frame
+    /// is still fetching what the clock wants (`SeekOnItsWayCoversClock`).
+    ///
+    /// Asked for on every call of a draw, a seek that takes longer than the time
+    /// between two draws, as one of a large clip does, would never land, and the
+    /// display would stay on the frame it had.
+    [[nodiscard]] bool seekInFlightCoversLocked(double desired_absolute_seconds,
+                                                double backward_slack,
+                                                double forward_slack) const
+    {
+        if (!m_seek_awaiting_frame) return false;
+        return SeekOnItsWayCoversClock(m_requested_seek_absolute_seconds, desired_absolute_seconds,
+                                       secondsSinceSeekRequestedLocked(), m_playback_state.rate,
+                                       backward_slack, forward_slack);
     }
 
     [[nodiscard]] bool displayFrameCoversDesiredLocked(double desired_absolute_seconds) const
@@ -1059,6 +1086,11 @@ private:
             return;
         }
 
+        if (m_seek_awaiting_frame) {
+            m_seek_awaiting_frame = false;
+            m_seek_landing_lag_seconds =
+                ClockRunOnSeconds(secondsSinceSeekRequestedLocked(), m_playback_state.rate);
+        }
         frame_slot.frame.generation = m_next_generation++;
         ++m_decoded_frame_count;
         // Evidence for pacing comes from here, where a real decoded timestamp
@@ -1170,6 +1202,12 @@ private:
     DecodedFrameSlot                 m_display_frame {};
     bool                             m_display_frame_ready { false };
     bool                             m_seek_requested { false };
+    /// Set by a seek request and cleared by the first frame decoded for it.
+    bool                             m_seek_awaiting_frame { false };
+    std::chrono::steady_clock::time_point m_seek_requested_at {};
+    /// How far behind the clock the last seek that landed left its first frame:
+    /// the clip's time that passed while it was being fetched.
+    double                           m_seek_landing_lag_seconds { 0.0 };
     double                           m_requested_seek_absolute_seconds { 0.0 };
     uint64_t                         m_seek_ticket { 0 };
     bool                             m_running { false };

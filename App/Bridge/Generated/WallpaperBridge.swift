@@ -1364,9 +1364,9 @@ public protocol WallpaperBridgeProtocol : AnyObject {
      * rasterizes at the size the author made it and stretches the result,
      * which costs the least. The internal render scale divides whichever is
      * chosen. Perspective scenes and plain videos ignore it. Running scenes
-     * resize their render targets in place; nothing is reparsed and a pause
-     * the user asked for is untouched (on Native Metal a scene's own video
-     * layers are reopened, as for any render-scale change).
+     * resize their render targets in place; nothing is reparsed, a scene's
+     * own video layers stay open and carry on, and a pause the user asked for
+     * is untouched.
      *
      * # Errors
      *
@@ -3430,9 +3430,9 @@ open func setSceneRenderer(mode: String)async throws  -> BridgeSnapshotBundle {
      * rasterizes at the size the author made it and stretches the result,
      * which costs the least. The internal render scale divides whichever is
      * chosen. Perspective scenes and plain videos ignore it. Running scenes
-     * resize their render targets in place; nothing is reparsed and a pause
-     * the user asked for is untouched (on Native Metal a scene's own video
-     * layers are reopened, as for any render-scale change).
+     * resize their render targets in place; nothing is reparsed, a scene's
+     * own video layers stay open and carry on, and a pause the user asked for
+     * is untouched.
      *
      * # Errors
      *
@@ -10549,7 +10549,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_scene_renderer() != 23711) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_scene_resolution() != 55504) {
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_scene_resolution() != 15138) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_scene_video_plane_sampling_enabled() != 19099) {

@@ -382,6 +382,58 @@ the next tick; which script Wallpaper Engine lets win when two write one text is
 established (the one frame that covers it shows the text script's value). Effect and
 video output of Native Metal has not been compared against real wallpapers.
 
+A video texture plays against the clock of the layer that shows it, the scene's until a script
+moves it, on both renderers. A render graph built again under a playing video (a text layer
+whose card changes size in texels, a property that shows or hides a layer, a change of the
+render scale on Native Metal) does not close the videos the new graph still shows. Wallpaper Engine resizes a text
+card's buffers in place and touches nothing else a scene holds, so its video neither goes back
+to the head of its clip nor stops. Here the host asks the renderer to clear the graph *for a
+rebuild* (`clearLastRenderGraphForRebuild`), which sets every open video aside (Native Metal:
+`MetalVideoTextures::hold`; Compatibility: `TextureCache::ClearForRebuild`); the compile that
+follows takes back the ones the new graph binds, by texture, and closes the rest when it ends,
+however it ends: a compile that is refused, or a clear that fails, closes them too. A video
+taken back is not parsed, so one packaged in the scene is not read, copied and hashed again
+(about 7 ms a megabyte: 0.2 to 0.4 s for a 53 MB clip, 1.3 s for a 191 MB one, 2.0 to 2.3 s for
+a 319 MB one, which a rebuild paid for every video it opened), and it is not opened, so its
+decoder carries on from the frame it had, given the scene's clock as any draw gives it. A
+decoder that failed while it waited is opened again like any other. Only the rebuild of the
+scene that is drawing keeps videos: a scene that is replaced and a renderer that is destroyed
+close them with the graph, as before, and so does a Compatibility surface that is released (a
+display change), which clears the texture cache; Native Metal keeps its graph, and the videos
+with it, through a surface release. A video whose layer a property shows again was left out of
+the graph by the rebuild that hid it, and closed then: it opens at the head of its clip and is
+sought to the clock, as any open is (below). Nothing is added to a frame, and no decoder is kept
+that was not open already. On the clock wallpaper of the re-test (3326873240: five 4K videos
+packaged in one 235 MB scene, a clock under an effect, Native Metal, display size, real-time
+pacing), a rebuild opens no video and takes 0.02 to 0.05 s; with the videos closed as they were,
+it opens all five again and takes 1.2 to 1.4 s on a quiet machine and 3.4 s on a busy one.
+Outside the clock's own box the picture after either rebuild is the picture of a run that did
+not rebuild, pixel for pixel: the seeks of this wallpaper's clips land while the later videos
+are still opening, so the head of a clip is not seen on it, only the wait.
+
+A video that is opened while the clock is already some way into the clip (a scene that falls
+back to the other renderer, a surface split off a shared decoder with shared decode on) opens
+at the head of the clip, as any open does, and the first call that gives it the clock seeks it
+there. The open waits for no seek, so it costs what opening at the head costs. The head of the
+clip is on screen until the seek has landed and the decoder has caught up with the clock, which
+kept running while the seek was made: 0.35 to 0.75 s for a 1080p clip and 0.7 to 1.5 s for a
+4K one at 30 frames a second with a keyframe every 250 frames (8.3 s), 2.3 to 4.2 s for 4K at
+60 frames a second with one every 600 (10 s). An open that waited for the seek would add its
+length to the draw that opens it (0.3 to 0.6 s on the 1080p clip, 0.5 to 1.1 s on the 4K one,
+1.4 to 1.5 s on the 60 frame one) and fail once it passed the two seconds an open waits for a
+first frame, as the 4K 60 frame clip's did at 9.9 s and at 19.9 s.
+
+A clock that jumps, as when a script sets a time, is one seek to the new time. A jump forward
+leaves the frame the video had on screen until the seek lands; a jump back by more than two
+frames clears it, and the draw that follows waits, for two seconds at most, for the seek's first
+frame. A seek that is on its way is not made again, because that restarts the decode from the
+keyframe and drops what it had decoded: asked for on every draw, a seek that takes longer than a
+draw would never land. It is made again only when the clock goes back before its target, or jumps
+on past it by more than a second beyond the time the seek has been made for, a clock that only
+runs while the seek is made being where it should be. A seek of any length therefore lands, and
+the frames after it are decoded on to the clock, at several times the pace the clip plays,
+instead of sought to again.
+
 Particle systems follow Wallpaper Engine 2.8's own rules, on both renderers, because
 one simulation feeds both. A system is simulated for its file's `starttime` before the
 first frame (steps of 0.05 s, or 0.2 s once the file holds 500 or more particles; at most
@@ -546,7 +598,8 @@ again whenever a change of the text gives the card another size in texels (one r
 of the render graph for that change; none while the card only moves, as when its
 alignment flips, or grows by less than a texel; a rebuild is about 0.5 ms of lowering and
 the compile of every pass, 0.6 to 0.9 ms in all on a scene of one layer and 39 to 45 ms on
-a scene of 72 passes, and it drops every uploaded image, so a text with a visible effect whose
+a scene of 72 passes, and it drops every uploaded image; a video playing in the scene stays open
+through it, as described under video textures above; a text with a visible effect whose
 card changes in texels every second, proportional digits or a typewriter, makes a heavy
 scene hitch for a few frames once per change). An effect on the text therefore sees
 the card as its whole picture: `v_TexCoord` runs 0 to 1 across it and

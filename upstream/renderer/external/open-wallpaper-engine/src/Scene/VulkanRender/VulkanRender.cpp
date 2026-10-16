@@ -170,7 +170,9 @@ struct VulkanRender::Impl {
     bool CreateRenderingResource(RenderingResources&);
     void DestroyRenderingResource(RenderingResources&);
 
-    bool clearLastRenderGraph();
+    /// `hold_videos`: the live video textures are set aside for the compile that
+    /// follows instead of closed (`TextureCache::ClearForRebuild`).
+    bool clearLastRenderGraph(bool hold_videos = false);
     bool compileRenderGraph(Scene&, rg::RenderGraph&);
     /// Resizes the scene's render targets to a new internal render scale and
     /// re-prepares the existing passes in place. Deliberately narrower than
@@ -328,6 +330,12 @@ bool VulkanRender::drawFrame(Scene& scene, bool* presented) {
 }
 void VulkanRender::InvalidatePresentedFrame() { pImpl->m_present_gate.Invalidate(); }
 bool VulkanRender::clearLastRenderGraph() { return pImpl->clearLastRenderGraph(); }
+bool VulkanRender::clearLastRenderGraphForRebuild() {
+    if (pImpl->clearLastRenderGraph(true)) return true;
+    // A clear that failed has no compile after it to close what it set aside.
+    if (pImpl->m_device) pImpl->m_device->tex_cache().CloseHeldVideos();
+    return false;
+}
 bool VulkanRender::compileRenderGraph(Scene& scene, rg::RenderGraph& rg) {
     return pImpl->compileRenderGraph(scene, rg);
 }
@@ -1261,7 +1269,7 @@ void VulkanRender::Impl::SetWallpaperHorizontalFlip(bool enabled) {
     LOG_INFO("wallpaper horizontal flip: %s", m_horizontal_flip ? "enabled" : "disabled");
 }
 
-bool VulkanRender::Impl::clearLastRenderGraph() {
+bool VulkanRender::Impl::clearLastRenderGraph(bool hold_videos) {
     if (quiesceFrame() != VK_SUCCESS) return false;
     m_direct_present_pass = nullptr;
     m_present_gate.Invalidate();
@@ -1286,7 +1294,8 @@ bool VulkanRender::Impl::clearLastRenderGraph() {
     m_pass_scratch.candidates.clear();
     m_pass_scratch.plan.entries.clear();
     m_pass_loaded = false;
-    if (! m_device->tex_cache().Clear(&error)) {
+    if (! (hold_videos ? m_device->tex_cache().ClearForRebuild(&error)
+                       : m_device->tex_cache().Clear(&error))) {
         LOG_ERROR("cannot clear render graph cache: %s", error.c_str());
         return failFrame(VK_ERROR_UNKNOWN);
     }
@@ -1299,6 +1308,12 @@ bool VulkanRender::Impl::clearLastRenderGraph() {
 }
 
 bool VulkanRender::Impl::compileRenderGraph(Scene& scene, rg::RenderGraph& rg) {
+    // The videos a rebuild set aside and this graph does not take back are the ones
+    // it no longer uses: closed with the compile, however it ends, a compile that
+    // is refused as well.
+    AUTO_DELETER(held_videos, [this]() {
+        if (m_device) m_device->tex_cache().CloseHeldVideos();
+    });
     if (! m_inited || m_device_lost || m_frame_faulted) return false;
     if (! m_passes.empty() && ! clearLastRenderGraph()) return false;
     m_direct_present_pass = nullptr;

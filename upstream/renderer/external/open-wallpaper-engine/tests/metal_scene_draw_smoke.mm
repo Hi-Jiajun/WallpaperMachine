@@ -64,6 +64,8 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <fcntl.h>
+#include <sys/syslimits.h>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -77,6 +79,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -328,6 +331,33 @@ struct RendererPicture
     std::string          error;
 };
 
+/// Where a run of `DrawWithRenderer` rebuilt the graph, and whether to end it there.
+struct RebuildWatch
+{
+    /// Draws to make after the first rebuild before the run ends (the last of them is
+    /// the picture); negative runs the frames it was asked for whatever happens.
+    int stop_after { -1 };
+    /// Rebuilds before this draw are not the first: a scene's scripts show layers as
+    /// it starts, which has the host build the graph again within the first draws.
+    int from { 0 };
+    /// A draw to build the graph again before whether or not anything asked for it:
+    /// what a clock under an effect does when its digits change size, at a draw of the
+    /// caller's choosing.
+    int force_at { -1 };
+    /// The draw the first rebuild came before, or -1 when there was none; and the
+    /// last draw of the run.
+    int rebuilt_at { -1 };
+    int last_draw { -1 };
+    /// For a test that has to wait for something to show before it acts, however long a
+    /// loaded machine takes to make it (a seek to land): from `look_from` on, every draw is
+    /// captured as a poster and handed to this, waited for, before the next draw begins.
+    /// `accepted_at` is the first draw whose picture it said yes to, or -1: the caller acts
+    /// at the `before_frame` of the draw after it, and the run is bounded by its frames.
+    std::function<bool(const RendererPicture&)> shown;
+    int look_from { 0 };
+    int accepted_at { -1 };
+};
+
 /// Draws `scene` with one renderer through `SceneRendererHandle` on a layer no
 /// window owns, as the host drives it -- the scaling it pushes to every
 /// renderer it creates, its per-frame `FrameBegin`, a graph rebuilt on every
@@ -337,11 +367,17 @@ struct RendererPicture
 /// each frame with its index, for a scene the world changes while it runs;
 /// `input`, when given, feeds its synthetic pointer events
 /// (`WE_TEST_INPUT_JSON`) through the renderer's cursor mapping as the host does.
+/// `counters`, when given, is the renderer's work counters from before the first
+/// graph is compiled (counting has to be switched on by the caller). `watch`, when
+/// given, is told where the first rebuild came and can end the run a few draws
+/// after it, for a picture of what a rebuild leaves behind whenever it comes.
 RendererPicture DrawWithRenderer(Scene& scene, bool native, uint32_t width, uint32_t height,
                                  int frames, double step,
                                  const std::function<void(int)>& before_frame = {},
                                  double display_scale_factor = 1.0,
-                                 tests::SceneProbeControls* input = nullptr)
+                                 tests::SceneProbeControls* input = nullptr,
+                                 RendererCounters* counters = nullptr,
+                                 RebuildWatch* watch = nullptr)
 {
     RendererPicture picture;
     @autoreleasepool {
@@ -355,6 +391,10 @@ RendererPicture DrawWithRenderer(Scene& scene, bool native, uint32_t width, uint
         void* handle          = (__bridge void*)layer;
 
         std::atomic<bool> wanted { false };
+        // A poster arrives on a thread of the renderer's: `shown` waits for it by count.
+        std::mutex              poster_mutex;
+        std::condition_variable poster_arrived;
+        uint64_t                posters = 0;
         RenderInitInfo    info;
         info.metal_layer   = handle;
         info.width         = static_cast<uint16_t>(width);
@@ -378,8 +418,9 @@ RendererPicture DrawWithRenderer(Scene& scene, bool native, uint32_t width, uint
         };
         info.wants_poster   = [&wanted] { return wanted.exchange(false); };
         info.poster_pending = [&wanted] { return wanted.load(); };
-        info.poster_ready   = [&picture](std::span<const uint8_t> bytes, uint32_t w, uint32_t h,
-                                       bool bgra) {
+        info.poster_ready   = [&](std::span<const uint8_t> bytes, uint32_t w, uint32_t h,
+                                  bool bgra) {
+            std::lock_guard lock(poster_mutex);
             picture.width  = w;
             picture.height = h;
             picture.rgb.resize(std::size_t(w) * h * 3);
@@ -388,6 +429,8 @@ RendererPicture DrawWithRenderer(Scene& scene, bool native, uint32_t width, uint
                 picture.rgb[i * 3 + 1] = bytes[i * 4 + 1];
                 picture.rgb[i * 3 + 2] = bytes[i * 4 + (bgra ? 0 : 2)];
             }
+            ++posters;
+            poster_arrived.notify_all();
         };
 
         SceneRendererHandle render;
@@ -396,6 +439,7 @@ RendererPicture DrawWithRenderer(Scene& scene, bool native, uint32_t width, uint
             picture.error = "could not start: " + error;
             return picture;
         }
+        if (counters != nullptr) render.SetCounters(counters);
         auto graph = sceneToRenderGraph(scene);
         if (graph == nullptr || ! render.compileRenderGraph(scene, *graph)) {
             picture.error = "could not prepare: " + render.lastError();
@@ -413,7 +457,10 @@ RendererPicture DrawWithRenderer(Scene& scene, bool native, uint32_t width, uint
         if (scene.runtime != nullptr) {
             scene.runtime->SetScreenResolution(Eigen::Vector2f(width, height));
         }
-        for (int frame = 0; frame < frames && picture.error.empty(); ++frame) {
+        int      last_frame = frames - 1;
+        bool     final_requested      = false;
+        uint64_t final_posters_before = 0;
+        for (int frame = 0; frame <= last_frame && picture.error.empty(); ++frame) {
             if (before_frame) before_frame(frame);
             if (input != nullptr && input->hasInput()) {
                 input->input(scene, static_cast<uint32_t>(frame), render.CursorMapping(scene));
@@ -422,10 +469,12 @@ RendererPicture DrawWithRenderer(Scene& scene, bool native, uint32_t width, uint
             if (scene.runtime != nullptr) {
                 scene.runtime->Tick(step);
                 scene.runtime->PumpTextLayerCache();
-                if (scene.runtime->ConsumeSceneGraphMutationFlag()) {
+                const bool asked_for = scene.runtime->ConsumeSceneGraphMutationFlag();
+                if (asked_for || (watch != nullptr && frame == watch->force_at)) {
                     // Cleared before the old graph is released: the renderer
-                    // still refers to its passes until then.
-                    if (! render.clearLastRenderGraph()) {
+                    // still refers to its passes until then. The same scene's graph
+                    // again, as the host builds it, so its videos stay open.
+                    if (! render.clearLastRenderGraphForRebuild()) {
                         picture.error = "could not rebuild: " + render.lastError();
                         break;
                     }
@@ -434,14 +483,56 @@ RendererPicture DrawWithRenderer(Scene& scene, bool native, uint32_t width, uint
                         picture.error = "could not rebuild: " + render.lastError();
                         break;
                     }
+                    if (watch != nullptr && watch->rebuilt_at < 0 && frame >= watch->from) {
+                        watch->rebuilt_at = frame;
+                        if (watch->stop_after >= 0) {
+                            last_frame = std::min(last_frame, frame + watch->stop_after);
+                        }
+                    }
                 }
             }
-            if (frame == frames - 1) wanted = true;
+            const bool looking = watch != nullptr && watch->shown && watch->accepted_at < 0 &&
+                                 frame >= watch->look_from;
+            uint64_t   posters_before = 0;
+            {
+                std::lock_guard lock(poster_mutex);
+                posters_before = posters;
+            }
+            if (frame == last_frame) {
+                final_requested      = true;
+                final_posters_before = posters_before;
+            }
+            if (frame == last_frame || looking) wanted = true;
             if (scene.shaderValueUpdater != nullptr) scene.shaderValueUpdater->FrameBegin();
             if (! render.drawFrame(scene)) {
                 picture.error = "frame " + std::to_string(frame) + ": " + render.lastError();
             }
             scene.PassFrameTime(step);
+            if (watch != nullptr) watch->last_draw = frame;
+            if (looking && picture.error.empty()) {
+                RendererPicture seen;
+                {
+                    std::unique_lock lock(poster_mutex);
+                    // A draw that presents nothing new serves its poster later; the next
+                    // draw then looks at the one that arrived, which is as good.
+                    if (poster_arrived.wait_for(lock, std::chrono::seconds(5),
+                                                [&] { return posters > posters_before; })) {
+                        seen.rgb    = picture.rgb;
+                        seen.width  = picture.width;
+                        seen.height = picture.height;
+                    }
+                }
+                if (! seen.rgb.empty() && watch->shown(seen)) watch->accepted_at = frame;
+            }
+        }
+        if (final_requested && watch != nullptr && watch->shown) {
+            // Earlier posters filled the picture already: the last one is waited for, or the
+            // run has no picture rather than an old one.
+            std::unique_lock lock(poster_mutex);
+            if (! poster_arrived.wait_for(lock, std::chrono::seconds(5),
+                                          [&] { return posters > final_posters_before; })) {
+                picture.rgb.clear();
+            }
         }
         if (picture.rgb.empty() && picture.error.empty() && native) {
             (void)render.ServicePosterRequest(scene);
@@ -7739,6 +7830,400 @@ TEST_F(MetalSceneDraw, AnEffectsUvOffsetIsAFractionOfTheCardOnBothRenderers)
     }
 }
 
+namespace
+{
+
+/// The video fixture's tile with a caption on top of it that draws through an
+/// effect: a layer whose card is another size in texels when its text is, which
+/// is what has the host rebuild the render graph under a video that is playing.
+/// The caption sits in the right half, so the left half is the clip alone.
+/// `long_clip` swaps the fixture's media for the long clip, whose single group
+/// of pictures makes a seek to a late frame take a good deal longer than a draw.
+std::filesystem::path WriteVideoCaptionFixture(const std::filesystem::path& root,
+                                               bool long_clip = false)
+{
+    const auto project = WriteVideoFixture(root, kVideoWidth, kVideoHeight);
+    if (project.empty()) return {};
+    if (long_clip && ! video::testing_media::WriteLongGopVideo(root / "materials" / "clip.mp4",
+                                                               "metal-video-long")) {
+        return {};
+    }
+    // The effect, its material and its shaders come from the text fixture; its
+    // layout is replaced by one that holds both layers.
+    WriteTextFixture(root, "1", true);
+    std::ofstream(root / "layout.json")
+        << R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+           R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0.0,0.0,0.0],)"
+           R"("cameraparallax":false,"orthogonalprojection":{"width":640,"height":360}},)"
+           R"("objects":[{"id":1,"name":"tile","image":"models/tile.json","origin":[320,180,0],)"
+           R"("scale":[1,1,1],"angles":[0,0,0],"visible":true},)"
+           R"({"id":2,"name":"caption","text":"1","font":"Arial","pointsize":48,)"
+           R"("origin":[520,60,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true,)"
+           R"("effects":[{"file":"effects/probe.json","visible":true}]}]})";
+    return project;
+}
+
+/// Which frame of the long clip a picture of the video layer shows: the bar that
+/// crosses the picture is in a column of its own for every frame. Read off the
+/// middle rows, away from the caption. -1 when there is no bar in the picture.
+int IdentifyBarFrame(const RendererPicture& picture)
+{
+    if (picture.width != kVideoWidth || picture.height != kVideoHeight ||
+        picture.rgb.size() != std::size_t(kVideoWidth) * kVideoHeight * 3) {
+        return -1;
+    }
+    constexpr uint32_t kFirstRow = 120, kLastRow = 240;
+    std::vector<double> column_sum(kVideoWidth, 0.0);
+    for (uint32_t y = kFirstRow; y < kLastRow; ++y) {
+        for (uint32_t x = 0; x < kVideoWidth; ++x) {
+            column_sum[x] += picture.rgb[(std::size_t(y) * kVideoWidth + x) * 3 + 1];
+        }
+    }
+    const int width = video::testing_media::kBarWidth;
+    double    best = 0.0, total = 0.0;
+    int       left = -1;
+    for (int x = 0; x < int(kVideoWidth); ++x) total += column_sum[x];
+    for (int x = 0; x + width <= int(kVideoWidth); ++x) {
+        double window = 0.0;
+        for (int i = 0; i < width; ++i) window += column_sum[x + i];
+        if (window > best) { best = window; left = x; }
+    }
+    // The bar is white over a ground a good deal darker: a window that does not
+    // stand out from the picture's mean is not a bar.
+    const double rows = kLastRow - kFirstRow;
+    if (left < 0 || best / (width * rows) < 1.5 * (total / (kVideoWidth * rows))) return -1;
+    return video::testing_media::LongGopFrameOfColumn(left);
+}
+
+/// Switches the renderer's work counters on for a test and off again however it ends.
+struct CountersOn
+{
+    CountersOn() { RendererCounters::SetEnabled(true); }
+    ~CountersOn() { RendererCounters::SetEnabled(false); }
+};
+
+/// How many media files this process has open: a decoder holds its file for as long as it
+/// lives, so this is what tells a video that was closed from one that was set aside.
+int OpenMediaFiles()
+{
+    int open = 0;
+    for (int fd = 0; fd < 4096; ++fd) {
+        char path[PATH_MAX];
+        if (fcntl(fd, F_GETPATH, path) == -1) continue;
+        const std::string_view name(path);
+        if (name.size() > 4 && name.substr(name.size() - 4) == ".mp4") ++open;
+    }
+    return open;
+}
+
+} // namespace
+
+TEST_F(MetalSceneDraw,
+       AVideoStaysOpenAndOnItsFrameWhenATextCardResizesTheGraphUnderItOnBothRenderers)
+{
+    // A text layer whose card is another size in texels has the host build the render graph
+    // again, and a graph built again used to close the scene's videos and open them again:
+    // the clip came back at its head and showed it until a seek to the scene's clock had
+    // landed. Wallpaper Engine resizes the card's buffers in place and touches nothing else,
+    // so its video neither stops nor goes back. Here the decoder is kept across the rebuild,
+    // on both renderers, and the video carries on.
+    //
+    // The clip is twenty seconds in one group of pictures, so a seek to a late frame decodes
+    // every frame before it, which takes 0.4 s to 12 s into the clip and 0.6 s to 19 s on a
+    // quiet machine, many times a draw, and its frames are told apart by the column of a bar.
+    // The clock is set to 12 s at the third draw and the scene is drawn at the pace of that
+    // clock, every draw looked at, until the picture shows the clock's frame, however long a
+    // loaded machine takes to get there; then the caption becomes a longer text, and the
+    // picture is the draw that follows the rebuild. A video opened again would be on the head
+    // of the clip there (frame 0, the bar at the left edge) with the clock at frame 360 and
+    // more; and it would be another decoder, which the work counters tell by its identity.
+    constexpr double kStep      = 1.0 / 60.0;
+    constexpr int    kJumpFrame = 2;
+    constexpr double kJumpTo    = 12.0;
+    // Fifteen seconds at the pace of the clock: far more than the seek takes, and the bound
+    // of a run that never gets there.
+    constexpr int kMostFrames = 900;
+    // The picture must be this close, in frames of the clip, to the clock to be waited out,
+    // and this close after the rebuild, one draw later.
+    constexpr int kSettled = 2, kWanted = 4;
+    const CountersOn counting;
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        const std::string name =
+            std::string("video-long-caption-") + (native ? "native" : "compat");
+        const auto project = WriteVideoCaptionFixture(root_ / name, true);
+        if (project.empty()) {
+            GTEST_SKIP() << "no hardware H.264 encoder here, or it cut the long clip's group of "
+                            "pictures short, so no media whose seek is longer than a draw";
+        }
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+        ASSERT_NE(loaded.scene->runtime, nullptr);
+        if (native) {
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+        }
+        auto& runtime = *loaded.scene->runtime;
+
+        const auto settle_text = [&runtime] {
+            for (int attempt = 0; attempt < 200 && runtime.NodeTextDirty("caption"); ++attempt) {
+                runtime.PumpTextLayerCache();
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+        };
+        RendererCounters counters;
+        uint64_t         instance_before = 0;
+        float            card_before = 0.0f, card_after = 0.0f;
+        int              last_looked_at = -1;
+        double           last_clock     = 0.0;
+        RebuildWatch     watch;
+        // No rebuild counts until the caption is changed: the scene's own start-up may ask for
+        // one, and the run must not end there.
+        watch.from      = std::numeric_limits<int>::max();
+        watch.stop_after = 0;
+        watch.look_from = kJumpFrame + 1;
+        watch.shown     = [&](const RendererPicture& seen) {
+            last_clock     = runtime.NodeVideoTextureCurrentTime("tile");
+            last_looked_at = IdentifyBarFrame(seen);
+            return last_clock > kJumpTo && last_looked_at >= 0 &&
+                   std::abs(last_looked_at - static_cast<int>(std::floor(last_clock * 30.0))) <=
+                       kSettled;
+        };
+        const auto picture = DrawWithRenderer(
+            *loaded.scene, native, kVideoWidth, kVideoHeight, kMostFrames, kStep,
+            [&](int frame) {
+                // Drawn at the pace of the clock, as the app draws, so that the decoder
+                // on its thread is as far along as it would be there.
+                std::this_thread::sleep_for(std::chrono::microseconds(16667));
+                if (frame == 0) settle_text();
+                if (frame == kJumpFrame) {
+                    ASSERT_TRUE(runtime.SetNodeVideoTextureCurrentTime("tile", kJumpTo));
+                }
+                if (watch.accepted_at < 0 || frame != watch.accepted_at + 1) return;
+                instance_before = counters.Get(OWE_RC_VIDEO_SOURCE_INSTANCE);
+                card_before     = runtime.NodeTextLayout("caption")->card.x();
+                watch.from      = frame;
+                ASSERT_TRUE(runtime.SetNodeText("caption", "WOVEN 99"));
+                settle_text();
+                card_after = runtime.NodeTextLayout("caption")->card.x();
+            },
+            1.0, nullptr, &counters, &watch);
+        ASSERT_TRUE(picture.error.empty()) << picture.error;
+        ASSERT_GE(watch.accepted_at, 0)
+            << "the seek to " << kJumpTo << " s had not landed in " << watch.last_draw + 1
+            << " draws: the picture was on frame " << last_looked_at << " of the clip with the "
+            << "video clock at " << last_clock << " s";
+        ASSERT_GE(std::floor(card_after) - std::floor(card_before), 1.0f)
+            << "the caption's card did not change size, so no graph was rebuilt";
+        ASSERT_EQ(watch.rebuilt_at, watch.accepted_at + 1) << "no graph was rebuilt for it";
+
+        // Not opened again: the decoder that played before the rebuild is the one playing after.
+        ASSERT_NE(instance_before, 0u) << "no video was open before the rebuild";
+        EXPECT_EQ(counters.Get(OWE_RC_VIDEO_SOURCE_INSTANCE), instance_before)
+            << "the video was opened again by the rebuild";
+        EXPECT_EQ(counters.Get(OWE_RC_VIDEO_SOURCE_COUNT), 1u);
+
+        // And on the frame the clock is at, not on the head of the clip.
+        const double clock  = runtime.NodeVideoTextureCurrentTime("tile");
+        const int    wanted = static_cast<int>(std::floor(clock * 30.0));
+        const int    shown  = IdentifyBarFrame(picture);
+        ASSERT_GT(clock, kJumpTo) << "the clock did not jump into the clip";
+        ASSERT_GE(shown, 0) << "no bar of the clip is on screen";
+        EXPECT_LE(std::abs(shown - wanted), kWanted)
+            << "frame " << shown << " of the clip is on screen with the video clock at " << clock
+            << " s, which is frame " << wanted;
+    }
+}
+
+TEST_F(MetalSceneDraw, AVideoTheRebuiltGraphLeavesOutIsClosedOnBothRenderers)
+{
+    // The video layer is hidden by a property and the caption changes size in the same tick,
+    // so the graph that is built again leaves the layer out and nothing in it binds the video
+    // that was playing. That decoder was kept for the new graph to take back and nothing took
+    // it back: it is closed with the compile, and its file is no longer open.
+    constexpr double kStep         = 1.0 / 60.0;
+    constexpr int    kRebuildFrame = 4;
+    constexpr int    kFrames       = kRebuildFrame + 3;
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        const std::string name = std::string("video-left-out-") + (native ? "native" : "compat");
+        const auto project = WriteVideoCaptionFixture(root_ / name);
+        if (project.empty()) {
+            GTEST_SKIP() << "no hardware H.264 encoder here, so no decodable media to parse";
+        }
+        // The tile shows or hides with a property; the caption is as the other fixtures have it.
+        {
+            std::ifstream in(root_ / name / "layout.json");
+            std::string layout((std::istreambuf_iterator<char>(in)),
+                               std::istreambuf_iterator<char>());
+            const std::string shown = R"("visible":true})";
+            const auto        at    = layout.find(shown);
+            ASSERT_NE(at, std::string::npos) << "the fixture's tile has no visibility to bind";
+            layout.replace(at, shown.size(), R"("visible":{"user":"showtile","value":true}})");
+            std::ofstream(root_ / name / "layout.json") << layout;
+            std::ofstream(project)
+                << R"({"title":"Metal video left out","type":"scene","file":"layout.json",)"
+                   R"("general":{"properties":{"showtile":{"type":"bool","value":true}}}})";
+        }
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+        ASSERT_NE(loaded.scene->runtime, nullptr);
+        if (native) {
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+        }
+        auto& runtime = *loaded.scene->runtime;
+
+        const auto settle_text = [&runtime] {
+            for (int attempt = 0; attempt < 200 && runtime.NodeTextDirty("caption"); ++attempt) {
+                runtime.PumpTextLayerCache();
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+        };
+        const int  files_before_scene = OpenMediaFiles();
+        RebuildWatch watch;
+        int        files_playing = -1, files_after = -1;
+        const auto picture = DrawWithRenderer(
+            *loaded.scene, native, kVideoWidth, kVideoHeight, kFrames, kStep,
+            [&](int frame) {
+                if (frame == 0) settle_text();
+                if (frame == kFrames - 1) files_after = OpenMediaFiles();
+                if (frame != kRebuildFrame) return;
+                files_playing = OpenMediaFiles();
+                runtime.PreviewProjectPropertyOverride(
+                    { { "showtile", RuntimeScalarValue::Bool(false) } });
+                ASSERT_TRUE(runtime.SetNodeText("caption", "WOVEN 99"));
+                settle_text();
+            },
+            1.0, nullptr, nullptr, &watch);
+        ASSERT_TRUE(picture.error.empty()) << picture.error;
+        ASSERT_GE(watch.rebuilt_at, kRebuildFrame) << "no graph was rebuilt";
+        ASSERT_GT(files_playing, files_before_scene) << "no video was open before the rebuild";
+        // Read while the renderer is still there: a video that was only set aside would be open.
+        EXPECT_EQ(files_after, files_before_scene)
+            << "a video the rebuilt graph does not bind is still open";
+    }
+}
+
+TEST_F(MetalSceneDraw, AVideoStaysOpenWhenARenderScaleChangeCompilesTheGraphAgainOnNativeMetal)
+{
+    // A render scale that moves resizes the targets by compiling the graph again, and the
+    // compile used to close the scene's videos with the graph it released. The host pushes the
+    // scale to every open scene, so a video that is playing sees it as often as the user drags
+    // the quality control: it stays open and on its clip.
+    const auto project =
+        WriteVideoFixture(root_ / "video-scale-project", kVideoWidth, kVideoHeight);
+    if (project.empty()) {
+        GTEST_SKIP() << "no hardware H.264 encoder here, so no decodable media to parse";
+    }
+    LoadedScene loaded;
+    std::string error;
+    ASSERT_TRUE(LoadScene(project, root_ / "video-scale-cache", loaded, error)) << error;
+    const auto selection = SelectSceneBackend(*loaded.scene);
+    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+
+    const CountersOn counting;
+    @autoreleasepool {
+        CAMetalLayer* layer   = [CAMetalLayer layer];
+        layer.device          = MTLCreateSystemDefaultDevice();
+        layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+        layer.drawableSize    = CGSizeMake(kVideoWidth, kVideoHeight);
+        layer.framebufferOnly = NO;
+
+        MetalRender         render;
+        RendererCounters    counters;
+        MetalRenderInitInfo info {
+            .metal_layer          = (__bridge void*)layer,
+            .width                = kVideoWidth,
+            .height               = kVideoHeight,
+            .render_width         = kVideoWidth,
+            .render_height        = kVideoHeight,
+            .display_scale_factor = 1.0,
+        };
+        ASSERT_TRUE(render.init(info)) << render.lastError();
+        render.SetCounters(&counters);
+        auto graph = sceneToRenderGraph(*loaded.scene);
+        ASSERT_NE(graph, nullptr);
+        ASSERT_TRUE(render.compileRenderGraph(*loaded.scene, *graph)) << render.lastError();
+        const std::string output = loaded.scene->ResolveRenderTargetName(SpecTex_Default);
+        const auto        raster_width = [&] {
+            EXPECT_TRUE(render.drawFrame(*loaded.scene)) << render.lastError();
+            loaded.scene->PassFrameTime(1.0 / 60.0);
+            std::vector<uint8_t> pixels;
+            uint32_t             width = 0, height = 0;
+            EXPECT_TRUE(render.ReadRenderTargetForTests(output, pixels, width, height));
+            return width;
+        };
+        ASSERT_EQ(raster_width(), kVideoWidth);
+        const uint64_t before = counters.Get(OWE_RC_VIDEO_SOURCE_INSTANCE);
+        ASSERT_NE(before, 0u) << "no video was open before the render scale moved";
+
+        ASSERT_TRUE(render.ApplyRenderScale(*loaded.scene, *graph, 0.5, SceneResolution::Canvas))
+            << render.lastError();
+        EXPECT_EQ(raster_width(), kVideoWidth / 2) << "the graph was not compiled again";
+        EXPECT_EQ(counters.Get(OWE_RC_VIDEO_SOURCE_INSTANCE), before)
+            << "the video was opened again by the render scale change";
+        EXPECT_EQ(counters.Get(OWE_RC_VIDEO_SOURCE_COUNT), 1u);
+        render.destroy();
+    }
+}
+
+TEST_F(MetalSceneDraw, AVideoSetAsideForACompileThatIsRefusedIsClosedOnNativeMetal)
+{
+    // The renderer sets the scene's videos aside for the compile that follows and the compile
+    // is what closes the ones it does not take back. A surface that is released when the host
+    // builds the graph again has the compile refused before it begins, and nothing else would
+    // close them: a decoder, its file and the frames it decoded ahead stay for as long as the
+    // renderer does.
+    const auto project =
+        WriteVideoFixture(root_ / "video-refused-project", kVideoWidth, kVideoHeight);
+    if (project.empty()) {
+        GTEST_SKIP() << "no hardware H.264 encoder here, so no decodable media to parse";
+    }
+    LoadedScene loaded;
+    std::string error;
+    ASSERT_TRUE(LoadScene(project, root_ / "video-refused-cache", loaded, error)) << error;
+    const auto selection = SelectSceneBackend(*loaded.scene);
+    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+
+    const int files_before_scene = OpenMediaFiles();
+    @autoreleasepool {
+        CAMetalLayer* layer   = [CAMetalLayer layer];
+        layer.device          = MTLCreateSystemDefaultDevice();
+        layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+        layer.drawableSize    = CGSizeMake(kVideoWidth, kVideoHeight);
+        layer.framebufferOnly = NO;
+
+        MetalRender         render;
+        MetalRenderInitInfo info {
+            .metal_layer          = (__bridge void*)layer,
+            .width                = kVideoWidth,
+            .height               = kVideoHeight,
+            .render_width         = kVideoWidth,
+            .render_height        = kVideoHeight,
+            .display_scale_factor = 1.0,
+        };
+        ASSERT_TRUE(render.init(info)) << render.lastError();
+        auto graph = sceneToRenderGraph(*loaded.scene);
+        ASSERT_NE(graph, nullptr);
+        ASSERT_TRUE(render.compileRenderGraph(*loaded.scene, *graph)) << render.lastError();
+        ASSERT_TRUE(render.drawFrame(*loaded.scene)) << render.lastError();
+        ASSERT_GT(OpenMediaFiles(), files_before_scene) << "no video was open before the rebuild";
+
+        ASSERT_TRUE(render.releaseSurface());
+        ASSERT_TRUE(render.clearLastRenderGraphForRebuild());
+        graph = sceneToRenderGraph(*loaded.scene);
+        EXPECT_FALSE(render.compileRenderGraph(*loaded.scene, *graph))
+            << "a renderer with no surface compiled a graph";
+        // Read while the renderer is still there: a video that was only set aside is open.
+        EXPECT_EQ(OpenMediaFiles(), files_before_scene)
+            << "the video that was set aside for a compile that did not happen is still open";
+        render.destroy();
+    }
+}
+
 TEST_F(MetalSceneDraw, AnAlignedTextLayerIsTheSamePictureOnBothRenderers)
 {
     for (const char* horizontal : { "left", "right" }) {
@@ -12043,7 +12528,16 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawTheSamePictureOnBothRenderers)
     // cursor at the centre of the screen is `[{"frame":0,"x":0.5,"y":0.5}]`),
     // and `WE_TEST_COMPARE_REALTIME` paces the frames in real time, so a
     // script reading the wall clock (`Date.now()`) sees the scene's time pass as
-    // it does on a desktop.
+    // it does on a desktop. `WE_TEST_COMPARE_STOP_AFTER_REBUILD=<n>` ends a run
+    // `n` draws after the first time the host would build the graph again (a clock
+    // whose text changes size does, when the minute turns over under a local clock
+    // set for it), with `WE_TEST_METAL_FRAMES` bounding the wait, and
+    // `WE_TEST_COMPARE_REBUILD_FROM=<m>` leaves out the rebuilds before draw `m`,
+    // which a scene's own scripts cause as it starts, and
+    // `WE_TEST_COMPARE_REBUILD_AT=<k>` builds the graph again before draw `k`
+    // whether or not the scene asked: the picture is then what a rebuild leaves
+    // behind, whenever it comes, and the draw it came before is printed so a run
+    // that did not rebuild can be drawn to the same time.
     const char* listed = std::getenv("WE_TEST_COMPARE_PROJECTS");
     const bool  native_only = std::getenv("WE_TEST_COMPARE_NATIVE_ONLY") != nullptr;
     const auto  assets = LocalSceneAssetsRoot();
@@ -12074,6 +12568,20 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawTheSamePictureOnBothRenderers)
             ? SceneResolution::Display
             : SceneResolution::Canvas;
     const bool realtime = std::getenv("WE_TEST_COMPARE_REALTIME") != nullptr;
+    int stop_after_rebuild = -1, rebuild_from = 0;
+    if (const char* value = std::getenv("WE_TEST_COMPARE_STOP_AFTER_REBUILD")) {
+        stop_after_rebuild = std::atoi(value);
+        ASSERT_TRUE(stop_after_rebuild >= 0 && stop_after_rebuild <= 3600);
+    }
+    if (const char* value = std::getenv("WE_TEST_COMPARE_REBUILD_FROM")) {
+        rebuild_from = std::atoi(value);
+        ASSERT_TRUE(rebuild_from >= 0 && rebuild_from <= 3600);
+    }
+    int rebuild_at = -1;
+    if (const char* value = std::getenv("WE_TEST_COMPARE_REBUILD_AT")) {
+        rebuild_at = std::atoi(value);
+        ASSERT_TRUE(rebuild_at >= 0 && rebuild_at <= 3600);
+    }
     double scale_factor = 1.0;
     if (const char* value = std::getenv("WE_TEST_COMPARE_SCALE_FACTOR")) {
         scale_factor = std::strtod(value, nullptr);
@@ -12158,8 +12666,21 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawTheSamePictureOnBothRenderers)
                     start + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                                 std::chrono::duration<double>(frame * frame_step)));
             };
+            RebuildWatch watch;
+            watch.stop_after = stop_after_rebuild;
+            watch.from       = rebuild_from;
+            watch.force_at   = rebuild_at;
             auto picture = DrawWithRenderer(scene, native, width, height, frame_count, frame_step,
-                                            pace, scale_factor, &input);
+                                            pace, scale_factor, &input, nullptr, &watch);
+            if (stop_after_rebuild >= 0) {
+                const std::string rebuilt =
+                    watch.rebuilt_at < 0
+                        ? "not rebuilt"
+                        : "rebuilt before draw " + std::to_string(watch.rebuilt_at);
+                std::printf("[ COMPARE  ] %s: %s graph %s, picture at draw %d of %d\n",
+                            scene_id.c_str(), native ? "native" : "compatibility", rebuilt.c_str(),
+                            watch.last_draw, frame_count);
+            }
             if (! picture.error.empty()) {
                 std::cout << "[ COMPARE  ] " << scene_id << ": "
                           << (native ? "native" : "compatibility") << " -- " << picture.error

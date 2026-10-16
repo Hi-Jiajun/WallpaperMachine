@@ -284,10 +284,10 @@ display's shape is filled and cropped.
 
 The choice reaches a running scene as a render-scale change does: the renderer
 resizes its targets in place on both renderers, with no reparse and no timeline
-reset, and a pause is kept; on Native Metal the scene's own video layers are
-reopened, as for any render-scale change. Every scene opened afterwards, a display
-change that rebuilds a scene's graph included, sizes its targets from the choice
-and the display it is then on. The battery profile and a quality throttle still lower
+reset, and a pause is kept; the scene's own video layers stay open and carry on, on Native Metal
+too, where the graph is compiled again but its decoders are kept for it. Every scene opened
+afterwards, a display change that rebuilds a scene's graph included, sizes its targets from the
+choice and the display it is then on. The battery profile and a quality throttle still lower
 the render scale on top of it, and **Effective now** describes that scale only. The
 setting is saved as `scene_resolution` under `[quality]` in `config.toml`.
 

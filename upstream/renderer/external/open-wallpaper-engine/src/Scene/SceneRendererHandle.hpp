@@ -145,6 +145,13 @@ public:
         OWE_FORWARD(clearLastRenderGraph());
         return false;
     }
+    /// `clearLastRenderGraph` for a graph that is about to be compiled again for
+    /// the scene that is drawing it: the scene's videos stay open for that
+    /// compile instead of starting over. The compile must follow.
+    bool clearLastRenderGraphForRebuild() {
+        OWE_FORWARD(clearLastRenderGraphForRebuild());
+        return false;
+    }
     bool compileRenderGraph(Scene& scene, rg::RenderGraph& graph) {
         OWE_FORWARD(compileRenderGraph(scene, graph));
         return false;

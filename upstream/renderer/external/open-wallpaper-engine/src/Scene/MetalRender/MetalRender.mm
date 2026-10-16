@@ -31,6 +31,7 @@
 #include "Interface/IShaderValueUpdater.h"
 #include "Scene/Scene.h"
 #include "SpecTexs.hpp"
+#include "Utils/AutoDeletor.hpp"
 #include "Utils/Logging.h"
 
 #include <Eigen/Dense>
@@ -4309,6 +4310,9 @@ bool MetalRender::Impl::planStaticSkips(Scene& scene)
 bool MetalRender::Impl::compile(Scene& scene, rg::RenderGraph& graph)
 {
     releaseGraph();
+    // The videos a rebuild set aside and this graph does not take back are the
+    // ones it no longer uses: closed with the compile, however it ends.
+    AUTO_DELETER(held_videos, [this]() { video.closeHeld(); });
     if (scene.imageParser != nullptr) {
         scene.imageParser->SetTextureSurfaceSize(scene.display_sized ? 0 : output_width,
                                                  scene.display_sized ? 0 : output_height);
@@ -4509,6 +4513,7 @@ void MetalRender::destroy()
             [drain waitUntilCompleted];
         }
         pImpl->releaseGraph();
+        pImpl->video.closeHeld();
         pImpl->releasePresentation();
         pImpl->present_pipelines.clear();
         pImpl->queue  = nil;
@@ -4564,13 +4569,28 @@ bool MetalRender::clearLastRenderGraph()
 {
     @autoreleasepool {
         pImpl->releaseGraph();
+        pImpl->video.closeHeld();
+        return true;
+    }
+}
+
+bool MetalRender::clearLastRenderGraphForRebuild()
+{
+    @autoreleasepool {
+        pImpl->video.hold();
+        pImpl->releaseGraph();
         return true;
     }
 }
 
 bool MetalRender::compileRenderGraph(Scene& scene, rg::RenderGraph& graph)
 {
-    if (! pImpl->inited) return pImpl->fail("the native renderer is not initialised");
+    if (! pImpl->inited) {
+        // The compile a rebuild set its videos aside for is not going to happen, and
+        // nothing else would close them.
+        pImpl->video.closeHeld();
+        return pImpl->fail("the native renderer is not initialised");
+    }
     @autoreleasepool {
         return pImpl->compile(scene, graph);
     }
@@ -4580,12 +4600,12 @@ bool MetalRender::ApplyRenderScale(Scene& scene, rg::RenderGraph& graph, double 
                                    SceneResolution resolution)
 {
     // The same guard the compatibility backend has, and for a sharper reason
-    // here: `compile` starts by releasing the graph, which closes every video
-    // and drops every uploaded image. The host pushes this as a live property
-    // to every open scene whenever the value *might* have moved — on scene
-    // creation, and on each power-source change while the battery profile is
-    // on — precisely so a quality control the user drags does not reparse the
-    // project or reopen its video. Acting on an unchanged value would turn
+    // here: `compile` starts by releasing the graph, which drops every uploaded
+    // image and sets every video aside for the new graph to take back. The host
+    // pushes this as a live property to every open scene whenever the value
+    // *might* have moved — on scene creation, and on each power-source change
+    // while the battery profile is on — precisely so a quality control the user
+    // drags does not reparse the project. Acting on an unchanged value would turn
     // every plug and unplug into exactly that.
     if (! std::isfinite(scale) || scale <= 0.0) return true;
     const double clamped = std::min(1.0, std::max(vulkan::kMinRenderScale, scale));
@@ -4601,6 +4621,7 @@ bool MetalRender::ApplyRenderScale(Scene& scene, rg::RenderGraph& graph, double 
     scene.resolution   = resolution;
     if (! resizes) return true;
     @autoreleasepool {
+        pImpl->video.hold();
         return pImpl->compile(scene, graph);
     }
 }

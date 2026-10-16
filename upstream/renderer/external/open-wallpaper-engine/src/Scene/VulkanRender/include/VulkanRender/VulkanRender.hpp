@@ -56,7 +56,17 @@ public:
     /// resuming a paused wallpaper.
     void InvalidatePresentedFrame();
 
+    /// Releases the compiled graph and everything that belongs to it: the scene's
+    /// videos are closed.
     bool clearLastRenderGraph();
+    /// The first half of building the same scene's graph again, as the host does
+    /// whenever something the graph is made of changes under a scene that is
+    /// playing. The scene's videos are not closed: their decoders are kept open for
+    /// the `compileRenderGraph` that follows, which takes back the ones its graph
+    /// still uses and closes the rest with it. The video then does not start over
+    /// at the head of its clip, and a video packaged in the scene is not read
+    /// again. Only for a compile of the scene that was drawing, which must follow.
+    bool clearLastRenderGraphForRebuild();
     bool compileRenderGraph(Scene&, rg::RenderGraph&);
     /// Applies a new internal rasterization scale, and the resolution the scene
     /// is rasterized at, to an already compiled graph. Keeps the parsed scene,

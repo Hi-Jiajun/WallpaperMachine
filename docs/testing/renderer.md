@@ -148,6 +148,8 @@ Frames, time and surfaces:
 | `WE_TEST_COMPARE_RESOLUTION` | the same test | `display` rasterizes a 2D scene at the size it is presented at on the layer; `canvas`, the default, at the size it was authored at. Perspective scenes and videos ignore it |
 | `WE_TEST_COMPARE_SCALE_FACTOR` | the same test | The layer's backing scale, `1`–`4` (default `1`); with `WE_TEST_COMPARE_SURFACE` it makes a laptop-panel-sized layer |
 | `WE_TEST_COMPARE_REALTIME` | the same test | Set (any value) to pace the frames in real time, so a script that reads the wall clock (`Date.now()`) sees as much time pass as the scene does on a desktop; unset, the frames run as fast as they draw |
+| `WE_TEST_COMPARE_STOP_AFTER_REBUILD` | the same test | `<n>`: the run ends `n` draws after the first time the host would build the graph again (a clock under an effect does when its digits change size), `WE_TEST_METAL_FRAMES` bounding the wait, and prints the draw the rebuild came before, so a run without one can be drawn to the same scene time. A scene's own scripts cause rebuilds as it starts; `WE_TEST_COMPARE_REBUILD_FROM=<m>` leaves out those before draw `m` |
+| `WE_TEST_COMPARE_REBUILD_AT` | the same test | `<k>`: builds the graph again before draw `k` whether or not the scene asked, as the host does for any change of the graph, so what a rebuild leaves behind (a video's frame, the draw's length) is looked at on a scene that would not rebuild by itself at a draw of your choosing |
 | `WE_TEST_SURFACE` | `offscreen_scene_probe` | `<width>x<height>` physical output extent; defaults to `1920x1080`. Perspective scenes use it as their full-scale raster; authored 2D canvases keep their size |
 | `WE_TEST_TEXTURE_SURFACE` | `offscreen_scene_probe` | `<width>x<height>` opts into the production display-sized texture mip policy (a leading mip is dropped only while the next is still at least as long as the surface's longest side, so the level kept covers the surface) without changing raster extent; unset retains all source levels for before/after image and allocation comparisons. Native Metal uses its surface size automatically |
 | `WE_TEST_METAL_SURFACE` | `metal_scene_draw_smoke` | `<width>x<height>` for the surface the native backend rasterizes; defaults to `960x540`. Screen-space shader inputs follow it, so comparing this backend's output with another's is only meaningful when both rasterize the same extent |
@@ -730,6 +732,33 @@ into private textures; the three that draw skip visibly without a Metal device.
   `ShaderValue: … not found in glsl` line is authored leftovers, not a binding
   failure. Wallpaper Engine's own `clipping_mask` effect fails to translate (see
   [Shader pipeline](scene-regressions.md#shader-pipeline)).
+- **A video opened under a running clock shows the head of its clip until a seek to the scene's
+  clock has landed.** An open waits for no seek: one that did would hold the render thread for
+  the seek, 0.3 to 1.1 s on 1080p and 4K clips with a keyframe every 250 frames and more than the
+  two seconds an open waits on a 4K 60 frame clip with one every 600, so every open starts at
+  the head. A render graph built again under a playing video is not such an open: the renderer
+  keeps the scene's decoders for the compile that follows (`clearLastRenderGraphForRebuild`,
+  `MetalVideoTextures::hold`, `TextureCache::ClearForRebuild`), as Wallpaper Engine's video is
+  untouched by a text card that changes size, so a text card, a property that shows or hides a
+  layer or a render-scale change on Native Metal neither shows the head of a kept video's clip
+  nor reads,
+  copies and hashes a packaged video again. What is still opened with the clock some way into
+  the clip is a scene that falls back to the other renderer, a Compatibility surface that is
+  released and set up again (a display change: `TextureCache::Clear` goes with the surface;
+  Native Metal keeps its graph and its videos through one), a surface split off a shared decoder
+  with shared decode on (off by default), a decoder that failed while it was kept, and the video
+  layer that a property shows again (the rebuild that hid it left the video out of the graph and
+  closed it). The seek is made once, by the first call that has the clock, and lands however often
+  frames are drawn; the head of the clip is on screen while the seek and the catching up to the
+  clock take, 0.35 to 1.5 s on the clips with a keyframe every 250 frames and up to 4.2 s on the
+  one with every 600 ([video clock](../features/scene-rendering.md)). The open of a video
+  packaged in a scene reads, copies and hashes the whole file (`WriteVideoPayloadToTemp`, about
+  7 ms a megabyte: 0.2 to 0.4 s on a 53 MB clip, 2 s on a 319 MB one), which every open of one
+  pays. Not done: resizing a text card's buffers in place, as Wallpaper Engine does, so a card
+  that changes size in texels still builds the graph again (about 0.5 ms of lowering and the
+  compile of every pass, 39 to 45 ms on a scene of 72 passes). The Wallpaper Engine frame this
+  was found against is a still one, so no frame of Wallpaper Engine's shows a video moving
+  through a rebuild.
 - **An image layer's brightness is applied where its colour is, ahead of its effects.**
   Wallpaper Engine multiplies it into the `g_Color4` of the layer's final composite and
   gives the effect chain's own passes a white one. Here the colour, the alpha and the
