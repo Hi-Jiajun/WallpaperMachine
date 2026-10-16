@@ -2906,6 +2906,40 @@ TEST(InstanceOverride, TheSpeedOverrideScalesTheEmitterSpeedUnlessTheFileIgnores
     EXPECT_NEAR(speed_of_first(R"(,"flags":16)"), 10.0f, 1.0e-3f);
 }
 
+TEST(InstanceOverride, TheSizeOverrideScalesTheBirthSizeAndEachSizeRampUnlessTheFileIgnoresIt) {
+    // A file whose `sizerandom` draws 40 and whose two `sizechange` ramps each
+    // hold 0.5, under an instance size override of 3. Wallpaper Engine gives the
+    // draw and each ramp the override: 40 * 3 * (0.5 * 3)^2 = 270. A file with
+    // the "ignore size override" flag (128) keeps it out of all three: 10.
+    const auto size_of_first = [](const std::string& flags) {
+        const std::string ramp = R"({"name":"sizechange","starttime":0,"endtime":1,"startvalue":0.5,"endvalue":0.5})";
+        ParticleScene scene(
+            { { "/particle.json",
+                ParticleFile(R"({"name":"sphererandom","id":1,"rate":0,"instantaneous":3,"distancemax":0})",
+                             R"("maxcount":8,"operator":[)" + ramp + "," + ramp + "]" + flags,
+                             R"({"name":"lifetimerandom","min":100,"max":100},)"
+                             R"({"name":"sizerandom","min":40,"max":40})") } },
+            OneParticleObject(R"("instanceoverride":{"id":1,"size":3})"));
+        scene.Step(2);
+        const auto live = LiveParticles(*scene.Sub().Instances()[0]);
+        EXPECT_EQ(live.size(), 3u);
+        return live.empty() ? 0.0f : live.front().size;
+    };
+    EXPECT_NEAR(size_of_first(""), 270.0f, 1.0e-2f);
+    EXPECT_NEAR(size_of_first(R"(,"flags":128)"), 10.0f, 1.0e-3f);
+    EXPECT_NEAR(size_of_first(R"(,"flags":16)"), 270.0f, 1.0e-2f) << "the speed flag leaves the size alone";
+}
+
+TEST(ParseLevel, TheIgnoreSizeOverrideFlagIsTheOneHundredTwentyEightBitOfTheFilesFlags) {
+    wpscene::Particle plain;
+    EXPECT_TRUE(plain.AppliesSizeOverride());
+    plain.flags.set(wpscene::Particle::FlagEnum::ignoresizeoverride);
+    EXPECT_FALSE(plain.AppliesSizeOverride());
+    EXPECT_TRUE(plain.AppliesSpeedOverride());
+    EXPECT_EQ(plain.flags.count(), 1u);
+    EXPECT_TRUE(plain.flags[7u]);
+}
+
 TEST(ParseLevel, TheIgnoreSpeedOverrideFlagIsTheSixteenBitOfTheFilesFlags) {
     wpscene::Particle plain;
     EXPECT_TRUE(plain.AppliesSpeedOverride());

@@ -2215,6 +2215,19 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   a prewarm spawns to sit where the layer's finished matrix, its groups' included,
   puts them; `Movement.FlagOneGravityOfAWorldspaceSystemNeedsNoTurningByItsLayer`
   requires gravity to be left as written.
+- **Particle size override** — `ParticleMouseControlpoint.ASizeOverrideScalesTheBirthSizeAndEverySizeRamp`
+  gives a particle born at 40 an override of 1, 2.5 and 0.4 and none to three
+  `sizechange` ramps that each hold 0.5: it must come out at 40 times the override times
+  (0.5 times the override) for every ramp, so a ramp is scaled by the override too;
+  `ParticleMouseControlpoint.EachSizeRampScalesTheRunningSizeByItsOwnValueTimesTheOverride`
+  runs the two ramps of a petal preset (0 to 1 over the first 5 percent of the life, 1
+  to 0 from 20 percent) through their moments and requires the product of both,
+  override included; `ParticleMouseControlpoint.AFileThatIgnoresTheSizeOverrideKeepsItOutOfTheBirthSizeAndEveryRamp`
+  and `InstanceOverride.TheSizeOverrideScalesTheBirthSizeAndEachSizeRampUnlessTheFileIgnoresIt`
+  (in `particle_parity_test`, through the scene parser) require a file with flag 128 to
+  keep the override out of the draw and the ramps, and a file with only the speed flag
+  to take it in both; `ParseLevel.TheIgnoreSizeOverrideFlagIsTheOneHundredTwentyEightBitOfTheFilesFlags`
+  pins the bit.
 - **Particle child system origin** — `SceneSchema.AChildSystemOriginScalesWithItsLayerUnlessItsParentIsWorldspace`
   hangs a static and an `eventfollow` child at a local offset under a layer scaled
   by two, with every combination of the parent's and the child file's `worldspace`

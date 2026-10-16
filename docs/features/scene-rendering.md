@@ -431,7 +431,12 @@ their spread, and is a plain tint only for a preset without colours; its
 `controlpoint0`..`7` and `controlpointangle0`..`7` replace the preset's control points
 (a control point flagged 2 is held at its scene position as the layer moves), and
 `brightness` multiplies the tint in an HDR scene, and each of them follows a user
-property while the scene runs. Its `speed` scales the emitters' and velocity
+property while the scene runs. Its `size` multiplies the size a particle is born with and
+every `sizechange` ramp of the file besides, as Wallpaper Engine's loader binds the
+override to each size record: a ramp scales the running size by the override times its own
+factor, so a particle under two ramps is the override cubed, not the override, unless the
+particle file sets the "ignore size override" flag (128), which keeps it out of the draw
+and the ramps alike. Its `speed` scales the emitters' and velocity
 initializers' speeds, `movement` gravity, `angularmovement` force, the vortex and turbulence
 speeds, the pull of `controlpointattract` and the frequency of `oscillateposition`, unless the
 particle file sets the "ignore speed override" flag (16). An `eventfollow` child whose bound

@@ -29,6 +29,10 @@ struct ParticleParseContext {
     /// that scale with it. A particle file that sets the "ignore speed
     /// override" flag keeps it out of all of them.
     bool                                        speed_override { true };
+    /// Whether the scene object's `instanceoverride.size` reaches the records
+    /// that scale with it: the size draw and every `sizechange` ramp. A file that
+    /// sets the "ignore size override" flag keeps it out of all of them.
+    bool                                        size_override { true };
     /// Whether the scene has a pixel canvas (an orthogonal projection with a size).
     /// Wallpaper Engine fills a key a file leaves out with different numbers
     /// in a pixel scene and in a 3D scene.
@@ -55,7 +59,8 @@ public:
                        std::shared_ptr<ParticleSpawnContext>         spawn               = nullptr);
     static ParticleInitOp
         genOverrideInitOp(std::shared_ptr<const wpscene::ParticleInstanceoverride>,
-                          ParticleColorDefinition color = {}, bool speed_override = true);
+                          ParticleColorDefinition color = {}, bool speed_override = true,
+                          bool size_override = true);
 
     /// Finds the colour a file's initializers and operators produce, for
     /// measuring an instance colour override against.

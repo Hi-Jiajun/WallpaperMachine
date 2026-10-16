@@ -15,6 +15,8 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <memory>
 #include <set>
@@ -742,6 +744,96 @@ TEST(ParticleMouseControlpoint, OverrideInitializerReadsRuntimeMutatedState) {
     init(second, 0.0);
     EXPECT_FLOAT_EQ(second.size, 4.0f);
     EXPECT_FLOAT_EQ(second.velocity.x(), 1.0f);
+}
+
+/// A particle born at `born` (its life `position` of the way through) after the
+/// initializer that carries the instance's size override and the operators that
+/// shape its size over its life.
+float SizeAfter(const std::shared_ptr<const wpscene::ParticleInstanceoverride>& override,
+                const std::vector<nlohmann::json>& ramps, float born, double position,
+                bool size_applies = true) {
+    auto init = WPParticleParser::genOverrideInitOp(override, {}, true, size_applies);
+    ParticleParseContext ctx;
+    ctx.over          = override;
+    ctx.size_override = size_applies;
+
+    std::array<Particle, 1> particles {};
+    ParticleModify::InitLifetime(particles[0], 10.0f);
+    ParticleModify::InitSize(particles[0], born);
+    init(particles[0], 0.0);
+    ParticleModify::Reset(particles[0]);
+    particles[0].lifetime = static_cast<float>((1.0 - position) * 10.0);
+    ParticleInfo info {
+        .particles     = particles,
+        .controlpoints = {},
+        .time          = 0.0,
+        .time_pass     = 1.0,
+    };
+    for (const auto& ramp : ramps) WPParticleParser::genParticleOperatorOp(ramp, ctx)(info);
+    return particles[0].size;
+}
+
+std::shared_ptr<wpscene::ParticleInstanceoverride> SizeOverride(float size) {
+    auto override     = std::make_shared<wpscene::ParticleInstanceoverride>();
+    override->enabled = true;
+    override->size    = size;
+    return override;
+}
+
+nlohmann::json Ramp(double starttime, double endtime, double startvalue, double endvalue) {
+    return { { "name", "sizechange" },
+             { "starttime", starttime },
+             { "endtime", endtime },
+             { "startvalue", startvalue },
+             { "endvalue", endvalue } };
+}
+
+TEST(ParticleMouseControlpoint, ASizeOverrideScalesTheBirthSizeAndEverySizeRamp) {
+    // Wallpaper Engine's loader gives every size record of a particle file a
+    // binding to the instance's `size` override (tag 0xcc of the bindings
+    // FUN_1401d15a0 applies): a `sizerandom` draw is multiplied by it, and so
+    // are the start and the change of each `sizechange` ramp. A ramp therefore
+    // scales the running size by `override * ramp`, and a particle born at 40
+    // under n ramps that each hold 0.5 is 40 * override * (0.5 * override)^n.
+    for (const float size_override : { 1.0f, 2.5f, 0.4f }) {
+        for (const int ramps : { 0, 1, 2, 3 }) {
+            SCOPED_TRACE(::testing::Message() << "override " << size_override << ", " << ramps << " ramps");
+            const std::vector<nlohmann::json> list(static_cast<std::size_t>(ramps), Ramp(0.0, 1.0, 0.5, 0.5));
+            const float expected = 40.0f * size_override * std::pow(0.5f * size_override, ramps);
+            EXPECT_NEAR(SizeAfter(SizeOverride(size_override), list, 40.0f, 0.5), expected,
+                        1.0e-4f * std::max(1.0f, expected));
+        }
+    }
+}
+
+TEST(ParticleMouseControlpoint, EachSizeRampScalesTheRunningSizeByItsOwnValueTimesTheOverride) {
+    // The petal preset: one ramp from 0 to 1 over the first 5 percent of the
+    // life, another from 1 to 0 from 20 percent on. Both multiply the size the
+    // earlier ones left, and the override reaches each: at a given moment the
+    // size is born * override * (override * first) * (override * second).
+    const std::vector<nlohmann::json> petal { Ramp(0.0, 0.05, 0.0, 1.0), Ramp(0.2, 1.0, 1.0, 0.0) };
+    const auto first  = [](double t) { return std::clamp(t / 0.05, 0.0, 1.0); };
+    const auto second = [](double t) { return 1.0 - std::clamp((t - 0.2) / 0.8, 0.0, 1.0); };
+    for (const float size_override : { 1.0f, 1.27f, 0.6f }) {
+        for (const double t : { 0.0, 0.025, 0.05, 0.1, 0.2, 0.6, 1.0 }) {
+            SCOPED_TRACE(::testing::Message() << "override " << size_override << " at " << t);
+            const double o        = size_override;
+            const double expected = 30.0 * o * (o * first(t)) * (o * second(t));
+            EXPECT_NEAR(SizeAfter(SizeOverride(size_override), petal, 30.0f, t), expected, 1.0e-4 * std::max(1.0, expected));
+        }
+    }
+}
+
+TEST(ParticleMouseControlpoint, AFileThatIgnoresTheSizeOverrideKeepsItOutOfTheBirthSizeAndEveryRamp) {
+    // The binding the loader creates for a size record is skipped when the
+    // file's flags carry bit 128 (the editor's "ignore size override"), for the
+    // `sizerandom` draw and the `sizechange` ramps alike.
+    const std::vector<nlohmann::json> two { Ramp(0.0, 1.0, 0.5, 0.5), Ramp(0.0, 1.0, 0.5, 0.5) };
+    for (const float size_override : { 1.0f, 2.5f, 0.4f }) {
+        SCOPED_TRACE(size_override);
+        EXPECT_NEAR(SizeAfter(SizeOverride(size_override), two, 40.0f, 0.5, false), 10.0f, 1.0e-4f);
+        EXPECT_NEAR(SizeAfter(SizeOverride(size_override), {}, 40.0f, 0.5, false), 40.0f, 1.0e-4f);
+    }
 }
 
 TEST(ParticleMouseControlpoint, ControlpointAttractFallsOffLinearlyToTheThreshold) {

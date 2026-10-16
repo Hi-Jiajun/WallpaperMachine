@@ -1045,6 +1045,7 @@ ParticleParseContext MakeParticleParseContext(
     ctx.color = WPParticleParser::analyzeColorSources(wp.initializers, wp.operators);
     ctx.ortho = pixel_canvas;
     ctx.speed_override = wp.AppliesSpeedOverride();
+    ctx.size_override  = wp.AppliesSizeOverride();
     if (scene != nullptr) {
         ctx.spectrum = [scene]() {
             return scene->runtime != nullptr ? scene->runtime->CurrentAudioSpectrumSnapshot()
@@ -1063,7 +1064,8 @@ void LoadInitializer(ParticleSubSystem& pSys, const wpscene::Particle& wp,
     }
     if (over->enabled) {
         pSys.AddInitializer(
-            WPParticleParser::genOverrideInitOp(over, ctx.color, ctx.speed_override));
+            WPParticleParser::genOverrideInitOp(over, ctx.color, ctx.speed_override,
+                                                ctx.size_override));
     }
 }
 void LoadOperator(ParticleSubSystem& pSys, const wpscene::Particle& wp,

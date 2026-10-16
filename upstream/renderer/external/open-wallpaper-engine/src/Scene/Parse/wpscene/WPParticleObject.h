@@ -121,6 +121,10 @@ public:
         // its emitters, movement, turbulence, vortex, control point attraction
         // and position oscillation (the editor's "ignore speed override").
         ignorespeedoverride   = 4, // 16
+        // The file keeps the scene object's `instanceoverride.size` away from its
+        // `sizerandom` draws and its `sizechange` ramps (the editor's "ignore size
+        // override").
+        ignoresizeoverride    = 7, // 128
     };
     using EFlags = BitFlags<FlagEnum>;
 
@@ -130,6 +134,10 @@ public:
     /// Whether the scene object's speed override reaches this file's
     /// speed-driven records.
     bool AppliesSpeedOverride() const { return ! flags[FlagEnum::ignorespeedoverride]; }
+
+    /// Whether the scene object's size override reaches this file's size
+    /// records: the size draw and every size ramp.
+    bool AppliesSizeOverride() const { return ! flags[FlagEnum::ignoresizeoverride]; }
 
     std::vector<Emitter>              emitters;
     std::vector<nlohmann::json>       initializers;

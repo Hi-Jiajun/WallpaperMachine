@@ -84,6 +84,12 @@ inline double SpeedScale(const wpscene::ParticleInstanceoverride& over, bool app
     return applies ? static_cast<double>(over.speed) : 1.0;
 }
 
+/// The scene object's size override as the size records read it: a file that
+/// ignores the override sees 1.
+inline double SizeScale(const wpscene::ParticleInstanceoverride& over, bool applies) {
+    return applies ? static_cast<double>(over.size) : 1.0;
+}
+
 inline double UnitRandom() { return Random::get(0.0, 1.0); }
 
 /// `u` raised to the initializer's exponent, so values crowd toward the
@@ -870,11 +876,11 @@ ParticleInitOp WPParticleParser::genParticleInitOp(const nlohmann::json&        
 
 ParticleInitOp WPParticleParser::genOverrideInitOp(
     std::shared_ptr<const wpscene::ParticleInstanceoverride> over, ParticleColorDefinition def,
-    bool speed_override) {
-    return [over = std::move(over), def, speed_override](Particle& p, double) {
+    bool speed_override, bool size_override) {
+    return [over = std::move(over), def, speed_override, size_override](Particle& p, double) {
         PM::MutiplyInitLifeTime(p, over->lifetime);
         PM::MutiplyInitAlpha(p, over->alpha);
-        PM::MutiplyInitSize(p, over->size);
+        if (size_override) PM::MutiplyInitSize(p, over->size);
         if (speed_override) PM::MutiplyVelocity(p, over->speed);
         // A file with colours of its own has them re-tinted by the colour
         // initializers; only a file without any takes the colour as a tint.
@@ -1128,6 +1134,7 @@ ParticleOperatorOp WPParticleParser::genParticleOperatorOp(const nlohmann::json&
                                            : std::make_shared<const wpscene::ParticleInstanceoverride>();
     const bool ortho = ctx.ortho;
     const bool speed_applies = ctx.speed_override;
+    const bool size_applies  = ctx.size_override;
     do {
         if (! wpj.contains("name")) break;
         std::string name;
@@ -1177,8 +1184,13 @@ ParticleOperatorOp WPParticleParser::genParticleOperatorOp(const nlohmann::json&
             };
         } else if (name == "sizechange") {
             auto vc        = ValueChange::ReadFromJson(wpj);
-            return [vc, over](const ParticleInfo& info) {
-                const auto size_over = over->size;
+            // Every ramp of the file takes the instance's `size` override too: the
+            // loader rescales each size record's start and change by it, so the
+            // ramp multiplies the running size by `override * ramp`, on top of the
+            // override the size draw already carries (override^(1 + ramps) in all).
+            // A file that ignores the override sees 1.
+            return [vc, over, size_applies](const ParticleInfo& info) {
+                const auto size_over = SizeScale(*over, size_applies);
                 for (auto& p : info.particles)
                     PM::MutiplySize(p, size_over * FadeValueChange(PM::LifetimePos(p), vc));
             };

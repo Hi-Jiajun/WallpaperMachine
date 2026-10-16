@@ -1148,7 +1148,12 @@ into private textures; the three that draw skip visibly without a Metal device.
   Engine's (the generators draw half of it, so the size initializers start from 1 where
   the engine starts from 0.5). A single `sizerandom` and an inherited `setsize` come out
   the same, and an inherited `multiplysize` multiplies by half of the parent's size, as
-  the engine multiplies its own (from the decompile; no frame shows it). Turbulence
+  the engine multiplies its own (from the decompile; no frame shows it). A scene
+  object's `size` override reaches every `sizechange` ramp, as the binary's loader binds
+  it to each size record, but it multiplies the finished size once where the binary
+  scales each `sizerandom` draw: the same for a file with one size initializer, but
+  the override squared for one with two and no scaling at all for one with none
+  (no local preset with an override has either, so no frame shows it). Turbulence
   uses Perlin noise where the engine's own noise function is not identified. `maxcount` is still capped at 20 000
   particles per file. A `worldspace` file is simulated and drawn in scene units from its
   layer's origin, as the binary's draw replaces the model matrix with the scene's own
