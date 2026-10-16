@@ -175,6 +175,14 @@ TEST_F(VideoDecoderSelection, AnAv1FrameReachesMetalWhenTheDefaultDecoderIsSoftw
     if (!VTIsHardwareDecodeSupported(kCMVideoCodecType_AV1)) {
         GTEST_SKIP() << "this machine has no VideoToolbox AV1 hardware decoder";
     }
+    // A virtual Mac (a hosted CI runner) reports its host's AV1 decoder, but a session
+    // for it cannot be opened inside the guest, so there is no hardware path to test.
+    @autoreleasepool {
+        id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+        if (device != nil && [device.name containsString:@"Paravirtual"]) {
+            GTEST_SKIP() << "a virtual machine's GPU cannot open VideoToolbox AV1 sessions";
+        }
+    }
     // Original solid-red 64x64 media, encoded with standalone FFmpeg / SVT-AV1 4.2.0:
     // ffmpeg -f lavfi -i color=c=red:s=64x64:r=30 -frames:v 3 -pix_fmt yuv420p
     //   -c:v libsvtav1 -preset 10 -crf 20 -svtav1-params lp=1 -an -f ivf red-av1.ivf

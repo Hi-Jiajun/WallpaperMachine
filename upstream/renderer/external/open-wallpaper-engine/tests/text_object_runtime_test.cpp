@@ -7633,13 +7633,39 @@ TEST(TextObjectRuntime, AFaceOfACollectionIsChosenByItsPostScriptName) {
 #endif
 }
 
+// PingFang SC as the renderer reads it: a file FreeType opens, holding the regular face by
+// name and the Han it draws. A Mac that has not downloaded the PingFang font asset, as a
+// fresh CI image has not, matches the family to a copy the renderer cannot draw with, and
+// a test about PingFang's own glyphs has nothing to measure there.
+bool HasReadablePingFangSC(const SystemFontFace& font) {
+    if (font.path.empty() || font.postscript_name != "PingFangSC-Regular") return false;
+    FT_Library library = nullptr;
+    if (FT_Init_FreeType(&library) != 0) return false;
+    bool    found = false;
+    FT_Face first = nullptr;
+    if (FT_New_Face(library, font.path.c_str(), 0, &first) == 0) {
+        const FT_Long count = first->num_faces;
+        FT_Done_Face(first);
+        for (FT_Long index = 0; index < count && ! found; ++index) {
+            FT_Face face = nullptr;
+            if (FT_New_Face(library, font.path.c_str(), index, &face) != 0) continue;
+            const char* name = FT_Get_Postscript_Name(face);
+            found = name != nullptr && font.postscript_name == name &&
+                    FT_Get_Char_Index(face, 0x4E2Du) != 0u;
+            FT_Done_Face(face);
+        }
+    }
+    FT_Done_FreeType(library);
+    return found;
+}
+
 // The fullwidth comma and the ideographic comma and full stop sit on the baseline in
 // the Simplified Chinese cut of PingFang, and centred in the line in the Hong Kong
 // cut, which is the first face of PingFang.ttc.
 TEST(TextObjectRuntime, HanFallbackUsesTheSimplifiedFace) {
 #ifdef __APPLE__
     const auto pingfang = ResolveInstalledFamily("PingFang SC");
-    if (pingfang.postscript_name != "PingFangSC-Regular") GTEST_SKIP() << "no PingFang SC installed";
+    if (! HasReadablePingFangSC(pingfang)) GTEST_SKIP() << "no readable PingFang SC installed";
 
     constexpr float kPointSize = 40.0f;
     const float     em         = kPointSize * 300.0f / 72.0f;
@@ -7988,7 +8014,7 @@ TEST(TextObjectRuntime, AGlyphTheFontLacksComesFromTheFirstFaceOfWallpaperEngine
     EXPECT_EQ(ink(in_braille("A")), arial_a);
     auto latin_in_pingfang = HelveticaState("A", 40.0f);
     const auto pingfang    = ResolveInstalledFamily("PingFang SC");
-    if (! pingfang.path.empty()) {
+    if (HasReadablePingFangSC(pingfang)) {
         latin_in_pingfang.resolved_font_path = pingfang.path;
         latin_in_pingfang.resolved_font_face = pingfang.postscript_name;
         ASSERT_NE(ink(latin_in_pingfang), arial_a) << "PingFang's A is no different from Arial's";
@@ -7996,7 +8022,7 @@ TEST(TextObjectRuntime, AGlyphTheFontLacksComesFromTheFirstFaceOfWallpaperEngine
 
     // A Han character comes from PingFang SC (Wallpaper Engine's Microsoft YaHei) and not from
     // Arial Unicode MS, which has it too, since that face is Office's and not Windows'.
-    if (pingfang.postscript_name == "PingFangSC-Regular") {
+    if (HasReadablePingFangSC(pingfang)) {
         auto han_in_pingfang = HelveticaState("\xE4\xB8\xAD", 40.0f);
         han_in_pingfang.resolved_font_path = pingfang.path;
         han_in_pingfang.resolved_font_face = pingfang.postscript_name;
@@ -8171,8 +8197,9 @@ TEST(TextObjectRuntime, CjkPunctuationIsNotDrawnByTheSymbolFace) {
     const std::string braille_path = "/System/Library/Fonts/Apple Braille.ttf";
     const auto        pingfang     = ResolveInstalledFamily("PingFang SC");
     const auto        symbols      = ResolveInstalledFamily("Apple Symbols");
-    if (! std::filesystem::exists(braille_path) || pingfang.path.empty() || symbols.path.empty()) {
-        GTEST_SKIP() << "no Apple Braille, PingFang SC or Apple Symbols on this system";
+    if (! std::filesystem::exists(braille_path) || ! HasReadablePingFangSC(pingfang) ||
+        symbols.path.empty()) {
+        GTEST_SKIP() << "no Apple Braille, readable PingFang SC or Apple Symbols on this system";
     }
     FT_Library library = nullptr;
     ASSERT_EQ(FT_Init_FreeType(&library), 0);

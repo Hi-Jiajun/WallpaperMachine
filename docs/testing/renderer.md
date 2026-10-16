@@ -85,6 +85,15 @@ hosted runners belongs in `REALTIME_TESTS`; the harness tests check that every
 name still exists. A default local renderer run remains necessary evidence for
 them.
 
+The same virtual machines differ from a real Mac in ways a few tests check for
+themselves, each skipping with its reason rather than failing: their GPU is a
+paravirtual Metal device whose VideoToolbox reports AV1 hardware it cannot open,
+so the AV1 decoder test skips on it; they have not downloaded the PingFang font
+asset, so the PingFang fallback tests skip unless FreeType reads a
+`PingFangSC-Regular` face with Han from the matched file; and the particle-scale
+draw test lets through an all-black compatibility frame on a paravirtual GPU
+alone (seen on a runner, cause not established), running its other cases.
+
 Test binaries and probes run through macOS `taskpolicy` with application
 scheduling and latency/throughput tiers of zero. Before exec, the
 single-threaded Python driver clears inherited Darwin background policy on both
