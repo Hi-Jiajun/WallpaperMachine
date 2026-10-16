@@ -523,6 +523,14 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
 
 ## Layers, textures and compositing
 
+- **Effect buffers and swaps** — `SceneSchema.EffectBuffersTakeWallpaperEnginesSizesFormatsAndSwaps`
+  pins `fit`/`width`/`height` sizing, the float and 8-bit formats and how a `swap`
+  lowers to one copy or a three-copy exchange;
+  `MetalSceneDraw.AnEffectsSwappedBuffersAccumulateAndItsFloatBuffersKeepTheirSignOnBothRenderers`
+  draws an accumulating, signed effect through both renderers. Wallpaper Engine's
+  fluid simulation (`effects/fluidsimulation`) needs both: without the swap its
+  history buffers were never written, and the two renderers then disagreed on a
+  local scene that runs it (mean difference 16 before, 0 after).
 - **3D model materials and skinning** — `SceneSchema.ModelMaterialDefaultsAreOpaqueDepthTestedAndExplicitStateWins`
   and `.ModelBonesReachEveryMaterialIncludingTheBindPose` in `scene_schema_tests`.
   Model materials default to normal blending, back-face culling and enabled

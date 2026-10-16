@@ -39,6 +39,10 @@ public:
     std::string name;
     std::string format;
     uint32_t    scale { 1 };
+    // A size of its own, and the longest side it may have; zero for none.
+    uint32_t    width { 0 };
+    uint32_t    height { 0 };
+    uint32_t    fit { 0 };
 };
 
 class WPImageEffect {

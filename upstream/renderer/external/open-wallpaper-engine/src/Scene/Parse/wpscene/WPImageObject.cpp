@@ -94,6 +94,9 @@ bool WPEffectFbo::FromJson(const nlohmann::json& json) {
         LOG_ERROR("fbo scale can't be 0");
         scale = 1;
     }
+    GET_JSON_NAME_VALUE_NOWARN(json, "width", width);
+    GET_JSON_NAME_VALUE_NOWARN(json, "height", height);
+    GET_JSON_NAME_VALUE_NOWARN(json, "fit", fit);
     return true;
 }
 

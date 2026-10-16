@@ -680,6 +680,117 @@ int32_t ResolveTextEffectRenderTargetDimension(float base_dimension, uint32_t /*
     return ResolveRenderTargetDimension(base_dimension, 1);
 }
 
+// The format Wallpaper Engine gives an effect buffer. Float buffers hold signed
+// values, such as a fluid simulation's velocity and pressure, which an 8-bit
+// target would clamp at zero; the back-buffer formats follow the scene. A
+// single- or two-channel float buffer takes the four-channel float target, the
+// narrowest float format both renderers allocate.
+TextureFormat EffectFboFormat(std::string_view format, bool hdr) {
+    if (format == "r16f" || format == "rg1616f" || format == "rgba16161616f" ||
+        format == "r32f" || format == "rg3232f" || format == "rgba32323232f") {
+        return TextureFormat::RGBA16F;
+    }
+    if (format == "rgba8888" || format == "rgb888" || format == "rg88" || format == "r8") {
+        return TextureFormat::RGBA8;
+    }
+    return hdr ? TextureFormat::RGBA16F : TextureFormat::RGBA8;
+}
+
+// An effect buffer with a `width`, `height` or `fit` of its own has a fixed
+// size, as in Wallpaper Engine: its own size where given (else the layer's),
+// shrunk so its longer side is at most `fit` with its aspect kept, then divided
+// by `scale`. Wallpaper Engine ignores sizes above 4096. Without any of them
+// the buffer follows the layer, scaled.
+std::optional<std::array<int32_t, 2>> FixedEffectFboExtent(const wpscene::WPEffectFbo& fbo,
+                                                           float layer_width,
+                                                           float layer_height) {
+    constexpr uint32_t kLargest = 4096;
+    const bool own_width  = fbo.width > 0 && fbo.width <= kLargest;
+    const bool own_height = fbo.height > 0 && fbo.height <= kLargest;
+    const bool fits       = fbo.fit > 0 && fbo.fit <= kLargest;
+    if (! own_width && ! own_height && ! fits) return std::nullopt;
+    float width  = own_width ? static_cast<float>(fbo.width) : layer_width;
+    float height = own_height ? static_cast<float>(fbo.height) : layer_height;
+    if (fits && width > 0.0f && height > 0.0f) {
+        const float fit = static_cast<float>(fbo.fit);
+        if (width < height) {
+            const float fitted = std::min(fit, height);
+            width              = width / height * fitted;
+            height             = fitted;
+        } else {
+            const float fitted = std::min(fit, width);
+            height             = height / width * fitted;
+            width              = fitted;
+        }
+    }
+    return std::array { ResolveRenderTargetDimension(width, fbo.scale),
+                        ResolveRenderTargetDimension(height, fbo.scale) };
+}
+
+// Whether, running on from just after pass `from` and round to the start of
+// the next frame, the effect reads `fbo` before it draws into it.
+bool EffectReadsBeforeWriting(const wpscene::WPImageEffect& effect, std::string_view fbo,
+                              std::size_t from) {
+    for (const auto& command : effect.commands) {
+        if (command.source == fbo) return true;
+    }
+    const auto count = effect.passes.size();
+    for (std::size_t step = 0; step < count; ++step) {
+        const auto& pass = effect.passes[(from + step) % count];
+        for (const auto& bind : pass.bind) {
+            if (bind.name == fbo) return true;
+        }
+        if (pass.target == fbo) return false;
+    }
+    return false;
+}
+
+// An effect's `copy` and `swap` commands as copies between its buffers. A
+// `swap` exchanges two buffers after a pass: the first then holds what was
+// drawn into the second, and the second what the first held. When the effect
+// draws into the second before it reads it again, that half of the exchange is
+// never seen and one copy is the whole swap; otherwise it goes through a
+// temporary buffer of the second's size.
+void LowerEffectCommands(const wpscene::WPImageEffect& effect,
+                         const std::unordered_map<std::string, std::string>& fbo_map, Scene& scene,
+                         std::vector<SceneImageEffect::Command>& commands) {
+    for (const auto& command : effect.commands) {
+        const bool swap = command.command == "swap";
+        if (command.command != "copy" && ! swap) {
+            LOG_ERROR("Unknown effect command: %s", command.command.c_str());
+            continue;
+        }
+        const auto target = fbo_map.find(command.target);
+        const auto source = fbo_map.find(command.source);
+        if (target == fbo_map.end() || source == fbo_map.end()) {
+            LOG_ERROR("Unknown effect command dst or src: %s %s",
+                      command.target.c_str(),
+                      command.source.c_str());
+            continue;
+        }
+        const auto copy = [&commands, &command](const std::string& dst, const std::string& src) {
+            commands.push_back({ .cmd      = SceneImageEffect::CmdType::Copy,
+                                 .dst      = dst,
+                                 .src      = src,
+                                 .afterpos = command.afterpos });
+        };
+        if (! swap) {
+            copy(target->second, source->second);
+            continue;
+        }
+        const auto after = static_cast<std::size_t>(std::max(0, command.afterpos));
+        if (! EffectReadsBeforeWriting(effect, command.target, after)) {
+            copy(source->second, target->second);
+            continue;
+        }
+        const auto temporary = target->second + "_swap";
+        scene.renderTargets[temporary] = scene.renderTargets.at(target->second);
+        copy(temporary, source->second);
+        copy(source->second, target->second);
+        copy(target->second, temporary);
+    }
+}
+
 // mapRate < 1.0
 void GenCardMesh(SceneMesh& mesh, const std::array<uint16_t, 2> size,
                  const std::array<float, 2> mapRate = { 1.0f, 1.0f }) {
@@ -2390,29 +2501,20 @@ void AttachEffectsToNode(ParseContext& context,
                 .bind = { .enable = true, .name = effect_ppong_a,
                           .scale = preserve_effect_fbo_resolution ? 1.0
                                                                  : 1.0 / std::max(1u, fbo.scale) },
-                .format = scene.hdr ? TextureFormat::RGBA16F : TextureFormat::RGBA8,
+                .format = EffectFboFormat(fbo.format, scene.hdr),
             };
+            if (const auto fixed = FixedEffectFboExtent(fbo,
+                                                        static_cast<float>(render_extent[0]),
+                                                        static_cast<float>(render_extent[1]))) {
+                auto& target  = scene.renderTargets[rtname];
+                target.width  = (*fixed)[0];
+                target.height = (*fixed)[1];
+                target.bind   = {};
+            }
             fboMap[fbo.name] = rtname;
         }
 
-        for (const auto& command : effect.commands) {
-            if (command.command != "copy") {
-                LOG_ERROR("Unknown effect command: %s", command.command.c_str());
-                continue;
-            }
-            if (fboMap.count(command.target) + fboMap.count(command.source) < 2) {
-                LOG_ERROR("Unknown effect command dst or src: %s %s",
-                          command.target.c_str(),
-                          command.source.c_str());
-                continue;
-            }
-            image_effect->commands.push_back({
-                .cmd      = SceneImageEffect::CmdType::Copy,
-                .dst      = fboMap[command.target],
-                .src      = fboMap[command.source],
-                .afterpos = command.afterpos,
-            });
-        }
+        LowerEffectCommands(effect, fboMap, scene, image_effect->commands);
 
         bool effect_materials_ok = true;
         for (usize i_mat = 0; i_mat < effect.materials.size(); ++i_mat) {
@@ -3852,30 +3954,20 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                             .allowReuse = true
                         };
                     }
-                    scene.renderTargets[rtname].format =
-                        scene.hdr ? TextureFormat::RGBA16F : TextureFormat::RGBA8;
+                    scene.renderTargets[rtname].format = EffectFboFormat(wpfbo.format, scene.hdr);
+                    if (! wpimgobj.fullscreen) {
+                        if (const auto fixed =
+                                FixedEffectFboExtent(wpfbo,
+                                                     static_cast<float>(render_extent[0]),
+                                                     static_cast<float>(render_extent[1]))) {
+                            scene.renderTargets[rtname].width  = (*fixed)[0];
+                            scene.renderTargets[rtname].height = (*fixed)[1];
+                        }
+                    }
                     fboMap[wpfbo.name] = rtname;
                 }
             }
-            // load! effect commands
-            {
-                for (const auto& el : wpeffobj.commands) {
-                    if (el.command != "copy") {
-                        LOG_ERROR("Unknown effect command: %s", el.command.c_str());
-                        continue;
-                    }
-                    if (fboMap.count(el.target) + fboMap.count(el.source) < 2) {
-                        LOG_ERROR("Unknown effect command dst or src: %s %s",
-                                  el.target.c_str(),
-                                  el.source.c_str());
-                        continue;
-                    }
-                    imgEffect->commands.push_back({ .cmd      = SceneImageEffect::CmdType::Copy,
-                                                    .dst      = fboMap[el.target],
-                                                    .src      = fboMap[el.source],
-                                                    .afterpos = el.afterpos });
-                }
-            }
+            LowerEffectCommands(wpeffobj, fboMap, scene, imgEffect->commands);
 
             bool eff_mat_ok { true };
 

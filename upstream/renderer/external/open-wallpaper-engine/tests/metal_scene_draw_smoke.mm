@@ -2347,6 +2347,87 @@ TEST_F(MetalSceneDraw, AScreenReadBeforeAnyDrawSeesTheBackgroundEveryFrameOnBoth
         << "the native renderer read another screen than the compatibility renderer";
 }
 
+TEST_F(MetalSceneDraw, AnEffectsSwappedBuffersAccumulateAndItsFloatBuffersKeepTheirSignOnBothRenderers)
+{
+    // Wallpaper Engine's fluid simulation keeps its state in buffers it swaps
+    // after every frame, sized by `fit` and in float formats. Here one pass adds
+    // a quarter to what the swapped buffer held last frame, another writes a
+    // negative value into a two-channel float buffer, and the last shows both:
+    // after three frames the sum is three quarters (one quarter if the swap were
+    // lost) and the negative value survives (zero in an 8-bit buffer).
+    std::map<bool, RendererPicture> pictures;
+    for (const bool native : { false, true }) {
+        const std::string name = native ? "swap-native" : "swap-compat";
+        const auto project = WriteFixture(root_ / name);
+        const std::string vertex =
+            "uniform mat4 g_ModelViewProjectionMatrix;\n"
+            "attribute vec3 a_Position;\nattribute vec2 a_TexCoord;\n"
+            "varying vec2 v_TexCoord;\n"
+            "void main(){ gl_Position=g_ModelViewProjectionMatrix*vec4(a_Position,1.0);"
+            "v_TexCoord=a_TexCoord; }\n";
+        const auto pass = [](std::string_view shader, std::string_view textures) {
+            return std::string(R"({"passes":[{"shader":")") + std::string(shader) +
+                   R"(","blending":"normal","cullmode":"nocull","depthtest":"disabled",)"
+                   R"("depthwrite":"disabled","textures":)" + std::string(textures) + "}]}";
+        };
+        const std::map<std::string, std::string> files {
+            { "effects/acc/effect.json",
+              R"({"name":"accumulate","fbos":[)"
+              R"({"name":"_rt_Acc1","fit":64,"format":"rgba8888"},)"
+              R"({"name":"_rt_Acc2","fit":64,"format":"rgba8888"},)"
+              R"({"name":"_rt_Signed","fit":64,"format":"rg1616f"}],)"
+              R"("passes":[)"
+              R"({"material":"materials/acc_step.json","target":"_rt_Acc2","bind":[{"name":"_rt_Acc1","index":0}]},)"
+              R"({"material":"materials/acc_signed.json","target":"_rt_Signed"},)"
+              R"({"material":"materials/acc_show.json","bind":[{"name":"_rt_Acc2","index":0},{"name":"_rt_Signed","index":1}]},)"
+              R"({"command":"swap","source":"_rt_Acc1","target":"_rt_Acc2"}]})" },
+            { "materials/acc_step.json", pass("acc_step", "[null]") },
+            { "materials/acc_signed.json", pass("acc_signed", "[]") },
+            { "materials/acc_show.json", pass("acc_show", "[null,null]") },
+            { "shaders/acc_step.vert", vertex },
+            { "shaders/acc_step.frag",
+              "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\n"
+              "void main(){ gl_FragColor=vec4(texture(g_Texture0,v_TexCoord).r+0.25,0.0,0.0,1.0); }\n" },
+            { "shaders/acc_signed.vert", vertex },
+            { "shaders/acc_signed.frag",
+              "varying vec2 v_TexCoord;\nvoid main(){ gl_FragColor=vec4(-0.5,0.0,0.0,1.0); }\n" },
+            { "shaders/acc_show.vert", vertex },
+            { "shaders/acc_show.frag",
+              "uniform sampler2D g_Texture0;\nuniform sampler2D g_Texture1;\n"
+              "varying vec2 v_TexCoord;\nvoid main(){\n"
+              "gl_FragColor=vec4(texture(g_Texture0,v_TexCoord).r,-texture(g_Texture1,v_TexCoord).r,0.0,1.0); }\n" },
+            { "layout.json",
+              R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+              R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0.0,0.0,0.0],)"
+              R"("cameraparallax":false,"orthogonalprojection":{"width":384,"height":256}},)"
+              R"("objects":[{"id":1,"name":"tile","image":"models/tile.json","origin":[192,128,0],)"
+              R"("scale":[1,1,1],"angles":[0,0,0],"visible":true,)"
+              R"("effects":[{"file":"effects/acc/effect.json","visible":true}]}]})" },
+        };
+        for (const auto& [file, contents] : files) {
+            const auto path = root_ / name / file;
+            std::filesystem::create_directories(path.parent_path());
+            std::ofstream(path) << contents;
+        }
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+        if (native) {
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+        }
+        pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+        ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+    }
+    const auto& rgb = pictures[true].rgb;
+    ASSERT_EQ(rgb.size(), 384u * 256u * 3u);
+    const std::size_t centre = (128u * 384u + 192u) * 3u;
+    EXPECT_NEAR(rgb[centre + 0], 191, 3) << "the swapped buffer did not carry last frame's sum";
+    EXPECT_NEAR(rgb[centre + 1], 128, 3) << "the float buffer lost its sign";
+    EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
+        << "the native renderer ran the effect's buffers differently from the compatibility renderer";
+}
+
 TEST_F(MetalSceneDraw, AnIntermediateTargetIsDrawnCopiedAndResampledInOneFrame)
 {
     // The shape an effect chain lowers to: the author's layer drawn into an

@@ -2921,6 +2921,108 @@ void main() {
     EXPECT_EQ(layer.GetEffect(0)->nodes.size(), 1u);
 }
 
+TEST(SceneSchema, EffectBuffersTakeWallpaperEnginesSizesFormatsAndSwaps) {
+    fs::VFS vfs;
+    auto files = std::map<std::string, std::string> {
+        { "/image.json", R"({"width":640,"height":360,"material":"mat.json"})" },
+        { "/mat.json",
+          R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":["a.tex"]}]})" },
+        { "/effects/sim/effect.json",
+          R"({"name":"sim","fbos":[
+              {"name":"_rt_V1","fit":256,"format":"rg1616f"},
+              {"name":"_rt_V2","fit":256,"format":"rg1616f"},
+              {"name":"_rt_D1","scale":2,"format":"rgba8888"},
+              {"name":"_rt_D2","scale":2,"format":"rgba8888"},
+              {"name":"_rt_R1","width":100,"height":50,"format":"rgba_backbuffer"},
+              {"name":"_rt_R2","width":100,"height":50,"format":"rgba_backbuffer"}],
+            "passes":[
+              {"material":"effect_mat.json","target":"_rt_V2","bind":[{"name":"_rt_V1","index":0}]},
+              {"material":"effect_mat.json","target":"_rt_D2","bind":[{"name":"_rt_D1","index":0}]},
+              {"material":"effect_mat.json","bind":[{"name":"_rt_R2","index":0}]},
+              {"material":"effect_mat.json","target":"_rt_R2","bind":[{"name":"_rt_R1","index":0}]},
+              {"command":"swap","source":"_rt_V1","target":"_rt_V2"},
+              {"command":"swap","source":"_rt_D1","target":"_rt_D2"},
+              {"command":"swap","source":"_rt_R1","target":"_rt_R2"}]})" },
+        { "/effect_mat.json",
+          R"({"passes":[{"blending":"normal","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":[null]}]})" },
+        { "/shaders/genericimage.vert",
+          R"(attribute vec3 a_Position;
+attribute vec2 a_TexCoord;
+varying vec2 v_TexCoord;
+void main() {
+  gl_Position = vec4(a_Position, 1.0);
+  v_TexCoord = a_TexCoord;
+}
+)" },
+        { "/shaders/genericimage.frag",
+          R"(uniform sampler2D g_Texture0;
+varying vec2 v_TexCoord;
+void main() {
+  gl_FragColor = texture(g_Texture0, v_TexCoord);
+}
+)" },
+        { "/materials/a.tex.tex", "" },
+    };
+    EXPECT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+    audio::SoundManager sound_manager(audio::SoundManager::OutputBackend::Null);
+    const std::string   scene = R"({
+      "camera": {"center":[0,0,0], "eye":[0,0,1], "up":[0,1,0]},
+      "general": {
+        "ambientcolor":[0.2,0.2,0.2], "skylightcolor":[0.3,0.3,0.3],
+        "clearcolor":[0,0,0], "cameraparallax":false,
+        "cameraparallaxamount":0, "cameraparallaxdelay":0,
+        "cameraparallaxmouseinfluence":0, "hdr":true,
+        "orthogonalprojection":{"width":640,"height":360}
+      },
+      "objects": [
+        {"id":2,"name":"simulated","image":"image.json",
+         "origin":[320,180,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true,
+         "effects":[{"file":"effects/sim/effect.json","id":3,"visible":true}]}
+      ]
+    })";
+    auto parsed = WPSceneParser().Parse(SceneParseRequest { .scene_id = "effect-buffers" },
+                                        scene, vfs, sound_manager);
+    ASSERT_NE(parsed, nullptr);
+    const auto target = [&parsed](std::string_view prefix) -> const SceneRenderTarget* {
+        for (const auto& [name, rt] : parsed->renderTargets) {
+            if (name.starts_with(prefix) && ! name.ends_with("_swap")) return &rt;
+        }
+        return nullptr;
+    };
+    // `fit` shrinks the longer side to 256 with the aspect kept; a float format
+    // stays float; an explicit 8-bit format stays 8-bit in an HDR scene; an own
+    // size wins; the back buffer's format follows the scene.
+    const auto* velocity = target("_rt_V1_");
+    ASSERT_NE(velocity, nullptr);
+    EXPECT_EQ(velocity->width, 256);
+    EXPECT_EQ(velocity->height, 144);
+    EXPECT_EQ(velocity->format, TextureFormat::RGBA16F);
+    const auto* dye = target("_rt_D1_");
+    ASSERT_NE(dye, nullptr);
+    EXPECT_EQ(dye->format, TextureFormat::RGBA8);
+    const auto* sized = target("_rt_R1_");
+    ASSERT_NE(sized, nullptr);
+    EXPECT_EQ(sized->width, 100);
+    EXPECT_EQ(sized->height, 50);
+    EXPECT_EQ(sized->format, TextureFormat::RGBA16F);
+
+    auto node = FindRootChildByName(*parsed, "simulated");
+    ASSERT_NE(node, nullptr);
+    const auto camera = parsed->cameras.find(node->Camera());
+    ASSERT_NE(camera, parsed->cameras.end());
+    ASSERT_TRUE(camera->second->HasImgEffect());
+    const auto& commands = camera->second->GetImgEffect()->GetEffect(0)->commands;
+    // V2 and D2 are drawn before they are read again: one copy each. R2 is read
+    // first, so its old content goes through a temporary: three copies.
+    ASSERT_EQ(commands.size(), 5u);
+    EXPECT_TRUE(commands[0].dst.starts_with("_rt_V1_") && commands[0].src.starts_with("_rt_V2_"));
+    EXPECT_TRUE(commands[1].dst.starts_with("_rt_D1_") && commands[1].src.starts_with("_rt_D2_"));
+    EXPECT_TRUE(commands[2].dst.ends_with("_swap") && commands[2].src.starts_with("_rt_R1_"));
+    EXPECT_TRUE(commands[3].dst.starts_with("_rt_R1_") && commands[3].src.starts_with("_rt_R2_"));
+    EXPECT_TRUE(commands[4].dst.starts_with("_rt_R2_") && commands[4].src.ends_with("_swap"));
+    for (const auto& command : commands) EXPECT_EQ(command.afterpos, 4);
+}
+
 TEST(SceneSchema, PassthroughImageEffectBaseMeshUsesLayerLocalCardGeometry) {
     fs::VFS vfs;
     auto files = std::map<std::string, std::string> {

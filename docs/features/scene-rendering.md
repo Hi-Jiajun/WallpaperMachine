@@ -112,7 +112,18 @@ afterwards, its transparent texels included; a pass that does not depth-test wri
 none. A target the frame
 reads before it writes it keeps its own image from one frame to the next on both
 renderers, so the reader sees exactly the previous frame; a scene with such a loop
-is never called still while it runs. Translating to the Metal shading language
+is never called still while it runs. An effect's own buffers are made the way
+Wallpaper Engine makes them: a float format (`r16f`, `rg1616f`) is a float target,
+so a fluid simulation's velocity and pressure keep their sign; an explicit 8-bit
+format stays 8-bit and the back-buffer formats follow the scene; a buffer with its
+own `width`/`height` or a `fit` has that size, its longer side shrunk to the `fit`
+with its aspect kept, before `scale`. An effect's `swap` command exchanges two
+buffers where it stands among the effect's passes, so a simulation carries its state from one frame to the
+next; when the effect draws into the second buffer before reading it again, one copy
+into the first is the whole exchange, otherwise it goes through a temporary buffer.
+A buffer's `clear` colour and `conditions` are not read: buffers start cleared to
+zero and are made whether or not the effect's combos use them. Translating to the
+Metal shading language
 turns GLSL's `inverse`, which Metal has no built-in for, into helper functions, so
 the stock perspective, reflection, water, light-shaft and cursor-ripple effects
 translate. A step that samples an image nothing in the scene produces (a layer
