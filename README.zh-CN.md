@@ -42,11 +42,11 @@
 </p>
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/05389596-04fb-434a-8533-ba1865f92617" width="100%" alt="WallpaperMachine 的窗口：左侧边栏是 Steam 创意工坊、pixiv、壁纸库和“正在播放”卡片，中间是已安装壁纸的网格，右侧检查器显示所选壁纸的预览、兼容性检查和选项。">
+  <img src="https://github.com/user-attachments/assets/9526d41a-4764-4df9-a678-22d75982a7fd" width="100%" alt="深色外观下的 WallpaperMachine 窗口：顶部是“壁纸库”“Steam 创意工坊”“pixiv”和“设置”标签页，中间是已安装壁纸的网格并标出了正在播放的那张，右侧检查器显示它的预览、兼容性检查和选项，底部是正在播放的内容。">
 </p>
 
 <p align="center">
-  <sub>侧边栏里是浏览和你的壁纸库，中间是你的壁纸，右侧是所选壁纸的选项。点按“应用壁纸”，它就成为你的桌面。</sub>
+  <sub>中间是你的壁纸库，右侧是所选壁纸的选项，底部是正在播放的内容。点按“应用壁纸”，它就成为你的桌面。</sub>
 </p>
 
 <p align="center">
