@@ -39,7 +39,9 @@ struct PanelTabs: View {
         .accessibilityIdentifier("tab-\(Self.identifier(of: page))")
       }
     }
-    .padding(.horizontal, 2)
+    // The toolbar's glass capsule reaches about 4 pt past a tab above and below; the same inset at
+    // the ends keeps the first and last tab's capsule concentric with it.
+    .padding(.horizontal, 4)
     .fixedSize()
     .accessibilityElement(children: .contain)
     .accessibilityLabel(Text(verbatim: L("Main navigation")))
