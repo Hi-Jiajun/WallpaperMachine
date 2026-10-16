@@ -106,8 +106,9 @@ blocks; the app ignores it. The headings are:
 | improved | Improved | 改进 |
 | fixed | Fixed | 修复 |
 
-Highlights appear only in feature releases (`x.y.0`): the three to five changes that
-define the release, which the other sections still list.
+Highlights appear only in feature releases: the three to five changes that define the
+release, which the other sections still list. A feature release is `x.y.0`, or a patch
+whose notes start below `x.y` because it replaces an `x.y.0` that was never published.
 
 ### Release banners
 
@@ -584,7 +585,10 @@ gh workflow run version.yml --ref main -f spec=patch -f notes_from=v1.2.6
 
 `notes_from` only sets `release_notes.py --previous`; it does not change the version
 policy, skip tests or replace a live release. Ordinary releases leave it empty and
-use the preceding tag.
+use the preceding tag. When the unpublished tag was a feature release, its notes start
+below that minor version, so the patch gets highlights too; commit copies of its
+banners under the patch's number (`x.y.1.jpg`, `x.y.1.zh-Hans.jpg`) before running the
+workflow, since a section names only its own version's banner.
 
 ## Checklist for a release
 

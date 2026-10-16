@@ -533,9 +533,16 @@ def body_parts(body):
     return tidy(text), parts
 
 
-def is_feature_release(version):
-    """`x.y.0`: a minor or major version, the ones that get highlights."""
-    return version_key(version)[2] == 0
+def is_feature_release(version, previous=None):
+    """The first release of a minor or major version, the ones that get highlights.
+
+    That is `x.y.0`, or a later patch whose notes start below `x.y`: one that replaces an
+    `x.y.0` that was tagged but never published, so nobody saw that version's highlights.
+    """
+    major, minor, patch = version_key(version)
+    if patch == 0:
+        return True
+    return previous is not None and version_key(previous)[:2] < (major, minor)
 
 
 def model_prompt(version, previous, entries):
@@ -549,7 +556,7 @@ def model_prompt(version, previous, entries):
     since = f"since {previous}" if previous else "from the start of the history"
     noun = "commit" if len(entries) == 1 else "commits"
     lines = [f"WallpaperMachine {display_version(version)}: {len(entries)} {noun} {since}, newest first."]
-    if is_feature_release(version):
+    if is_feature_release(version, previous):
         lines.append("This is a feature release: write its highlights.")
     else:
         lines.append("This is a patch release: leave highlights empty.")

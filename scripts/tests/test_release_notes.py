@@ -400,8 +400,14 @@ class ModelRangeTests(unittest.TestCase):
     def test_only_a_feature_release_asks_for_highlights(self):
         self.write()
         self.assertIn("This is a feature release", self.reply.requests[0][2]["messages"][0]["content"])
-        release_notes.write_with_model("0.2.1", "v0.1.0", "HEAD", REPOSITORY, self.root, self.reply, KEY)
+        release_notes.write_with_model("0.1.1", "v0.1.0", "HEAD", REPOSITORY, self.root, self.reply, KEY)
         self.assertIn("This is a patch release", self.reply.requests[1][2]["messages"][0]["content"])
+
+    def test_a_patch_replacing_an_unpublished_feature_release_asks_for_highlights(self):
+        # 0.2.0 was tagged but never published: 0.2.1's notes start at 0.1.0 and are the
+        # first anyone reads of 0.2.
+        release_notes.write_with_model("0.2.1", "v0.1.0", "HEAD", REPOSITORY, self.root, self.reply, KEY)
+        self.assertIn("This is a feature release", self.reply.requests[0][2]["messages"][0]["content"])
 
     def test_each_language_opens_with_its_own_banner(self):
         self.assertNotIn("![", self.write(), "No picture, no banner line")
