@@ -271,6 +271,19 @@ Playback, backend, host and startup areas are in
     Not compared pixel for pixel: the previews are a close-up and an edited loop. 3743578252
     now draws its large dark foreground fish at scale 3.7 across the frame early in its
     timeline, which a Wallpaper Engine frame at the same time would settle.
+- **A pass-through layer in a group reads the screen where it is drawn** —
+  `MetalSceneDraw.APassThroughLayerInAGroupReadsTheScreenWhereItIsDrawnOnBothRenderers`
+  draws a four-quadrant backdrop through a pass-through layer with an identity effect,
+  alone, as a project layer with no origin in a group at the canvas centre, and under a
+  moved, 2x-scaled group, and requires each to equal the backdrop alone on both
+  renderers (the scaled one away from the 3-pixel band its half-sized card softens). The
+  card that copies the screen (`PassthroughCardVertices`, `PassthroughClipSpaceVertices`)
+  is laid out again from the layer's world matrix by `LayOutPassthroughCards` once every
+  layer is under its parent; from the local transform the parse had before that, issue
+  #53's CRT "Full Composition Layer" (a project layer under a centred group) copied the
+  screen half a canvas off and showed a half-sized copy of the scene in one quadrant. A
+  group transform a script or property changes after load is still not followed by the
+  card.
 - **One cursor mapping, owned by the presentation** —
   `SceneRuntimeContext::SetCursorInput` maps window-normalized input through the
   cursor viewport the renderer publishes (`origin + (x, 1 - y) * size`) and writes

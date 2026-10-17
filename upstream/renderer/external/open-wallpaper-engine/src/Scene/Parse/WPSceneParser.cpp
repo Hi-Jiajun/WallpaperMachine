@@ -277,6 +277,16 @@ struct ParseContext {
     /// The card each text layer shows, for a composite registered only once
     /// a later consumer turns out to sample the layer.
     std::unordered_map<int32_t, TextLayerRenderFrame>       text_cards;
+    /// Pass-through layers drawn through effects. Each card copies the part of
+    /// the screen its layer is drawn over, which the layer's groups decide, so
+    /// it is laid out again once every layer is under its parent.
+    struct PassthroughCard {
+        std::shared_ptr<SceneNode> node;
+        std::shared_ptr<SceneMesh> mesh;
+        std::array<uint16_t, 2>    size {};
+        bool                       clip_space { false };
+    };
+    std::vector<PassthroughCard>                            passthrough_cards;
 
     ShaderValueMap             global_base_uniforms;
     std::shared_ptr<SceneNode> effect_camera_node;
@@ -859,16 +869,18 @@ void GenTextCardMesh(SceneMesh& mesh, TextLayerRenderBounds bounds,
     mesh.AddVertexArray(std::move(vertex));
 }
 
-void GenPassthroughCardMesh(SceneMesh& mesh, const std::array<uint16_t, 2> size,
-                            const SceneNode& node, int32_t projection_width,
-                            int32_t projection_height) {
+// The card of a pass-through layer drawn through effects: the layer's own quad,
+// textured with the part of the screen `transform` (where the layer is drawn)
+// puts it over.
+SceneVertexArray PassthroughCardVertices(const std::array<uint16_t, 2> size,
+                                         const Eigen::Matrix4d& transform,
+                                         int32_t projection_width, int32_t projection_height) {
     float left   = -(size[0] / 2.0f);
     float right  = size[0] / 2.0f;
     float bottom = -(size[1] / 2.0f);
     float top    = size[1] / 2.0f;
     float z      = 0.0f;
 
-    const auto  transform = node.GetLocalTrans();
     const float width     = std::max(1.0f, static_cast<float>(projection_width));
     const float height    = std::max(1.0f, static_cast<float>(projection_height));
 
@@ -901,19 +913,20 @@ void GenPassthroughCardMesh(SceneMesh& mesh, const std::array<uint16_t, 2> size,
         4);
     vertex.SetVertex(WE_IN_POSITION, pos);
     vertex.SetVertex(WE_IN_TEXCOORD, texCoord);
-    mesh.AddVertexArray(std::move(vertex));
+    return vertex;
 }
 
-void GenPassthroughClipSpaceMesh(SceneMesh& mesh, const std::array<uint16_t, 2> size,
-                                 const SceneNode& node, int32_t projection_width,
-                                 int32_t projection_height) {
+// The same for the `passthrough` material, whose quad is already in clip space.
+SceneVertexArray PassthroughClipSpaceVertices(const std::array<uint16_t, 2> size,
+                                              const Eigen::Matrix4d& transform,
+                                              int32_t projection_width,
+                                              int32_t projection_height) {
     float left   = -(size[0] / 2.0f);
     float right  = size[0] / 2.0f;
     float bottom = -(size[1] / 2.0f);
     float top    = size[1] / 2.0f;
     float z      = 0.0f;
 
-    const auto  transform = node.GetLocalTrans();
     const float width     = std::max(1.0f, static_cast<float>(projection_width));
     const float height    = std::max(1.0f, static_cast<float>(projection_height));
 
@@ -958,7 +971,7 @@ void GenPassthroughClipSpaceMesh(SceneMesh& mesh, const std::array<uint16_t, 2> 
         4);
     vertex.SetVertex(WE_IN_POSITION, pos);
     vertex.SetVertex(WE_IN_TEXCOORD, texCoord);
-    mesh.AddVertexArray(std::move(vertex));
+    return vertex;
 }
 
 void AddParticleIndexArray(SceneMesh& mesh, uint32_t count) {
@@ -4675,21 +4688,25 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             const bool use_compose_effect_local_card =
                 wpimgobj.config.passthrough && isCompose && count_eff > 0;
             if (wpimgobj.config.passthrough && hasEffect && ! use_compose_effect_local_card) {
-                if (material.name == "passthrough") {
-                    GenPassthroughClipSpaceMesh(
-                        mesh,
-                        { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] },
-                        *spImgNode,
-                        context.ortho_w,
-                        context.ortho_h);
-                } else {
-                    GenPassthroughCardMesh(
-                        mesh,
-                        { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] },
-                        *spImgNode,
-                        context.ortho_w,
-                        context.ortho_h);
-                }
+                // Laid out from the layer's own transform for now, and again from
+                // where its groups put it once it is under them
+                // (LayOutPassthroughCards).
+                const ParseContext::PassthroughCard card {
+                    .node       = spImgNode,
+                    .mesh       = spMesh,
+                    .size       = { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] },
+                    .clip_space = material.name == "passthrough",
+                };
+                mesh.AddVertexArray(card.clip_space
+                                        ? PassthroughClipSpaceVertices(card.size,
+                                                                       spImgNode->GetLocalTrans(),
+                                                                       context.ortho_w,
+                                                                       context.ortho_h)
+                                        : PassthroughCardVertices(card.size,
+                                                                  spImgNode->GetLocalTrans(),
+                                                                  context.ortho_w,
+                                                                  context.ortho_h));
+                context.passthrough_cards.push_back(card);
             } else {
                 GenCardMesh(
                     mesh, { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] }, mapRate);
@@ -6021,6 +6038,22 @@ void ParseLightObj(ParseContext& context, wpscene::WPLightObject& light_obj) {
     }
 }
 
+// A pass-through card laid out where its layer is drawn: under its groups, as
+// the layer's final card is placed (SyncImageEffectFinalTransforms). From the
+// layer's own transform alone, a layer with an origin inside a moved group
+// copied the screen from where the group's origin would be.
+void LayOutPassthroughCards(ParseContext& context) {
+    for (const auto& card : context.passthrough_cards) {
+        card.node->UpdateTrans();
+        const auto& world = card.node->ModelTrans();
+        card.mesh->GetVertexArray(0) =
+            card.clip_space
+                ? PassthroughClipSpaceVertices(card.size, world, context.ortho_w, context.ortho_h)
+                : PassthroughCardVertices(card.size, world, context.ortho_w, context.ortho_h);
+    }
+    context.passthrough_cards.clear();
+}
+
 void SyncImageEffectFinalTransforms(ParseContext& context) {
     for (const auto& [layer_id, node] : context.layer_nodes) {
         (void)layer_id;
@@ -6576,6 +6609,7 @@ std::shared_ptr<Scene> WPSceneParser::Parse(const SceneParseRequest& request,
     AttachRemainingLayerNodes(context);
     PrewarmParticleSystems(context);
     RegisterLayerAttachments(context);
+    LayOutPassthroughCards(context);
     SyncImageEffectFinalTransforms(context);
 
     BuildBloomPostProcess(context, sc);

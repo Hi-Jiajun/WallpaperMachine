@@ -755,7 +755,10 @@ tested, a plain group or a particle layer is not, and a visible layer under the 
 with `disablepropagation` hides every layer behind it, which hears no enter, leave or
 move meanwhile and keeps whatever hover state it had. A project layer
 (`models/util/projectlayer.json`) is as large as the scene's canvas, and the
-depth-testing composition layer composes like the plain one. Camera parallax moves
+depth-testing composition layer composes like the plain one. A pass-through layer
+drawn through effects, such as a project layer under a CRT effect, copies the part of
+the screen it is drawn over, under the groups it sits in, not at the origin it has
+within them. Camera parallax moves
 what a composition layer holds along with its card, as Wallpaper Engine's draw loop gives
 every pass of a layer the same offset: the screen its first pass reads is the place its last
 pass draws it, so a layer that only copies what is behind it shows a continuous scene, not
