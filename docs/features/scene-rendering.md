@@ -768,7 +768,9 @@ target, keep the blend of mip levels they always had. Whether the cursor reaches
 Engine's walk: only image, text and model layers that are `solid` (the default) are
 tested, a plain group or a particle layer is not, and a visible layer under the cursor
 with `disablepropagation` hides every layer behind it, which hears no enter, leave or
-move meanwhile and keeps whatever hover state it had. A project layer
+move meanwhile and keeps whatever hover state it had. An image layer is as large as
+the size its scene saved; the `width` and `height` a model states (a sprite sheet's
+frame) size only a layer that saved none. A project layer
 (`models/util/projectlayer.json`) is as large as the scene's canvas, and the
 depth-testing composition layer composes like the plain one. A pass-through layer
 drawn through effects, such as a project layer under a CRT effect, copies the part of

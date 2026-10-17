@@ -250,15 +250,19 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
     read_vec3_setting(json, "angles", &angles, &angles_setting, nullptr);
 	if(!fullscreen) {
 		GET_JSON_NAME_VALUE_NOWARN(json, "parallaxDepth", parallaxDepth);
-		if(jImage.contains("width")) {
-			int32_t w,h;
-			GET_JSON_NAME_VALUE(jImage, "width", w);	
-			GET_JSON_NAME_VALUE(jImage, "height", h);	
-			size = {(float)w, (float)h};
-		} else if(json.contains("size")) {
-			GET_JSON_NAME_VALUE(json, "size", size);	
-		} else {
-			size = {origin.at(0)*2, origin.at(1)*2};
+		// The size the scene saved is the one the layer was given in the editor;
+		// a model's own size (a sprite sheet's frame) is only for a layer that
+		// saved none it can be read from.
+		const bool saved_size = json.contains("size");
+		if(!(saved_size && GET_JSON_NAME_VALUE(json, "size", size))) {
+			if(jImage.contains("width")) {
+				int32_t w,h;
+				GET_JSON_NAME_VALUE(jImage, "width", w);
+				GET_JSON_NAME_VALUE(jImage, "height", h);
+				size = {(float)w, (float)h};
+			} else if(!saved_size) {
+				size = {origin.at(0)*2, origin.at(1)*2};
+			}
 		}
     }
     GET_JSON_NAME_VALUE_NOWARN(jImage, "nopadding", nopadding);

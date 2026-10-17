@@ -1217,6 +1217,14 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   `autosize` and `projectlayer` is as large as the scene's canvas, whatever size
   the scene saved. `solidlayer` is read and unused, and `autosize` alone still takes
   the saved size.
+- **A layer's saved size over its model's** —
+  `SceneSchema.ALayerIsDrawnAtTheSizeItsSceneSavedRatherThanItsModels`. A model can
+  state a `width` and `height` (the editor writes a frame's size for a sprite sheet);
+  the layer is still as large as the `size` the scene saved, and the model's size is
+  only for a layer that saved none. A CRT wallpaper whose screen is a sprite sheet
+  resized in the editor drew its screen at the frame's size, a dark rectangle inset
+  in the monitor with background showing round it, where Wallpaper Engine's frames
+  fill the bezel.
 - **Depth state of a layer drawn through effects** —
   `MetalSceneDraw.ALayerDrawnThroughEffectsKeepsItsOwnDepthTestAndWriteOnBothRenderers`.
   The last pass of an image layer's effects is drawn with the layer's authored

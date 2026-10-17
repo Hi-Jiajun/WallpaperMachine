@@ -4570,6 +4570,54 @@ TEST(SceneSchema, ParserUsesStableRuntimeNamesForDuplicateImageLayerNames) {
     EXPECT_EQ(scene->runtime->NodeSize("__we_layer_21"), Eigen::Vector2f(64.0f, 32.0f));
 }
 
+// A model can state a size of its own (the editor writes one for a sprite sheet:
+// a frame's size), and the scene saves the size the layer was given in the
+// editor. A layer resized there is drawn at the scene's size, as Wallpaper Engine
+// draws it; the model's size is only for a layer that saved none.
+TEST(SceneSchema, ALayerIsDrawnAtTheSizeItsSceneSavedRatherThanItsModels) {
+    fs::VFS vfs;
+    MountSceneFiles(vfs); // image.json states 64 x 32
+    audio::SoundManager sound_manager;
+    WPSceneParser       parser;
+    ProjectProperties   properties;
+    auto scene = parser.Parse(SceneParseRequest {
+        .scene_id = "resized-model-layer", .project_properties = &properties,
+    }, R"({
+      "camera": {"center":[0,0,0], "eye":[0,0,1], "up":[0,1,0]},
+      "general": {
+        "ambientcolor":[0,0,0], "skylightcolor":[0,0,0],
+        "clearcolor":[0,0,0], "cameraparallax":false,
+        "orthogonalprojection":{"width":400,"height":300}
+      },
+      "objects": [
+        {"id":30,"name":"resized","image":"image.json","origin":[100,150,0],
+         "size":"96.00000 72.00000","visible":true},
+        {"id":31,"name":"unsized","image":"image.json","origin":[300,150,0],"visible":true}
+      ]
+    })", vfs, sound_manager);
+    ASSERT_NE(scene, nullptr);
+    ASSERT_NE(scene->runtime, nullptr);
+
+    const auto drawn = [&](std::string_view name) {
+        Eigen::Vector2f extent { 0.0f, 0.0f };
+        const auto      node = FindRootChildByName(*scene, name);
+        if (node == nullptr || node->Mesh() == nullptr) {
+            ADD_FAILURE() << name << " has no card";
+            return extent;
+        }
+        const auto& vertices = node->Mesh()->GetVertexArray(0);
+        for (std::size_t index = 0; index < vertices.VertexCount(); ++index) {
+            const auto position = VertexPosition(vertices, index);
+            extent = extent.cwiseMax(Eigen::Vector2f(std::abs(position[0]), std::abs(position[1])));
+        }
+        return Eigen::Vector2f(extent * 2.0f);
+    };
+    EXPECT_EQ(scene->runtime->NodeSize("resized"), Eigen::Vector2f(96.0f, 72.0f));
+    EXPECT_EQ(drawn("resized"), Eigen::Vector2f(96.0f, 72.0f));
+    EXPECT_EQ(scene->runtime->NodeSize("unsized"), Eigen::Vector2f(64.0f, 32.0f));
+    EXPECT_EQ(drawn("unsized"), Eigen::Vector2f(64.0f, 32.0f));
+}
+
 TEST(SceneSchema, DuplicateNamesResolveInAuthoredOrderWithoutSharingThisLayerBindings) {
     fs::VFS vfs;
     MountSceneFiles(vfs);
