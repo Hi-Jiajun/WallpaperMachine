@@ -71,7 +71,10 @@ unattached `CAMetalLayer`s and injected notification and encoding services:
 - Originals and quit: inherited (pathless) selections resolve through the public
   API before any poster write and are never replaced by an unresolved poster;
   independent per-Space originals survive; a user's own wallpaper change is not
-  overwritten on restore; quit waits for the native reload, every read-back and
+  overwritten on restore; an original whose file is gone gives way to another
+  display's original and then macOS's default picture (when its display stops playing,
+  at quit and in the launch repair), while one the app may not look at is still put
+  back; quit waits for the native reload, every read-back and
   in-flight writes, keeps the original when restoration fails persistently, and
   cannot be blocked forever by an unreachable reference; cancelling a restoration
   that is waiting (a logout's deadline) stops it and leaves the journal entry and the

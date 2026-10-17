@@ -355,7 +355,9 @@ Swift keeps the *system* wallpaper consistent with that window. `DesktopWallpape
 renderer output into JPEG posters and installs them as the static desktop picture that Mission
 Control shows; `DesktopWallpaperLedger` journals the user's original per-Space wallpaper before the
 first write and restores it on quit, or at once when Settings turns poster writing off
-(`PlaybackPreferences.writesDesktopPicture`); `DesktopSpaceWallpaperAPI` reaches the
+(`PlaybackPreferences.writesDesktopPicture`). An original whose file has since been deleted
+gives way to another desktop's original or macOS's default picture, so it cannot block a quit;
+`DesktopSpaceWallpaperAPI` reaches the
 per-Space getter and setter through optional private CoreGraphics and HIServices symbols, falling back to the public
 `NSWorkspace` API. Timing, refusals, macOS 27 behavior and the quit wait are in
 [desktop-picture](features/desktop-picture.md). More behaviors sit above the windows:

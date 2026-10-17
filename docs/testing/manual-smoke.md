@@ -464,6 +464,10 @@ describes what should happen and the log lines to read afterwards.
       wallpaper and Mission Control thumbnails remain unchanged.
 - [ ] Change a native wallpaper outside the app and verify that quitting does
       not overwrite it.
+- [ ] Set the desktop picture to an image you can delete, apply a live wallpaper,
+      delete the image, then quit. The quit finishes, every Desktop shows another
+      display's original or macOS's default picture, and the log names the missing
+      file and what was put back instead.
 - [ ] With a live wallpaper applied, log out, then restart and shut down (separate
       runs, authorized only). macOS must show no "cancelled" or "preventing logout"
       dialog. The log says `quit: reason=logout mode=powerOff` (or restart or

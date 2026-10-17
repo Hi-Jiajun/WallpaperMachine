@@ -201,6 +201,20 @@ journal, and finally another display's original. With no recoverable original it
 that desktop untouched and reports the failure through `AppLog`; live playback
 continues without new posters there.
 
+Another app can delete a picture it set, as a wallpaper app clearing out its old
+downloads does, and macOS refuses to show a file that does not exist. Writing that
+original back would fail on every attempt and so refuse every quit. So whenever a
+desktop is put back (at quit, when its display stops playing, when the switch is turned
+off, and in the launch repair), an original whose file is gone counts as unavailable. The
+desktop gets the next original whose file is still there, in the order above (another
+desktop on its display, its effective image, its journal, another display's). When none
+is left it gets macOS's default picture
+(`/System/Library/CoreServices/DefaultDesktop.heic`, written as the file that link points
+to). `AppLog` records the missing file and what was put back instead. Only a definite "no
+such file" counts. A file the app may not look at, such as one in a folder macOS's
+privacy protection covers, is written back as before. Files are looked at only while a
+desktop is being put back, never for each poster.
+
 A desktop showing anything but a poster was changed outside the app and keeps that
 choice on restoration. When a display stops showing a live wallpaper, its desktops are
 restored while the others keep their posters.
@@ -253,7 +267,8 @@ cancelled, since the quit restores the desktop itself). The native lock-screen s
 then restores its own selections
 (without a lock-screen service, on macOS earlier than 26, restoration starts
 directly), and the poster service restores the originals: it puts each desktop's
-journaled original back, checks image references in the native store read-only, and
+journaled original back (or, when that file is gone, [the next one that still
+exists](#the-journal-of-originals)), checks image references in the native store read-only, and
 retries asynchronous restoration for about five seconds (25 attempts, 200 ms apart)
 while WallpaperAgent reloads. Quit waits for every restored desktop to read back and for any poster write
 still in flight; one that lands late is restored again.
