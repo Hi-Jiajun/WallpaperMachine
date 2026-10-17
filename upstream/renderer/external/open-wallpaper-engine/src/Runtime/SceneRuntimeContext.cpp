@@ -9,6 +9,7 @@
 #include "Scene/include/Scene/SceneMaterial.h"
 #include "Scene/include/Scene/SceneMesh.h"
 #include "Scene/SceneNode.h"
+#include "Scene/Parse/PassthroughCard.hpp"
 #include "Scripting/ScriptEngine.hpp"
 #include "SpecTexs.hpp"
 #include "Utils/Logging.h"
@@ -466,12 +467,18 @@ Eigen::Matrix3f NodeRotationMatrix(const Eigen::Vector3f& angles) {
         .toRotationMatrix();
 }
 
-void SyncEffectFinalNode(SceneNode& source, SceneImageEffectLayer& layer) {
+void SyncEffectFinalNode(SceneNode& source, SceneImageEffectLayer& layer,
+                         PassthroughCard* passthrough_card) {
     source.UpdateTrans();
     // The final card is what reaches the scene, so it is drawn where the source layer
     // is drawn: its world matrix with the offset a screen anchor adds to the draw.
     auto matrix = source.ModelTrans();
     if (! source.DrawOffset().isZero()) matrix.block<3, 1>(0, 3) += source.DrawOffset().cast<double>();
+    // A pass-through layer's card copies the screen from the same place, so a group
+    // that moves the layer moves both; the card's corners change only when it does.
+    if (passthrough_card != nullptr && source.Mesh() != nullptr) {
+        passthrough_card->LayOut(*source.Mesh(), matrix);
+    }
     const auto sync_node = [&source, &matrix](SceneNode& target) {
         if (! target.HasRenderTransformOverride() ||
             ! (target.RenderTrans().array() == matrix.array()).all()) {
@@ -655,7 +662,7 @@ void SceneRuntimeContext::Tick(double frame_time) {
     for (auto& [name, binding] : m_node_effect_final) {
         (void)name;
         if (binding.node == nullptr || binding.layer == nullptr) continue;
-        SyncEffectFinalNode(*binding.node, *binding.layer);
+        SyncEffectFinalNode(*binding.node, *binding.layer, binding.passthrough_card.get());
     }
     for (auto& binding : m_material_constants) ApplyMaterialConstantBinding(binding);
     for (std::size_t index = 0; index < scene_script_count; ++index) {
@@ -1935,16 +1942,18 @@ void SceneRuntimeContext::RegisterDynamicValueListener(
 void SceneRuntimeContext::RegisterNodeEffectFinal(std::string name,
                                                   SceneNode* node,
                                                   SceneImageEffectLayer* layer,
-                                                  TextLayerRenderFrame target_frame) {
+                                                  TextLayerRenderFrame target_frame,
+                                                  std::shared_ptr<PassthroughCard> passthrough_card) {
     if (node == nullptr || layer == nullptr) return;
     if (const auto iterator = m_nodes.find(name);
         iterator == m_nodes.end() || iterator->second != node) {
         RegisterNode(name, node);
     }
     m_node_effect_final[std::move(name)] = NodeEffectFinalBinding {
-        .node         = node,
-        .layer        = layer,
-        .target_frame = target_frame,
+        .node             = node,
+        .layer            = layer,
+        .target_frame     = target_frame,
+        .passthrough_card = std::move(passthrough_card),
     };
 }
 
@@ -2164,8 +2173,9 @@ uint32_t SceneRuntimeContext::DescribeTimeAdvancingWork() const {
     };
 
     // `m_node_effect_final` holds no value at all: `SyncEffectFinalNode`
-    // mirrors a node onto its effect layer's final node, so it moves when the
-    // node it mirrors moves and never on its own.
+    // mirrors a node onto its effect layer's final node, and lays a pass-through
+    // card out again, so it moves when the node it mirrors moves and never on
+    // its own.
     if (any_binding_advances(m_node_visibility) || any_binding_advances(m_node_translate) ||
         any_binding_advances(m_node_scale) || any_binding_advances(m_node_rotation) ||
         std::any_of(m_material_constants.begin(),

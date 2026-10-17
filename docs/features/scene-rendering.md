@@ -758,7 +758,8 @@ move meanwhile and keeps whatever hover state it had. A project layer
 depth-testing composition layer composes like the plain one. A pass-through layer
 drawn through effects, such as a project layer under a CRT effect, copies the part of
 the screen it is drawn over, under the groups it sits in, not at the origin it has
-within them. Camera parallax moves
+within them, and follows them when a property, a script or a timeline moves them while
+the scene runs. Camera parallax moves
 what a composition layer holds along with its card, as Wallpaper Engine's draw loop gives
 every pass of a layer the same offset: the screen its first pass reads is the place its last
 pass draws it, so a layer that only copies what is behind it shows a continuous scene, not

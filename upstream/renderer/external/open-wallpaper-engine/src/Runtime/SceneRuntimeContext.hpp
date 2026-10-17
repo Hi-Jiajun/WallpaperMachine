@@ -41,6 +41,7 @@ class ScriptedDynamicValue;
 class SceneNode;
 class SceneImageEffectLayer;
 struct SceneImageEffect;
+struct PassthroughCard;
 class Scene;
 class WPSoundStream;
 struct ScriptHostContext;
@@ -340,8 +341,12 @@ public:
                                        double fov, CameraPathPlayback path);
     void RegisterDynamicValueListener(std::unique_ptr<DynamicValue> value,
                                       std::function<void(const DynamicValue&)> callback);
+    /// `passthrough_card`, for a pass-through layer drawn through effects, is the
+    /// card that copies the screen where the layer is drawn: laid out again,
+    /// with the final card, whenever the layer is drawn somewhere else.
     void RegisterNodeEffectFinal(std::string name, SceneNode* node, SceneImageEffectLayer* layer,
-                                 TextLayerRenderFrame target_frame = {});
+                                 TextLayerRenderFrame             target_frame     = {},
+                                 std::shared_ptr<PassthroughCard> passthrough_card = nullptr);
     void RegisterMaterialAlphaAnimation(std::shared_ptr<SceneMaterial> material,
                                         std::shared_ptr<ScalarAnimationPlayback> animation);
     // A scripted or user-bound image `alpha` is not an animation timeline.
@@ -682,6 +687,7 @@ private:
         SceneNode*             node { nullptr };
         SceneImageEffectLayer* layer { nullptr };
         TextLayerRenderFrame   target_frame {};
+        std::shared_ptr<PassthroughCard> passthrough_card;
     };
     struct MaterialAlphaBinding {
         std::weak_ptr<SceneMaterial> material;

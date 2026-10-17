@@ -281,9 +281,15 @@ Playback, backend, host and startup areas are in
   is laid out again from the layer's world matrix by `LayOutPassthroughCards` once every
   layer is under its parent; from the local transform the parse had before that, issue
   #53's CRT "Full Composition Layer" (a project layer under a centred group) copied the
-  screen half a canvas off and showed a half-sized copy of the scene in one quadrant. A
-  group transform a script or property changes after load is still not followed by the
-  card.
+  screen half a canvas off and showed a half-sized copy of the scene in one quadrant.
+  `MetalSceneDraw.APassThroughLayerReadsTheScreenWhereItsGroupMovesItWhileTheSceneRunsOnBothRenderers`
+  moves the group once the scene has loaded, by a zoom slider bound to its scale and
+  changed in the running scene and by a script on its origin, requires the same of the
+  frames after, and requires the card to have been laid out exactly once more.
+  `SyncEffectFinalNode` lays the card (`PassthroughCard`, an `OnEvent` mesh) out again
+  from the matrix it places the final card with, only when that matrix differs from the
+  one the card was last laid out from; before, the card kept copying the screen from
+  where the layer had been until the scene was loaded again.
 - **One cursor mapping, owned by the presentation** —
   `SceneRuntimeContext::SetCursorInput` maps window-normalized input through the
   cursor viewport the renderer publishes (`origin + (x, 1 - y) * size`) and writes

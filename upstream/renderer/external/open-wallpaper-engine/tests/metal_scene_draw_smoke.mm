@@ -4300,6 +4300,78 @@ TEST_F(MetalSceneDraw, AFullscreenLayerCoversTheScreenWhereverItsGroupSitsOnBoth
         << "the renderers draw the fullscreen layer differently";
 }
 
+/// A 384x256 canvas over a backdrop of four colours, a red, green, blue and
+/// yellow quadrant, followed by `objects` (scene objects, each led by a comma).
+/// They can draw `models/post.json`, a pass-through layer that copies the screen,
+/// or `models/project.json`, a project layer as large as the canvas, through
+/// `effects/identity/effect.json`, one pass that changes nothing. `properties`
+/// is the project's user properties.
+std::filesystem::path WritePassThroughFixture(const std::filesystem::path& directory,
+                                              const std::string&           objects,
+                                              const std::string&           properties = "{}")
+{
+    const auto project = WriteFixture(directory);
+    const auto file    = [&](const std::string& path, const std::string& text) {
+        std::filesystem::create_directories((directory / path).parent_path());
+        std::ofstream(directory / path) << text;
+    };
+    file("project.json", R"({"title":"Pass-through layer","type":"scene","file":"layout.json",)"
+                         R"("general":{"properties":)" + properties + "}}");
+    const std::string vertex =
+        "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\n"
+        "attribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+        "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+        "  v_TexCoord = a_TexCoord;\n}\n";
+    file("shaders/quadrants.vert", vertex);
+    file("shaders/quadrants.frag",
+         "varying vec2 v_TexCoord;\nvoid main() {\n"
+         "  vec3 low = v_TexCoord.x < 0.5 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);\n"
+         "  vec3 high = v_TexCoord.x < 0.5 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 1.0, 0.0);\n"
+         "  gl_FragColor = vec4(v_TexCoord.y < 0.5 ? low : high, 1.0);\n}\n");
+    file("shaders/through.vert", vertex);
+    file("shaders/through.frag",
+         "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\n"
+         "void main() {\n  gl_FragColor = texture2D(g_Texture0, v_TexCoord);\n}\n");
+    const std::string pass = R"("cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled")";
+    file("materials/quadrants.json",
+         R"({"passes":[{"shader":"quadrants","blending":"translucent",)" + pass + "}]}");
+    file("materials/screen.json",
+         R"({"passes":[{"shader":"through","blending":"translucent",)" + pass +
+             R"(,"textures":["_rt_FullFrameBuffer"]}]})");
+    file("materials/through.json",
+         R"({"passes":[{"shader":"through","blending":"normal",)" + pass + R"(,"textures":[null]}]})");
+    file("effects/identity/effect.json",
+         R"({"name":"identity","passes":[{"material":"materials/through.json"}]})");
+    file("models/backdrop.json", R"({"width":384,"height":256,"material":"materials/quadrants.json"})");
+    file("models/post.json", R"({"passthrough":true,"material":"materials/screen.json"})");
+    file("models/project.json",
+         R"({"passthrough":true,"autosize":true,"projectlayer":true,"material":"materials/screen.json"})");
+    file("layout.json",
+         R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+         R"("general":{"clearcolor":[0,0,0],"bloom":false,"cameraparallax":false,)"
+         R"("orthogonalprojection":{"width":384,"height":256}},"objects":[)"
+         R"({"id":1,"name":"backdrop","image":"models/backdrop.json","origin":[192,128,0],)"
+         R"("scale":[1,1,1],"angles":[0,0,0],"visible":true})" +
+             objects + "]}");
+    return project;
+}
+
+/// How many channel values of `picture` are more than 2 off `backdrop`, leaving
+/// out the 3-pixel bands along the backdrop's middle lines when the layer over
+/// it holds the screen at another size and softens the edges between its colours.
+std::size_t ChannelsOffTheBackdrop(const std::vector<uint8_t>& picture,
+                                   const std::vector<uint8_t>& backdrop, bool resampled)
+{
+    std::size_t different = 0;
+    for (std::size_t i = 0; i < picture.size() && i < backdrop.size(); ++i) {
+        const int x = static_cast<int>((i / 3u) % 384u);
+        const int y = static_cast<int>((i / 3u) / 384u);
+        if (resampled && (std::abs(x - 192) < 4 || std::abs(y - 128) < 4)) continue;
+        if (std::abs(int(picture[i]) - int(backdrop[i])) > 2) ++different;
+    }
+    return different;
+}
+
 TEST_F(MetalSceneDraw, APassThroughLayerInAGroupReadsTheScreenWhereItIsDrawnOnBothRenderers)
 {
     // A pass-through layer drawn through effects (a "Full Composition Layer"
@@ -4334,46 +4406,7 @@ TEST_F(MetalSceneDraw, APassThroughLayerInAGroupReadsTheScreenWhereItIsDrawnOnBo
             const std::string label = plain ? "plain" : placements[variant].name;
             const std::string name  = std::string("passthrough-group-") +
                                      (native ? "native-" : "compat-") + std::to_string(variant);
-            const auto project = WriteFixture(root_ / name);
-            const auto file    = [&](const std::string& path, const std::string& text) {
-                std::filesystem::create_directories((root_ / name / path).parent_path());
-                std::ofstream(root_ / name / path) << text;
-            };
-            const std::string vertex =
-                "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\n"
-                "attribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
-                "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
-                "  v_TexCoord = a_TexCoord;\n}\n";
-            file("shaders/quadrants.vert", vertex);
-            file("shaders/quadrants.frag",
-                 "varying vec2 v_TexCoord;\nvoid main() {\n"
-                 "  vec3 low = v_TexCoord.x < 0.5 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);\n"
-                 "  vec3 high = v_TexCoord.x < 0.5 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 1.0, 0.0);\n"
-                 "  gl_FragColor = vec4(v_TexCoord.y < 0.5 ? low : high, 1.0);\n}\n");
-            file("shaders/through.vert", vertex);
-            file("shaders/through.frag",
-                 "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\n"
-                 "void main() {\n  gl_FragColor = texture2D(g_Texture0, v_TexCoord);\n}\n");
-            const std::string pass =
-                R"("cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled")";
-            file("materials/quadrants.json",
-                 R"({"passes":[{"shader":"quadrants","blending":"translucent",)" + pass + "}]}");
-            file("materials/screen.json",
-                 R"({"passes":[{"shader":"through","blending":"translucent",)" + pass +
-                     R"(,"textures":["_rt_FullFrameBuffer"]}]})");
-            file("materials/through.json",
-                 R"({"passes":[{"shader":"through","blending":"normal",)" + pass +
-                     R"(,"textures":[null]}]})");
-            file("effects/identity/effect.json",
-                 R"({"name":"identity","passes":[{"material":"materials/through.json"}]})");
-            file("models/backdrop.json",
-                 R"({"width":384,"height":256,"material":"materials/quadrants.json"})");
-            file("models/post.json", R"({"passthrough":true,"material":"materials/screen.json"})");
-            file("models/project.json",
-                 R"({"passthrough":true,"autosize":true,"projectlayer":true,"material":"materials/screen.json"})");
-            std::string objects =
-                R"({"id":1,"name":"backdrop","image":"models/backdrop.json","origin":[192,128,0],)"
-                R"("scale":[1,1,1],"angles":[0,0,0],"visible":true})";
+            std::string objects;
             if (! plain) {
                 const std::string group = placements[variant].group;
                 const std::string parent = group.empty() ? "" : R"("parent":9,)";
@@ -4384,11 +4417,7 @@ TEST_F(MetalSceneDraw, APassThroughLayerInAGroupReadsTheScreenWhereItIsDrawnOnBo
                            R"("visible":true,)"
                            R"("effects":[{"file":"effects/identity/effect.json","id":3,"visible":true}]})";
             }
-            file("layout.json",
-                 R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
-                 R"("general":{"clearcolor":[0,0,0],"bloom":false,"cameraparallax":false,)"
-                 R"("orthogonalprojection":{"width":384,"height":256}},"objects":[)" +
-                     objects + "]}");
+            const auto project = WritePassThroughFixture(root_ / name, objects);
             LoadedScene loaded;
             std::string error;
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
@@ -4414,16 +4443,106 @@ TEST_F(MetalSceneDraw, APassThroughLayerInAGroupReadsTheScreenWhereItIsDrawnOnBo
         ASSERT_NE(at(350, 220), at(350, 30));
         for (const auto& placement : placements) {
             const auto& rgb = pictures.at(prefix + placement.name).rgb;
-            std::size_t different = 0;
-            for (std::size_t i = 0; i < rgb.size(); ++i) {
-                const int x = static_cast<int>((i / 3u) % 384u);
-                const int y = static_cast<int>((i / 3u) / 384u);
-                if (placement.resampled && (std::abs(x - 192) < 4 || std::abs(y - 128) < 4)) continue;
-                if (std::abs(int(rgb[i]) - int(plain[i])) > 2) ++different;
-            }
+            const auto  different = ChannelsOffTheBackdrop(rgb, plain, placement.resampled);
             EXPECT_EQ(different, 0u)
                 << (native ? "native" : "compatibility") << " renderer, layer " << placement.name
                 << ": " << different << " of " << rgb.size()
+                << " channel values differ from the scene without the pass-through layer";
+        }
+    }
+}
+
+TEST_F(MetalSceneDraw, APassThroughLayerReadsTheScreenWhereItsGroupMovesItWhileTheSceneRunsOnBothRenderers)
+{
+    // The part of the screen a pass-through layer copies into its card is where
+    // its groups draw it, and a group can move while the scene runs: a zoom
+    // slider bound to the group's scale and changed in the open scene, or a
+    // script that moves the group. The card was laid out once, as the scene
+    // loaded, so it went on copying the screen from where the layer had been
+    // while the layer was drawn somewhere else, until the scene was loaded again.
+    // Each group here moves after the scene has loaded; from then on the layer,
+    // with an effect that changes nothing, has to leave the backdrop as it was.
+    // The card is laid out again on the frame its group moved and on no other.
+    struct Motion {
+        const char* name;
+        const char* group;
+        const char* layer;
+        bool        resampled;
+    };
+    const std::array<Motion, 2> motions { {
+        // Over the middle of the canvas at a zoom of 1, over all of it at 2.
+        { "a property scales the group", R"("origin":[100,60,0],"scale":{"user":"zoom","value":"1 1 1"},)",
+          R"("size":[192,128],"origin":[46,34,0],)", true },
+        // From the middle of the canvas to below and left of it on the first frame.
+        { "a script moves the group",
+          R"("origin":{"value":"192 128 0","script":"export function update(value) { )"
+          R"(return engine.runtime > 0 ? new Vec3(110, 70, 0) : value; }"},)",
+          R"("size":[192,128],"origin":[0,0,0],)", false },
+    } };
+    const auto find_node = [](auto&& self, SceneNode* node, std::string_view name) -> SceneNode* {
+        if (node->Name() == name && node->Mesh() != nullptr) return node;
+        for (const auto& child : node->GetChildren()) {
+            if (auto* found = self(self, child.get(), name)) return found;
+        }
+        return nullptr;
+    };
+    std::map<std::string, RendererPicture> pictures;
+    for (const bool native : { false, true }) {
+        // The same backdrop without the pass-through layer: the picture to keep.
+        for (std::size_t variant = 0; variant <= motions.size(); ++variant) {
+            const bool        plain = variant == motions.size();
+            const std::string label = plain ? "plain" : motions[variant].name;
+            const std::string name  = std::string("passthrough-moving-group-") +
+                                     (native ? "native-" : "compat-") + std::to_string(variant);
+            std::string objects;
+            if (! plain) {
+                objects = std::string(R"(,{"id":9,"name":"group",)") + motions[variant].group +
+                          R"("visible":true},{"id":2,"name":"post","parent":9,"image":"models/post.json",)" +
+                          motions[variant].layer +
+                          R"("visible":true,"effects":[{"file":"effects/identity/effect.json","id":3,"visible":true}]})";
+            }
+            const auto project = WritePassThroughFixture(
+                root_ / name, objects, R"({"zoom":{"type":"slider","value":1,"min":1,"max":2}})");
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            Scene& scene = *loaded.scene;
+            if (native) {
+                const auto selection = SelectSceneBackend(scene);
+                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            }
+            SceneMesh* card = nullptr;
+            if (! plain) {
+                auto* node = find_node(find_node, scene.sceneGraph.get(), "post");
+                ASSERT_NE(node, nullptr);
+                card = node->Mesh();
+            }
+            const uint64_t loaded_generation = card != nullptr ? card->DirtyGeneration() : 0;
+            auto picture = DrawWithRenderer(scene, native, 384, 256, 4, 1.0 / 60.0, [&](int frame) {
+                if (frame == 1) {
+                    scene.runtime->ApplyProjectPropertyOverride(
+                        { { "zoom", RuntimeScalarValue::Float(2.0f) } });
+                }
+            });
+            ASSERT_TRUE(picture.error.empty()) << label << ": " << picture.error;
+            ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+            EXPECT_EQ(scene.runtime->scriptErrorCount(), 0u) << label;
+            if (card != nullptr) {
+                EXPECT_EQ(card->DirtyGeneration(), loaded_generation + 1)
+                    << label << ": the card was not laid out again exactly once, when its group moved";
+            }
+            pictures[(native ? "native " : "compat ") + label] = std::move(picture);
+        }
+    }
+    for (const bool native : { false, true }) {
+        const std::string prefix = native ? "native " : "compat ";
+        const auto&       plain  = pictures.at(prefix + "plain").rgb;
+        for (const auto& motion : motions) {
+            const auto& rgb       = pictures.at(prefix + motion.name).rgb;
+            const auto  different = ChannelsOffTheBackdrop(rgb, plain, motion.resampled);
+            EXPECT_EQ(different, 0u)
+                << (native ? "native" : "compatibility") << " renderer, " << motion.name << ": "
+                << different << " of " << rgb.size()
                 << " channel values differ from the scene without the pass-through layer";
         }
     }
