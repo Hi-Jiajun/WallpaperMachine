@@ -390,13 +390,19 @@ struct DisplaysSolarGroup: View {
         }
       case .automatic:
         DisplaysRow(item: DisplaysSettingsSection.solarActions, note: model.solarAutomaticStatus) {
-          Button("Use current location") {
-            SolarLocationTracker.shared.requestAuthorization()
-            controller.launch(PanelActionCoordinator.key("automationSolarLocate")) {
-              try await model.startAutomaticLocation()
+          if model.solarLocationDenied {
+            Button("Open Location Settings") {
+              SolarLocationTracker.shared.openSettings()
             }
+            .disabled(busy)
+          } else {
+            Button("Use current location") {
+              controller.launch(PanelActionCoordinator.key("automationSolarLocate")) {
+                try await model.startAutomaticLocation()
+              }
+            }
+            .disabled(busy)
           }
-          .disabled(busy)
         }
       }
       DisplaysNote(text: L("Solar times are approximate. Near the poles, a day may have no sunrise or sunset."))

@@ -7329,6 +7329,21 @@
     },
     "Using the current location: %.4f, %.4f" : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Using the current location: %.4f, %.4f"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "現在地を使用中：%.4f, %.4f"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "使用当前位置：%.4f, %.4f"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "使用目前位置：%.4f, %.4f"}}}
+    },
+    "Time source" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Time source"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "時刻の取得元"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "时间来源"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "時間來源"}}}
+    },
+    "Sunrise time" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Sunrise time"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "日の出時刻"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "日出时间"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "日出時間"}}}
+    },
+    "Sunset time" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Sunset time"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "日の入り時刻"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "日落时间"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "日落時間"}}}
+    },
+    "Open Location Settings" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Open Location Settings"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "位置情報設定を開く"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "打开定位设置"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "開啟定位設定"}}}
+    },
+    "Location Services is turned off on this Mac. Turn it on in System Settings → Privacy & Security → Location Services, then choose Automatic again." : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Location Services is turned off on this Mac. Turn it on in System Settings → Privacy & Security → Location Services, then choose Automatic again."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このMacでは位置情報サービスがオフです。システム設定 → プライバシーとセキュリティ → 位置情報サービスでオンにしてから、もう一度「自動」を選んでください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "这台 Mac 的定位服务已关闭。请在「系统设置 → 隐私与安全性 → 定位服务」中打开，然后重新选择「自动定位」。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "這台 Mac 的定位服務已關閉。請在「系統設定 → 隱私權與安全性 → 定位服務」中開啟，然後重新選擇「自動定位」。"}}}
     }
   },
   "version" : "1.0"
