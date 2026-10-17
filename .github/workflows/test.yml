@@ -1,9 +1,9 @@
-# The release gate: the same `python3 scripts/test.py` a change has to pass locally,
-# with the Rust and renderer checks beside it, on hosted macOS 26 runners. Version
-# calls it before it tags a release, Build for a hand-pushed tag; run it by hand
-# (Actions -> Test -> Run workflow) to see a hosted-runner failure without starting a
-# release. A run by hand may narrow the native tests with `only` and skip the Rust and
-# renderer checks, so only an unnarrowed run says the gate passes.
+# The test gate on hosted macOS 26 runners: the same `python3 scripts/test.py` a change
+# has to pass locally, with the Rust and renderer checks beside it. It is not part of a
+# release (build.yml says why); run it by hand (Actions -> Test -> Run workflow) to see
+# whether a branch passes on macOS 26, which a developer on a later macOS does not run.
+# A run may narrow the native tests with `only` and skip the Rust and renderer checks,
+# so only an unnarrowed run says the gate passes.
 #
 # Three jobs on three runners, because one after another they took over 40 minutes
 # for 1.5 (Rust 5, renderer 9 to 13, native 18 to 22). Each builds the renderer and the
@@ -12,16 +12,6 @@
 name: Test
 
 on:
-  workflow_call:
-    inputs:
-      ref:
-        description: "Commit, branch or tag to test."
-        required: true
-        type: string
-      logs:
-        description: "Name of the artifact that keeps a failed run's logs."
-        required: false
-        type: string
   workflow_dispatch:
     inputs:
       ref:
@@ -71,7 +61,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.logs || format('test-logs-{0}', github.run_id) }}-rust
+          name: test-logs-${{ github.run_id }}-rust
           path: |
             artifacts/build/
             artifacts/rust/
@@ -108,7 +98,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.logs || format('test-logs-{0}', github.run_id) }}-renderer
+          name: test-logs-${{ github.run_id }}-renderer
           path: |
             artifacts/build/
             artifacts/renderer/adaptive-*/
@@ -165,7 +155,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.logs || format('test-logs-{0}', github.run_id) }}-native
+          name: test-logs-${{ github.run_id }}-native
           path: |
             artifacts/build/
             artifacts/tests/*.log

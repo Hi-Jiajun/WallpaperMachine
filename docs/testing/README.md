@@ -159,9 +159,9 @@ path. A test that passes alone but fails in the gate is the symptom; reproduce
 it with `python3 scripts/test.py --serial` and fix the shared state rather than
 the scheduling. UI runs are always serial: they drive one desktop.
 
-CI's `native` gate job runs `--serial` too: on hosted macOS runners serial costs
-almost no wall clock (the step's comment in `.github/workflows/test.yml` has the
-timings), and the `test-logs-<tag>-native` artifact carries the run's crash and
+The Test workflow's `native` job runs `--serial` too: on hosted macOS runners serial
+costs almost no wall clock (the step's comment in `.github/workflows/test.yml` has the
+timings), and the `test-logs-<run id>-native` artifact carries the run's crash and
 jetsam reports when a run fails there and not locally.
 
 The per-test `UserDefaults` suite is not only a parallelism concern: the unit
@@ -298,7 +298,7 @@ they do not establish.
    checkout runs green — see [wallpaper-corpus.md](wallpaper-corpus.md).
 5. **Use original synthetic fixtures** when you need content; do not check in
    Workshop packages or other copyrighted assets.
-6. **Expect the release gate to run on macOS 26.** CI's runner is a macOS 26 VM
+6. **Expect the CI gate to run on macOS 26.** CI's runner is a macOS 26 VM
    while developers may be on a later macOS. There SwiftUI builds no
    accessibility tree for an unshown window until a client has contacted the app;
    `PanelTestCase` does that once (`AccessibilityClient`), so panel tests read the

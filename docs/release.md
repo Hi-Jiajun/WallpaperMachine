@@ -297,51 +297,32 @@ repository `origin` points at.
 ### Version (`version.yml`)
 
 Runs on every push to `main`, and on demand from **Actions -> Version -> Run
-workflow** with a `spec` input. It runs the release gate before it writes anything,
-so a failing test never uses up a version number:
+workflow** with a `spec` input. On an `ubuntu-latest` runner it:
 
-1. `plan`, on `ubuntu-latest`, runs `python3 scripts/bump_version.py --ci` without
-   `--apply` and stops the run when there is no spec. With one, it fails in seconds
-   if the target tag already exists on `origin`;
-2. `gate` calls the [Test workflow](#test-testyml) for the pushed commit
-   (`github.sha`), the same gate Build runs for a hand-pushed tag. A failure leaves
-   `main` and the tags as they were: re-run the failed jobs after a flake, or land the
-   fix and run Version again with the same spec, and the same version is cut;
-3. `bump`, on `ubuntu-latest`, checks that `main` is still the tested commit and
-   stops otherwise (below), then runs `python3 scripts/bump_version.py --ci --apply`;
-4. has the release-notes model write the new version's bilingual section into
+1. checks out with full history;
+2. runs `python3 scripts/bump_version.py --ci --apply`;
+3. has the release-notes model write the new version's bilingual section into
    `CHANGELOG.md` with `scripts/release_notes.py --to HEAD --ai --changelog
    --apply` — `### English` then `### 简体中文`. The tag does not exist yet, so
    the range ends at `HEAD`. Without the secret, or when the model fails or omits
    a language, the job stops here: nothing is committed or tagged, and re-running
    the failed job retries the same bump;
-5. if anything changed, refuses to continue when the target tag already exists on
+4. if anything changed, refuses to continue when the target tag already exists on
    `origin`, then commits `project.yml`,
    `WallpaperMachine.xcodeproj/project.pbxproj` and `CHANGELOG.md` as
    `chore: bump version to x.y.z`, tags `vx.y.z`, and pushes branch and tag
    atomically as `github-actions[bot]`;
-6. calls the Build workflow directly for the tag it just pushed, passing the tested
-   commit as `tested`, so Build does not run the gate a second time.
+5. calls the Build workflow directly for the tag it just pushed.
 
-The bump commit goes on top of the tested commit, so the tag holds exactly the code
-the gate passed plus the version files and `CHANGELOG.md`. A commit that lands on
-`main` while the gate runs (about 25 minutes) makes `bump` stop with nothing
-committed or tagged, and the error names the command that releases the new tip:
-`gh workflow run version.yml --ref main -f spec=<spec>`. Re-running the old run
-cannot help, because it tests the same commit again. The Supporters workflow does
-not push while a Version run is in progress. The gate runs once, before the Release
-build rather than beside it, so a release from Version takes the gate plus about 15
-minutes of build.
-
-Step 6 is not redundant. **A tag pushed with `GITHUB_TOKEN` never starts another
+Step 5 is not redundant. **A tag pushed with `GITHUB_TOKEN` never starts another
 workflow**, so the tag-triggered Release workflow would never fire for a
 CI-produced tag; without the direct call, a bumped version would be tagged but
 never published.
 
 The bump job holds a `version-<ref>` concurrency group only while the bump commit
-is produced. A workflow-wide group would keep the lock through the gate and the
-macOS build, and because GitHub retains only the newest pending run, a queued
-`release:` push could be replaced by a later ordinary push and silently lost.
+is produced. A workflow-wide group would keep the lock through the macOS build,
+and because GitHub retains only the newest pending run, a queued `release:` push
+could be replaced by a later ordinary push and silently lost.
 
 The workflow needs permission to push to `main`: `contents: write`, and branch
 protection must allow GitHub Actions.
@@ -350,18 +331,16 @@ protection must allow GitHub Actions.
 
 `workflow_call` only, with a required `tag` input. It is the single place a
 publishable artifact is produced, called by Version for CI-produced tags and by
-Release for hand-pushed ones. An optional `tested` input names a commit the gate
-already passed; Version passes the commit it tested. It runs five jobs. `app-icon`
-compiles the app icon on a `macos-26` runner. `build` then runs on `macos-15` (the
-oldest runner that carries Xcode 26, whose Homebrew bottles set the published app's
-minimum macOS) while `test` runs on three `macos-26` runners, so the test gate adds
-no time on top of the Release build. `tested`, on `ubuntu-latest`, skips
-`test` only when the tag's parent is the `tested` commit and the tagged commit
-changes nothing but `project.yml`, `WallpaperMachine.xcodeproj/project.pbxproj` and
-`CHANGELOG.md`, as Version's bump commit does; any other tag, a hand-pushed one
-included, is tested here. `publish` runs on `ubuntu-latest` only after `build`
-succeeds and the gate passed, here or in Version, so a published binary has passed
-the same gate a change has to pass.
+Release for hand-pushed ones. It runs three jobs. `app-icon` compiles the app icon
+on a `macos-26` runner. `build` then runs on `macos-15` (the oldest runner that
+carries Xcode 26, whose Homebrew bottles set the published app's minimum macOS),
+with a 150-minute timeout. `publish` runs on `ubuntu-latest` once it succeeds.
+
+The test gate is not part of a release. Every change passes `python3 scripts/test.py`
+before it is committed, and on hosted VMs the gate failed 1.5.0 through 1.5.4 only on
+timing and layout the VM got wrong, each failure leaving a tag that could not be
+published and a fix that had to ship under the next number. The
+[Test workflow](#test-testyml) runs the same gate by hand.
 
 The icon is compiled apart because Xcode 26's `actool` crashes on most `.icon`
 compiles on macOS 15 ([build.md](build.md#stages-and-outputs)). `app-icon` runs
@@ -406,26 +385,9 @@ Step 6 is the guard that the bump actually reached the build:
 `CFBundleShortVersionString`, so a mismatch means the published tag and the
 built version disagree and the job fails instead of publishing the wrong binary.
 
-**`test`** calls the Test workflow ([`test.yml`](#test-testyml)) for the tag, unless
-`tested` showed that Version's gate already covered it. Its three jobs run in parallel,
-each after `prepare-build` and `python3 scripts/build.py --renderer-only` for the
-renderer and the generated bridge: `rust` runs `python3 scripts/check_rust.py`,
-`renderer` runs `python3 scripts/check_renderer.py --allow-missing-gpu
---allow-imprecise-timers`, and `native` runs `python3 scripts/test.py --serial`, which
-builds the Debug app, icon included, and its tests itself. A failure in any of them prevents publication.
-`--serial` runs one test class at a time: see
-[Parallel execution](testing/README.md#parallel-execution) for why. The two
-renderer flags are CI fallbacks for hosted VMs: only the exact exit 77 of a
-compiled device or timer probe skips the named GPU or wall-clock cadence checks
-([renderer testing](testing/renderer.md#scriptscheck_rendererpy)); each skip is a
-CI warning, and all other probe and test failures remain failures. Excluded and
-asset-dependent checks stay listed in the JSON reports and logs; they do not count
-as verified asset or GPU coverage.
-
-When a macOS job fails it uploads its full tool logs from `artifacts/` (for
-`native`, also any WebKit, app or jetsam reports from the run) as `build-logs-<tag>`
-or `test-logs-<tag>-rust`, `-renderer` or `-native`, kept 14 days: the job output is
-only the scripts' filtered summary.
+When `build` fails it uploads its full tool logs from `artifacts/` as
+`build-logs-<tag>`, kept 14 days: the job output is only the scripts' filtered
+summary.
 
 **`publish`**
 
@@ -443,12 +405,12 @@ non-beta `/Applications/Xcode_26*.app`, `brew install --quiet`s the
 XcodeGen/CMake/renderer package set with `dav1d` and `ccache`, and restores three
 `actions/cache` entries. Every key carries the runner's macOS (`<os>` below is
 `macos-15` or `macos-26`), because bottles, the FFmpeg keg and compiled objects
-differ between releases; `build` and `test` therefore keep separate entries.
+differ between releases; `build` and the Test workflow therefore keep separate entries.
 
 | Cache | Path | Key | What a hit saves |
 |---|---|---|---|
 | LGPL FFmpeg | `/opt/homebrew/Cellar/mwe-ffmpeg` | `mwe-ffmpeg-<os>-<dav1d version>-<hash of Formula/mwe-ffmpeg.rb>` | the FFmpeg source build; the action restores the keg's `opt` link and `scripts/install_ffmpeg.py` finds the keg current |
-| C++ objects | `~/.ccache` | `ccache-<os>-<run>`, restored by the `ccache-<os>-` prefix | recompiling the scene engine. A checkout gives every file a new mtime, so CMake rebuilds the whole engine even from a restored build tree; ccache hashes content and returns the previous objects. The gate's three jobs share a run's key, so only `renderer`, which compiles the engine and its C++ tests, saves it; `rust` and `native` pass `save-object-cache: "false"` and only restore it |
+| C++ objects | `~/.ccache` | `ccache-<os>-<run>`, restored by the `ccache-<os>-` prefix | recompiling the scene engine. A checkout gives every file a new mtime, so CMake rebuilds the whole engine even from a restored build tree; ccache hashes content and returns the previous objects. Test's three jobs share a run's key, so only `renderer`, which compiles the engine and its C++ tests, saves it; `rust` and `native` pass `save-object-cache: "false"` and only restore it |
 | Renderer | `~/.cargo/registry`, `~/.cargo/git`, `upstream/renderer/target` | `renderer-ccache-<os>-<hash of Cargo.lock, rust-toolchain.toml, provenance.json>`, restored by prefix | crate downloads, and Rust compilation while the nightly toolchain is unchanged |
 
 The `CMAKE_<LANG>_COMPILER_LAUNCHER=ccache` variables only take effect on a build
@@ -495,14 +457,24 @@ use the release workflow for the shared lock. The script's docstring and
 
 ### Test (`test.yml`)
 
-The release gate as a workflow of its own: Version calls it for the commit it is
-about to tag, Build for a hand-pushed tag, and **Actions -> Test -> Run workflow** runs
-it for any `ref` (default `main`) on the same `macos-26` runners without tagging,
-building the Release app or publishing. Its `rust`, `renderer` and `native` jobs run
-in parallel on three runners, so the gate takes about as long as the native tests
-(about 25 minutes for 1.5) rather than the sum of the three (over 40). A red gate in Version costs no version number,
-but it costs a run; use a run by hand to reproduce a hosted-runner failure while you
-fix it:
+The test gate on hosted runners, run by hand from **Actions -> Test -> Run
+workflow** for any `ref` (default `main`). It does not tag, build the Release app or
+publish, and no release waits for it ([why](#build-buildyml)). Its three jobs run in
+parallel on `macos-26` runners, each after `prepare-build` and `python3 scripts/build.py
+--renderer-only` for the renderer and the generated bridge, so a run takes about as long
+as the native tests (about 25 minutes for 1.5) rather than the sum (over 40):
+
+- `rust` runs `python3 scripts/check_rust.py`;
+- `renderer` runs `python3 scripts/check_renderer.py --allow-missing-gpu
+  --allow-imprecise-timers`. The two flags are fallbacks for hosted VMs: only the exact
+  exit 77 of a compiled device or timer probe skips the named GPU or wall-clock cadence
+  checks ([renderer testing](testing/renderer.md#scriptscheck_rendererpy)); each skip
+  is a CI warning, and all other probe and test failures remain failures. Excluded and
+  asset-dependent checks stay listed in the JSON reports and logs; they do not count as
+  verified asset or GPU coverage;
+- `native` runs `python3 scripts/test.py --serial`, which builds the Debug app, icon
+  included, and its tests itself. `--serial` runs one test class at a time: see
+  [Parallel execution](testing/README.md#parallel-execution) for why.
 
 ```sh
 gh workflow run test.yml --ref main -f ref=main
@@ -512,16 +484,16 @@ gh workflow run test.yml --ref main -f ref=main -f skip_renderer=true -f only="S
 `only` passes each space-separated name to `scripts/test.py --only`, and
 `skip_renderer` skips the `rust` and `renderer` jobs; both are for diagnosis, so only
 a run without them says the gate passes. A failed job keeps its logs, result bundles
-included, as `test-logs-<run id>-<job>` (`test-logs-<tag>-<job>` when Version or Build
-calls it) for 14 days.
+and any WebKit, app or jetsam reports included, as `test-logs-<run id>-<job>` for 14
+days.
 
 ### Warm caches (`warm-caches.yml`)
 
 GitHub evicts a cache entry nobody has read for seven days. Twice a week (and on
 demand from **Actions -> Warm caches -> Run workflow**) this runs `prepare-build`
 and `python3 scripts/build.py --renderer-only` on `main`, once on `macos-15` and
-once on `macos-26`, which reads every entry Build uses and saves a fresh C++ object
-cache for each, so a release after a quiet week still starts warm. Caches saved on
+once on `macos-26`, which reads every entry Build and Test use and saves a fresh C++
+object cache for each, so a release or a Test run after a quiet week still starts warm. Caches saved on
 `main` are readable from every ref, including the tags Release builds. It
 publishes nothing.
 
@@ -619,11 +591,6 @@ image.
 
 ## Recovering a failed release
 
-A test failure in Version is not a failed release: its gate runs before anything is
-committed or tagged, so re-running the failed jobs, or Version after the fix lands,
-cuts the same version. What follows applies to a failure after the tag is pushed (the
-Release build, packaging, publishing) and to a hand-pushed tag whose gate fails.
-
 A tag the Version workflow pushed stays when its Build run fails; only Build's
 `publish` job makes a release public. If a tag was created but its release never
 passed the publication gate, preserve that tag and fix the failed checks on
@@ -652,15 +619,13 @@ possible.
 
 1. Land the change on `main` with a `release:` spec line, or run the Version
    workflow with a spec.
-2. Confirm the Version run's `gate` passed and the run committed
-   `chore: bump version to x.y.z` with the new `CHANGELOG.md` section and pushed
-   `vx.y.z`. Read the section: it is `### English` then `### 简体中文`, and the
-   model wrote both. The app bundles both translations; the GitHub release page
-   shows only the English notes.
-3. Confirm the called Build run skipped `test` because `tested` covered the tag,
-   verified the mounted image, and published `WallpaperMachine-x.y.z-arm64.dmg`
-   with its `.sha256` sidecar, `WallpaperMachine-update.json` and a provenance
-   attestation. The
+2. Confirm the Version run committed `chore: bump version to x.y.z` with the new
+   `CHANGELOG.md` section and pushed `vx.y.z`. Read the section: it is `### English`
+   then `### 简体中文`, and the model wrote both. The app bundles both translations;
+   the GitHub release page shows only the English notes.
+3. Confirm the called Build run verified the mounted
+   image, and published `WallpaperMachine-x.y.z-arm64.dmg` with its `.sha256`
+   sidecar, `WallpaperMachine-update.json` and a provenance attestation. The
    manifest's `digest` must equal the sidecar's checksum:
    `curl -sL https://github.com/WallpaperMachine/WallpaperMachine/releases/latest/download/WallpaperMachine-update.json`.
 4. Read the release body on the page: it should contain only the English notes

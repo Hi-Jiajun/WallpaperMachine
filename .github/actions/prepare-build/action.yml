@@ -1,6 +1,6 @@
 # Everything a macOS job needs before scripts/build.py can run: Xcode 26, the Homebrew
 # packages, the project's LGPL FFmpeg, and the three caches that keep a release from
-# compiling the world. Shared by Build's build job, the gate's jobs in Test and by Warm
+# compiling the world. Shared by Build's build job, the Test workflow's jobs and Warm
 # caches, so all of them read and write the same cache entries.
 #
 # Caches (docs/release.md, "Build (build.yml)"), all scoped to main, which every ref can read:
@@ -8,7 +8,7 @@
 #   a ~3 minute source build; scripts/install_ffmpeg.py accepts the restored keg.
 # - ccache: the C++ scene engine's objects, hashed by content, so the fresh mtimes of a
 #   checkout (which force CMake to recompile everything) cost cache lookups, not builds.
-#   Saved under a new key every run and restored by prefix. The gate's parallel jobs
+#   Saved under a new key every run and restored by prefix. Test's parallel jobs
 #   share a run's key, so only the one that compiles the most (`renderer`) saves it;
 #   the others pass `save-object-cache: "false"`.
 # - renderer: cargo's registry and target directory, keyed on the lock file, the

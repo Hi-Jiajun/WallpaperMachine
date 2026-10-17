@@ -44,8 +44,8 @@ jobs:
           - { language: javascript-typescript, build-mode: none, runner: ubuntu-latest }
           - { language: python, build-mode: none, runner: ubuntu-latest }
           - { language: rust, build-mode: none, runner: ubuntu-latest }
-          # macOS 26 for the same reason as Build's test job: actool compiles the
-          # Debug app's icon there.
+          # macOS 26 for the same reason as the Test workflow's native job: actool
+          # compiles the Debug app's icon there.
           - { language: swift, build-mode: manual, runner: macos-26 }
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120

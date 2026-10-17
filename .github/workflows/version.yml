@@ -3,11 +3,9 @@
 # Commit subject (or any line in a pushed commit, including a squash title):
 #   release: patch | minor | major | x.y.z | vx.y.z
 #
-# CI runs the release gate on the pushed commit first. Only once it passes does CI
-# update project.yml, WallpaperMachine.xcodeproj and CHANGELOG.md, whose new section
-# the release-notes model writes from the commits (secret RELEASE_NOTES_API_KEY), commit
-# `chore: bump version to x.y.z`, tag `vx.y.z`, and call Build for that tag. A red gate
-# leaves no commit or tag, so re-running cuts the same version.
+# CI updates project.yml, WallpaperMachine.xcodeproj and CHANGELOG.md, whose new section
+# the release-notes model writes from the commits (secret RELEASE_NOTES_API_KEY), commits
+# `chore: bump version to x.y.z`, tags `vx.y.z`, and calls Build for that tag.
 # The call is required: a tag pushed with GITHUB_TOKEN never starts Release itself.
 name: Version
 
@@ -30,57 +28,11 @@ permissions:
   contents: write
 
 jobs:
-  plan:
-    # Reads the spec and the version it leads to without writing anything, so a push
-    # without a `release:` line ends here in seconds and starts no macOS runner.
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    outputs:
-      changed: ${{ steps.plan.outputs.changed }}
-      spec: ${{ steps.plan.outputs.spec }}
-      tag: ${{ steps.plan.outputs.tag }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Plan the bump
-        id: plan
-        env:
-          RELEASE_SPEC: ${{ github.event.inputs.spec }}
-        run: python3 scripts/bump_version.py --ci
-
-      - name: Refuse a version that is already tagged
-        # Before the gate, so a spec that cannot be cut fails in seconds.
-        if: steps.plan.outputs.changed == 'true'
-        env:
-          TAG: ${{ steps.plan.outputs.tag }}
-        run: |
-          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
-            echo "::error::Tag ${TAG} already exists on origin; that version is already cut."
-            exit 1
-          fi
-
-  gate:
-    # The release gate, on the commit being released and before anything is committed
-    # or tagged: a failure here leaves main and the tags as they were, and re-running
-    # the failed jobs (or Version, after a fix) cuts the same version.
-    needs: plan
-    if: needs.plan.outputs.changed == 'true'
-    uses: ./.github/workflows/test.yml
-    permissions:
-      contents: read
-    with:
-      ref: ${{ github.sha }}
-      logs: test-logs-${{ needs.plan.outputs.tag }}
-
   bump:
-    needs: [plan, gate]
     runs-on: ubuntu-latest
     # Lock the branch only while the bump commit is produced. A workflow-wide group would
-    # hold it through the gate and the macOS build, and GitHub keeps only the newest
-    # pending run, so a queued `release:` push could be replaced by a later ordinary push
-    # and silently lost.
+    # hold it through the macOS build, and GitHub keeps only the newest pending run, so a
+    # queued `release:` push could be replaced by a later ordinary push and silently lost.
     concurrency:
       group: version-${{ github.ref }}
       cancel-in-progress: false
@@ -90,22 +42,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Require main to still be the tested commit
-        # The bump commit goes on top of the commit the gate passed, so the tag holds
-        # exactly the tested code plus the version files and CHANGELOG.md. A commit that
-        # landed while the gate ran would make the push fail anyway; stop before asking
-        # the model.
-        env:
-          BRANCH: ${{ github.ref_name }}
-          SPEC: ${{ needs.plan.outputs.spec }}
-        run: |
-          set -euo pipefail
-          tip="$(git ls-remote origin "refs/heads/${BRANCH}" | cut -f1)"
-          if [ "${tip}" != "${GITHUB_SHA}" ]; then
-            echo "::error::${BRANCH} moved from ${GITHUB_SHA} to ${tip} while the gate ran. Nothing was committed or tagged; run Version on the new tip: gh workflow run version.yml --ref ${BRANCH} -f spec=${SPEC}"
-            exit 1
-          fi
 
       - name: Bump version files
         id: bump
@@ -157,9 +93,6 @@ jobs:
     uses: ./.github/workflows/build.yml
     with:
       tag: ${{ needs.bump.outputs.tag }}
-      # The gate already passed on the tag's parent; Build checks that and does not
-      # run it a second time.
-      tested: ${{ github.sha }}
     # Build reads RELEASE_NOTES_API_KEY for a tag that has no CHANGELOG.md section.
     secrets: inherit
     permissions:
