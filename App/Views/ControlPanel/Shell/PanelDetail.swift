@@ -8,8 +8,12 @@ struct PanelDetail: View {
   @Environment(\.panelTheme) private var theme
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-  /// The slide of the Filters sidebar, close to a system sidebar's own.
-  private static let filtersAnimation = Animation.smooth(duration: 0.32)
+  /// The slide of the Filters sidebar and the inspector, close to a system sidebar's own.
+  private static let columnSlide = Animation.smooth(duration: 0.32)
+
+  private var columnAnimation: Animation {
+    reduceMotion ? .easeOut(duration: 0.15) : Self.columnSlide
+  }
 
   var body: some View {
     let shell = controller.shell
@@ -40,12 +44,15 @@ struct PanelDetail: View {
         // pages that have an inspector; closed on Settings, and the choice is kept for when they
         // come back.
         if shell.hasInspector && shell.isInspectorShown {
+          // It slides out from the window's trailing edge, as the Filters sidebar does from the
+          // leading one.
           InspectorColumn { inspector(for: selection) }
+            .transition(
+              reduceMotion ? .opacity : .move(edge: .trailing).combined(with: .opacity))
         }
       }
-      .animation(
-        reduceMotion ? .easeOut(duration: 0.15) : Self.filtersAnimation,
-        value: shell.areFiltersShown)
+      .animation(columnAnimation, value: shell.areFiltersShown)
+      .animation(columnAnimation, value: shell.isInspectorShown)
     }
     .background { theme.surface.background.color.ignoresSafeArea() }
     // Under the first-run guide the bare title bar names nothing: the guide is what is on show.
