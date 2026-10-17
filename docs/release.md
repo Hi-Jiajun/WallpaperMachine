@@ -297,32 +297,51 @@ repository `origin` points at.
 ### Version (`version.yml`)
 
 Runs on every push to `main`, and on demand from **Actions -> Version -> Run
-workflow** with a `spec` input. On an `ubuntu-latest` runner it:
+workflow** with a `spec` input. It runs the release gate before it writes anything,
+so a failing test never uses up a version number:
 
-1. checks out with full history;
-2. runs `python3 scripts/bump_version.py --ci --apply`;
-3. has the release-notes model write the new version's bilingual section into
+1. `plan`, on `ubuntu-latest`, runs `python3 scripts/bump_version.py --ci` without
+   `--apply` and stops the run when there is no spec. With one, it fails in seconds
+   if the target tag already exists on `origin`;
+2. `gate` calls the [Test workflow](#test-testyml) for the pushed commit
+   (`github.sha`), the same gate Build runs for a hand-pushed tag. A failure leaves
+   `main` and the tags as they were: re-run the failed jobs after a flake, or land the
+   fix and run Version again with the same spec, and the same version is cut;
+3. `bump`, on `ubuntu-latest`, checks that `main` is still the tested commit and
+   stops otherwise (below), then runs `python3 scripts/bump_version.py --ci --apply`;
+4. has the release-notes model write the new version's bilingual section into
    `CHANGELOG.md` with `scripts/release_notes.py --to HEAD --ai --changelog
    --apply` — `### English` then `### 简体中文`. The tag does not exist yet, so
    the range ends at `HEAD`. Without the secret, or when the model fails or omits
    a language, the job stops here: nothing is committed or tagged, and re-running
    the failed job retries the same bump;
-4. if anything changed, refuses to continue when the target tag already exists on
+5. if anything changed, refuses to continue when the target tag already exists on
    `origin`, then commits `project.yml`,
    `WallpaperMachine.xcodeproj/project.pbxproj` and `CHANGELOG.md` as
    `chore: bump version to x.y.z`, tags `vx.y.z`, and pushes branch and tag
    atomically as `github-actions[bot]`;
-5. calls the Build workflow directly for the tag it just pushed.
+6. calls the Build workflow directly for the tag it just pushed, passing the tested
+   commit as `tested`, so Build does not run the gate a second time.
 
-Step 5 is not redundant. **A tag pushed with `GITHUB_TOKEN` never starts another
+The bump commit goes on top of the tested commit, so the tag holds exactly the code
+the gate passed plus the version files and `CHANGELOG.md`. A commit that lands on
+`main` while the gate runs (often 30 to 45 minutes) makes `bump` stop with nothing
+committed or tagged, and the error names the command that releases the new tip:
+`gh workflow run version.yml --ref main -f spec=<spec>`. Re-running the old run
+cannot help, because it tests the same commit again. The Supporters workflow does
+not push while a Version run is in progress. The gate runs once, before the Release
+build rather than beside it, so a release from Version takes the gate plus about 15
+minutes of build.
+
+Step 6 is not redundant. **A tag pushed with `GITHUB_TOKEN` never starts another
 workflow**, so the tag-triggered Release workflow would never fire for a
 CI-produced tag; without the direct call, a bumped version would be tagged but
 never published.
 
 The bump job holds a `version-<ref>` concurrency group only while the bump commit
-is produced. A workflow-wide group would keep the lock through the macOS build,
-and because GitHub retains only the newest pending run, a queued `release:` push
-could be replaced by a later ordinary push and silently lost.
+is produced. A workflow-wide group would keep the lock through the gate and the
+macOS build, and because GitHub retains only the newest pending run, a queued
+`release:` push could be replaced by a later ordinary push and silently lost.
 
 The workflow needs permission to push to `main`: `contents: write`, and branch
 protection must allow GitHub Actions.
@@ -331,12 +350,18 @@ protection must allow GitHub Actions.
 
 `workflow_call` only, with a required `tag` input. It is the single place a
 publishable artifact is produced, called by Version for CI-produced tags and by
-Release for hand-pushed ones. It runs four jobs. `app-icon` compiles the app icon
-on a `macos-26` runner. `build` then runs on `macos-15` (the oldest runner that
-carries Xcode 26, whose Homebrew bottles set the published app's minimum macOS)
-while `test` runs on `macos-26`, 150-minute timeout each, so the test gate adds no
-time on top of the Release build. `publish` runs on `ubuntu-latest` only after
-both succeed, so a published binary has passed the same gate a change has to pass.
+Release for hand-pushed ones. An optional `tested` input names a commit the gate
+already passed; Version passes the commit it tested. It runs five jobs. `app-icon`
+compiles the app icon on a `macos-26` runner. `build` then runs on `macos-15` (the
+oldest runner that carries Xcode 26, whose Homebrew bottles set the published app's
+minimum macOS) while `test` runs on `macos-26`, 150-minute timeout each, so the test
+gate adds no time on top of the Release build. `tested`, on `ubuntu-latest`, skips
+`test` only when the tag's parent is the `tested` commit and the tagged commit
+changes nothing but `project.yml`, `WallpaperMachine.xcodeproj/project.pbxproj` and
+`CHANGELOG.md`, as Version's bump commit does; any other tag, a hand-pushed one
+included, is tested here. `publish` runs on `ubuntu-latest` only after `build`
+succeeds and the gate passed, here or in Version, so a published binary has passed
+the same gate a change has to pass.
 
 The icon is compiled apart because Xcode 26's `actool` crashes on most `.icon`
 compiles on macOS 15 ([build.md](build.md#stages-and-outputs)). `app-icon` runs
@@ -381,8 +406,10 @@ Step 6 is the guard that the bump actually reached the build:
 `CFBundleShortVersionString`, so a mismatch means the published tag and the
 built version disagree and the job fails instead of publishing the wrong binary.
 
-**`test`** calls the Test workflow ([`test.yml`](#test-testyml)) for the tag. It runs `prepare-build`, `python3 scripts/build.py --renderer-only` for the
-renderer and the generated bridge, `python3 scripts/check_rust.py`,
+**`test`** calls the Test workflow ([`test.yml`](#test-testyml)) for the tag, unless
+`tested` showed that Version's gate already covered it. It runs `prepare-build`,
+`python3 scripts/build.py --renderer-only` for the renderer and the generated
+bridge, `python3 scripts/check_rust.py`,
 `python3 scripts/check_renderer.py --allow-missing-gpu --allow-imprecise-timers`,
 and `python3 scripts/test.py --serial`, which builds the Debug app, icon included,
 and its tests itself. A failure in any of them prevents publication.
@@ -468,11 +495,12 @@ use the release workflow for the shared lock. The script's docstring and
 
 ### Test (`test.yml`)
 
-The release gate as a workflow of its own: Build calls it with the tag, and
-**Actions -> Test -> Run workflow** runs it for any `ref` (default `main`) on the same
-`macos-26` runner without tagging, building the Release app or publishing. Use it to
-reproduce a hosted-runner failure before cutting a version, since a tag whose gate
-fails stays unpublished ([recovery](#recovering-a-failed-release)):
+The release gate as a workflow of its own: Version calls it for the commit it is
+about to tag, Build for a hand-pushed tag, and **Actions -> Test -> Run workflow** runs
+it for any `ref` (default `main`) on the same `macos-26` runner without tagging,
+building the Release app or publishing. A red gate in Version costs no version number,
+but it costs a run; use a run by hand to reproduce a hosted-runner failure while you
+fix it:
 
 ```sh
 gh workflow run test.yml --ref main -f ref=main
@@ -482,7 +510,8 @@ gh workflow run test.yml --ref main -f ref=main -f skip_renderer=true -f only="S
 `only` passes each space-separated name to `scripts/test.py --only`, and
 `skip_renderer` skips the Rust and renderer checks; both are for diagnosis, so only a
 run without them says the gate passes. A failed run keeps its logs, result bundles
-included, as `test-logs-<run id>` (`test-logs-<tag>` when Build calls it) for 14 days.
+included, as `test-logs-<run id>` (`test-logs-<tag>` when Version or Build calls it)
+for 14 days.
 
 ### Warm caches (`warm-caches.yml`)
 
@@ -588,6 +617,11 @@ image.
 
 ## Recovering a failed release
 
+A test failure in Version is not a failed release: its gate runs before anything is
+committed or tagged, so re-running the failed jobs, or Version after the fix lands,
+cuts the same version. What follows applies to a failure after the tag is pushed (the
+Release build, packaging, publishing) and to a hand-pushed tag whose gate fails.
+
 A tag the Version workflow pushed stays when its Build run fails; only Build's
 `publish` job makes a release public. If a tag was created but its release never
 passed the publication gate, preserve that tag and fix the failed checks on
@@ -616,13 +650,15 @@ possible.
 
 1. Land the change on `main` with a `release:` spec line, or run the Version
    workflow with a spec.
-2. Confirm the Version run committed `chore: bump version to x.y.z` with the new
-   `CHANGELOG.md` section and pushed `vx.y.z`. Read the section: it is `### English`
-   then `### 简体中文`, and the model wrote both. The app bundles both translations;
-   the GitHub release page shows only the English notes.
-3. Confirm the called Build run passed the test gate, verified the mounted
-   image, and published `WallpaperMachine-x.y.z-arm64.dmg` with its `.sha256`
-   sidecar, `WallpaperMachine-update.json` and a provenance attestation. The
+2. Confirm the Version run's `gate` passed and the run committed
+   `chore: bump version to x.y.z` with the new `CHANGELOG.md` section and pushed
+   `vx.y.z`. Read the section: it is `### English` then `### 简体中文`, and the
+   model wrote both. The app bundles both translations; the GitHub release page
+   shows only the English notes.
+3. Confirm the called Build run skipped `test` because `tested` covered the tag,
+   verified the mounted image, and published `WallpaperMachine-x.y.z-arm64.dmg`
+   with its `.sha256` sidecar, `WallpaperMachine-update.json` and a provenance
+   attestation. The
    manifest's `digest` must equal the sidecar's checksum:
    `curl -sL https://github.com/WallpaperMachine/WallpaperMachine/releases/latest/download/WallpaperMachine-update.json`.
 4. Read the release body on the page: it should contain only the English notes

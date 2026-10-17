@@ -5,11 +5,14 @@
 # tags. Version has to call it directly: a tag pushed with GITHUB_TOKEN never starts
 # another workflow, so Release alone would never run for CI-produced tags.
 #
-# Four jobs. `app-icon` compiles the Icon Composer icon on macOS 26, because Xcode 26's
+# Five jobs. `app-icon` compiles the Icon Composer icon on macOS 26, because Xcode 26's
 # actool crashes on most attempts to compile an .icon on macOS 15. `build` makes the
 # Release image on macOS 15 with that icon, while `test` runs the gate on macOS 26, so
-# the gate costs no time on top of the Release build; `publish` needs both, so a binary
-# is only ever published after the gate a change has to pass. The release is created as a draft
+# the gate costs no time on top of the Release build. Version runs the gate before it
+# tags and passes the commit it tested; `tested` confirms that commit is the tag's
+# parent and that the bump changed nothing else, and `test` is then skipped instead of
+# running twice. `publish` needs the build and a passed gate, so a binary is only ever
+# published after the gate a change has to pass. The release is created as a draft
 # and published only after the disk image it needs is uploaded, so the in-app updater
 # never sees a "latest" release with nothing to download. Everything published is
 # derived from the build or recorded at the tag: the notes from the tag's bilingual
@@ -24,6 +27,11 @@ on:
       tag:
         description: "Version tag to build and publish."
         required: true
+        type: string
+      tested:
+        description: "Commit the release gate already passed on (Version's), if any."
+        required: false
+        default: ""
         type: string
 
 permissions:
@@ -182,16 +190,56 @@ jobs:
           compression-level: 0
           retention-days: 7
 
+  tested:
+    # Whether the gate already covers this tag's code: Version's bump commit sits on the
+    # commit it tested and touches only the version files and CHANGELOG.md. Anything
+    # else, a hand-pushed tag included, is tested below.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      covered: ${{ steps.check.outputs.covered }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 2
+
+      - name: Compare the tag with the tested commit
+        id: check
+        env:
+          TESTED: ${{ inputs.tested }}
+        run: |
+          set -euo pipefail
+          covered=false
+          if [ -n "${TESTED}" ] && [ "$(git rev-parse HEAD^)" = "${TESTED}" ]; then
+            others="$(git diff --name-only HEAD^ HEAD -- . ':!project.yml' \
+              ':!WallpaperMachine.xcodeproj/project.pbxproj' ':!CHANGELOG.md')"
+            if [ -z "${others}" ]; then
+              covered=true
+              echo "The gate passed on ${TESTED}, the tag's parent; not running it again."
+            else
+              echo "The bump commit also changes: ${others}; running the gate."
+            fi
+          fi
+          echo "covered=${covered}" >> "$GITHUB_OUTPUT"
+
   test:
     # The release gate, defined once in test.yml so a run by hand checks exactly what
     # a release has to pass.
+    needs: tested
+    if: needs.tested.outputs.covered != 'true'
     uses: ./.github/workflows/test.yml
     with:
       ref: ${{ inputs.tag }}
       logs: test-logs-${{ inputs.tag }}
 
   publish:
-    needs: [build, test]
+    needs: [tested, build, test]
+    # `test` is skipped only when Version's gate already passed on this code.
+    if: >-
+      ${{ !cancelled() && needs.build.result == 'success' &&
+      (needs.test.result == 'success' ||
+      (needs.test.result == 'skipped' && needs.tested.outputs.covered == 'true')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # Builds remain per-tag and parallel; publication is repository-wide so the

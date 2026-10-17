@@ -1,9 +1,9 @@
 # The release gate: the same `python3 scripts/test.py` a change has to pass locally,
-# with the Rust and renderer checks before it, on a hosted macOS 26 runner. Build calls
-# it for every release; run it by hand (Actions -> Test -> Run workflow) to see a
-# hosted-runner failure without tagging or publishing anything. A run by hand may
-# narrow the native tests with `only` and skip the Rust and renderer checks, so only an
-# unnarrowed run says the gate passes.
+# with the Rust and renderer checks before it, on a hosted macOS 26 runner. Version
+# calls it before it tags a release, Build for a hand-pushed tag; run it by hand
+# (Actions -> Test -> Run workflow) to see a hosted-runner failure without starting a
+# release. A run by hand may narrow the native tests with `only` and skip the Rust and
+# renderer checks, so only an unnarrowed run says the gate passes.
 name: Test
 
 on:
