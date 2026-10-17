@@ -77,6 +77,8 @@ REALTIME_TESTS = {
 }
 # The median of 31 condition-variable waits of 10 ms, the frame clock's own
 # primitive. More than one whole period late means cadence tests cannot hold.
+# A Mac coalesces a 10 ms wait to about 12 ms. A hosted VM has measured 18 to 27 ms, and its
+# cadence tests failed at 18 ms, so anything above 15 ms counts as imprecise.
 TIMER_PROBE_SOURCE = """#include <algorithm>
 #include <chrono>
 #include <condition_variable>
@@ -97,7 +99,7 @@ int main() {
     }
     std::nth_element(waits.begin(), waits.begin() + 15, waits.end());
     std::printf("median 10 ms wait: %.2f ms\\n", waits[15]);
-    return waits[15] > 20.0 ? 77 : 0;
+    return waits[15] > 15.0 ? 77 : 0;
 }
 """
 

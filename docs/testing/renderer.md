@@ -42,7 +42,7 @@ It assembles the Homebrew environment from `scripts/build.py`, then:
 | `--project PATH` | Add a local scene `project.json`; repeatable |
 | `--assets PATH` | Shared assets directory for `--project` inputs (default `~/Library/Application Support/WallpaperMachine/SceneAssets`) |
 | `--allow-missing-gpu` | CI fallback only: compile a Metal-device probe; its exact exit 77 skips the GPU targets flagged in `REGRESSION_BINARIES` plus the image and reload probes. Compile errors, abnormal exits and timeouts still fail. Default local runs require GPU checks. |
-| `--allow-imprecise-timers` | CI fallback only: compile a timer probe that takes the median of 31 condition-variable waits of 10 ms; its exact exit 77 (median above 20 ms) filters the cadence tests named in `REALTIME_TESTS` out of their binaries. Compile errors, abnormal exits and timeouts still fail. Default local runs require every cadence test. |
+| `--allow-imprecise-timers` | CI fallback only: compile a timer probe that takes the median of 31 condition-variable waits of 10 ms; its exact exit 77 (median above 15 ms; a Mac measures about 12 ms, hosted VMs 18 ms and more) filters the cadence tests named in `REALTIME_TESTS` out of their binaries. Compile errors, abnormal exits and timeouts still fail. Default local runs require every cadence test. |
 
 Reports, SHA-256 hashes, logs, the generated synthetic fixtures and private GPU
 output go under a fresh `artifacts/renderer/adaptive-<timestamp>/` directory,
@@ -74,7 +74,8 @@ missing-device skip. A default local renderer run remains necessary evidence for
 the GPU checks CI skips.
 
 Hosted macOS arm64 runners are virtual machines that deliver a 10 ms wait
-50–100 ms late regardless of process policy, so the frame-clock,
+8 ms or more late (a Mac: about 2 ms) regardless of process policy, and how late
+varies from run to run, so the frame-clock,
 unchanged-present and audio-expiry tests that count ticks against short waits
 cannot pass there. With `--allow-imprecise-timers` only the probe's exit 77
 filters exactly the tests in `REALTIME_TESTS` out of their binaries with
