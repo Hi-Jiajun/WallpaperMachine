@@ -532,7 +532,8 @@ and reinstalling the wallpaper brings the assignment back.
 ## Target display
 
 The toolbar's target-display menu chooses which display Apply acts on, and which display
-Now Playing shows. Disabled and mirrored displays are listed but not selectable, annotated
+Now Playing shows. In a wide window the button names the chosen display next to its icon; a
+narrow window shows the icon alone and the help names the display. Disabled and mirrored displays are listed but not selectable, annotated
 `(disabled)` or `(mirrored)`; the menu waits while a wallpaper command runs. A target that
 can no longer be chosen stays stored (the menu bar and automation read it) and the menu reads
 **Target display** until another is picked.

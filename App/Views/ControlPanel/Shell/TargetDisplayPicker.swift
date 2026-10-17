@@ -40,7 +40,8 @@ extension TargetDisplayOption {
 /// The display that wallpapers are applied to, chosen from a menu in the toolbar.
 ///
 /// Every display is listed, but only an enabled one that plays its own wallpaper can be chosen; a
-/// mirrored or disabled one says so and is greyed out. The menu is unavailable while a command is
+/// mirrored or disabled one says so and is greyed out. A wide window names the chosen display next
+/// to the icon; a narrow one (`ShellModel.isCompact`) shows the icon alone. The menu is unavailable while a command is
 /// running, and the toolbar does not show it on Settings. A display that has left the list or can no
 /// longer be chosen leaves the menu reading "Target display": the choice is kept, and the person
 /// picks another.
@@ -65,15 +66,19 @@ struct TargetDisplayPicker: View {
       }
       .pickerStyle(.inline)
     } label: {
-      Label {
-        Text(verbatim: current?.shortLabel(among: displays) ?? L("Target display"))
-          .lineLimit(1)
-          .truncationMode(.tail)
-      } icon: {
-        Image(systemName: "display")
+      // The toolbar draws a `Label` as its icon alone, so a wide window spells the icon and the
+      // name out side by side; a narrow one keeps the icon, and the help names the display.
+      if shell.isCompact {
+        Label(L("Target display"), systemImage: "display")
+      } else {
+        HStack(spacing: 6) {
+          Image(systemName: "display")
+          Text(verbatim: current?.shortLabel(among: displays) ?? L("Target display"))
+            .lineLimit(1)
+            .truncationMode(.tail)
+        }
+        .frame(maxWidth: 180)
       }
-      .labelStyle(.titleAndIcon)
-      .frame(maxWidth: shell.isCompact ? 130 : 180)
     }
     .disabled(controller.isStoreBusy)
     .help(helpText(current))
