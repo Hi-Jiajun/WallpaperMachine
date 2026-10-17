@@ -325,7 +325,7 @@ so a failing test never uses up a version number:
 
 The bump commit goes on top of the tested commit, so the tag holds exactly the code
 the gate passed plus the version files and `CHANGELOG.md`. A commit that lands on
-`main` while the gate runs (often 30 to 45 minutes) makes `bump` stop with nothing
+`main` while the gate runs (about 25 minutes) makes `bump` stop with nothing
 committed or tagged, and the error names the command that releases the new tip:
 `gh workflow run version.yml --ref main -f spec=<spec>`. Re-running the old run
 cannot help, because it tests the same commit again. The Supporters workflow does
@@ -354,8 +354,8 @@ Release for hand-pushed ones. An optional `tested` input names a commit the gate
 already passed; Version passes the commit it tested. It runs five jobs. `app-icon`
 compiles the app icon on a `macos-26` runner. `build` then runs on `macos-15` (the
 oldest runner that carries Xcode 26, whose Homebrew bottles set the published app's
-minimum macOS) while `test` runs on `macos-26`, 150-minute timeout each, so the test
-gate adds no time on top of the Release build. `tested`, on `ubuntu-latest`, skips
+minimum macOS) while `test` runs on three `macos-26` runners, so the test gate adds
+no time on top of the Release build. `tested`, on `ubuntu-latest`, skips
 `test` only when the tag's parent is the `tested` commit and the tagged commit
 changes nothing but `project.yml`, `WallpaperMachine.xcodeproj/project.pbxproj` and
 `CHANGELOG.md`, as Version's bump commit does; any other tag, a hand-pushed one
@@ -407,12 +407,12 @@ Step 6 is the guard that the bump actually reached the build:
 built version disagree and the job fails instead of publishing the wrong binary.
 
 **`test`** calls the Test workflow ([`test.yml`](#test-testyml)) for the tag, unless
-`tested` showed that Version's gate already covered it. It runs `prepare-build`,
-`python3 scripts/build.py --renderer-only` for the renderer and the generated
-bridge, `python3 scripts/check_rust.py`,
-`python3 scripts/check_renderer.py --allow-missing-gpu --allow-imprecise-timers`,
-and `python3 scripts/test.py --serial`, which builds the Debug app, icon included,
-and its tests itself. A failure in any of them prevents publication.
+`tested` showed that Version's gate already covered it. Its three jobs run in parallel,
+each after `prepare-build` and `python3 scripts/build.py --renderer-only` for the
+renderer and the generated bridge: `rust` runs `python3 scripts/check_rust.py`,
+`renderer` runs `python3 scripts/check_renderer.py --allow-missing-gpu
+--allow-imprecise-timers`, and `native` runs `python3 scripts/test.py --serial`, which
+builds the Debug app, icon included, and its tests itself. A failure in any of them prevents publication.
 `--serial` runs one test class at a time: see
 [Parallel execution](testing/README.md#parallel-execution) for why. The two
 renderer flags are CI fallbacks for hosted VMs: only the exact exit 77 of a
@@ -422,10 +422,10 @@ CI warning, and all other probe and test failures remain failures. Excluded and
 asset-dependent checks stay listed in the JSON reports and logs; they do not count
 as verified asset or GPU coverage.
 
-When either macOS job fails it uploads its full tool logs from `artifacts/` (for
-`test`, also any WebKit, app or jetsam reports from the run) as `build-logs-<tag>`
-or `test-logs-<tag>`, kept 14 days: the job output is only the scripts' filtered
-summary.
+When a macOS job fails it uploads its full tool logs from `artifacts/` (for
+`native`, also any WebKit, app or jetsam reports from the run) as `build-logs-<tag>`
+or `test-logs-<tag>-rust`, `-renderer` or `-native`, kept 14 days: the job output is
+only the scripts' filtered summary.
 
 **`publish`**
 
@@ -448,7 +448,7 @@ differ between releases; `build` and `test` therefore keep separate entries.
 | Cache | Path | Key | What a hit saves |
 |---|---|---|---|
 | LGPL FFmpeg | `/opt/homebrew/Cellar/mwe-ffmpeg` | `mwe-ffmpeg-<os>-<dav1d version>-<hash of Formula/mwe-ffmpeg.rb>` | the FFmpeg source build; the action restores the keg's `opt` link and `scripts/install_ffmpeg.py` finds the keg current |
-| C++ objects | `~/.ccache` | `ccache-<os>-<run>`, restored by the `ccache-<os>-` prefix | recompiling the scene engine. A checkout gives every file a new mtime, so CMake rebuilds the whole engine even from a restored build tree; ccache hashes content and returns the previous objects |
+| C++ objects | `~/.ccache` | `ccache-<os>-<run>`, restored by the `ccache-<os>-` prefix | recompiling the scene engine. A checkout gives every file a new mtime, so CMake rebuilds the whole engine even from a restored build tree; ccache hashes content and returns the previous objects. The gate's three jobs share a run's key, so only `renderer`, which compiles the engine and its C++ tests, saves it; `rust` and `native` pass `save-object-cache: "false"` and only restore it |
 | Renderer | `~/.cargo/registry`, `~/.cargo/git`, `upstream/renderer/target` | `renderer-ccache-<os>-<hash of Cargo.lock, rust-toolchain.toml, provenance.json>`, restored by prefix | crate downloads, and Rust compilation while the nightly toolchain is unchanged |
 
 The `CMAKE_<LANG>_COMPILER_LAUNCHER=ccache` variables only take effect on a build
@@ -497,8 +497,10 @@ use the release workflow for the shared lock. The script's docstring and
 
 The release gate as a workflow of its own: Version calls it for the commit it is
 about to tag, Build for a hand-pushed tag, and **Actions -> Test -> Run workflow** runs
-it for any `ref` (default `main`) on the same `macos-26` runner without tagging,
-building the Release app or publishing. A red gate in Version costs no version number,
+it for any `ref` (default `main`) on the same `macos-26` runners without tagging,
+building the Release app or publishing. Its `rust`, `renderer` and `native` jobs run
+in parallel on three runners, so the gate takes about as long as the native tests
+(about 25 minutes for 1.5) rather than the sum of the three (over 40). A red gate in Version costs no version number,
 but it costs a run; use a run by hand to reproduce a hosted-runner failure while you
 fix it:
 
@@ -508,10 +510,10 @@ gh workflow run test.yml --ref main -f ref=main -f skip_renderer=true -f only="S
 ```
 
 `only` passes each space-separated name to `scripts/test.py --only`, and
-`skip_renderer` skips the Rust and renderer checks; both are for diagnosis, so only a
-run without them says the gate passes. A failed run keeps its logs, result bundles
-included, as `test-logs-<run id>` (`test-logs-<tag>` when Version or Build calls it)
-for 14 days.
+`skip_renderer` skips the `rust` and `renderer` jobs; both are for diagnosis, so only
+a run without them says the gate passes. A failed job keeps its logs, result bundles
+included, as `test-logs-<run id>-<job>` (`test-logs-<tag>-<job>` when Version or Build
+calls it) for 14 days.
 
 ### Warm caches (`warm-caches.yml`)
 

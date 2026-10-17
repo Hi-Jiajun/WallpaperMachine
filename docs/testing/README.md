@@ -159,10 +159,10 @@ path. A test that passes alone but fails in the gate is the symptom; reproduce
 it with `python3 scripts/test.py --serial` and fix the shared state rather than
 the scheduling. UI runs are always serial: they drive one desktop.
 
-CI's `test` job runs `--serial` too: on hosted macOS runners serial costs almost
-no wall clock (the step's comment in `.github/workflows/build.yml` has the
-timings), and the `test-logs-<tag>` artifact carries the run's crash and jetsam
-reports when a run fails there and not locally.
+CI's `native` gate job runs `--serial` too: on hosted macOS runners serial costs
+almost no wall clock (the step's comment in `.github/workflows/test.yml` has the
+timings), and the `test-logs-<tag>-native` artifact carries the run's crash and
+jetsam reports when a run fails there and not locally.
 
 The per-test `UserDefaults` suite is not only a parallelism concern: the unit
 bundle runs inside the real app as its test host, so `UserDefaults.standard`
