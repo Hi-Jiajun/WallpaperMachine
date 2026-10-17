@@ -164,9 +164,14 @@ VkSamplerCreateInfo GenSamplerInfo(TextureKey key) {
     return sampler_info;
 }
 
+/// Moves a new image out of UNDEFINED into `layout`. With `zero`, a colour
+/// image is cleared to transparent black on the way: a new image holds
+/// whatever its memory last held, which is neither black nor the same on
+/// every GPU, and a target read before anything writes it would start from
+/// that.
 VkResult TransImgLayout(const vvk::Queue& queue, vvk::CommandBuffer& cmd,
                         const ImageParameters& image, VkImageLayout layout,
-                        VkFence fence = VK_NULL_HANDLE) {
+                        VkFence fence = VK_NULL_HANDLE, bool zero = false) {
     VkResult result;
     do {
         result = cmd.Begin(VkCommandBufferBeginInfo {
@@ -185,18 +190,39 @@ VkResult TransImgLayout(const vvk::Queue& queue, vvk::CommandBuffer& cmd,
             .baseArrayLayer = 0,
             .layerCount     = VK_REMAINING_ARRAY_LAYERS,
         };
-        {
-            VkImageMemoryBarrier out_bar {
+        if (zero) {
+            VkImageMemoryBarrier clear_bar {
                 .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
                 .pNext            = nullptr,
                 .srcAccessMask    = 0,
-                .dstAccessMask    = VK_ACCESS_MEMORY_READ_BIT,
+                .dstAccessMask    = VK_ACCESS_TRANSFER_WRITE_BIT,
                 .oldLayout        = VK_IMAGE_LAYOUT_UNDEFINED,
-                .newLayout        = layout,
+                .newLayout        = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 .image            = image.handle,
                 .subresourceRange = subresourceRange,
             };
             cmd.PipelineBarrier(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                0,
+                                clear_bar);
+            const VkClearColorValue transparent {};
+            cmd.ClearColorImage(
+                image.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &transparent, subresourceRange);
+        }
+        {
+            VkImageMemoryBarrier out_bar {
+                .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                .pNext            = nullptr,
+                .srcAccessMask    = zero ? VkAccessFlags(VK_ACCESS_TRANSFER_WRITE_BIT) : 0,
+                .dstAccessMask    = VK_ACCESS_MEMORY_READ_BIT,
+                .oldLayout        = zero ? VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+                                         : VK_IMAGE_LAYOUT_UNDEFINED,
+                .newLayout        = layout,
+                .image            = image.handle,
+                .subresourceRange = subresourceRange,
+            };
+            cmd.PipelineBarrier(zero ? VK_PIPELINE_STAGE_TRANSFER_BIT
+                                     : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                                 VK_DEPENDENCY_BY_REGION_BIT,
                                 out_bar);
@@ -1272,11 +1298,20 @@ std::optional<VmaImageParameters> TextureCache::CreateTex(TextureKey tex_key) {
                             ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
                             : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
+        // A target starts empty, as on the Metal backend: an effect's history
+        // buffer that the frame reads before it draws, or an input nothing
+        // draws, must read as nothing on its first frame. Only single-sample
+        // colour images are sampled; depth and multisampled colour are not.
+        // Once, here, where the allocation already waits for the GPU: no
+        // frame pays for it.
+        const bool zero = ! is_depth && planned_samples == VK_SAMPLE_COUNT_1_BIT;
         if (! m_tex_cmd) allocateCmd();
         TransImgLayout(m_device.graphics_queue().handle,
                        m_tex_cmd,
                        image_paras,
-                       final_layout);
+                       final_layout,
+                       VK_NULL_HANDLE,
+                       zero);
         image_paras.layout = final_layout;
 
         VVK_CHECK_ACT(break, m_device.handle().WaitIdle());

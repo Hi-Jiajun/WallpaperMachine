@@ -318,7 +318,8 @@ plain translucent layer that writes depth still hides farther layers drawn after
 in a scene that sorts
 ([known limitations](../testing/renderer.md#known-limitations)). A target the frame
 reads before it writes it keeps its own image from one frame to the next on both
-renderers, so the reader sees exactly the previous frame; a scene with such a loop
+renderers, so the reader sees exactly the previous frame, and transparent black on
+the first frame, since both renderers clear every new target; a scene with such a loop
 is never called still while it runs. An effect's own buffers are made the way
 Wallpaper Engine makes them: a float format (`r16f`, `rg1616f`) is a float target,
 so a fluid simulation's velocity and pressure keep their sign; an explicit 8-bit

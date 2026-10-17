@@ -1072,7 +1072,16 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   draws an accumulating, signed effect through both renderers. Wallpaper Engine's
   fluid simulation (`effects/fluidsimulation`) needs both: without the swap its
   history buffers were never written, and the two renderers then disagreed on a
-  local scene that runs it (mean difference 16 before, 0 after).
+  local scene that runs it (mean difference 16 before, 0 after). The swapped
+  buffer is read before anything writes it, so its first frame reads whatever a
+  new target holds. Native Metal zeroes every new target at compile
+  (`clearTargetsOnce`); Compatibility's `TextureCache::CreateTex` only moved a new
+  image out of `UNDEFINED`, and on an Apple M3 Max that image read 1.0 in the red
+  channel, so the sum saturated at 255 from the first frame while Native Metal
+  counted 64, 128, 192. `CreateTex` now clears each new single-sample colour
+  image once, at allocation. A hosted runner's paravirtual GPU hands out zeroed
+  memory, so this test passes there with or without the clear: only a run on a
+  real Apple GPU catches a regression.
 - **3D model materials and skinning** — `SceneSchema.ModelMaterialDefaultsAreOpaqueDepthTestedAndExplicitStateWins`
   and `.ModelBonesReachEveryMaterialIncludingTheBindPose` in `scene_schema_tests`.
   Model materials default to normal blending, back-face culling and enabled
