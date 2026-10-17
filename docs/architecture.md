@@ -51,8 +51,13 @@ menu and the screen-parameters observer, opens the control-panel window, and sta
 long-lived services (lock screen, desktop poster sync, presentation policy, playlist and
 automation schedulers, the web and native-video wallpaper hosts, system media).
 
-- **Activation policy.** `.accessory` while no control-panel, What's New or preview window is
-  open, `.regular` while one is.
+- **Activation policy.** `.regular` while one of the four ordinary windows (control panel,
+  What's New, wallpaper preview, web sign-in) is on screen or minimized to the Dock,
+  `.accessory` otherwise. Opening one raises the policy; every place that lowers it (a window
+  closing, the status-item re-assert at launch, a quit) asks `ActivationPolicyRule`
+  (`App/Services/Lifecycle/`) about `NSApp.windows`. Alerts, open and save panels and wallpaper
+  windows never count, sign-in windows are matched through `WebSignInWindowController`'s own
+  list, and the panel and What's New a quit puts away stop counting even when minimized.
 - **Spaces and minimizing.** The four ordinary windows (control panel, What's New, wallpaper
   preview, web sign-in) call `ControlPanelWindow.moveToActiveSpace`, which inserts
   `.moveToActiveSpace` into their collection behavior, so opening one shows it on the Space the

@@ -276,7 +276,9 @@ The panel opens on the Space you are on rather than switching you to the Space i
 last left on, and so do What's New, the wallpaper preview and the Steam and pixiv sign-in
 windows. A minimized panel comes back from the Dock when it is opened from the status
 menu, the Dock icon or Command-comma, or when the app is activated; the green button still
-offers full screen. The wallpaper itself keeps playing on every Space as before.
+offers full screen. The app keeps its Dock icon while any of these windows is open, on screen
+or minimized, and leaves the Dock when the last one closes. The wallpaper itself keeps playing
+on every Space as before.
 
 ### Reopening the panel
 

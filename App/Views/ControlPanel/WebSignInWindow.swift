@@ -51,6 +51,15 @@ final class WebSignInWindowController: NSWindowController, NSWindowDelegate, WKN
     /// The open window of each site, by cookie name.
     private static var current: [String: WebSignInWindowController] = [:]
 
+    /// Runs after a sign-in window has closed, so the app can leave the Dock once no ordinary
+    /// window is left.
+    static var onClosed: (() -> Void)?
+
+    /// Whether `window` is an open sign-in window.
+    static func isOpen(_ window: NSWindow) -> Bool {
+        current.values.contains { $0.window === window }
+    }
+
     private let site: WebSignInSite
     private let webView: WKWebView
     private var continuation: CheckedContinuation<WebSignInCookies?, Never>?
@@ -119,6 +128,7 @@ final class WebSignInWindowController: NSWindowController, NSWindowDelegate, WKN
         webView.stopLoading()
         window?.delegate = nil
         close()
+        Self.onClosed?()
         continuation.resume(returning: session)
     }
 
