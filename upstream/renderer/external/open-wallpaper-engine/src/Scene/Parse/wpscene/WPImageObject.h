@@ -121,6 +121,10 @@ public:
     nlohmann::json             visible_setting;
     nlohmann::json             alpha_setting;
     WPMaterial                 material;
+    // The slots a solid instance layer's `instance` block delegates, kept apart
+    // from the model material's: the parser, which can read the project's
+    // properties, decides from them whether a picture replaced the placeholder.
+    std::vector<WPUserTexture> instance_usertextures;
     std::vector<WPImageEffect> effects;
     Config                     config;
     std::vector<int32_t>       dependencies;

@@ -1045,8 +1045,9 @@ TEST(SceneSchema, ImageAbsorbsDependenciesInstanceAnimationLayersAndBindings) {
 
 // The layer colour of a solid instance layer paints the placeholder its shared
 // model material ships. Whether it survives depends on whether that placeholder
-// is actually replaced: a runtime image is substituted into the slot, a project
-// property is not.
+// is actually replaced: the layer itself can tell for a runtime image, but not
+// for a project property, whose value only the parse reads
+// (PlaceholderPicture.* in project_property_preview_test).
 TEST(SceneSchema, InstanceColourSurvivesUnlessARuntimeImageTakesTheSlot) {
     fs::VFS vfs;
     MountSceneFiles(vfs);
@@ -1062,8 +1063,8 @@ TEST(SceneSchema, InstanceColourSurvivesUnlessARuntimeImageTakesTheSlot) {
 
     EXPECT_EQ(layer(R"({"name":"$mediaThumbnail","type":"system"})"),
               (std::array<float, 3> { 1.0f, 1.0f, 1.0f }));
-    // A `scenetexture` project property keeps `util/white` in the slot, so the
-    // layer is still a solid colour and dropping its tint would repaint it.
+    // A `scenetexture` project property may still be unset, which keeps
+    // `util/white` in the slot: the layer keeps its tint until the parse knows.
     EXPECT_EQ(layer(R"("backgroundimage")"),
               (std::array<float, 3> { 0.11765f, 0.11765f, 0.11765f }));
 

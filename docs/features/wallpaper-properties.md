@@ -245,7 +245,10 @@ a wallpaper built around "choose your own picture" shows the picture. The choice
 takes effect on **Apply changes**, which reloads the scene; the picker stores the
 path, not a copy, so moving or deleting the file leaves that slot on the artwork
 the author shipped. A picture outside the app's own storage is not readable from
-the sandboxed lock-screen extension, which keeps the authored texture there.
+the sandboxed lock-screen extension, which keeps the authored texture there. A
+picture chosen for a solid placeholder layer, the user's own or one a preset ships,
+is shown as it is: the layer's colour, often the scheme colour, only paints the
+placeholder while no picture fills it.
 
 ### Showing edits on the desktop
 

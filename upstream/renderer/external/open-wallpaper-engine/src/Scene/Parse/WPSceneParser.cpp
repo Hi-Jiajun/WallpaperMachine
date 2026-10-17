@@ -4270,11 +4270,35 @@ bool IsComposeLayerModel(std::string_view image) {
            image == "models/util/composelayer_depthtest.json";
 }
 
+// Whether a picture the project's properties choose takes a slot of a solid
+// instance layer's placeholder, resolved exactly as its material will be.
+bool PropertyPictureReplacesPlaceholder(const wpscene::WPImageObject& layer,
+                                        const ProjectProperties&      properties) {
+    if (layer.instance_usertextures.empty()) return false;
+    auto textures = layer.material.textures;
+    ApplySystemUserTextures(textures, layer.instance_usertextures, &properties);
+    return textures != layer.material.textures;
+}
+
 void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     auto& wpimgobj = img_obj;
     const auto runtime_name = LayerRuntimeName(context, wpimgobj);
 
     auto& vfs = *context.vfs;
+
+    // A solid placeholder's colour paints its `util/white`, not a picture that
+    // replaces it: Wallpaper Engine shows a picture chosen for the slot (a
+    // preset's `files/...`, or the user's own) as it is. Left on, a dark scheme
+    // colour multiplied a whole background to black. A cover the runtime
+    // supplies was settled by the layer itself; a property is settled here, by
+    // the values the scene loads with, which a running scene holds (the slot is
+    // load-only). With no picture chosen the layer stays a solid colour.
+    if (context.scene->runtime != nullptr &&
+        PropertyPictureReplacesPlaceholder(wpimgobj,
+                                           context.scene->runtime->projectProperties())) {
+        wpimgobj.color = { 1.0f, 1.0f, 1.0f };
+        if (wpimgobj.field_bindings.is_object()) wpimgobj.field_bindings.erase("color");
+    }
 
     const bool isCompose = IsComposeLayerModel(wpimgobj.image);
     ResolveUserEffectVisibility(context, wpimgobj.effects, runtime_name);

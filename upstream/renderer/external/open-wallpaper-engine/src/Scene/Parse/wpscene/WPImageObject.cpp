@@ -312,6 +312,7 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
                         instance_pass.usertextures.end(),
                         IsSystemUserTexture);
         material.MergePass(instance_pass);
+        instance_usertextures = instance_pass.usertextures;
         // The layer colour of a solid instance layer tints the placeholder the
         // model material ships — `util/white`. Once a runtime image is actually
         // substituted into that slot the colour has nothing left to describe,
@@ -319,9 +320,8 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
         // cover layer to 0.118, while the author's own recording of it shows
         // the cover at full strength. A binding that names a project property
         // substitutes too, but only once its user has chosen a picture, and the
-        // property table is not readable from here. Such a layer keeps its
-        // colour rather than guess at a slot that may still hold the
-        // placeholder.
+        // property table is not readable from here: the parser makes that call
+        // (ParseImageObj), and until then the layer keeps its colour.
         if (replaces_placeholder) color = { 1.0f, 1.0f, 1.0f };
         runtime_image_replaces_color = replaces_placeholder;
     }

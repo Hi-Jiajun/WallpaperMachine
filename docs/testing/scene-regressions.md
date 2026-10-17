@@ -432,7 +432,13 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   own material, every effect pass and a compose layer's passthrough from one
   value, keeping each `g_Color4` alpha. It is a listener, so it costs nothing per
   frame and runs only when the property changes. A layer whose placeholder a
-  runtime image replaces drops a bound colour as it drops an authored one.
+  runtime image replaces drops a bound colour as it drops an authored one, and so
+  does a solid placeholder whose slot a `scenetexture` property fills:
+  `PlaceholderPicture.*` in `project_property_preview_test`. `WPImageObject` cannot
+  read the properties, so `ParseImageObj` resolves the instance's slots against the
+  loaded values as the material will (`PropertyPictureReplacesPlaceholder`); a preset's
+  picture multiplied by its dark scheme colour drew the whole wallpaper black (issue
+  #53). Unset, or a file that cannot be opened, keeps the placeholder and its colour.
 - **Image layer brightness** — `SceneSchema.AnImageLayersBrightnessTintsItsMaterialsOnlyInAnHdrSceneAndFollowsItsBindings`,
   `MetalSceneDraw.AnImageLayersBrightnessTintsItOnlyWhereTheSceneRendersHdrOnBothRenderers`
   and `.AnImageLayersBoundBrightnessFollowsItsPropertyAndScriptOnBothRenderers`.

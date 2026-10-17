@@ -34,6 +34,8 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <filesystem>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -749,6 +751,116 @@ TEST(LoadOnlyProperties, AFreshParseWithTheNewValueDiffersWhichIsWhyItIsHeld) {
     EXPECT_TRUE(preview.changed.empty());
     EXPECT_EQ(BuiltEffects(*before->scene), effects);
     EXPECT_EQ(PictureTexture(*before), texture);
+}
+
+// A solid placeholder: a solid instance layer whose model ships `util/white`,
+// painted in a colour bound to the scheme colour, and whose slot a `scenetexture`
+// property can fill. A preset fills it with a picture it installs beside the
+// package (`files/...`).
+constexpr std::string_view kPlaceholderLayer = R"([
+  {"id":6,"name":"placeholder","image":"placeholder.json","size":"64 32","origin":[32,16,0],
+   "color":{"user":"scheme","value":"0.1 0.1 0.1"},
+   "instance":{"id":7,"textures":["util/white"],"usertextures":["picture"]}}
+])";
+
+const ProjectProperties kPlaceholderAuthored {
+    { "picture", RuntimeScalarValue::String("") },
+    { "scheme", RuntimeScalarValue::String("0.1 0.1 0.1") },
+};
+
+std::unique_ptr<LoadedScene> LoadPlaceholder(const ProjectProperties& saved) {
+    // One opaque white pixel.
+    constexpr unsigned char kPng[] {
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+        0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+        0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00,
+        0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0xf8, 0xcf, 0xc0, 0xf0,
+        0x1f, 0x00, 0x05, 0x00, 0x01, 0xff, 0x89, 0x99, 0x3d, 0x1d, 0x00, 0x00,
+        0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    };
+    const std::map<std::string, std::string> files {
+        { "/placeholder.json",
+          R"({"instanced":true,"solidlayer":true,"material":"placeholder_mat.json"})" },
+        { "/placeholder_mat.json",
+          R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":["util/white"]}]})" },
+        { "/materials/util/white.tex", "" },
+        { "/files/picked.png", std::string(std::begin(kPng), std::end(kPng)) },
+    };
+    return Load(kPlaceholderLayer, MergeProjectProperties(kPlaceholderAuthored, saved),
+                &kPlaceholderAuthored, files);
+}
+
+struct PlaceholderState {
+    std::string        texture;
+    std::vector<float> color;
+};
+
+// What the placeholder samples, and the `g_Color4` it multiplies that by.
+PlaceholderState Placeholder(LoadedScene& loaded) {
+    PlaceholderState state;
+    auto*            node = FindNode(*loaded.scene->sceneGraph, "placeholder");
+    if (node == nullptr || node->Mesh() == nullptr || node->Mesh()->Material() == nullptr) {
+        return state;
+    }
+    const auto* material = node->Mesh()->Material();
+    if (! material->textures.empty()) state.texture = material->textures.front();
+    if (const auto found = material->customShader.constValues.find("g_Color4");
+        found != material->customShader.constValues.end()) {
+        for (std::size_t index = 0; index < found->second.size(); ++index) {
+            state.color.push_back(found->second[index]);
+        }
+    }
+    return state;
+}
+
+void ExpectColor(const PlaceholderState& state, float rgb) {
+    ASSERT_EQ(state.color.size(), 4u);
+    for (std::size_t index = 0; index < 3; ++index) EXPECT_NEAR(state.color[index], rgb, 1e-5f);
+    EXPECT_NEAR(state.color[3], 1.0f, 1e-5f);
+}
+
+// The colour paints the placeholder, not the picture that replaces it: Wallpaper
+// Engine shows a picture chosen for a placeholder as it is. Multiplied by a dark
+// scheme colour, a preset's whole background drew black.
+TEST(PlaceholderPicture, APictureChosenForAPlaceholderIsNotTintedByItsColour) {
+    const auto chosen = LoadPlaceholder({ { "picture", RuntimeScalarValue::String("files/picked.png") } });
+    ASSERT_NE(chosen, nullptr);
+    chosen->runtime().Tick(1.0 / 60.0);
+    EXPECT_EQ(Placeholder(*chosen).texture, "files/picked.png");
+    ExpectColor(Placeholder(*chosen), 1.0f);
+
+    // Nor does a scheme colour picked afterwards reach it.
+    chosen->runtime().ApplyProjectPropertyOverride({
+        { "picture", RuntimeScalarValue::String("files/picked.png") },
+        { "scheme", RuntimeScalarValue::String("0.5 0.5 0.5") },
+    });
+    chosen->runtime().Tick(1.0 / 60.0);
+    ExpectColor(Placeholder(*chosen), 1.0f);
+}
+
+TEST(PlaceholderPicture, WithNoPictureChosenThePlaceholderKeepsItsColour) {
+    const auto plain = LoadPlaceholder({});
+    ASSERT_NE(plain, nullptr);
+    plain->runtime().Tick(1.0 / 60.0);
+    EXPECT_EQ(Placeholder(*plain).texture, "util/white");
+    ExpectColor(Placeholder(*plain), 0.1f);
+
+    // The colour still follows the property it is bound to.
+    plain->runtime().ApplyProjectPropertyOverride({ { "scheme", RuntimeScalarValue::String("0.5 0.5 0.5") } });
+    plain->runtime().Tick(1.0 / 60.0);
+    ExpectColor(Placeholder(*plain), 0.5f);
+
+    // A picture of the user's own that can no longer be opened leaves the
+    // placeholder, and so its colour, in place.
+    const auto gone = LoadPlaceholder({ { "picture",
+                                          RuntimeScalarValue::String(
+                                              (std::filesystem::temp_directory_path() /
+                                               "wpe-placeholder-picture-gone.png")
+                                                  .string()) } });
+    ASSERT_NE(gone, nullptr);
+    gone->runtime().Tick(1.0 / 60.0);
+    EXPECT_EQ(Placeholder(*gone).texture, "util/white");
+    ExpectColor(Placeholder(*gone), 0.1f);
 }
 
 // A sound layer's volume is a slider like any other. It is read by a binding that
