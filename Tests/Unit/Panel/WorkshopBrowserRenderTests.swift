@@ -304,7 +304,8 @@ final class WorkshopBrowserRenderTests: MediaPanelTestCase {
       let ring = try XCTUnwrap(found.first { $0.identifier == "workshop-tile-ring" }?.frame)
       let owner = try XCTUnwrap(tiles.first { $0.contains(CGPoint(x: ring.midX, y: ring.midY)) })
       XCTAssertEqual(
-        2 * (owner.maxY - ring.midY), owner.width, accuracy: 0.5,
+        // macOS 26 rounds the ring's centre to a whole point, one point off at some widths.
+        2 * (owner.maxY - ring.midY), owner.width, accuracy: 1,
         "\(Int(size.width)): the artwork is as tall as it is wide")
       host.close()
     }

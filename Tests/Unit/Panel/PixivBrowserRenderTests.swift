@@ -448,6 +448,8 @@ final class PixivBrowserRenderTests: MediaPanelTestCase {
   func testAtTheSmallestWindowThePillGivesWayToTheDownloadsButtonAndTheInspectorToggle()
     async throws
   {
+    try PanelTestSupport.skipBeforeMacOS27(
+      "macOS 26 sends the Downloads button to the overflow menu of an unshown window's toolbar")
     // The saves stay under way until the panel closes, which cancels them.
     let hosted = try host(originals: PixivGate())
     try await loadAndSelect(hosted)

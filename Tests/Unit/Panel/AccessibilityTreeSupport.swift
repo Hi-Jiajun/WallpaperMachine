@@ -108,3 +108,13 @@ enum AccessibilityClient {
     await connected?.value
   }
 }
+
+enum PanelTestSupport {
+  /// Skips a test of how the system draws or drives an unshown window where macOS 26 does it
+  /// differently from macOS 27 and the difference cannot be observed without a desktop. The
+  /// behaviour on macOS 26 is then unverified, not passed: check it there by hand.
+  static func skipBeforeMacOS27(_ reason: String) throws {
+    let current = ProcessInfo.processInfo.operatingSystemVersion
+    if current.majorVersion < 27 { throw XCTSkip("\(reason) (macOS \(current.majorVersion))") }
+  }
+}

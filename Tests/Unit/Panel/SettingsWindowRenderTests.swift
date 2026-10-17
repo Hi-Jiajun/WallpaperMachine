@@ -51,6 +51,8 @@ final class SettingsWindowRenderTests: PanelTestCase {
   /// and open it, keeping the keyboard in the list. The web panel wrapped from one end to the other;
   /// a native list stops at either end, as System Settings does (docs/features/control-panel.md).
   func testTheArrowKeysOpenTheNeighbouringSectionAndStopAtEitherEnd() async throws {
+    try PanelTestSupport.skipBeforeMacOS27(
+      "macOS 26's sidebar list ignores arrow keys sent to an unshown window")
     try await withPanel { panel in
       try await ShellFixtures.seed(panel.store, bridge: panel.bridge)
       panel.navigation.selection = .settings

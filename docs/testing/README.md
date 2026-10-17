@@ -298,6 +298,15 @@ they do not establish.
    checkout runs green — see [wallpaper-corpus.md](wallpaper-corpus.md).
 5. **Use original synthetic fixtures** when you need content; do not check in
    Workshop packages or other copyrighted assets.
+6. **Expect the release gate to run on macOS 26.** CI's runner is a macOS 26 VM
+   while developers may be on a later macOS. There SwiftUI builds no
+   accessibility tree for an unshown window until a client has contacted the app;
+   `PanelTestCase` does that once (`AccessibilityClient`), so panel tests read the
+   tree through it. Behaviour of an unshown window that only macOS 27 shows
+   (toolbar overflow, sidebar arrow keys) skips earlier with
+   `PanelTestSupport.skipBeforeMacOS27`, which leaves it unverified there.
+   `gh workflow run test.yml -f ref=<branch>` runs the gate on that runner
+   ([release.md](../release.md#test-testyml)).
 6. **Record the result** when the change calls for a log entry (a feature or
    cross-domain change, a changed documented behavior, or on request — see
    [Verification tiers](#verification-tiers)): the counts, the command, and what
