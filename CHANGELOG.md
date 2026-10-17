@@ -8,6 +8,58 @@ Simplified Chinese. The app's What's New window offers both translations; the
 GitHub Release body repeats only the English notes. See
 [docs/release.md](docs/release.md) for how a version is cut.
 
+## 1.5.6 — 2026-10-17
+
+### English
+
+This update makes more scene wallpapers look the way they do in Wallpaper Engine, fixes a problem that could stop the app from quitting, and adds a way to reset all settings
+
+#### New
+
+- Settings › General has a new Reset section that, after a confirmation, returns every setting to its default while keeping your library, playlists, collections and sign-ins
+
+#### Improved
+
+- A wide window now shows the target display's name in the toolbar, so you can see at a glance which screen gets wallpapers
+- Wallpaper details now slide in and out from the window's right edge, matching the Filters sidebar
+
+#### Fixed
+
+- Quitting WallpaperMachine no longer fails with a missing-file error when the desktop picture you used before it has since been deleted
+- Scenes and Workshop presets with a chosen background picture now show that picture instead of turning the whole wallpaper black
+- Full-screen effects inside a group, such as the CRT screen of terminal wallpapers, no longer show a shrunken or shifted copy of the scene
+- Moving the mouse no longer makes wallpapers with a full-screen post-processing layer, such as film grain, show the picture twice
+- Clock widgets and other layers that zoom on hover no longer disappear right after a wallpaper starts
+- Wallpaper settings chosen from a list, such as a clock's date format, now follow your choice instead of always showing the same option
+- Resized animated picture layers now appear at their saved size, so the CRT monitor in Makima is Listening fills its bezel without a grey border
+- On the Compatibility renderer, effects that build on the previous frame, such as fluid simulations, no longer start from a bright screen on some Macs
+
+### 简体中文
+
+本次更新让更多场景壁纸的显示效果与 Wallpaper Engine 一致，修复了可能导致应用无法退出的问题，并新增了重置全部设置的功能
+
+#### 新增
+
+- 设置 › 通用新增“重置”部分，确认后可将所有设置恢复为默认值，同时保留你的壁纸库、播放列表、合集和登录信息
+
+#### 改进
+
+- 窗口较宽时，工具栏会显示目标显示器的名称，一眼就能看出壁纸将应用到哪块屏幕
+- 壁纸详情栏现在会从窗口右侧滑入滑出，与筛选边栏的动画保持一致
+
+#### 修复
+
+- 如果使用 WallpaperMachine 之前的桌面图片已被删除，退出应用时不再因找不到文件而失败
+- 选择了背景图片的场景或自带背景图片的创意工坊预设现在会正常显示该图片，不再整屏发黑
+- 图层组内的全屏效果（如终端类壁纸的 CRT 屏幕效果）不再显示缩小或错位的场景画面
+- 带有全屏后期处理图层（如胶片颗粒）的壁纸在移动鼠标时不再出现画面重影
+- 时钟等悬停时会放大的小部件不再在壁纸启动后立即消失
+- 从列表中选择的壁纸设置（如时钟的日期格式）现在会按你的选择生效，不再始终显示同一选项
+- 调整过大小的动态图片图层现在按场景保存的尺寸显示，Makima is Listening 中的 CRT 显示器屏幕会填满边框，不再留有灰边
+- 使用兼容渲染器时，流体模拟等基于上一帧的效果在部分 Mac 上不再从全亮画面开始
+
+**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.5.5...v1.5.6
+
 ## 1.5.5 — 2026-10-17
 
 ### English
