@@ -51,6 +51,7 @@ live under `testing/`.
 | [testing/verification-log.md](testing/verification-log.md) | Dated verification history, ten newest entries |
 | [testing/archive/](testing/archive/) | Retired verification-log entries, one file per month, written by `scripts/log_verification.py`; historical only |
 | [testing/wallpaper-corpus.md](testing/wallpaper-corpus.md) | Local regression corpus checklist |
+| [testing/wallpaper-engine-reference.md](testing/wallpaper-engine-reference.md) | Comparing a wallpaper with Wallpaper Engine's own frames from a Parallels Windows VM (`scripts/we_reference.py`): capture, render, compare, noise floor |
 
 ## Archive
 

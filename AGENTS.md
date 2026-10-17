@@ -44,9 +44,12 @@ use `rg -u` only when those are the target.
   script, playback): never detect or special-case a wallpaper by workshop ID,
   title, path, hash or a fingerprint of its quirks. Reproduce the failure as a
   general test first; keep existing behavior and the regression areas intact.
-  No frame-time, memory or energy cost to paper over a bug (extra passes,
-  per-frame CPU work, unbounded caches); if a real trade-off is unavoidable,
-  stop and ask.
+  The target picture is Wallpaper Engine's own frame of that wallpaper, not an author
+  preview or our older render: compare before and after the fix with
+  `scripts/we_reference.py` ([reference frames](docs/testing/wallpaper-engine-reference.md));
+  without the Windows VM, say the fix was not compared. No frame-time, memory or
+  energy cost to paper over a bug (extra passes, per-frame CPU work, unbounded
+  caches); if a real trade-off is unavoidable, stop and ask.
 - Every new user-facing string goes into every shipped catalog in the same change
   (`App/Resources/*.xcstrings`, `Extension/Localizable.xcstrings`); a panel literal
   (`Text("…")`, `L("…")`) must equal its catalog key or it renders English.
@@ -66,7 +69,9 @@ use `rg -u` only when those are the target.
   drafts) in one `artifacts/<task>/` folder. Before finishing, delete what this task
   left in `artifacts/` (including its renderer/Rust check runs) without asking, and say
   in one line what was removed; keep only output the final reply cites, and name it.
-  Never delete another task's output: other agents may be running in parallel. For
+  Never delete another task's output: other agents may be running in parallel.
+  Wallpaper Engine frames in the main checkout's `artifacts/we-reference/shots/` are
+  shared: keep them. For
   wider cleanup, show `python3 scripts/clean.py --dry-run` and run
   `python3 scripts/clean.py` (keeps built apps) only after the user agrees. `--all`
   deletes the delivered app; `--user-assets`/`--managed-user-assets` delete live user
@@ -85,7 +90,9 @@ use `rg -u` only when those are the target.
   ask questions in chat, not in a browser UI.
 - No desktop control, opening windows, screenshots, wallpaper/appearance changes, audio
   hardware, permission prompts, live Steam login or app install/restart without explicit
-  authorization. Feature/test approval is not desktop approval. Peekaboo and
+  authorization. Feature/test approval is not desktop approval, with one exception: a
+  wallpaper fix may wake the Parallels Windows VM, run the reference capture in it
+  (Wallpaper Engine muted) and suspend it again. Peekaboo and
   `python3 scripts/test.py --ui` require a requested desktop run, never a completion/release
   gate. [Tool guidance](docs/development-tools.md) includes `python3 scripts/check_dev_tools.py`
   (safe inspection; installation ≠ permission).

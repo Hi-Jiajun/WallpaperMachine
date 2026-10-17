@@ -46,7 +46,10 @@ Routine verification **must not**:
 - sign in to Steam, run a real SteamCMD login, or approve a Gatekeeper prompt,
 - replace or restart the installed `/Applications/WallpaperMachine.app`.
 
-Each of those requires an explicit user decision. `python3 scripts/test.py --ui`
+Each of those requires an explicit user decision, with one standing exception: a
+wallpaper fix may wake the Parallels Windows VM, capture Wallpaper Engine's frames
+in it with Wallpaper Engine muted, and suspend it again
+([wallpaper-engine-reference.md](wallpaper-engine-reference.md)). `python3 scripts/test.py --ui`
 and the manual smoke checklist take over the desktop and are neither part of
 routine verification nor a required release gate. See
 [../../AGENTS.md](../../AGENTS.md) for the agent-facing form of this rule and
@@ -243,6 +246,7 @@ the effort to the change:
 | New feature or cross-domain change | targeted runs as above | full gate once, log entry; Release build only if delivery was requested |
 | Rust crates | `cargo test` in the touched crate | full gate plus `scripts/check_rust.py` |
 | Renderer / bridge | `cargo test` or the touched CMake target | full gate plus `scripts/check_rust.py` and `scripts/check_renderer.py` |
+| How a wallpaper looks | as above for the layer touched | as above, plus a before/after comparison with Wallpaper Engine's frames ([wallpaper-engine-reference.md](wallpaper-engine-reference.md)) |
 | Docs only | link, path and command check | nothing else |
 
 `--only` skips the Python script tests and prints a warning: it is an
