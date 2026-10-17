@@ -11,6 +11,11 @@ import XCTest
 /// previews are tested with.
 @MainActor
 class PanelTestCase: XCTestCase {
+  override func setUp() async throws {
+    try await super.setUp()
+    await AccessibilityClient.connect()
+  }
+
   func makeStore(supportPrompt: SupportPromptStore? = nil) -> (store: BridgeStore, bridge: LayoutSnapshotBridge) {
     let bridge = LayoutSnapshotBridge(noPointer: .init())
     let store = BridgeStore(bridge: bridge, supportPrompt: supportPrompt)

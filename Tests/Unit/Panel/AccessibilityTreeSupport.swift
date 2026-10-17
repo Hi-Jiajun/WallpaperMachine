@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import XCTest
 
 /// One element of the accessibility tree of hosted content, as VoiceOver reads it: for the render
@@ -80,5 +81,30 @@ struct AccessibilityElement {
     case let number as NSNumber: number.stringValue
     default: ""
     }
+  }
+}
+
+/// Makes the test host look, to SwiftUI, like an app an accessibility client is talking to.
+///
+/// On macOS 26 SwiftUI builds no accessibility elements for hosted content until a client such as
+/// VoiceOver has asked the app something; macOS 27 builds them regardless. The render tests read
+/// that tree, so on a Mac with no client running (a hosted CI runner) every page looked empty.
+/// One request to this app's own element, sent the way a client sends it, is enough; it is made
+/// off the main thread because the app answers it there.
+enum AccessibilityClient {
+  @MainActor private static var connected: Task<Void, Never>?
+
+  @MainActor static func connect() async {
+    if connected == nil {
+      let pid = getpid()
+      connected = Task.detached {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 5)
+        // Both answer "unsupported" from AppKit; the requests themselves are what count.
+        _ = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        _ = AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+      }
+    }
+    await connected?.value
   }
 }
