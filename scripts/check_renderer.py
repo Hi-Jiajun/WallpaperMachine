@@ -70,6 +70,7 @@ REALTIME_TESTS = {
         "UnchangedPresent.OutputChangesOnAHeldVideoFramePresentOnceEach",
         "UnchangedPresent.APropertyPreviewShowsOnAStillSceneAndWakesAnIdleOneForOneFrame",
         "UnchangedPresent.AHistoryLoopKeepsTheClockRunningWithoutATimeUniform",
+        "UnchangedPresent.ADrawFailureAfterTheFirstFrameIsReportedOnceAndASurfaceRebuildHealsIt",
     ),
     "audio_tests": (
         "AudioResponseMonoTest.PartialSubmissionsExtendExpiryUntilACompleteBlockArrives",
