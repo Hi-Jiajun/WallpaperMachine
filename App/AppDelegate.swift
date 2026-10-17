@@ -121,6 +121,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         AppLog.info("startup: didFinishLaunching start")
         BridgeEnvironment.configureVulkanICDIfNeeded()
         AppLog.info("startup: vulkan icd configured")
+        // Automatic sun times follow the Mac's position across launches, not only after the
+        // source is picked again.
+        SolarLocationTracker.shared.sync(with: WallpaperAutomationStore.shared.solar.source)
         do {
             try ClientPaths.prepare()
             let created = try BridgeStore()

@@ -7311,6 +7311,24 @@
     },
     "SteamCMD is Valve’s free download tool. Install it into this app’s own folder or locate a copy you already have; the sign-in follows on its own." : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "SteamCMDはValveの無料ダウンロードツールです。このアプリ専用のフォルダにインストールするか、既存のコピーを指定してください。完了すると自動的にサインインに進みます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "SteamCMD 是 Valve 的免费下载工具。可以安装到应用自己的文件夹，也可以选择已有副本，完成后会自动继续登录。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "SteamCMD 是 Valve 的免費下載工具。你可以安裝到此 App 自己的資料夾，或指定現有副本；完成後會自動接著登入。"}}}
+    },
+    "Coordinates" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Coordinates"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "座標"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "经纬度"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "經緯度"}}}
+    },
+    "Fixed times" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Fixed times"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "固定時刻"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "固定时间"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "固定時間"}}}
+    },
+    "Automatic" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Automatic"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "自動"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "自动定位"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "自動定位"}}}
+    },
+    "Use current location" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Use current location"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "現在地を使う"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "使用当前位置"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "使用目前位置"}}}
+    },
+    "Location access has not been granted yet. Allow it in System Settings → Privacy & Security → Location Services." : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Location access has not been granted yet. Allow it in System Settings → Privacy & Security → Location Services."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "位置情報へのアクセスがまだ許可されていません。システム設定 → プライバシーとセキュリティ → 位置情報サービスで許可してください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "尚未获得定位权限。请在「系统设置 → 隐私与安全性 → 定位服务」中允许。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "尚未取得定位權限。請在「系統設定 → 隱私權與安全性 → 定位服務」中允許。"}}}
+    },
+    "Using the current location: %.4f, %.4f" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Using the current location: %.4f, %.4f"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "現在地を使用中：%.4f, %.4f"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "使用当前位置：%.4f, %.4f"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "使用目前位置：%.4f, %.4f"}}}
     }
   },
   "version" : "1.0"

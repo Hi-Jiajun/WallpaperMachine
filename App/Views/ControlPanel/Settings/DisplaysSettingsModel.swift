@@ -545,6 +545,40 @@ final class DisplaysSettingsModel {
 
   // MARK: Sunrise and sunset
 
+  /// Where the sun rules take their times from.
+  var solarSource: WallpaperSolarSource { controller.solarSettings.source }
+  var solarSunriseMinute: Int { controller.solarSettings.fixedSunriseMinute }
+  var solarSunsetMinute: Int { controller.solarSettings.fixedSunsetMinute }
+
+  /// What the automatic source has to show: the position it keeps up to date, or that it
+  /// has none yet.
+  var solarAutomaticStatus: String {
+    guard let location = controller.solarSettings.location else {
+      return String(localized: "Location access has not been granted yet. Allow it in System Settings → Privacy & Security → Location Services.")
+    }
+    return String(
+      format: String(localized: "Using the current location: %.4f, %.4f"),
+      location.latitude, location.longitude)
+  }
+
+  func setSolarSource(_ source: WallpaperSolarSource) async throws {
+    try await controller.setSolarSource(source)
+  }
+
+  /// Updates one of the two fixed times, keeping the other as it is.
+  func setSolarFixedTimes(sunrise: Int? = nil, sunset: Int? = nil) async throws {
+    let current = controller.solarSettings
+    try await controller.setSolarFixedTimes(
+      sunriseMinute: sunrise ?? current.fixedSunriseMinute,
+      sunsetMinute: sunset ?? current.fixedSunsetMinute)
+  }
+
+  /// Switches to the automatic source and asks for location access.
+  func startAutomaticLocation() async throws {
+    try await controller.setSolarSource(.automatic)
+    SolarLocationTracker.shared.requestAuthorization()
+  }
+
   /// What was typed in the coordinate fields; nil follows the saved location.
   var latitudeText: String?
   var longitudeText: String?
