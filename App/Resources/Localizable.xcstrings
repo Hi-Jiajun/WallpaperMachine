@@ -3157,6 +3157,27 @@
     "Every wallpaper you subscribe to is already in your library." : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Every wallpaper you subscribe to is already in your library."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "サブスクライブ中の壁紙はすべてライブラリにあります。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "你订阅的每个壁纸都已在库中。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "你訂閱的所有桌布都已在桌布庫中。"}}}
     },
+    "Import my subscriptions" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Import my subscriptions"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "サブスクライブ中の壁紙を読み込む"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "导入我的订阅"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "匯入我的訂閱"}}}
+    },
+    "Subscribed wallpapers added to Downloads: %lld" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Subscribed wallpapers added to Downloads: %lld"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ダウンロードに追加したサブスクライブ中の壁紙：%lld"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "已加入下载的订阅壁纸：%lld"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "已加入下載項目的訂閱桌布：%lld"}}}
+    },
+    "Download the Workshop wallpapers you already subscribe to on Steam into your library." : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Download the Workshop wallpapers you already subscribe to on Steam into your library."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "Steamでサブスクライブ中のワークショップ壁紙をライブラリにダウンロードします。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "把你在 Steam 上已订阅的创意工坊壁纸下载到库中。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "把你在 Steam 上已訂閱的工作坊桌布下載到桌布庫。"}}}
+    },
+    "Download the Workshop wallpapers you already subscribe to on Steam. Steam asks you to sign in to Steam Community once, on its own page." : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Download the Workshop wallpapers you already subscribe to on Steam. Steam asks you to sign in to Steam Community once, on its own page."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "Steamでサブスクライブ中のワークショップ壁紙をダウンロードします。Steamコミュニティへのサインインを一度だけ、Steam自身のページで求められます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "下载你在 Steam 上已订阅的创意工坊壁纸。Steam 会在它自己的页面上请你登录一次 Steam 社区。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "下載你在 Steam 上已訂閱的工作坊桌布。Steam 會在它自己的頁面上請你登入一次 Steam 社群。"}}}
+    },
+    "Import your Steam subscriptions?" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Import your Steam subscriptions?"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "Steamでサブスクライブ中の壁紙を読み込みますか？"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "导入你的 Steam 订阅？"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "匯入你的 Steam 訂閱？"}}}
+    },
+    "WallpaperMachine can download the Workshop wallpapers you already subscribe to on Steam. Sign in to Steam Community once, on Steam’s own page, and this Mac stays signed in until you sign out." : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine can download the Workshop wallpapers you already subscribe to on Steam. Sign in to Steam Community once, on Steam’s own page, and this Mac stays signed in until you sign out."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachineは、Steamでサブスクライブ中のワークショップ壁紙をダウンロードできます。Steam自身のページでSteamコミュニティに一度サインインすれば、サインアウトするまでこのMacはサインインしたままです。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 可以下载你在 Steam 上已订阅的创意工坊壁纸。在 Steam 自己的页面上登录一次 Steam 社区，这台 Mac 就会保持登录，直到你退出登录。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 可以下載你在 Steam 上已訂閱的工作坊桌布。在 Steam 自己的頁面上登入一次 Steam 社群，這台 Mac 就會保持登入，直到你登出。"}}}
+    },
+    "Opens Steam’s sign-in, then adds them to Downloads." : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Opens Steam’s sign-in, then adds them to Downloads."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "Steamのサインインを開き、続けてダウンロードに追加します。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "打开 Steam 的登录页，然后把它们加入下载。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "打開 Steam 的登入頁，然後把它們加入下載項目。"}}}
+    },
     "Sign in to Steam" : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Sign in to Steam"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "Steamにサインイン"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "登录 Steam"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "登入 Steam"}}}
     },

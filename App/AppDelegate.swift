@@ -160,6 +160,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             playbackSnapshotCurrent = false
         }
         pixivStore.restoreSession()
+        workshopStore.restoreSteamWebSession()
         // A crash during a download leaves its staging behind, holding the whole downloaded item.
         let stagingRoot = ClientPaths.supportURL
         let pixivStagingRoot = PixivWallpaperPackager.stagingRoot(forLibrary: ClientPaths.libraryURL)

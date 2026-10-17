@@ -71,7 +71,7 @@ final class PanelController {
   /// pixiv's sign-in page in `WebSignInWindowController`.
   @ObservationIgnored var signInToPixiv: (@MainActor () async -> String?)?
   /// The same for Steam Community, whose session lets Discover list subscriptions.
-  @ObservationIgnored var signInToSteamWeb: (@MainActor () async -> String?)?
+  @ObservationIgnored var signInToSteamWeb: (@MainActor () async -> WebSignInCookies?)?
   /// Support links open only on a deliberate choice; tests capture their destinations.
   @ObservationIgnored var openSupportURL: @MainActor (URL) -> Bool = { DesktopActions.current.open($0) }
   /// Shows System Settings › General › Login Items, where the user allows a launch at login they

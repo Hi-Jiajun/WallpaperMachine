@@ -2,9 +2,10 @@
 
 One-time offers on a Mac that has not seen them: the welcome guide that covers the
 first window, a single request to star or support the project after the first
-downloaded wallpaper is applied, a later request for a GitHub star, and one question
+downloaded wallpaper is applied, a later request for a GitHub star, one question
 about [performance data](telemetry.md) for someone who finished the guide before it
-had that switch. Each is shown once and remembered in the app's defaults. The panel
+had that switch, and one offer to import the Steam subscriptions for someone signed in
+to Steam who has not met that import. Each is shown once and remembered in the app's defaults. The panel
 they appear in is described in [control panel](control-panel.md).
 
 ## First run
@@ -51,7 +52,13 @@ have **Back**, and decision pages have **Skip**:
    that pixiv downloads, Workshop browsing and viewing existing wallpapers remain
    available; an inconclusive result is labeled unconfirmed. Both offer **Check
    ownership again** and allow **Continue**, and saved accounts from an earlier run
-   can also be checked. **Skip for now** (or **Skip and cancel sign-in** while a job
+   can also be checked. Signed in, unless the account is known not to own Wallpaper
+   Engine, the page also offers **Import my subscriptions**: the Workshop wallpapers
+   the account already subscribes to on Steam, downloaded into the library. Steam lists
+   them only behind its Steam Community sign-in, a different one from SteamCMD's, so a
+   first import opens Steam's own sign-in window ([Subscriptions](workshop-downloads.md#subscriptions));
+   that sign-in stays on this Mac. What the library lacks is queued in Downloads, behind
+   the guide, and the card then says how many, or that the library already has them all. **Skip for now** (or **Skip and cancel sign-in** while a job
    or setup request is pending) leaves Steam for the first download to ask about. A
    Steam Guard request arriving on another page marks the Steam step as needing
    attention without changing pages, and keyboard focus goes to the field Steam asks
@@ -139,12 +146,13 @@ flag; after that it never returns automatically, including after quitting or
 updating. Opening a link neither stars the repository nor makes a payment; the user
 finishes that action in their browser. See [Supporter details](../../SPONSORS.md).
 
-## Star prompt and the performance data question
+## Star prompt, the performance data question and the subscriptions offer
 
-`SupportPromptStore` schedules all three prompts and `PanelController.pendingPrompt`
+`SupportPromptStore` schedules all four prompts and `PanelController.pendingPrompt`
 names at most one; `SupportPromptPresenter` shows it in the same sheet with the same
 waiting rules as above (`SupportPromptSheet`). When several are due, the order is the
-performance data question, then the support prompt, then the star prompt, and no
+performance data question, then the subscriptions offer, then the support prompt, then
+the star prompt, and no
 prompt appears on the same calendar day as another. Once one has been answered or
 dismissed, no other appears in that window.
 
@@ -154,6 +162,14 @@ dismissed, no other appears in that window.
   Reaching the guide's Preferences page, or choosing in Settings, counts as having been
   asked; someone who leaves the guide before that page is asked once afterwards. A run
   without the telemetry service never asks.
+- **Import your Steam subscriptions?** offers once the guide's **Import my
+  subscriptions** to someone who finished the guide and has a saved SteamCMD sign-in
+  but never signed in to Steam Community in a build that has the import: an existing
+  user after the update, or someone who skipped the guide's Steam page and signed in
+  at a first download. The guide's card appearing, or a Steam Community sign-in from
+  anywhere (**Your subscriptions** included), counts as having met it. Choosing it
+  spends the offer, closes the sheet and goes on: Steam's sign-in window, then the
+  downloads, whose failure, or finding nothing missing, reaches the banner.
 - **Like WallpaperMachine?** asks once for a GitHub star from someone who did not
   choose **Star on GitHub** in the support prompt or in Settings → About. It waits
   until 14 days after the first day the panel was on screen with a build that counts

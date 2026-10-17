@@ -53,8 +53,9 @@ struct WelcomeOverlayHost: View {
 
 /// The one-time prompts, one at a time: after the first downloaded wallpaper, star the project or
 /// become a supporter; later, a GitHub star; for someone who finished the guide before it offered
-/// the switch, whether to send performance data. Links open only when chosen; nothing is starred or
-/// paid by opening one. **Not now**, the close button and Escape all just leave.
+/// the switch, whether to send performance data; for someone signed in to Steam who never met the
+/// import, importing their subscriptions. Links open only when chosen; nothing is starred or paid
+/// by opening one. **Not now**, the close button and Escape all just leave.
 struct SupportPromptSheet: View {
   let presenter: SupportPromptPresenter
 
@@ -124,6 +125,7 @@ struct SupportPromptSheet: View {
     case .support: Text("Feeling good?")
     case .star: Text("Like WallpaperMachine?")
     case .telemetry: Text("Send performance data?")
+    case .subscriptions: Text("Import your Steam subscriptions?")
     }
   }
 
@@ -137,6 +139,10 @@ struct SupportPromptSheet: View {
     case .telemetry:
       Text(
         "It helps find what makes wallpapers slow: how long they take to apply, their frame rate and energy use, and your Mac’s model, sent once a day. No names, files or account details."
+      )
+    case .subscriptions:
+      Text(
+        "WallpaperMachine can download the Workshop wallpapers you already subscribe to on Steam. Sign in to Steam Community once, on Steam’s own page, and this Mac stays signed in until you sign out."
       )
     }
   }
@@ -169,6 +175,13 @@ struct SupportPromptSheet: View {
         symbol: "waveform.path.ecg", color: .teal, title: Text("Send performance data"),
         note: Text("You can turn it off in Settings › Storage."), trailingSymbol: "checkmark"
       ) { choose(.enableTelemetry) }
+    case .subscriptions:
+      // Steam's sign-in window, then the downloads; the sheet closes at once.
+      WelcomeActionRow(
+        symbol: "square.and.arrow.down.on.square", color: .blue,
+        title: Text("Import my subscriptions"),
+        note: Text("Opens Steam’s sign-in, then adds them to Downloads."), trailingSymbol: "chevron.right"
+      ) { choose(.importSubscriptions) }
     }
   }
 

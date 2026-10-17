@@ -153,7 +153,7 @@ extension PanelController {
   // MARK: Steam Community
 
   /// Signs in to Steam on its own page, in a window of its own, so Your subscriptions can be read.
-  /// The app never sees the password and keeps only the session cookie, in memory. The action
+  /// The app never sees the password and keeps only the session cookies, in the keychain. The action
   /// returns at once: a second call while the window is open brings it forward, and the sign-in's
   /// outcome (or its failure, which reaches the banner) arrives later. `signInToSteamWeb` is the
   /// seam tests answer instead of the window; `steamWebSignInTask` is what they await.
@@ -162,11 +162,11 @@ extension PanelController {
       if workshop.isSigningInToSteamWeb {
         WebSignInWindowController.bringToFront(.steam)
       } else if workshop.steamWebSession == nil {
-        let obtain = signInToSteamWeb ?? { await WebSignInWindowController.obtainCookie(for: .steam) }
+        let obtain = signInToSteamWeb ?? { await WebSignInWindowController.obtainCookies(for: .steam) }
         steamWebSignInTask = Task { @MainActor [weak self] in
           guard let self else { return }
           do {
-            try await self.workshop.signInToSteamWeb(obtainCookie: obtain)
+            try await self.signInToSteamCommunity(obtain)
           } catch {
             self.errors.report(error)
           }
@@ -175,7 +175,36 @@ extension PanelController {
     }
   }
 
-  /// Forgets the Steam Community session; Your subscriptions empties if it was on show.
+  /// Signs in through `obtain` and, once a session is held, spends the one-time offer to import
+  /// the subscriptions: whoever signed in has found the feature.
+  private func signInToSteamCommunity(_ obtain: @MainActor () async -> WebSignInCookies?) async throws {
+    try await workshop.signInToSteamWeb(obtainCookies: obtain)
+    if workshop.steamWebSession != nil { store.supportPrompt?.recordSubscriptionsOffered() }
+  }
+
+  /// **Import my subscriptions**, in the welcome guide and the one-time offer: signs in to Steam
+  /// Community first when no session is held, waiting for that window, then downloads every
+  /// subscribed wallpaper the library lacks, as `downloadSubscribedWorkshopItems` does. Answers how
+  /// many were queued, 0 when the library already has them all, or nil when no session came of
+  /// the window (it was closed, or another sign-in already has it open). Failures throw, so the
+  /// caller shows them where the person is looking.
+  func importSteamSubscriptions() async throws -> Int? {
+    if workshop.steamWebSession == nil {
+      guard !workshop.isSigningInToSteamWeb else {
+        WebSignInWindowController.bringToFront(.steam)
+        return nil
+      }
+      try await signInToSteamCommunity(
+        signInToSteamWeb ?? { await WebSignInWindowController.obtainCookies(for: .steam) })
+      guard workshop.steamWebSession != nil else { return nil }
+    }
+    var queued = 0
+    try await run(.direct) { queued = try await queueMissingSubscriptions() }
+    return queued
+  }
+
+  /// Forgets the Steam Community session, also on this Mac; Your subscriptions empties if it was on
+  /// show.
   func steamWebSignOut() async throws {
     try await run(.immediate) { workshop.signOutOfSteamWeb() }
   }
@@ -188,20 +217,26 @@ extension PanelController {
   /// unsubscribed, and every item still needs the SteamCMD sign-in.
   func downloadSubscribedWorkshopItems() async throws {
     try await run(.direct) {
-      let installed = Set(store.librarySnapshot.wallpapers.map(\.id))
-      let missing = try await workshop.missingSubscriptions(installed: installed)
-        .filter { $0.kind != .application }
-      guard !missing.isEmpty else {
+      guard try await queueMissingSubscriptions() > 0 else {
         throw WallpaperActionError(
           message: L("Every wallpaper you subscribe to is already in your library."))
       }
-      try await store.commands.run {
-        for item in missing where workshop.downloader.download(for: item.id)?.isPending != true {
-          workshop.requestDownload(item: item, rememberSession: remembersSession, bridge: store)
-          try checkDownloadError()
-        }
+    }
+  }
+
+  /// Queues the subscribed wallpapers the library lacks and answers how many there were.
+  private func queueMissingSubscriptions() async throws -> Int {
+    let installed = Set(store.librarySnapshot.wallpapers.map(\.id))
+    let missing = try await workshop.missingSubscriptions(installed: installed)
+      .filter { $0.kind != .application }
+    guard !missing.isEmpty else { return 0 }
+    try await store.commands.run {
+      for item in missing where workshop.downloader.download(for: item.id)?.isPending != true {
+        workshop.requestDownload(item: item, rememberSession: remembersSession, bridge: store)
+        try checkDownloadError()
       }
     }
+    return missing.count
   }
 
   // MARK: Updates and reinstalling

@@ -7,13 +7,16 @@ import XCTest
 /// subscriptions and a details endpoint that describes them.
 @MainActor
 final class PanelWorkshopSubscriptionsTests: MediaPanelTestCase {
-  private func makePanel(subscribed: [String: String]) throws -> BrowsingPanel {
+  private func makePanel(
+    subscribed: [String: String], supportPrompt: SupportPromptStore? = nil
+  ) throws -> BrowsingPanel {
     SubscriptionsProtocol.subscribed = subscribed
     addTeardownBlock { SubscriptionsProtocol.subscribed = [:] }
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [SubscriptionsProtocol.self]
-    let panel = try makeBrowsingPanel(service: WorkshopService(session: URLSession(configuration: configuration)))
-    panel.controller.signInToSteamWeb = { "76561198000000001%7C%7C0123456789abcdef0123" }
+    let panel = try makeBrowsingPanel(
+      service: WorkshopService(session: URLSession(configuration: configuration)), supportPrompt: supportPrompt)
+    panel.controller.signInToSteamWeb = { WebSignInCookies(session: "76561198000000001%7C%7C0123456789abcdef0123") }
     return panel
   }
 
@@ -84,6 +87,59 @@ final class PanelWorkshopSubscriptionsTests: MediaPanelTestCase {
     _ = await held.value
     await subscribed.value
     XCTAssertEqual(panel.workshop.downloadRequests.map(\.id), ["333"])
+  }
+
+  // MARK: Import my subscriptions
+
+  /// The welcome guide's and the one-time offer's import signs in to Steam Community first, then
+  /// queues what the library lacks. A sign-in window closed first changes nothing and leaves the
+  /// offer open; signing in spends it, since whoever signed in found the feature.
+  func testImportSignsInFirstThenQueuesWhatTheLibraryLacks() async throws {
+    let prompt = SupportPromptStore(defaults: try TemporaryDefaults.make(for: self).defaults)
+    let panel = try makePanel(subscribed: ["111": "Video", "333": "Scene"], supportPrompt: prompt)
+    panel.store.librarySnapshot = installed(["111"])
+    let signIn = panel.controller.signInToSteamWeb
+    panel.controller.signInToSteamWeb = { nil }
+
+    let closed = try await panel.controller.importSteamSubscriptions()
+    XCTAssertNil(closed)
+    XCTAssertTrue(panel.workshop.downloadRequests.isEmpty)
+    XCTAssertEqual(prompt.pendingPrompt(welcomeSeen: true, telemetryOn: true, steamSignedIn: true), .subscriptions)
+
+    panel.controller.signInToSteamWeb = signIn
+    let queued = try await panel.controller.importSteamSubscriptions()
+    XCTAssertEqual(queued, 1)
+    XCTAssertEqual(panel.workshop.downloadRequests.map(\.id), ["333"])
+    XCTAssertNil(prompt.pendingPrompt(welcomeSeen: true, telemetryOn: true, steamSignedIn: true))
+  }
+
+  /// The guide's card says what the import did: how many went to Downloads, or that the library
+  /// already has them all.
+  func testTheGuideReportsWhatTheImportQueued() async throws {
+    let panel = try makePanel(subscribed: ["111": "Video", "333": "Scene"])
+    panel.store.librarySnapshot = installed(["111"])
+    let guide = panel.controller.welcome
+    XCTAssertFalse(guide.isSignedInToSteamCommunity)
+    await guide.importSubscriptions()
+    XCTAssertEqual(guide.subscriptionImport, .queued(1))
+    XCTAssertTrue(guide.isSignedInToSteamCommunity)
+    XCTAssertNil(guide.error)
+
+    panel.store.librarySnapshot = installed(["111", "333"])
+    await guide.importSubscriptions()
+    XCTAssertEqual(guide.subscriptionImport, .upToDate)
+  }
+
+  /// The offer to someone who never met the import: choosing it spends the offer at once, then the
+  /// sign-in and the downloads run on without the sheet.
+  func testTheOfferSpendsItselfAndImports() async throws {
+    let prompt = SupportPromptStore(defaults: try TemporaryDefaults.make(for: self).defaults)
+    let panel = try makePanel(subscribed: ["333": "Scene"], supportPrompt: prompt)
+    try await panel.controller.supportPromptChoice(.importSubscriptions, for: .subscriptions)
+    XCTAssertNil(prompt.pendingPrompt(welcomeSeen: true, telemetryOn: true, steamSignedIn: true))
+    await panel.controller.steamWebSignInTask?.value
+    XCTAssertEqual(panel.workshop.downloadRequests.map(\.id), ["333"])
+    XCTAssertNil(panel.controller.errors.message)
   }
 }
 

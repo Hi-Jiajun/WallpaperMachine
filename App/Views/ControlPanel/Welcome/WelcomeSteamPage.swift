@@ -5,7 +5,8 @@ enum SteamField: Hashable { case account, password, response }
 
 /// Page two: sign in to Steam now, or leave it for the first download. One of five states shows,
 /// by `SteamSignInPhase`: signed in (with what the ownership check found), waiting for SteamCMD, the
-/// form, or the sign-in running with whatever Steam is asking.
+/// form, or the sign-in running with whatever Steam is asking. Signed in, unless the account is
+/// known not to own Wallpaper Engine, it also offers to import the account's subscriptions.
 struct WelcomeSteamPage: View {
   @Environment(FirstRunModel.self) private var model
   @Environment(\.welcomeIsCompact) private var compact
@@ -20,6 +21,9 @@ struct WelcomeSteamPage: View {
           "You can browse without an account. Steam Workshop downloads require an account that owns Wallpaper Engine. Sign in now, or skip and sign in at your first download."
         ))
       state(of: phase)
+      if case .signedIn(_, let ownership, _) = phase.state, ownership != .notOwned {
+        WelcomeSubscriptionsCard()
+      }
       if !phase.isSignedIn { WelcomeSteamLinks() }
     }
     // The status card is the page's live status: a change is announced after whatever VoiceOver
@@ -131,6 +135,49 @@ struct WelcomeSignedInCard: View {
         if let error = model.error { WelcomeNotice(style: .error, message: error) }
       }
     }
+  }
+}
+
+// MARK: - Subscriptions
+
+/// **Import my subscriptions**: the Workshop wallpapers the account already subscribes to on Steam,
+/// downloaded into the library. Steam lists them only behind its own Steam Community sign-in, so a
+/// first import opens Steam's sign-in window; this Mac then stays signed in. The downloads run
+/// behind the guide, in Downloads.
+struct WelcomeSubscriptionsCard: View {
+  @Environment(FirstRunModel.self) private var model
+
+  var body: some View {
+    let isImporting = model.pending.contains(.subscriptions)
+    WelcomeColumn(spacing: 8) {
+      WelcomeActionRow(
+        symbol: "square.and.arrow.down.on.square", color: .blue,
+        title: Text("Import my subscriptions"), note: note(isImporting: isImporting),
+        trailingSymbol: "chevron.right"
+      ) { Task { await model.importSubscriptions() } }
+      .disabled(isImporting)
+      switch model.subscriptionImport {
+      case .queued(let count):
+        WelcomeNotice(style: .info, message: L("Subscribed wallpapers added to Downloads: \(count)"))
+      case .upToDate:
+        WelcomeNotice(
+          style: .info, message: L("Every wallpaper you subscribe to is already in your library."))
+      case nil:
+        EmptyView()
+      }
+    }
+    // Shown here, the offer needs no one-time prompt later.
+    .onAppear { model.subscriptionsOffered() }
+  }
+
+  private func note(isImporting: Bool) -> Text {
+    if isImporting { return Text("Waiting for Steam") }
+    if model.isSignedInToSteamCommunity {
+      return Text("Download the Workshop wallpapers you already subscribe to on Steam into your library.")
+    }
+    return Text(
+      "Download the Workshop wallpapers you already subscribe to on Steam. Steam asks you to sign in to Steam Community once, on its own page."
+    )
   }
 }
 

@@ -1253,9 +1253,11 @@ install and a no-login smoke run (see [README.md](README.md#opt-in-layers)).
 
 `SupportPromptStoreTests` — a downloaded wallpaper qualifies only after a
 successful activation, a pending prompt survives relaunch and further downloads,
-and a presented prompt never returns. Across the three prompts: one a day in
+and a presented prompt never returns. Across the four prompts: one a day in
 priority order, the performance data question only for someone who finished the
-guide without it, the star prompt after 14 days and 5 days of use (one day counts
+guide without it, the subscriptions offer only for someone signed in to Steam who
+finished the guide without meeting the import (spent by the guide's card or a Steam
+Community sign-in), the star prompt after 14 days and 5 days of use (one day counts
 once) and not after the star was chosen, and state saved by earlier builds still
 loads. `Support/` also holds the shared fixtures
 (`TemporaryDefaults`, `TestAppLanguage`, bridge snapshots).
@@ -1368,7 +1370,10 @@ faces (`WebWallpaperFontAliasTests`) and the screen-saver surface
   unfiltered pages, age-rating sampling of collections, every subscription page
   read with the session, a page whose entries cannot be read failing instead of
   passing for empty, the store's back history, sign-in, ended session and
-  sign-out, and a pasted link or id: one tile that no sidebar filter hides, no
+  sign-out, the session saved for the next launch and removed with it, an expired
+  cookie renewed with Steam's renewal token before a read (and a refused renewal
+  ending the session; `SteamWebSessionTests` covers which token is kept and when a
+  cookie needs renewing), and a pasted link or id: one tile that no sidebar filter hides, no
   browse page read, failures on the normal retry path, other sources ignoring the
   id, and a browse page whose markup changed: listed from its links or the ids in
   its renamed data, an id Steam does not serve left out, paging estimates, the

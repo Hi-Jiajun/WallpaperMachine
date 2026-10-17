@@ -51,7 +51,7 @@ class MediaPanelTestCase: PanelTestCase {
   }
 
   func makeBrowsingPanel(
-    service: WorkshopService, updates: WorkshopUpdateStore? = nil
+    service: WorkshopService, updates: WorkshopUpdateStore? = nil, supportPrompt: SupportPromptStore? = nil
   ) throws -> BrowsingPanel {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(
       "panel-browsing-\(UUID().uuidString)")
@@ -65,7 +65,7 @@ class MediaPanelTestCase: PanelTestCase {
         minimumInterval: .zero),
       packager: PixivWallpaperPackager(library: root.appendingPathComponent("Library")),
       sessions: PixivMemorySessionStore())
-    let store = makeStore().store
+    let store = makeStore(supportPrompt: supportPrompt).store
     let dialogs = RecordingDialogs()
     let previousHome = ProcessInfo.processInfo.environment["WALLPAPER_MACHINE_HOME"]
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

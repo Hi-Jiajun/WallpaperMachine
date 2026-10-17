@@ -246,12 +246,26 @@ subscriptions** needs a Steam Community sign-in. This is a different sign-in fro
 SteamCMD's (see [Steam sign-in](#steam-sign-in)), and the app never sees the
 password: **Sign in to Steam…** opens Steam's own sign-in page in a window
 (`WebSignInWindowController` with its `.steam` site, the same one pixiv uses) and
-takes the `steamLoginSecure` cookie Steam sets. The cookie is kept in memory only
-(`WorkshopStore.steamWebSession`): it is never written to disk or the keychain,
-ends when the app quits or on **Sign out of Steam**, and is sent only to
-`steamcommunity.com` over HTTPS (a redirect anywhere else goes without it,
-`WorkshopService.redirected`), to read the subscriptions list (the author page
-with `browsefilter=mysubscriptions`).
+takes the `steamLoginSecure` cookie Steam sets, and with it the
+`steamRefresh_steam` renewal token Steam sets on `login.steampowered.com` when the page
+set one for the same account. The session (`WorkshopStore.steamWebSession`) is kept in
+the login keychain as one generic password (`KeychainSteamWebSessionStore`, service
+`app.wallpapermachine.steam-community`), read once at launch off the main thread, so
+the sign-in survives quitting; **Sign out of Steam**, or Steam ending the session,
+removes it. The cookie is sent only to `steamcommunity.com` over HTTPS (a redirect
+anywhere else goes without it, `WorkshopService.redirected`), to read the subscriptions
+list (the author page with `browsefilter=mysubscriptions`).
+
+The cookie's own token lasts about a day; the renewal token lasts months. Before a
+subscriptions read, a cookie whose token has run out (its JWT `exp`, read without
+checking the signature, within two minutes) is traded for a new one through
+`IAuthenticationService/GenerateAccessTokenForApp` on `api.steampowered.com`
+(`WorkshopService.renew`): the renewal token goes there alone, in a POST body, and the
+request follows no redirect. Concurrent readers wait for one renewal, and the new
+cookie is saved. Steam refusing the token (an empty `response`) ends the session like
+its sign-in page does. A session without a renewal token is used until Steam ends it.
+The SteamCMD sign-in cannot be reused here: SteamCMD keeps its own machine-bound
+client token, which the app does not read.
 
 That page lists rows rather than an author's tiles, so
 `WorkshopService.decodeProfileListing` reads an item's id from either layout: an
@@ -268,7 +282,10 @@ with **Download the ones not in your library** as the list's main action beside
 **Download the ones not in your library** reads every page of subscriptions (at
 most 1,000 pages of 30), drops what is installed, collections and Application
 items, and queues the rest as ordinary downloads, which need SteamCMD's own
-sign-in as any download does. Nothing is subscribed or unsubscribed on Steam.
+sign-in as any download does. Nothing is subscribed or unsubscribed on Steam. The
+welcome guide's **Import my subscriptions** and its one-time offer to existing users
+([first run](first-run.md#star-prompt-the-performance-data-question-and-the-subscriptions-offer))
+do the same, signing in first when needed.
 
 ## One decision per download
 

@@ -310,6 +310,7 @@
 		53A38F898530E57FA71B76EB /* AppRuleMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FDA5FA38CEAF14407999615 /* AppRuleMonitorTests.swift */; };
 		53D1F244030A7AEA100B5C39 /* NativeVideoLivenessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6A8D8076CED302FF281FA1B /* NativeVideoLivenessTests.swift */; };
 		53DA4EDBEB38CE8EB98364DD /* DeletionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93FD3C95C18D430D508ADA33 /* DeletionTests.swift */; };
+		541714D9299F572E608BBECE /* SteamWebSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AD540B7D5332C07F7C0839C /* SteamWebSessionStore.swift */; };
 		544E378483D36B5AED043412 /* WebWallpaperWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 688F4E980B136CA89A7A3372 /* WebWallpaperWindow.swift */; };
 		547243ED725391BE91EB1DB7 /* SettingsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1E142F074CCD18756A4B4DA /* SettingsModel.swift */; };
 		5483298CD87E6FCEAA6B23CB /* StorageBackupModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E90F3173F0E33ED9915CAC0D /* StorageBackupModel.swift */; };
@@ -440,6 +441,7 @@
 		74F39F171BA3606BF4D5D0E2 /* SettingsBFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48AF9AC1F29D7A82DAA5D836 /* SettingsBFixtures.swift */; };
 		75A551A3E1AFD76D0D911472 /* ControlPanelWindowSizingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C379BDC29C91D4F1DE26AAFC /* ControlPanelWindowSizingTests.swift */; };
 		75B409BF1A2439F5819E5FBF /* DesktopWallpaperLedger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E46920A5931F497D7CACC13 /* DesktopWallpaperLedger.swift */; };
+		769DFDCD78AE17E204601A68 /* SteamWebSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C89234C5CAB7120620E7D86E /* SteamWebSessionTests.swift */; };
 		770B357DCC2A8CCD461DC7B6 /* WallpaperReapplyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A94D2ABE78588F2AF75BA2E9 /* WallpaperReapplyTests.swift */; };
 		77FFDC485884D73F24889589 /* PlacementDrafts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FD75A0E0CBC6FDED3B0260C /* PlacementDrafts.swift */; };
 		78886E550A5488B3AC2666E4 /* PanelSlider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 442D8E3C316C5DCB2A8E572A /* PanelSlider.swift */; };
@@ -1376,6 +1378,7 @@
 		6A715769A44ABC446C2D271F /* PixivWallpaperPackager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PixivWallpaperPackager.swift; sourceTree = "<group>"; };
 		6AA8BDDB1B25D0A01F8AF608 /* SteamCMDSetupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SteamCMDSetupTests.swift; sourceTree = "<group>"; };
 		6AD251BE755A90EE9B529A68 /* SettingsDetail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsDetail.swift; sourceTree = "<group>"; };
+		6AD540B7D5332C07F7C0839C /* SteamWebSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SteamWebSessionStore.swift; sourceTree = "<group>"; };
 		6B5CF25C4E189DD8B00902B4 /* PanelRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelRootView.swift; sourceTree = "<group>"; };
 		6B6E16805544A91329986DFF /* InspectorPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorPolicy.swift; sourceTree = "<group>"; };
 		6B71F4B7AA59D452A3B46105 /* InstalledFooter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstalledFooter.swift; sourceTree = "<group>"; };
@@ -1702,6 +1705,7 @@
 		C7D80BA380F27B95D0470A7A /* PowerSourceMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerSourceMonitor.swift; sourceTree = "<group>"; };
 		C82F965E8454CAC6C590E8B5 /* WorkshopFooter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkshopFooter.swift; sourceTree = "<group>"; };
 		C853889B979F4B1175FA0B73 /* PerformanceQualityControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceQualityControls.swift; sourceTree = "<group>"; };
+		C89234C5CAB7120620E7D86E /* SteamWebSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SteamWebSessionTests.swift; sourceTree = "<group>"; };
 		C8D9E1B7E6B2917C7E75B5ED /* WallpaperActivationRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperActivationRecoveryTests.swift; sourceTree = "<group>"; };
 		C8ED962623E9D268391AEF06 /* FirstRunModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstRunModelTests.swift; sourceTree = "<group>"; };
 		C92440584DC64841D6BB17DA /* NativeVideoDeadline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVideoDeadline.swift; sourceTree = "<group>"; };
@@ -2558,6 +2562,7 @@
 				E445628679463DA269C386B3 /* DownloadTelemetryTests.swift */,
 				9E5FB71981DFB52F719A30F8 /* LibraryPreviewFetcherTests.swift */,
 				E63EA08FC71E6459FBC0755D /* SteamCMDRuntimeValidationTests.swift */,
+				C89234C5CAB7120620E7D86E /* SteamWebSessionTests.swift */,
 				F0E481186B5E539877D0DB6E /* TransferEstimatorTests.swift */,
 				5D28E789E0E33BE2773D1902 /* WorkshopApplyOnArrivalTests.swift */,
 				648F0EAFA290CB221E5FDE39 /* WorkshopDownloadPersistenceTests.swift */,
@@ -3123,6 +3128,7 @@
 			children = (
 				5C77B3407E1AF330E1B8A2DC /* LibraryPreviewFetcher.swift */,
 				B1DCF68964D1C57B6FF5513A /* PropertyImageCache.swift */,
+				6AD540B7D5332C07F7C0839C /* SteamWebSessionStore.swift */,
 				60AEB320A0D801025439FAB1 /* TransferEstimator.swift */,
 				F17611FE37BEDBA683549A23 /* WorkshopDownloadCheckpoint.swift */,
 				7762AC596B1FD44CD50285BD /* WorkshopDownloader.swift */,
@@ -3997,6 +4003,7 @@
 				FB71ED5B4932388ADE85495A /* SteamCMDRuntimeValidationTests.swift in Sources */,
 				3AF64123C0E9BE96447485AF /* SteamCMDSetupTests.swift in Sources */,
 				8ACE5DD82EE91795DF66FFFD /* SteamSignInPhaseTests.swift in Sources */,
+				769DFDCD78AE17E204601A68 /* SteamWebSessionTests.swift in Sources */,
 				2169344E8075C9C6DD73B10B /* StillImagePageRenderingTests.swift in Sources */,
 				0869A4148B30AB846A7A60AE /* StillImagePageUpgradeTests.swift in Sources */,
 				C35B5D3A89EDFBCF43325A97 /* StillImagePlacementTests.swift in Sources */,
@@ -4469,6 +4476,7 @@
 				C61222DB19A7A9A547D9F2D0 /* SteamSetupState.swift in Sources */,
 				7D2DC968C185FDC33FC47670 /* SteamSignInGuideView.swift in Sources */,
 				F865DAD192A50B8E5372345A /* SteamSignInPhase.swift in Sources */,
+				541714D9299F572E608BBECE /* SteamWebSessionStore.swift in Sources */,
 				F400F636F6586E4990B3AC6F /* StillImagePageUpgrade.swift in Sources */,
 				56C34A2D1ED2E79B663BD872 /* StillImagePlacementStore.swift in Sources */,
 				6072AC23D1C30FB6C6EFF45F /* StillImageWallpaper.swift in Sources */,

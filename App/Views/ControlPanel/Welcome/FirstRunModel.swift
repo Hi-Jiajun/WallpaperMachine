@@ -24,7 +24,15 @@ final class FirstRunModel {
   /// same key does nothing.
   enum Pending: Hashable, Sendable {
     case language, theme, performance, preferences, lockScreen
-    case signIn, setup, cancel, setupCancel, signOut
+    case signIn, setup, cancel, setupCancel, signOut, subscriptions
+  }
+
+  /// What **Import my subscriptions** last did.
+  enum SubscriptionImport: Equatable, Sendable {
+    /// This many wallpapers went to Downloads.
+    case queued(Int)
+    /// The library already has every subscribed wallpaper.
+    case upToDate
   }
 
   /// What the guide found when it opened, which Skip puts back.
@@ -74,6 +82,8 @@ final class FirstRunModel {
   /// **Import wallpapers** was chosen and the library's Import popover waits for the window to have
   /// drawn Installed (`openWaitingImportPopover()`).
   private(set) var importPopoverIsWaiting = false
+  /// The outcome of **Import my subscriptions**, while the panel lives.
+  private(set) var subscriptionImport: SubscriptionImport?
   /// Counted up when the page title or the footer's Continue should take VoiceOver focus.
   private(set) var titleFocusRequest = 0
   private(set) var continueFocusRequest = 0
@@ -403,6 +413,22 @@ final class FirstRunModel {
   func useDifferentAccount() async {
     let signedOut = await perform(.signOut) { try await controller.logOutSteam() }
     if signedOut, controller.steamAccount.saved == nil { dismissedJob = true }
+  }
+
+  /// The import card is on screen: the guide has offered it, so the one-time offer is not needed.
+  func subscriptionsOffered() { controller.store.supportPrompt?.recordSubscriptionsOffered() }
+
+  /// Whether Steam Community is signed in, so the import needs no sign-in window first.
+  var isSignedInToSteamCommunity: Bool { controller.workshop.steamWebSession != nil }
+
+  /// **Import my subscriptions**: Steam's own sign-in window when Steam Community is not signed in
+  /// yet, then every subscribed wallpaper the library lacks goes to Downloads, behind the guide.
+  /// A window closed without signing in changes nothing.
+  func importSubscriptions() async {
+    await perform(.subscriptions) {
+      guard let queued = try await controller.importSteamSubscriptions() else { return }
+      subscriptionImport = queued > 0 ? .queued(queued) : .upToDate
+    }
   }
 
   func installSteamCMD() async { await perform(.setup) { try await controller.installSteamCMD() } }

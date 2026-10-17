@@ -237,7 +237,7 @@ the rest opens in a popover from the ⓘ beside the title.
   Release; download and restart-install happen only after confirmation (see
   [updates](updates.md)). The application menu item **Check for Updates…** opens
   this section. **Spread the word** has **Share WallpaperMachine…** and **Star on
-  GitHub** ([one-time prompts](first-run.md#star-prompt-and-the-performance-data-question)).
+  GitHub** ([one-time prompts](first-run.md#star-prompt-the-performance-data-question-and-the-subscriptions-offer)).
 - **Storage** holds the wallpaper files chosen for properties, **Clear unused
   caches…** with the shader cache, logs and completed downloads,
   [Backup](backup-restore.md), and ends with **Troubleshooting**: Detailed logging, *Allow inspecting web wallpapers*

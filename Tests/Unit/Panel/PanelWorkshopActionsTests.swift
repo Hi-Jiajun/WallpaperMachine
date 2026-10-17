@@ -71,7 +71,7 @@ final class PanelWorkshopActionsTests: MediaPanelTestCase {
     var windows = 0
     controller.signInToSteamWeb = {
       windows += 1
-      return "76561198000000001%7C%7C0123456789abcdef0123"
+      return WebSignInCookies(session: "76561198000000001%7C%7C0123456789abcdef0123")
     }
     try await controller.steamWebSignIn()
     await controller.steamWebSignInTask?.value
@@ -89,7 +89,7 @@ final class PanelWorkshopActionsTests: MediaPanelTestCase {
 
   func testASignInThatYieldsNoUsableSessionReachesTheBanner() async throws {
     let panel = try makePanel()
-    panel.controller.signInToSteamWeb = { "not a steam cookie" }
+    panel.controller.signInToSteamWeb = { WebSignInCookies(session: "not a steam cookie") }
     try await panel.controller.steamWebSignIn()
     await panel.controller.steamWebSignInTask?.value
     XCTAssertEqual(
