@@ -866,6 +866,28 @@ JSValue RuntimeScalarValueToJS(JSContext* context, const RuntimeScalarValue& val
     return JS_UNDEFINED;
 }
 
+// A number handed back where a vector is expected is that number on every
+// component, as an authored single number is, so the next `update(value)` still
+// receives a vector to read `.x` from. False when `hint` is not a vector.
+bool UpdateVectorFromNumber(DynamicValue& result, double number,
+                            DynamicValue::UnderlyingType hint) {
+    const auto scalar  = static_cast<float>(number);
+    const auto integer = static_cast<int>(number);
+    switch (hint) {
+    case DynamicValue::Vec2: result.update(Eigen::Vector2f(scalar, scalar)); return true;
+    case DynamicValue::Vec3: result.update(Eigen::Vector3f(scalar, scalar, scalar)); return true;
+    case DynamicValue::Vec4:
+        result.update(Eigen::Vector4f(scalar, scalar, scalar, scalar));
+        return true;
+    case DynamicValue::IVec2: result.update(Eigen::Vector2i(integer, integer)); return true;
+    case DynamicValue::IVec3: result.update(Eigen::Vector3i(integer, integer, integer)); return true;
+    case DynamicValue::IVec4:
+        result.update(Eigen::Vector4i(integer, integer, integer, integer));
+        return true;
+    default: return false;
+    }
+}
+
 bool FillDynamicValueFromJS(JSContext* context, JSValue value, DynamicValue::UnderlyingType hint,
                             DynamicValue& result) {
     result.update();
@@ -876,6 +898,7 @@ bool FillDynamicValueFromJS(JSContext* context, JSValue value, DynamicValue::Und
     if (tag == JS_TAG_INT) {
         int32_t int_value = 0;
         JS_ToInt32(context, &int_value, value);
+        if (UpdateVectorFromNumber(result, int_value, hint)) return true;
         if (hint == DynamicValue::Float) {
             result.update(static_cast<float>(int_value));
         } else {
@@ -890,6 +913,7 @@ bool FillDynamicValueFromJS(JSContext* context, JSValue value, DynamicValue::Und
     if (JS_TAG_IS_FLOAT64(tag)) {
         double float_value = 0.0;
         JS_ToFloat64(context, &float_value, value);
+        if (UpdateVectorFromNumber(result, float_value, hint)) return true;
         result.update(static_cast<float>(float_value));
         return true;
     }

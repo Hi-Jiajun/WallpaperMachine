@@ -436,6 +436,19 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   hover easing, full authored enlargement and continuous reversal on cursor leave
   and re-entry. JavaScript input conversion serializes only the value payload,
   without copying the live property's listener/subscription ownership.
+- **A number returned for a vector property** — `ScriptRuntimeCompat.ANumberReturnedForAVectorPropertyFillsEveryAxisAndStaysAVector`,
+  `.ANumberReturnedForAShaderVectorFillsEveryComponent` and
+  `.ANumberWrittenToALayersColourOrParallaxDepthFillsEveryComponent`.
+  `FillDynamicValueFromJS` turned a number into a Float whatever the property's
+  type, so a `scale` script returning `value.x + (target - value.x) * speed` handed its next `update` a bare
+  number, `value.x` was undefined, and the layer's scale and position went NaN from
+  the second frame (a default-on clock never drew). A number for a vector type now
+  fills every component of that type (`UpdateVectorFromNumber`), so the property stays
+  a vector. The tests ease a node's `scale` toward 2 through a script property for 30
+  frames (finite, uniform, monotonic, no script error) and step a two-component shader
+  constant that returns `value.y + 1`. The same conversion serves the `thisLayer`
+  setters, so `color` and `parallaxDepth` now take a number on every component
+  (the third test writes `0.5` and `0.75` to them); both ignored it.
 - **Native writes survive `update()`** — `ScriptRuntimeCompat.UpdateSideEffectWritesSurviveWhenUpdateReturnsUndefined`.
   "Keep the current value when `update()` returns `undefined`" only works if the
   current value includes what the script wrote, so evaluation continues from the

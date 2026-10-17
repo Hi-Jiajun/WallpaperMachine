@@ -165,6 +165,20 @@ no pass or memory. It is also a script like any other, so a scene whose only scr
 an image layer's colour no longer goes idle (it did, while the colour script was never
 created); a scene with other scripts did not idle before either.
 
+A number a script hands back for a vector property (a layer's `origin`, `scale` or
+`angles`, a colour, a two- to four-component shader constant) is that number on every
+component, as a single authored number is, and the property stays a vector, so the next
+`update(value)` can read `value.x` again. A hover zoom whose `update(value)` returns
+`value.x + (target - value.x) * speed` for `scale` therefore scales evenly; kept as a
+bare number, its next call read `.x` off that number and the layer's scale, and with it
+its position, went NaN from the second frame, so the layer was never drawn (a clock
+widget on by default). A number written to `thisLayer.color` or
+`thisLayer.parallaxDepth` now fills every component too, where it was ignored;
+`origin`, `scale` and `angles` already took one on every axis. Wallpaper Engine's own
+`Vec3` and `Vec2` fill every component from a single number; that its host converts a
+returned number the same way is inferred from a default-on widget written to rely on
+it, not compared against its frames.
+
 A script that writes `thisLayer.alpha` on a layer whose alpha no timeline, script or
 user property owns sets the layer's opacity as the editor's `alpha` does. The layer's
 own pass applies it, once, on any layer but a puppet with bones under effects, which

@@ -411,6 +411,63 @@ export function update(value) {
     EXPECT_EQ(runtime->scriptErrorCount(), 0u);
 }
 
+// A script may hand back a bare number for a vector property, as a hover zoom
+// whose `update(value)` returns `value.x + (target - value.x) * speed` does: it
+// is that number on every axis, and the next `update` still receives a vector.
+// Kept as a number, the next call read `.x` off it, and the layer's scale and
+// with it its position went NaN, so the layer was never drawn.
+TEST(ScriptRuntimeCompat, ANumberReturnedForAVectorPropertyFillsEveryAxisAndStaysAVector) {
+    Scene scene;
+    auto runtime = MakeRuntimeWithScene(scene);
+    ASSERT_NE(runtime, nullptr);
+    auto node = std::make_shared<SceneNode>();
+    runtime->RegisterNodeScale("zoom", node.get(), ResolveVec3Setting(*runtime, {
+        {"value", "1 1 1"},
+        {"scriptproperties", {{"target", 2.0}}},
+        {"script", R"JS(
+export var scriptProperties = createScriptProperties()
+    .addSlider({name: 'target', value: 1}).finish();
+export function update(value) {
+    return value.x + (scriptProperties.target - value.x) * 0.5;
+}
+)JS"}}, "zoom"));
+
+    float previous = 1.0f;
+    for (int frame = 1; frame <= 30; ++frame) {
+        runtime->Tick(1.0 / 60.0);
+        const Eigen::Vector3f scale = node->Scale();
+        ASSERT_TRUE(scale.allFinite()) << "frame " << frame;
+        EXPECT_FLOAT_EQ(scale.y(), scale.x());
+        EXPECT_FLOAT_EQ(scale.z(), scale.x());
+        EXPECT_GT(scale.x(), previous - 1.0e-6f) << "frame " << frame;
+        previous = scale.x();
+    }
+    EXPECT_NEAR(previous, 2.0f, 1.0e-4f);
+    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
+}
+
+// The same holds for a shader constant of another width: a number fills both
+// components of a two-component constant, and the script keeps receiving a pair.
+TEST(ScriptRuntimeCompat, ANumberReturnedForAShaderVectorFillsEveryComponent) {
+    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
+    ASSERT_NE(runtime, nullptr);
+    auto material = std::make_shared<SceneMaterial>();
+    runtime->RegisterMaterialConstant(material, "g_Offset", ResolveVectorSetting(*runtime, {
+        {"value", "0 0"},
+        {"script", R"JS(
+export function update(value) { return value.y + 1; }
+)JS"}}, 2));
+    for (int frame = 1; frame <= 3; ++frame) {
+        runtime->Tick(1.0 / 60.0);
+        const auto& offset = material->customShader.constValues.at("g_Offset");
+        ASSERT_EQ(offset.size(), 2u) << "frame " << frame;
+        ASSERT_TRUE(std::isfinite(offset[0])) << "frame " << frame;
+        EXPECT_GE(offset[0], static_cast<float>(frame));
+        EXPECT_FLOAT_EQ(offset[1], offset[0]);
+    }
+    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
+}
+
 TEST(ScriptRuntimeCompat, PropertyFeedbackResumesFromExplicitUserValueChanges) {
     auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {
         .project_properties = {{"progress", RuntimeScalarValue::Float(2.0f)}},
@@ -6114,6 +6171,27 @@ export function update(value) {
     const auto depth = fixture.scene.shaderValueUpdater->NodeParallaxDepth(fixture.owner.get());
     EXPECT_FLOAT_EQ(depth[0], 0.75f);
     EXPECT_FLOAT_EQ(depth[1], 1.5f);
+}
+
+// A number written to a layer's colour or parallax depth is that number on every
+// component, as a number an `update()` returns for a vector property is; both
+// writes were ignored.
+TEST(ScriptRuntimeCompat, ANumberWrittenToALayersColourOrParallaxDepthFillsEveryComponent) {
+    CardTemplateScene fixture;
+    auto&             runtime = *fixture.runtime;
+    const auto        run = RunUpdateOn(runtime, "owner", std::string(kCheckHelpers) + R"JS(
+export function update(value) {
+  thisLayer.parallaxDepth = 0.75;
+  check('depth', thisLayer.parallaxDepth.x === 0.75 && thisLayer.parallaxDepth.y === 0.75);
+  thisLayer.color = 0.5;
+  return 1;
+}
+)JS");
+    EXPECT_SCRIPT_PASSES(run);
+    const auto depth = fixture.scene.shaderValueUpdater->NodeParallaxDepth(fixture.owner.get());
+    EXPECT_FLOAT_EQ(depth[0], 0.75f);
+    EXPECT_FLOAT_EQ(depth[1], 0.75f);
+    EXPECT_TRUE(runtime.NodeColor("owner").isApprox(Eigen::Vector3f::Constant(0.5f)));
 }
 
 TEST(ScriptRuntimeCompat, ALayerCreatedBelowAParentMovesWithItAndStaysOutOfTheRoot) {
