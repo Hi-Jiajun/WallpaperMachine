@@ -606,7 +606,11 @@ policy, skip tests or replace a live release. Ordinary releases leave it empty a
 use the preceding tag. When the unpublished tag was a feature release, its notes start
 below that minor version, so the patch gets highlights too; commit copies of its
 banners under the patch's number (`x.y.1.jpg`, `x.y.1.zh-Hans.jpg`) before running the
-workflow, since a section names only its own version's banner.
+workflow, since a section names only its own version's banner. Once the patch is cut,
+remove the sections of the unpublished versions it replaces, and their banners, from
+`CHANGELOG.md`: its notes already cover them, and a section left there is shown again in
+What's New. The app it builds still carries them, so remove them before cutting it when
+possible.
 
 ## Checklist for a release
 
