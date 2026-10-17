@@ -263,6 +263,16 @@ Playback, backend, host and startup areas are in
     cursor centred) requires a picture under group -> fullscreen layer (with and without
     an effect) and under a top-level fullscreen layer saved where the group is (children
     inheriting its depth 2) to equal the picture under the group alone.
+    `.AFullscreenLayerStaysOverTheScreenWhileParallaxMovesTheSceneOnBothRenderers`
+    (amount 0.5, cursor at the top-left and the bottom-right corner, a backdrop at depth 1)
+    requires a top-level fullscreen layer without an effect, with one, saved with depth 0,
+    saved off the middle with depth 0.5, and saved where the backdrop is with the backdrop
+    below it, to equal the backdrop alone. `ParseImageObj` gives a fullscreen layer depth
+    0: the file's is never read for one (`WPImageObject::FromJson`), and the default depth 1 moved the
+    last pass of its effects, drawn through the `fullscreen` camera, so the copy of the
+    screen was drawn a second time, shifted by the cursor, over the scene (3521337568's
+    film-grain post-processing layer). The layers below it keep their tree's depth
+    (`ResolveLayerParallax`).
     Established from the 2.8.42 decompile (the layer's own draw ignores its model matrix;
     children are drawn through its composite) and from two local scenes, not from a
     Wallpaper Engine frame of a scene that has the layer: 3804689861's author preview

@@ -4305,6 +4305,12 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         wpimgobj.origin[1] = static_cast<float>(context.ortho_h) * 0.5f;
         wpimgobj.scale  = { 1.0f, 1.0f, 1.0f };
         wpimgobj.angles = { 0.0f, 0.0f, 0.0f };
+        // Nor does camera parallax move it: it copies the screen and draws it
+        // back over the whole screen, wherever the cursor is. The file's depth
+        // is never read for it, and the depth a layer has when none is saved
+        // drew that copy shifted over the scene it copied. The layers below it
+        // take their tree's depth from the scene file (ResolveLayerParallax).
+        wpimgobj.parallaxDepth = { 0.0f, 0.0f };
     } else if (wpimgobj.autosize && wpimgobj.projectlayer) {
         // A project layer is as large as the scene's canvas, whatever size the
         // scene file saved for it; where it sits is the scene file's.

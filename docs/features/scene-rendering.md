@@ -767,8 +767,12 @@ the scene displaced by the layer's own offset. A fullscreen layer
 (`fullscreen` in its model) is laid over the whole screen whichever group it sits in:
 the group decides whether it shows, never where, how large or how turned, so its
 effects, its result and camera parallax all treat it as the outermost layer of its own
-tree. The layers saved below it are another matter: they are placed from the transform
-the scene saved for the fullscreen layer (none saved, none added, so a post-processing
+tree. Nor does camera parallax move the layer itself: its depth is zero whatever the file
+saves, so the screen it copies is drawn back over the whole screen wherever the cursor is.
+With the default depth, the result of its effects was a second, shifted copy of the whole
+scene over the first, with the scene underneath showing along two edges. The layers saved
+below it are another matter: they are placed from the transform the scene saved for the
+fullscreen layer (none saved, none added, so a post-processing
 layer with no origin holds its children at canvas coordinates), under the groups it sits
 in, and not from the screen centre it is drawn at; and a fullscreen layer with effects
 holds those children in its own picture and runs its effects over them and over the

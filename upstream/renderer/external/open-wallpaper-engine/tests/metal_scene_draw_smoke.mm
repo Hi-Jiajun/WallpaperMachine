@@ -4983,6 +4983,92 @@ TEST_F(MetalSceneDraw, ParallaxMovesTheChildrenOfAFullscreenLayerWithTheirTreeOn
     }
 }
 
+TEST_F(MetalSceneDraw, AFullscreenLayerStaysOverTheScreenWhileParallaxMovesTheSceneOnBothRenderers)
+{
+    // A post-processing layer copies the screen and draws it back over the whole
+    // screen, wherever the cursor is: camera parallax moves the layers drawn
+    // before it and the layers below it, never the layer itself. A layer that
+    // only passes the screen on must leave the scene as parallax drew it. Moved
+    // by parallax at the depth a layer has when the scene saves none, its
+    // effects' result was a second, shifted picture of the whole scene over the
+    // first, which showed only along two edges of the screen.
+    const std::string general =
+        R"("cameraparallax":true,"cameraparallaxamount":0.5,"cameraparallaxdelay":0,)"
+        R"("cameraparallaxmouseinfluence":1,)";
+    // The backdrop moves with the cursor, so a copy moved again shows.
+    const std::string backdrop =
+        R"({"id":1,"name":"backdrop","image":"models/backdrop.json","origin":[192,128,0],)"
+        R"("parallaxDepth":[1,1],"visible":true})";
+    const auto post = [](const std::string& fields, bool effect) {
+        return std::string(R"({"id":2,"name":"post","image":"models/post.json","visible":true)") + fields +
+               (effect ? R"(,"effects":[{"file":"effects/identity/effect.json","id":3,"visible":true}])" : "") +
+               "}";
+    };
+    struct Tree {
+        const char* name;
+        std::string objects;
+    };
+    const std::array<Tree, 6> trees { {
+        { "plain", backdrop },
+        { "a fullscreen layer", backdrop + "," + post("", false) },
+        { "a fullscreen layer with an effect", backdrop + "," + post("", true) },
+        { "a fullscreen layer with an effect saved with no depth",
+          backdrop + "," + post(R"(,"parallaxDepth":[0,0])", true) },
+        { "a fullscreen layer with an effect saved off the middle with a depth",
+          backdrop + "," + post(R"(,"origin":[40,-30,0],"parallaxDepth":[0.5,0.5])", true) },
+        // Saved where the backdrop is, the layer roots the backdrop's tree there:
+        // parallax moves the backdrop in the layer's picture as it moves it on
+        // screen, and the picture is drawn over the screen unmoved.
+        { "a fullscreen layer with an effect over the backdrop",
+          post(R"(,"origin":[192,128,0])", true) +
+              R"(,{"id":1,"name":"backdrop","parent":2,"image":"models/backdrop.json",)"
+              R"("origin":[0,0,0],"visible":true})" },
+    } };
+    struct Cursor {
+        const char* name;
+        double      x, y;
+    };
+    const std::array<Cursor, 2> cursors { { { "top left", 0.0, 0.0 }, { "bottom right", 1.0, 1.0 } } };
+    for (const bool native : { false, true }) {
+        SCOPED_TRACE(native ? "native" : "compatibility");
+        for (const auto& cursor : cursors) {
+            SCOPED_TRACE(cursor.name);
+            std::vector<RendererPicture> pictures;
+            for (std::size_t t = 0; t < trees.size(); ++t) {
+                const std::string name = std::string("fullscreen-over-parallax-") + (native ? "native-" : "compat-") +
+                                         (cursor.x < 0.5 ? "tl-" : "br-") + std::to_string(t);
+                const auto project = WriteFullscreenTreeFixture(root_ / name, general, trees[t].objects);
+                LoadedScene loaded;
+                std::string error;
+                ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << trees[t].name << ": " << error;
+                if (native) {
+                    const auto selection = SelectSceneBackend(*loaded.scene);
+                    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+                }
+                loaded.scene->shaderValueUpdater->MouseInput(cursor.x, cursor.y);
+                auto drawn = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+                ASSERT_TRUE(drawn.error.empty()) << trees[t].name << ": " << drawn.error;
+                ASSERT_EQ(drawn.rgb.size(), 384u * 256u * 3u);
+                pictures.push_back(std::move(drawn));
+            }
+            // Parallax moved the backdrop, or the comparison below says nothing:
+            // one of its edges is the clear colour.
+            const auto& reference = pictures.front().rgb;
+            const auto  at        = [&reference](int x, int y) {
+                const std::size_t i = (static_cast<std::size_t>(y) * 384u + static_cast<std::size_t>(x)) * 3u;
+                return std::array<int, 3> { reference[i], reference[i + 1], reference[i + 2] };
+            };
+            const std::array<int, 3> clear { 0, 0, 0 };
+            ASSERT_TRUE(at(1, 128) == clear || at(382, 128) == clear) << "parallax left the backdrop in place";
+            for (std::size_t t = 1; t < trees.size(); ++t) {
+                const auto different = ChannelsApart(pictures[t].rgb, reference);
+                EXPECT_EQ(different, 0u) << trees[t].name << ": " << different << " of " << reference.size()
+                                         << " channel values differ from the scene without the layer";
+            }
+        }
+    }
+}
+
 TEST_F(MetalSceneDraw, AVertexShaderThatWritesItsInputsStillReadsTheMeshOnBothRenderers)
 {
     // Wallpaper Engine's HLSL lets a vertex shader assign to its inputs (a
