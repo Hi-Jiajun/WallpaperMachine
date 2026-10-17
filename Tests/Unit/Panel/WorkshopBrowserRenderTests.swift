@@ -299,7 +299,8 @@ final class WorkshopBrowserRenderTests: MediaPanelTestCase {
       columns.append(Set(firstRow.map { Int($0.minX.rounded()) }).count)
       let width = try XCTUnwrap(tiles.first?.width)
       for tile in tiles {
-        XCTAssertEqual(tile.width, width, accuracy: 0.5, "\(Int(size.width)): every tile is as wide")
+        // macOS 26 rounds each column to whole points, so widths differ by up to one.
+        XCTAssertEqual(tile.width, width, accuracy: 1, "\(Int(size.width)): every tile is as wide")
       }
       let ring = try XCTUnwrap(found.first { $0.identifier == "workshop-tile-ring" }?.frame)
       let owner = try XCTUnwrap(tiles.first { $0.contains(CGPoint(x: ring.midX, y: ring.midY)) })
