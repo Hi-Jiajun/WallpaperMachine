@@ -836,6 +836,18 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   to a choice without a condition is unchanged (it reads 0). A puppet animation
   layer's flag and the other bool consumers share the one `DynamicValue` path and
   are not exercised one by one.
+- **A script property bound to a choice with a condition is a flag** —
+  `ScriptRuntimeCompat.AScriptPropertyBoundToAComboChoiceReadsWhetherTheChoiceMatches`.
+  A conditioned binding set the flag to whether the choice matched but kept the
+  choice as the value's type and string, so `DynamicValueToJS` handed a script the
+  string `"2"` for every flag over that combo, true in JavaScript whatever the
+  condition; a clock offering MM/DD, DD/MM and YYYY/MM/DD as three flags over one
+  combo always showed the first. `DynamicValue::update` from a string, directly or
+  copied from the bound property, now makes a conditioned value a Boolean. The test
+  binds two script properties to one combo (conditions `0` and `2`), has the script
+  report which is truthy and its `typeof`, and moves the choice through `2`, `0` and
+  `1` with `ApplyProjectPropertyOverride`. Consumers that read `getBool()` (layer and
+  effect `visible`) see what they saw before.
 - **Sound layer volume follows its slider** — `project_property_preview_test`
   (`SoundLayerVolume.*`, CPU only, a fake sound stream and a null-backend sound
   manager, so no audio device is opened). `WPSoundParser::Parse` read a

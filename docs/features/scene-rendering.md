@@ -931,7 +931,13 @@ bound to a text input whose text is `1` or `true` is on. A string a script retur
 for a flag is read the same way on every tick it runs, by a comparison in place
 that makes no copy. A binding that names a condition compares the choice with it
 instead, so `{"user": {"name": "mode", "condition": "2"}}` is on exactly when the
-choice is `2` and never by the rule above. Wallpaper Engine draws a layer bound
+choice is `2` and never by the rule above. The bound value is then a flag, not the
+choice: a script property bound this way reads `true` or `false`. It used to read the
+choice itself, a string such as `"2"` that is true in JavaScript whatever it says, so
+a clock offering its date formats as three flags over one combo (conditions `0`, `1`,
+`2`) always took the first one it tested. A shader constant bound with a condition
+now reads 1 or 0 as well, where it read the choice as a number; no wallpaper is known
+to bind one so. Wallpaper Engine draws a layer bound
 this way at the combo's default `1`; what it does with another choice is not
 established, so those follow the rule. A number bound to a choice without a
 condition still reads 0, because nothing shows that Wallpaper Engine converts a

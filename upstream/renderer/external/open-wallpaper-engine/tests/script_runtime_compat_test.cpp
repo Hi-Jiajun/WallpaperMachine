@@ -727,6 +727,43 @@ TEST(ScriptRuntimeCompat, PuppetAnimationLayerVisibilityFollowsUserProperty) {
     EXPECT_FLOAT_EQ(copy.genFrame(0.0)[0].translation().x(), 0.0f);
 }
 
+// A script property bound to a combo with a condition is a flag: whether the
+// combo's choice equals the condition. Handing the script the choice itself
+// ("2") made every such flag truthy, so a clock offering three date formats as
+// three flags over one combo always took the first.
+TEST(ScriptRuntimeCompat, AScriptPropertyBoundToAComboChoiceReadsWhetherTheChoiceMatches) {
+    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {
+        .project_properties = {{"format", RuntimeScalarValue::String("2")}},
+    });
+    ASSERT_NE(runtime, nullptr);
+    const auto text = ResolveStringSetting(*runtime, {
+        {"value", ""},
+        {"scriptproperties", {
+            {"first", {{"user", {{"name", "format"}, {"condition", "0"}}}, {"value", false}}},
+            {"third", {{"user", {{"name", "format"}, {"condition", "2"}}}, {"value", true}}},
+        }},
+        {"script", R"JS(
+export var scriptProperties = createScriptProperties()
+    .addCheckbox({name: 'first', value: false})
+    .addCheckbox({name: 'third', value: true}).finish();
+export function update(value) {
+    if (scriptProperties.first) return 'first ' + typeof scriptProperties.first;
+    if (scriptProperties.third) return 'third ' + typeof scriptProperties.third;
+    return 'neither ' + typeof scriptProperties.first;
+}
+)JS"},
+    });
+    runtime->Tick(1.0 / 60.0);
+    EXPECT_EQ(text->getString(), "third boolean");
+    runtime->ApplyProjectPropertyOverride({{"format", RuntimeScalarValue::String("0")}});
+    runtime->Tick(1.0 / 60.0);
+    EXPECT_EQ(text->getString(), "first boolean");
+    runtime->ApplyProjectPropertyOverride({{"format", RuntimeScalarValue::String("1")}});
+    runtime->Tick(1.0 / 60.0);
+    EXPECT_EQ(text->getString(), "neither boolean");
+    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
+}
+
 // Two interlocking triangle buttons share a bounding box; the cursor must only
 // hit the one whose texels are opaque under it.
 TEST(ScriptRuntimeCompat, CursorHitTestRespectsCoverageMask) {
