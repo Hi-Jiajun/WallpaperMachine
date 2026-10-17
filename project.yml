@@ -10,7 +10,10 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     MACOSX_DEPLOYMENT_TARGET: "15.0"
-    CODE_SIGN_IDENTITY: "-"
+    # A stable local identity keeps the keychain access of a rebuilt app valid, so the
+    # Steam Community session is not asked for again after every build. Created with
+    # `outputs/build/make-signing-cert.sh`; upstream's ad-hoc "-" is unchanged.
+    CODE_SIGN_IDENTITY: "WallpaperMachine Dev"
     CODE_SIGN_STYLE: Manual
     ENABLE_HARDENED_RUNTIME: NO
     DEVELOPMENT_TEAM: ""
