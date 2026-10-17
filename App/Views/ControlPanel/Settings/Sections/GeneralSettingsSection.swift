@@ -1,11 +1,12 @@
 import SwiftUI
 
 /// Settings › General: the interface language, what happens at login and after applying a
-/// wallpaper, and the way back to the welcome guide.
+/// wallpaper, the way back to the welcome guide, and resetting every setting.
 struct GeneralSettingsSection: View {
   private static let interface = SettingsItem.Group("interface", title: "Interface")
   private static let startup = SettingsItem.Group("startup", title: "Startup")
   private static let help = SettingsItem.Group("help", title: "Help")
+  private static let reset = SettingsItem.Group("reset", title: "Reset")
 
   static let language = SettingsItem(
     id: "general.language", section: .general, group: interface, title: "Language",
@@ -27,7 +28,13 @@ struct GeneralSettingsSection: View {
     note: "Shown on first launch: language and appearance, Steam sign-in, preferences and tips.",
     keywords: ["Show again"])
 
-  static let items = [language, launchAtLogin, hideAfterApplying, welcomeGuide]
+  static let resetAll = SettingsItem(
+    id: "general.reset-all", section: .general, group: reset, title: "Reset all settings",
+    note:
+      "Returns every setting to its default. Your library, playlists, collections, displays and sign-ins are kept.",
+    keywords: ["Reset…", "Restore defaults"])
+
+  static let items = [language, launchAtLogin, hideAfterApplying, welcomeGuide, resetAll]
 
   @Environment(PanelController.self) private var controller
 
@@ -59,6 +66,18 @@ struct GeneralSettingsSection: View {
       SettingsGroup(Self.help, in: .general) {
         SettingsRow(Self.welcomeGuide) {
           SettingsActionButton("Show again") { controller.shell.isWelcomeRequested = true }
+        }
+      }
+      SettingsGroup(Self.reset, in: .general) {
+        SettingsRow(Self.resetAll) {
+          SettingsActionButton(
+            "Reset…",
+            isDisabled: controller.settings.isLocked("resetAllSettings", whileRunning: true)
+          ) {
+            controller.settings.perform("resetAllSettings") {
+              try await controller.resetAllSettings()
+            }
+          }
         }
       }
     }

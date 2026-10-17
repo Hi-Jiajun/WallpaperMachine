@@ -9,6 +9,17 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-15 — Text through effects is composed over the scene behind it, and padded only while an effect is visible
+
+Worktree step T9 and T5 of the text parity work, checked in an isolated worktree with the renderer test binaries; the app gate (`scripts/test.py`) and `scripts/check_renderer.py` were not run, and the spec's generated-picture case for the composite is covered by drawn `metal_scene_draw_smoke` cases instead.
+
+- `ctest` over every renderer test binary built from the worktree — all 1476 that ran passed; 2 are disabled and 8 skipped for lack of local corpus, video or project inputs
+- `text_object_runtime_test` 145, `metal_scene_draw_smoke` 106 (2 skipped: the local-project tests), `scene_schema_tests` 137, `script_runtime_compat_test` 163, `layer_texture_reference_test` 37, `project_property_preview_test` 23, `mouse_input_test` 22, `static_subgraph_cache_test` 26, `metal_backend_test` 36 — all passed, on both renderers where a test draws
+- probetext4 rendered with `render_ours.py` against Wallpaper Engine's frames: stems at alpha 1, 0.65 and 0.5 are 1.000, 0.651, 0.498 plain and 1.000, 0.275, 0.125 through `opacity`, equal to Wallpaper Engine's
+- a scene of three text layers whose shipped `opacity` effect a script switches on from 0.5 s to 1 s, drawn natively at 1920x1080 with the shipped assets (`LocalProjectsDrawTheSamePictureOnBothRenderers`, native only): ink at frames 10, 45 and 90 with the same box, where frames 10 and 90 had none before the passthrough took a white `g_Color4`
+- the new draw cases fail without their fix: the scripted, add and shipped-effects cases without the white `g_Color4`, the add case without `SetIdleFinalBlend`; the no-pass case fails without `EffectCountsForText` and the skip of effects with no pass
+- gaps: whether an effect that leaves alpha alone composes at the alpha cubed is open (the VHS frame of 3465215190 reads the alpha squared) and the capture that settles it was not taken; no Wallpaper Engine frame of HDR text through an effect, nor of mode 31 text with an effect, was compared
+
 ## 2026-10-15 — 2D scene resolution: Display resolution by default
 
 Headless only: no desktop, no audio, no app launch, no Release build.

@@ -186,8 +186,16 @@ the rest opens in a popover from the ⓘ beside the title.
   filters and app rules keep to their own rows
   ([performance](performance.md#low-battery-low-power-mode-heat-and-focus)).
 - **General** starts with the [Language](#language) picker (Interface), then Startup
-  (**Launch at login** and **Hide window after applying a wallpaper**) and Help (the
-  [welcome guide](first-run.md), **Show again**).
+  (**Launch at login** and **Hide window after applying a wallpaper**), Help (the
+  [welcome guide](first-run.md), **Show again**) and Reset (**Reset all settings**,
+  **Reset…**). Reset asks first; once confirmed, every setting the Settings pages
+  offer returns to a fresh install's default: language, appearance, shortcuts, launch
+  at login, desktop and lock-screen switches, playback, power and app rules, the
+  engine's performance and scene choices, logging, web inspection, Steam update checks
+  and download count, and performance data. Content is kept: the library, favorites,
+  playlists, collections, presets, displays and their wallpapers, the storage location
+  and sign-ins, as is macOS's own "Click wallpaper to reveal desktop". A setting that
+  fails to reset does not stop the others; the first failure goes to the banner.
   **Launch at login** is disabled with its reason while the app is outside
   Applications. When the user has switched WallpaperMachine off in System Settings →
   General → Login Items, macOS keeps it off however often the app registers it
