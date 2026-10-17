@@ -305,7 +305,7 @@ they do not establish.
    tree through it. Behaviour of an unshown window that only macOS 27 shows
    (toolbar overflow, sidebar arrow keys) skips earlier with
    `PanelTestSupport.skipBeforeMacOS27`, which leaves it unverified there.
-   `gh workflow run test.yml -f ref=<branch>` runs the gate on that runner
+   `gh workflow run test.yml --ref <branch>` runs the gate on that runner
    ([release.md](../release.md#test-testyml)).
 6. **Record the result** when the change calls for a log entry (a feature or
    cross-domain change, a changed documented behavior, or on request — see

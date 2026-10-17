@@ -5,6 +5,12 @@
 # A run may narrow the native tests with `only` and skip the Rust and renderer checks,
 # so only an unnarrowed run says the gate passes.
 #
+# A run tests the branch or tag it is started from ("Use workflow from", or
+# `gh workflow run test.yml --ref <branch>`), never a ref named in an input: its jobs
+# save caches under the ref they run from, and caches saved on main are restored by
+# every release. Started from main with another ref's code, a run would let that code
+# write the caches a release builds from.
+#
 # Three jobs on three runners, because one after another they took over 40 minutes
 # for 1.5 (Rust 5, renderer 9 to 13, native 18 to 22). Each builds the renderer and the
 # bridge from the shared caches, which costs a few minutes per job and leaves the gate
@@ -14,11 +20,6 @@ name: Test
 on:
   workflow_dispatch:
     inputs:
-      ref:
-        description: "Commit, branch or tag to test."
-        required: true
-        default: main
-        type: string
       only:
         description: "Optional space-separated test classes or Class/method to run alone."
         required: false
@@ -40,8 +41,6 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.ref }}
 
       - uses: ./.github/actions/prepare-build
         with:
@@ -74,8 +73,6 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.ref }}
 
       - uses: ./.github/actions/prepare-build
 
@@ -114,7 +111,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref }}
           # scripts/tests read the history the way the release scripts do.
           fetch-depth: 0
 

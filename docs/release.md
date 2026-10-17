@@ -458,11 +458,15 @@ use the release workflow for the shared lock. The script's docstring and
 ### Test (`test.yml`)
 
 The test gate on hosted runners, run by hand from **Actions -> Test -> Run
-workflow** for any `ref` (default `main`). It does not tag, build the Release app or
-publish, and no release waits for it ([why](#build-buildyml)). Its three jobs run in
-parallel on `macos-26` runners, each after `prepare-build` and `python3 scripts/build.py
---renderer-only` for the renderer and the generated bridge, so a run takes about as long
-as the native tests (about 25 minutes for 1.5) rather than the sum (over 40):
+workflow** on the branch or tag chosen under "Use workflow from" (`--ref` below). It
+does not tag, build the Release app or publish, and no release waits for it
+([why](#build-buildyml)). It has no input naming another ref to test: its jobs save
+caches under the ref the run starts from, and a run started from `main` that built
+another ref's code would let that code write the caches every release restores. Its
+three jobs run in parallel on `macos-26` runners, each after `prepare-build` and
+`python3 scripts/build.py --renderer-only` for the renderer and the generated bridge,
+so a run takes about as long as the native tests (about 25 minutes for 1.5) rather
+than the sum (over 40):
 
 - `rust` runs `python3 scripts/check_rust.py`;
 - `renderer` runs `python3 scripts/check_renderer.py --allow-missing-gpu
@@ -477,8 +481,8 @@ as the native tests (about 25 minutes for 1.5) rather than the sum (over 40):
   [Parallel execution](testing/README.md#parallel-execution) for why.
 
 ```sh
-gh workflow run test.yml --ref main -f ref=main
-gh workflow run test.yml --ref main -f ref=main -f skip_renderer=true -f only="SettingsWindowRenderTests WorkshopBrowserRenderTests"
+gh workflow run test.yml --ref main
+gh workflow run test.yml --ref <branch> -f skip_renderer=true -f only="SettingsWindowRenderTests WorkshopBrowserRenderTests"
 ```
 
 `only` passes each space-separated name to `scripts/test.py --only`, and
@@ -519,13 +523,15 @@ as they were.
 Code scanning on every push to `main`, every pull request into it, weekly, and on
 demand. It replaces GitHub's default setup, which can only autobuild Swift and
 fails at the extension's link because the renderer library and the Homebrew
-libraries do not exist yet. Actions, JavaScript/TypeScript, Python and Rust are
-analyzed without a build on Linux. Swift runs on `macos-26`: `prepare-build` and
+libraries do not exist yet. Actions, Python and Rust are analyzed without a build
+on Linux. Swift runs on `macos-26`: `prepare-build` and
 `python3 scripts/build.py --renderer-only` first, untraced, then CodeQL traces
 `scripts/build.py --swift-only` with the `--xcode-setting` overrides CodeQL's own
 Swift autobuild uses (no signing, no compilation cache, no integrated driver), so
 the extractor sees every Swift compile. C/C++ (only vendored third-party code is
-visible to it) and Ruby (only the FFmpeg formula) are deliberately not analyzed.
+visible to it), Ruby (only the FFmpeg formula) and JavaScript/TypeScript (none since
+the SwiftUI control panel; CodeQL fails a language with no code) are deliberately not
+analyzed.
 Default setup must stay off under **Settings -> Code security -> CodeQL
 analysis**; while it is on, GitHub rejects this workflow's results.
 
