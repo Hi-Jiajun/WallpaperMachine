@@ -218,14 +218,14 @@ struct DisplaysSettingsSection: View {
     id: "displays.solar-longitude", section: .displays, group: solar, title: "Longitude")
   static let solarSource = SettingsItem(
     id: "displays.solar-source", section: .displays, group: solar, title: "Time source",
-    keywords: ["Coordinates", "Fixed times"])
+    keywords: ["Coordinates", "Fixed times", "Automatic"])
   static let solarSunrise = SettingsItem(
     id: "displays.solar-sunrise", section: .displays, group: solar, title: "Sunrise time")
   static let solarSunset = SettingsItem(
     id: "displays.solar-sunset", section: .displays, group: solar, title: "Sunset time")
   static let solarActions = SettingsItem(
     id: "displays.solar-actions", section: .displays, group: solar, title: "Save location",
-    keywords: ["Clear location", "Save times"])
+    keywords: ["Clear location", "Save times", "Use current location"])
 
   /// The page's order.
   static let items: [SettingsItem] = [

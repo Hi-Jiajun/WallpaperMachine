@@ -135,4 +135,28 @@ final class WallpaperAutomationPlannerTests: XCTestCase {
             value, now: day, dark: false, solar: solar, calendar: calendar)
         XCTAssertEqual(result.current?.date, expected)
     }
+
+    func testAutomaticSourcePlansFromTheTrackedLocation() throws {
+        let calendar = calendar("Asia/Shanghai")
+        var value = DisplayWallpaperAutomation()
+        value.mode = .schedule
+        value.rules = [.init(event: .sunrise, target: target("morning"))]
+        let location = WallpaperSolarLocation(latitude: 30.08, longitude: 103.87)
+        let solar = WallpaperSolarSettings(
+            source: .automatic, location: location,
+            fixedSunriseMinute: 1, fixedSunsetMinute: 23 * 60)
+        let day = date(2026, 10, 18, 12, in: calendar)
+        let expected = try XCTUnwrap(
+            WallpaperSolarTimes.event(.sunrise, on: day, location: location, calendar: calendar))
+        let result = WallpaperAutomationPlanner.resolve(
+            value, now: day, dark: false, solar: solar, calendar: calendar)
+        XCTAssertEqual(result.current?.date, expected)
+
+        // Automatic without a fix yet has no event to plan with, like coordinates.
+        let missing = WallpaperAutomationPlanner.resolve(
+            value, now: day, dark: false,
+            solar: WallpaperSolarSettings(source: .automatic, location: nil),
+            calendar: calendar)
+        XCTAssertNil(missing.current)
+    }
 }

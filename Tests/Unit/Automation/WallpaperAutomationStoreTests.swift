@@ -89,6 +89,16 @@ final class WallpaperAutomationStoreTests: XCTestCase {
         XCTAssertNil(loaded.loadError)
     }
 
+    func testAutomaticSourceKeepsTheLocationItTracks() throws {
+        let store = WallpaperAutomationStore(defaults: defaults)
+        let location = WallpaperSolarLocation(latitude: 30.0827, longitude: 103.874)
+        try store.setSolar(.init(source: .automatic, location: location))
+        let loaded = WallpaperAutomationStore(defaults: defaults)
+        XCTAssertEqual(loaded.solar.source, .automatic)
+        XCTAssertEqual(loaded.solar.location, location)
+        XCTAssertNil(loaded.loadError)
+    }
+
     func testAFixedTimeOutsideTheDayIsRefused() {
         let store = WallpaperAutomationStore(defaults: defaults)
         XCTAssertThrowsError(try store.setSolar(.init(

@@ -550,6 +550,23 @@ final class DisplaysSettingsModel {
   var solarSunriseMinute: Int { controller.solarSettings.fixedSunriseMinute }
   var solarSunsetMinute: Int { controller.solarSettings.fixedSunsetMinute }
 
+  /// What the automatic source has to show: the position it keeps up to date, or that it
+  /// has none yet.
+  var solarAutomaticStatus: String {
+    guard SolarLocationTracker.shared.servicesEnabled else {
+      return String(localized: "Location Services is turned off on this Mac. Turn it on in System Settings → Privacy & Security → Location Services, then choose Automatic again.")
+    }
+    guard let location = controller.solarSettings.location else {
+      return String(localized: "Location access has not been granted yet. Allow it in System Settings → Privacy & Security → Location Services.")
+    }
+    return String(
+      format: String(localized: "Using the current location: %.4f, %.4f"),
+      location.latitude, location.longitude)
+  }
+
+  /// True once the user has refused location access, where asking again would do nothing.
+  var solarLocationDenied: Bool { SolarLocationTracker.shared.isDenied }
+
   func setSolarSource(_ source: WallpaperSolarSource) async throws {
     try await controller.setSolarSource(source)
   }
@@ -560,6 +577,16 @@ final class DisplaysSettingsModel {
     try await controller.setSolarFixedTimes(
       sunriseMinute: sunrise ?? current.fixedSunriseMinute,
       sunsetMinute: sunset ?? current.fixedSunsetMinute)
+  }
+
+  /// Switches to the automatic source and asks for location access.
+  func startAutomaticLocation() async throws {
+    try await controller.setSolarSource(.automatic)
+    if SolarLocationTracker.shared.isDenied {
+      SolarLocationTracker.shared.openSettings()
+    } else {
+      SolarLocationTracker.shared.requestAuthorization()
+    }
   }
 
   /// What was typed in the coordinate fields; nil follows the saved location.

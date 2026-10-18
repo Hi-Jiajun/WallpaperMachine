@@ -337,6 +337,7 @@ struct DisplaysSolarGroup: View {
         ) {
           Text("Coordinates").tag(WallpaperSolarSource.coordinates)
           Text("Fixed times").tag(WallpaperSolarSource.fixed)
+          Text("Automatic").tag(WallpaperSolarSource.automatic)
         }
         .labelsHidden()
         .pickerStyle(.menu)
@@ -390,6 +391,22 @@ struct DisplaysSolarGroup: View {
                   try await model.setSolarFixedTimes(sunrise: nil, sunset: minute)
                 }
               }))
+        }
+      case .automatic:
+        DisplaysRow(item: DisplaysSettingsSection.solarActions, note: model.solarAutomaticStatus) {
+          if model.solarLocationDenied {
+            Button("Open Location Settings") {
+              SolarLocationTracker.shared.openSettings()
+            }
+            .disabled(busy)
+          } else {
+            Button("Use current location") {
+              controller.launch(PanelActionCoordinator.key("automationSolarLocate")) {
+                try await model.startAutomaticLocation()
+              }
+            }
+            .disabled(busy)
+          }
         }
       }
       DisplaysNote(text: L("Solar times are approximate. Near the poles, a day may have no sunrise or sunset."))

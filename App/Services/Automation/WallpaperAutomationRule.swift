@@ -63,14 +63,14 @@ struct WallpaperSolarLocation: Codable, Equatable, Sendable {
     }
 }
 
-/// Where the sun rules take their times from: coordinates the user typed, or clock times the
-/// user fixed.
+/// Where the sun rules take their times from: coordinates the user typed, clock times the
+/// user fixed, or coordinates the system keeps up to date.
 enum WallpaperSolarSource: String, Codable, CaseIterable, Sendable {
-    case coordinates, fixed
+    case coordinates, fixed, automatic
 }
 
-/// The Sunrise and sunset settings. `location` is what the coordinates source plans with; the
-/// fixed source ignores it and uses the two clock times instead.
+/// The Sunrise and sunset settings. `location` is what the coordinates and automatic sources
+/// plan with; the fixed source ignores it and uses the two clock times instead.
 struct WallpaperSolarSettings: Codable, Equatable, Sendable {
     var source: WallpaperSolarSource = .coordinates
     var location: WallpaperSolarLocation?

@@ -44,7 +44,7 @@ applied afterwards; it counts as handled, like a manual choice. Saving changed r
 and may apply it immediately. A failed event is reported in the display's section
 and waits for **Retry automatic change** or a later event.
 
-**Sunrise and sunset**, at the bottom of Displays, offers two time sources. With
+**Sunrise and sunset**, at the bottom of Displays, offers three time sources. With
 **Coordinates** it accepts manual latitude and longitude: north/east positive,
 south/west negative. Calculation is local, requires no location permission or
 network request, and follows the approximate
@@ -55,10 +55,16 @@ With **Fixed times** it uses the two clock times entered there instead of
 calculating anything, so no coordinates are needed. Rules keep their offsets, so a
 rule at sunset − 15 minutes fires 15 minutes before the fixed sunset time.
 
+With **Automatic** the app asks for location access and keeps the Mac's approximate
+position up to date, then calculates like **Coordinates**. Location updates stop
+when another source is selected, and the last position keeps planning while a new
+fix is unavailable. If Location Services is off or access was refused, the panel
+says so and links to System Settings instead of asking again.
+
 Weekdays refer to the solar event's civil day before applying the offset; offsets
 may cross midnight. Days without a sunrise/sunset near the poles are skipped. A
-coordinate-based solar rule without saved coordinates has no event until a
-location is supplied.
+coordinate-based or automatic solar rule without a location has no event until one
+is supplied.
 
 ## Focus selection and restoration
 
