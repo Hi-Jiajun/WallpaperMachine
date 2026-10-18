@@ -216,9 +216,16 @@ struct DisplaysSettingsSection: View {
     ])
   static let solarLongitude = SettingsItem(
     id: "displays.solar-longitude", section: .displays, group: solar, title: "Longitude")
+  static let solarSource = SettingsItem(
+    id: "displays.solar-source", section: .displays, group: solar, title: "Time source",
+    keywords: ["Coordinates", "Fixed times"])
+  static let solarSunrise = SettingsItem(
+    id: "displays.solar-sunrise", section: .displays, group: solar, title: "Sunrise time")
+  static let solarSunset = SettingsItem(
+    id: "displays.solar-sunset", section: .displays, group: solar, title: "Sunset time")
   static let solarActions = SettingsItem(
     id: "displays.solar-actions", section: .displays, group: solar, title: "Save location",
-    keywords: ["Clear location"])
+    keywords: ["Clear location", "Save times"])
 
   /// The page's order.
   static let items: [SettingsItem] = [
@@ -230,7 +237,8 @@ struct DisplaysSettingsSection: View {
     automation, automationMode, automationLight, automationDark, automationSpaces,
     automationSchedule, automationFooter,
     playback, scaling, scaleFactor, frameRate, mute, volume,
-    layoutsSave, plansList, solarIntro, solarLongitude, solarActions,
+    layoutsSave, plansList, solarIntro, solarSource, solarSunrise, solarSunset,
+    solarLongitude, solarActions,
   ]
 
   @Environment(PanelController.self) private var controller

@@ -44,14 +44,21 @@ applied afterwards; it counts as handled, like a manual choice. Saving changed r
 and may apply it immediately. A failed event is reported in the display's section
 and waits for **Retry automatic change** or a later event.
 
-**Sunrise and sunset**, at the bottom of Displays, accepts manual latitude and
-longitude: north/east positive, south/west negative. Calculation is local, requires
-no location permission or network request, and follows the approximate
+**Sunrise and sunset**, at the bottom of Displays, offers two time sources. With
+**Coordinates** it accepts manual latitude and longitude: north/east positive,
+south/west negative. Calculation is local, requires no location permission or
+network request, and follows the approximate
 [NOAA solar equations](https://www.gml.noaa.gov/grad/solcalc/solareqns.PDF).
-It uses the Mac's time zone even when coordinates describe another region. Weekdays
-refer to the solar event's civil day before applying the offset; offsets may cross
-midnight. Days without a sunrise/sunset near the poles are skipped. A solar rule
-without saved coordinates has no event until a location is supplied.
+It uses the Mac's time zone even when coordinates describe another region.
+
+With **Fixed times** it uses the two clock times entered there instead of
+calculating anything, so no coordinates are needed. Rules keep their offsets, so a
+rule at sunset − 15 minutes fires 15 minutes before the fixed sunset time.
+
+Weekdays refer to the solar event's civil day before applying the offset; offsets
+may cross midnight. Days without a sunrise/sunset near the poles are skipped. A
+coordinate-based solar rule without saved coordinates has no event until a
+location is supplied.
 
 ## Focus selection and restoration
 

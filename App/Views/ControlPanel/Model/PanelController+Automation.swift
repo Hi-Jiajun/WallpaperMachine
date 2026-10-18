@@ -41,6 +41,12 @@ extension PanelController {
     return automations.location
   }
 
+  /// Where the sun rules take their times from, and the fixed times when that is the source.
+  var solarSettings: WallpaperSolarSettings {
+    _ = revisions.automationSettings
+    return automations.solar
+  }
+
   /// Why the saved automatic rules could not all be read, when they could not.
   var automationLoadError: String? {
     _ = revisions.automationSettings
@@ -155,6 +161,24 @@ extension PanelController {
   /// `automationClearLocation`.
   func clearSolarLocation() async throws {
     try await run(.immediate) { try automations.setLocation(nil) }
+  }
+
+  /// `automationSolarSource`: coordinates, fixed clock times, or the system's own position.
+  func setSolarSource(_ source: WallpaperSolarSource) async throws {
+    var value = automations.solar
+    value.source = source
+    try await run(.immediate) { try automations.setSolar(value) }
+  }
+
+  /// `automationSolarFixedTimes`: the clock times the fixed source switches at.
+  func setSolarFixedTimes(sunriseMinute: Int, sunsetMinute: Int) async throws {
+    guard (0..<1440).contains(sunriseMinute), (0..<1440).contains(sunsetMinute) else {
+      throw InvalidControlValue()
+    }
+    var value = automations.solar
+    value.fixedSunriseMinute = sunriseMinute
+    value.fixedSunsetMinute = sunsetMinute
+    try await run(.immediate) { try automations.setSolar(value) }
   }
 
   /// `automationRetry`: tries again the change that failed.

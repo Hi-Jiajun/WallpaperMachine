@@ -7305,6 +7305,21 @@
     },
     "SteamCMD is Valve’s free download tool. Install it into this app’s own folder or locate a copy you already have; the sign-in follows on its own." : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "SteamCMDはValveの無料ダウンロードツールです。このアプリ専用のフォルダにインストールするか、既存のコピーを指定してください。完了すると自動的にサインインに進みます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "SteamCMD 是 Valve 的免费下载工具。可以安装到应用自己的文件夹，也可以选择已有副本，完成后会自动继续登录。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "SteamCMD 是 Valve 的免費下載工具。你可以安裝到此 App 自己的資料夾，或指定現有副本；完成後會自動接著登入。"}}}
+    },
+    "Coordinates" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Coordinates"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "座標"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "经纬度"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "經緯度"}}}
+    },
+    "Fixed times" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Fixed times"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "固定時刻"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "固定时间"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "固定時間"}}}
+    },
+    "Time source" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Time source"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "時刻の取得元"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "时间来源"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "時間來源"}}}
+    },
+    "Sunrise time" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Sunrise time"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "日の出時刻"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "日出时间"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "日出時間"}}}
+    },
+    "Sunset time" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Sunset time"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "日の入り時刻"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "日落时间"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "日落時間"}}}
     }
   },
   "version" : "1.0"

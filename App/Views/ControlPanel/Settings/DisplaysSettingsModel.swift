@@ -545,6 +545,23 @@ final class DisplaysSettingsModel {
 
   // MARK: Sunrise and sunset
 
+  /// Where the sun rules take their times from.
+  var solarSource: WallpaperSolarSource { controller.solarSettings.source }
+  var solarSunriseMinute: Int { controller.solarSettings.fixedSunriseMinute }
+  var solarSunsetMinute: Int { controller.solarSettings.fixedSunsetMinute }
+
+  func setSolarSource(_ source: WallpaperSolarSource) async throws {
+    try await controller.setSolarSource(source)
+  }
+
+  /// Updates one of the two fixed times, keeping the other as it is.
+  func setSolarFixedTimes(sunrise: Int? = nil, sunset: Int? = nil) async throws {
+    let current = controller.solarSettings
+    try await controller.setSolarFixedTimes(
+      sunriseMinute: sunrise ?? current.fixedSunriseMinute,
+      sunsetMinute: sunset ?? current.fixedSunsetMinute)
+  }
+
   /// What was typed in the coordinate fields; nil follows the saved location.
   var latitudeText: String?
   var longitudeText: String?
