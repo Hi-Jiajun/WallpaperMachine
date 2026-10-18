@@ -7,7 +7,7 @@ of the Settings → Storage tools; the Settings sections are listed in
 **Settings → Storage → Backup** exports a versioned `.wmbackup` directory package
 containing renderer/wallpaper settings, allowlisted preferences (collections,
 plans, presets, favorites, image placements, display layouts, automatic-selection
-rules and solar coordinates included), and retained
+rules and sunrise/sunset settings included), and retained
 [user-selected files](user-files.md). Handled automatic
 events and temporary Focus recovery state remain local and are cleared on
 successful restore; rollback restores their original values. **Include the
@@ -28,7 +28,9 @@ although the panel does not read them, so backups made by earlier versions resto
 Choose a backup to preview its contents, conflicts and missing-resource warnings.
 **Keep what is on this Mac** preserves conflicting per-display playlists, their
 deadlines and automatic-selection configurations as whole records; independent
-records can be imported. **Replace with the backup** replaces conflicts. Confirmed
+records can be imported. Sunrise/sunset settings are also kept or replaced as one
+record, including when a backup from an older version contains only coordinates.
+**Replace with the backup** replaces conflicts. Confirmed
 restoration is staged for the next launch, before stores or the renderer read
 settings; nothing changes in the running session, and the app does not quit or
 restart automatically.
