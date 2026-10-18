@@ -1,4 +1,4 @@
 [toolchain]
 channel = "nightly"
-targets = ["x86_64-apple-darwin"]
+targets = ["aarch64-apple-darwin"]
 components = ["rust-src"]

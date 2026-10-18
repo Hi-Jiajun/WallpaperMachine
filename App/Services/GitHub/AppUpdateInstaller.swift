@@ -245,9 +245,55 @@ struct AppUpdateInstaller: AppUpdateInstalling, @unchecked Sendable {
             throw AppUpdateIssue(code: .verification, detail: String(localized: "The update couldn't be verified, so it wasn't installed."))
         }
         let executable = app.appendingPathComponent("Contents/MacOS/WallpaperMachine")
-        guard FileManager.default.isReadableFile(atPath: executable.path) else {
+        guard FileManager.default.isReadableFile(atPath: executable.path),
+              executableHasHostSlice(executable) else {
             throw AppUpdateIssue(code: .verification, detail: String(localized: "The update couldn't be verified, so it wasn't installed."))
         }
+    }
+
+    /// Whether the executable has a slice this Mac can run.
+    ///
+    /// Releases are read from a repository that also publishes builds for another
+    /// architecture, and a downloaded bundle cannot be launched to find out. Replacing an
+    /// Intel install with an arm64 build would leave an app that will not start.
+    static func executableHasHostSlice(_ url: URL) -> Bool {
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe),
+              data.count >= 8 else { return false }
+        #if arch(arm64)
+        let host: UInt32 = 0x0100_000C
+        #else
+        let host: UInt32 = 0x0100_0007
+        #endif
+        let magic = bigEndian32(data, 0)
+        switch magic {
+        case 0xCAFEBABE, 0xCAFEBABF:
+            let count = Int(bigEndian32(data, 4))
+            guard count > 0, count < 64 else { return false }
+            let stride = magic == 0xCAFEBABF ? 32 : 20
+            for index in 0..<count where bigEndian32(data, 8 + index * stride) == host {
+                return true
+            }
+            return false
+        case 0xCFFAEDFE, 0xCEFAEDFE:
+            return littleEndian32(data, 4) == host
+        default:
+            return false
+        }
+    }
+
+    private static func bigEndian32(_ data: Data, _ offset: Int) -> UInt32 {
+        guard offset >= 0, offset + 4 <= data.count else { return 0 }
+        let bytes = data[offset..<offset + 4]
+        return bytes.reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
+    }
+
+    private static func littleEndian32(_ data: Data, _ offset: Int) -> UInt32 {
+        guard offset >= 0, offset + 4 <= data.count else { return 0 }
+        let bytes = data[offset..<offset + 4]
+        return UInt32(bytes[bytes.startIndex])
+            | UInt32(bytes[bytes.startIndex + 1]) << 8
+            | UInt32(bytes[bytes.startIndex + 2]) << 16
+            | UInt32(bytes[bytes.startIndex + 3]) << 24
     }
 }
 

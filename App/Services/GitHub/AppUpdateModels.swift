@@ -1,7 +1,9 @@
 import Foundation
 
 enum AppUpdateConfiguration {
-    static let repository = "WallpaperMachine/WallpaperMachine"
+    /// This fork publishes its own images; pointing at upstream would offer an arm64 build
+    /// to an Intel install.
+    static let repository = "Hi-Jiajun/WallpaperMachine"
     static let bundleIdentifier = "app.wallpapermachine"
     static let productName = "WallpaperMachine"
     static let applicationName = productName + ".app"
@@ -310,7 +312,6 @@ enum GitHubReleaseParser {
         }
         return candidates.first { $0.name.lowercased() == expected }
             ?? candidates.first { $0.name.lowercased().contains(AppUpdateConfiguration.architecture) }
-            ?? candidates.first
     }
 
     private struct Payload: Decodable {
