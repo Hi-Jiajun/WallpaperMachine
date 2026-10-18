@@ -57,6 +57,7 @@ struct ControlPanelView: View {
     let controller = PanelController(
       store: store, navigation: navigation, workshop: workshop, pixiv: pixiv, updater: updater,
       imports: imports, defaults: defaults, appLanguage: appLanguage, automations: .shared,
+      solarLocationTracker: .shared,
       displayLayouts: .shared, spaces: .shared)
     // The panel's strings follow the language of the store the controller was built over.
     PanelLocale.shared.bind(to: controller.appLanguage)

@@ -163,11 +163,25 @@ extension PanelController {
     try await run(.immediate) { try automations.setLocation(nil) }
   }
 
-  /// `automationSolarSource`: coordinates the user typed, or fixed clock times.
+  /// `automationSolarSource`: a deliberate source choice may ask for location access. Restoring
+  /// saved settings does not use this action and therefore never prompts.
   func setSolarSource(_ source: WallpaperSolarSource) async throws {
     var value = automations.solar
     value.source = source
-    try await run(.immediate) { try automations.setSolar(value) }
+    try await run(.immediate) {
+      try automations.setSolar(value)
+      if source == .automatic { solarLocationTracker.requestAuthorization() }
+    }
+  }
+
+  /// `automationSolarLocate`: retries an undecided location request from the automatic source.
+  func requestSolarLocation() async throws {
+    try await run(.immediate) { solarLocationTracker.requestAuthorization() }
+  }
+
+  /// `automationSolarSettings`: opens the system pane after the user denied access.
+  func showSolarLocationSettings() async throws {
+    try await run(.immediate) { solarLocationTracker.openSettings() }
   }
 
   /// `automationSolarFixedTimes`: the clock times the fixed source switches at.

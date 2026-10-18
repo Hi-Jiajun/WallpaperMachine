@@ -55,11 +55,13 @@ With **Fixed times** it uses the two clock times entered there instead of
 calculating anything, so no coordinates are needed. Rules keep their offsets, so a
 rule at sunset − 15 minutes fires 15 minutes before the fixed sunset time.
 
-With **Automatic** the app asks for location access and keeps the Mac's approximate
+Choosing **Automatic** asks for location access and keeps the Mac's approximate
 position up to date, then calculates like **Coordinates**. Location updates stop
 when another source is selected, and the last position keeps planning while a new
-fix is unavailable. If Location Services is off or access was refused, the panel
-says so and links to System Settings instead of asking again.
+fix is unavailable. Relaunching resumes already-authorized updates without asking
+for permission. If Location Services is off or access was refused, the panel says
+so and links to System Settings; allowing access there resumes updates while
+**Automatic** remains selected.
 
 Weekdays refer to the solar event's civil day before applying the offset; offsets
 may cross midnight. Days without a sunrise/sunset near the poles are skipped. A

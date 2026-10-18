@@ -7336,8 +7336,23 @@
     "Open Location Settings" : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Open Location Settings"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "位置情報設定を開く"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "打开定位设置"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "開啟定位設定"}}}
     },
-    "Location Services is turned off on this Mac. Turn it on in System Settings → Privacy & Security → Location Services, then choose Automatic again." : {
-      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Location Services is turned off on this Mac. Turn it on in System Settings → Privacy & Security → Location Services, then choose Automatic again."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このMacでは位置情報サービスがオフです。システム設定 → プライバシーとセキュリティ → 位置情報サービスでオンにしてから、もう一度「自動」を選んでください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "这台 Mac 的定位服务已关闭。请在「系统设置 → 隐私与安全性 → 定位服务」中打开，然后重新选择「自动定位」。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "這台 Mac 的定位服務已關閉。請在「系統設定 → 隱私權與安全性 → 定位服務」中開啟，然後重新選擇「自動定位」。"}}}
+    "Location Services is turned off on this Mac. Turn it on in System Settings → Privacy & Security → Location Services." : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Location Services is turned off on this Mac. Turn it on in System Settings → Privacy & Security → Location Services."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このMacでは位置情報サービスがオフです。システム設定 → プライバシーとセキュリティ → 位置情報サービスでオンにしてください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "这台 Mac 的定位服务已关闭。请在「系统设置 → 隐私与安全性 → 定位服务」中打开。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "這台 Mac 的定位服務已關閉。請在「系統設定 → 隱私權與安全性 → 定位服務」中開啟。"}}}
+    },
+    "Allow location access to calculate sunrise and sunset for this Mac." : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Allow location access to calculate sunrise and sunset for this Mac."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このMacの日の出と日の入りを計算するために、位置情報へのアクセスを許可してください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "请允许访问位置，以计算这台 Mac 所在地的日出和日落时间。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "請允許存取位置，以計算這台 Mac 所在地的日出和日落時間。"}}}
+    },
+    "Waiting for the current location…" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Waiting for the current location…"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "現在地を取得しています…"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "正在获取当前位置…"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "正在取得目前位置…"}}}
+    },
+    "NSLocationUsageDescription" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine uses this Mac’s approximate location to calculate sunrise and sunset for automatic wallpaper changes."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachineは、このMacのおおよその位置情報を使って日の出と日の入りを計算し、壁紙を自動的に切り替えます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 使用这台 Mac 的大致位置计算日出和日落时间，以自动切换壁纸。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 使用這台 Mac 的概略位置計算日出和日落時間，以自動切換桌布。"}}}
+    },
+    "NSAppleEventsUsageDescription" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine asks Music and Spotify what is playing, only while you have turned media integration on for a wallpaper."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachineは、壁紙のメディア連携をオンにしている間だけ、MusicとSpotifyで再生中の曲を確認します。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 仅在你为壁纸开启媒体集成时，向 Music 和 Spotify 查询正在播放的内容。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 只會在你為桌布開啟媒體整合時，向 Music 和 Spotify 查詢正在播放的內容。"}}}
+    },
+    "NSAudioCaptureUsageDescription" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine captures system audio only when you enable audio-reactive wallpapers."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachineは、音声に反応する壁紙を有効にしたときだけシステムオーディオをキャプチャします。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 仅在你启用音频响应壁纸时捕获系统音频。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 只會在你啟用音訊反應桌布時擷取系統音訊。"}}}
     }
   },
   "version" : "1.0"

@@ -41,7 +41,7 @@ dialogs and menus change after quit/reopen.
 | --- | --- | --- |
 | Control panel (`App/Views/ControlPanel/`) | `App/Resources/Localizable.xcstrings` | Follows the effective language live, without a relaunch ([below](#the-panels-live-language)) |
 | Native AppKit (menus, alerts, What's New, preview and sign-in windows) | `App/Resources/Localizable.xcstrings` | `String(localized:)`; the bundle resolves at launch from the `AppleLanguages` override above |
-| Info.plist usage text | `App/Resources/InfoPlist.xcstrings` | Excluded from the app target in `project.yml`, because `Info.plist` supplies `NSAudioCaptureUsageDescription` itself; kept complete in every shipped language, which the Python check requires |
+| Info.plist usage text | `App/Resources/InfoPlist.xcstrings` | Compiled into each language's `InfoPlist.strings`; macOS reads the localized permission explanation in the app's launch language, with `Info.plist` providing the English fallback |
 | Import file picker | `App/Resources/Localizable.xcstrings` plus macOS's native file-browser strings | Same-language sheet, or a short-lived helper whose launch language is the current effective app language |
 | Lock-screen extension (`Extension/`) | `Extension/Localizable.xcstrings` | `String(localized:)` against the extension's own bundle, which follows the macOS language list; literals reach it through `WallpaperRuntime.failure(_:)`, and text that is already final (the renderer's own errors) goes through `failure(detail:)` |
 | Language picker | `AppLanguage.supported` | Each language is listed under its own name, untranslated, so it can be found from any interface language |
@@ -166,6 +166,11 @@ developer's own language choice. Panel tests pin the language (the panel test
 fixtures use English, and render tests pass a store for the language they draw);
 a test that checks a native localized message compares it with
 `String(localized:)`, never with the English text.
+
+`AppPermissionLocalizationTests` reads the built app's `InfoPlist.strings` for
+every shipped language, without requesting permissions. It checks that location,
+Apple Events and audio-capture explanations are present, that translations do not
+fall back to English, and that the English resources agree with `Info.plist`.
 
 Add a translated entry for every missing key and delete the keys nothing
 extracts. The catalog mixes Xcode's expanded layout with one-line entries, so

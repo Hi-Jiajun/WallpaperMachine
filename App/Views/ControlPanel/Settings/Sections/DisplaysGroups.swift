@@ -396,7 +396,9 @@ struct DisplaysSolarGroup: View {
         DisplaysRow(item: DisplaysSettingsSection.solarActions, note: model.solarAutomaticStatus) {
           if model.solarLocationDenied {
             Button("Open Location Settings") {
-              SolarLocationTracker.shared.openSettings()
+              controller.launch(PanelActionCoordinator.key("automationSolarSettings")) {
+                try await controller.showSolarLocationSettings()
+              }
             }
             .disabled(busy)
           } else {

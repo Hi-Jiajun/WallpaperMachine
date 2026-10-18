@@ -595,6 +595,43 @@ final class DisplaysSettingsModelTests: SettingsBTestCase {
 
   // MARK: Sunrise and sunset
 
+  func testChoosingAutomaticRequestsLocationAndChangingSourceStopsIt() async throws {
+    let panel = try makeRulePanel()
+    defer { Task { await panel.shutdown() } }
+    let model = panel.controller.displaysSettings
+    XCTAssertEqual(panel.solarLocationManager.authorizationReads, 0)
+    try await model.setSolarSource(.automatic)
+    XCTAssertEqual(model.solarSource, .automatic)
+    XCTAssertEqual(panel.solarLocationManager.requests, 1)
+    panel.solarLocationManager.changeAuthorization(to: .authorizedAlways)
+    XCTAssertEqual(panel.solarLocationManager.starts, 1)
+    panel.solarLocationManager.send(.init(latitude: 30.08, longitude: 103.87))
+    XCTAssertEqual(panel.controller.solarLocation?.latitude, 30.08)
+
+    try await model.setSolarSource(.coordinates)
+    XCTAssertEqual(panel.solarLocationManager.stops, 1)
+    model.latitudeText = "51.5"
+    model.longitudeText = "-0.1"
+    let saved = try await model.saveLocation()
+    XCTAssertTrue(saved)
+    panel.solarLocationManager.send(.init(latitude: 40.7, longitude: -74.0))
+    XCTAssertEqual(panel.controller.solarLocation?.latitude, 51.5)
+  }
+
+  func testLocationPermissionChangesReachThePanelWithoutALocationFix() async throws {
+    let panel = try makeRulePanel()
+    defer { Task { await panel.shutdown() } }
+    let model = panel.controller.displaysSettings
+    try await model.setSolarSource(.automatic)
+    XCTAssertFalse(model.solarLocationDenied)
+    panel.solarLocationManager.changeAuthorization(to: .denied)
+    XCTAssertTrue(model.solarLocationDenied)
+    panel.solarLocationManager.changeAuthorization(to: .authorizedAlways)
+    XCTAssertFalse(model.solarLocationDenied)
+    XCTAssertEqual(panel.solarLocationManager.starts, 1)
+    XCTAssertNil(panel.controller.solarLocation)
+  }
+
   func testTheLocationIsSavedFromTheTypedFieldsAndClearedAndInvalidTextChangesNothing() async throws {
     let panel = try makeRulePanel()
     defer { Task { await panel.shutdown() } }

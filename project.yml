@@ -50,10 +50,6 @@ targets:
         excludes:
           - Resources/Info.plist
           - Resources/AppIcon.icon
-          # Vendored upstream localization of NSAudioCaptureUsageDescription. Info.plist
-          # already supplies that key, so the catalog stays out of the build until the app
-          # ships localized permission strings deliberately.
-          - Resources/InfoPlist.xcstrings
           - Bridge/Generated/WallpaperBridgeFFI.h
           - Bridge/Generated/WallpaperBridgeFFI.modulemap
       - path: App/Resources/AppIcon.icon

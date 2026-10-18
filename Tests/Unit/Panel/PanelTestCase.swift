@@ -360,6 +360,8 @@ final class PanelFixture {
   let theme: AppThemeStore
   let playlists: PlaylistStore
   let automations: WallpaperAutomationStore
+  let solarLocationManager = FakeSolarLocationManager()
+  lazy var solarLocationTracker = SolarLocationTracker(store: automations, manager: solarLocationManager)
   let spaces: WallpaperSpaceMonitor
   /// The condition rules engaged, as the app's monitor would publish them; empty until a test sets it.
   let systemConditions = SystemConditionState()
@@ -492,7 +494,8 @@ final class PanelFixture {
       appLanguage: .english(), playback: PlaybackPreferences(defaults: defaults), playlists: playlists,
       hotKeys: HotKeyPreferences(defaults: defaults), collections: collections, presets: presets,
       backup: backup, imagePlacement: imagePlacement, compatibility: compatibility, letterbox: letterbox,
-      automations: automations, spaces: self.spaces, systemConditions: systemConditions)
+      automations: automations, solarLocationTracker: solarLocationTracker,
+      spaces: self.spaces, systemConditions: systemConditions)
     controller.signInToPixiv = { nil }
     return controller
   }
@@ -573,6 +576,7 @@ final class PanelFixture {
   }
 
   func shutdown() async {
+    solarLocationTracker.stop()
     hide()
     controller.stop()
     compatibility.select(nil)

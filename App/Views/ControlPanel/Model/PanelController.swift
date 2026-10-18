@@ -33,6 +33,7 @@ final class PanelController {
   let playback: PlaybackPreferences
   let playlists: PlaylistStore
   let automations: WallpaperAutomationStore
+  let solarLocationTracker: SolarLocationTracker
   let displayLayouts: WallpaperDisplayLayoutStore
   let spaces: WallpaperSpaceMonitor
   /// The condition rules engaged now, as the app's `SystemConditionMonitor` publishes them.
@@ -254,6 +255,7 @@ final class PanelController {
     letterbox: VideoLetterboxStore? = nil,
     chooseApplication: (@MainActor () async -> URL?)? = nil,
     automations: WallpaperAutomationStore? = nil,
+    solarLocationTracker: SolarLocationTracker? = nil,
     displayLayouts: WallpaperDisplayLayoutStore? = nil,
     spaces: WallpaperSpaceMonitor? = nil,
     systemConditions: SystemConditionState? = nil
@@ -286,6 +288,7 @@ final class PanelController {
     self.playback = playback
     self.playlists = playlists
     self.automations = automations
+    self.solarLocationTracker = solarLocationTracker ?? SolarLocationTracker(store: automations)
     self.displayLayouts = displayLayouts
     self.spaces = spaces
     self.systemConditions = systemConditions
