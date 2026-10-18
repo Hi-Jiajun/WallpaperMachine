@@ -25,16 +25,6 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
-## 2026-10-18 — Solar settings restore and automatic location
-
-PR #56 and #57 repairs: solar backup compatibility, location lifecycle and localized permission resources.
-
-- Rebuilt the unchanged shared PR renderer and bindings with python3 scripts/build.py --renderer-only; exit 0.
-- PR #56 targeted native tests: 57 passed, 0 failed. Full python3 scripts/test.py: 3864 passed, 0 failed, 45 skipped.
-- PR #57 targeted native tests: 68 passed, 0 failed. Full python3 scripts/test.py: 3877 passed, 0 failed, 45 skipped; all Python modules passed.
-- New regressions exercise real backup restore and rollback, fake location source/authorization transitions, panel actions and compiled permission resources in every shipped language.
-- The 45 media/device and live-network tests remain opt-in and were skipped. No desktop interaction, real location permission request, Release build or installed-app launch/replacement was performed.
-
 ## 2026-10-17 — Steam Community sign-in kept and subscriptions import
 
 - python3 scripts/test.py: 3843 passed, 0 failed, 45 skipped (Python, XcodeGen, native).
@@ -112,3 +102,15 @@ Reported as On battery: Keep running still capping wallpapers at 30 fps. The app
 - `python3 scripts/build.py --renderer-only` — run first in the worktree to replace a stale bridge library; regenerated bindings unchanged
 - Skipped: no desktop run; the new lines were not looked at on screen (render tests lay out the Quick Settings and Performance pages with a throttle in force in every language). Manual check added to docs/testing/manual-smoke.md.
 - Gap: a condition's Pause or Stop overriding On battery: Keep running is still not shown in Quick Settings.
+
+## 2026-10-16 — Native Metal matched to Wallpaper Engine 2.8 scenes: gate, comparison with its frames and Release build
+
+The 70 Wallpaper Engine parity commits on main (5f3e5d58..98be08fa: scene, text, particle, shader, script, video and harness changes), checked in an isolated worktree of the landing chain and then built from main.
+
+- `python3 scripts/check_rust.py` — exit 0
+- `python3 scripts/check_renderer.py` — exit 0; no FAILED line in the evidence logs and every report.json count 0; skipped: the shader asset tests (no WALLPAPER_MACHINE_ASSETS_ROOT) and the local-project gtests
+- `python3 scripts/test.py` — 3767 to 3769 of 3815 passed, 45 skipped; `PixivBrowserRenderTests.testAtTheSmallestWindowThePillGivesWayToTheDownloadsButtonAndTheInspectorToggle` times out, as it does on main 5f3e5d58 without this work; `PowerSourceResamplerTests.testStartingTwiceDoesNotObserveTwice` and another Pixiv grid test failed once under load and passed in the other runs
+- every one of the 70 commits built alone and passed the 30 renderer test binaries (and the Swift classes and Rust crates it touches)
+- Native Metal renders of 40 Workshop scene wallpapers compared with Wallpaper Engine 2.8.42's own frames (display resolution, pointer at the centre, real-time pacing, clock at the capture time): of 324 differences found before, 142 fixed, 13 improved, 18 unchanged, 0 worse; no wallpaper left with a major difference
+- gaps: web wallpapers were not recaptured (no change to the web host); volumetric lights, model MSAA and the other listed known limitations remain; one reference capture showed another wallpaper; the app was not run on the desktop
+- `python3 scripts/build.py --configuration Release` — OK; the app's bridge checksums match its bindings

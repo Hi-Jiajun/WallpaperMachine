@@ -9,18 +9,6 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
-## 2026-10-16 — Native Metal matched to Wallpaper Engine 2.8 scenes: gate, comparison with its frames and Release build
-
-The 70 Wallpaper Engine parity commits on main (5f3e5d58..98be08fa: scene, text, particle, shader, script, video and harness changes), checked in an isolated worktree of the landing chain and then built from main.
-
-- `python3 scripts/check_rust.py` — exit 0
-- `python3 scripts/check_renderer.py` — exit 0; no FAILED line in the evidence logs and every report.json count 0; skipped: the shader asset tests (no WALLPAPER_MACHINE_ASSETS_ROOT) and the local-project gtests
-- `python3 scripts/test.py` — 3767 to 3769 of 3815 passed, 45 skipped; `PixivBrowserRenderTests.testAtTheSmallestWindowThePillGivesWayToTheDownloadsButtonAndTheInspectorToggle` times out, as it does on main 5f3e5d58 without this work; `PowerSourceResamplerTests.testStartingTwiceDoesNotObserveTwice` and another Pixiv grid test failed once under load and passed in the other runs
-- every one of the 70 commits built alone and passed the 30 renderer test binaries (and the Swift classes and Rust crates it touches)
-- Native Metal renders of 40 Workshop scene wallpapers compared with Wallpaper Engine 2.8.42's own frames (display resolution, pointer at the centre, real-time pacing, clock at the capture time): of 324 differences found before, 142 fixed, 13 improved, 18 unchanged, 0 worse; no wallpaper left with a major difference
-- gaps: web wallpapers were not recaptured (no change to the web host); volumetric lights, model MSAA and the other listed known limitations remain; one reference capture showed another wallpaper; the app was not run on the desktop
-- `python3 scripts/build.py --configuration Release` — OK; the app's bridge checksums match its bindings
-
 ## 2026-10-16 — Text layout, placement, effect buffers and fonts: review follow-ups of the text steps
 
 Follow-ups to the reviews of the ported text steps (face cache, alignment words and brightness, card layout, placement, effect buffers, composite, fonts), checked in an isolated worktree with the renderer test binaries; the app gate (`scripts/test.py`), `scripts/check_renderer.py` and the Swift unit target were not run, and there was no desktop, app launch or audio.
@@ -1262,4 +1250,14 @@ Issue #28: preset 3610485014 (base 2983846453, a day/night switch template) drew
 - python3 scripts/test.py — exit 0 after rebase; all Python checks passed, 1002 native tests passed, 0 failed, 11 opt-in media/network tests skipped of 1013.
 - Before rebase: six temporary real offscreen WKWebView feature flows passed and were removed after retaining focused regressions; renderer draft/metadata and synthetic pointer-capture boundaries were injected. Native WebKit output probe invoked media gain and read back mute false→true→false without audio hardware.
 - Desktop/visual presentation, actual speaker output, live account services, Siri/Shortcuts UI and power remain unverified. No app launch, permission prompt, wallpaper change, install or restart.
+
+## 2026-10-18 — Solar settings restore and automatic location
+
+PR #56 and #57 repairs: solar backup compatibility, location lifecycle and localized permission resources.
+
+- Rebuilt the unchanged shared PR renderer and bindings with python3 scripts/build.py --renderer-only; exit 0.
+- PR #56 targeted native tests: 57 passed, 0 failed. Full python3 scripts/test.py: 3864 passed, 0 failed, 45 skipped.
+- PR #57 targeted native tests: 68 passed, 0 failed. Full python3 scripts/test.py: 3877 passed, 0 failed, 45 skipped; all Python modules passed.
+- New regressions exercise real backup restore and rollback, fake location source/authorization transitions, panel actions and compiled permission resources in every shipped language.
+- The 45 media/device and live-network tests remain opt-in and were skipped. No desktop interaction, real location permission request, Release build or installed-app launch/replacement was performed.
 
