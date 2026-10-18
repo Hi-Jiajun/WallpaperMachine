@@ -1,6 +1,11 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Coordinates" : {"localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Coordinates"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "座標"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "经纬度"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "經緯度"}}}},
+    "Fixed times" : {"localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Fixed times"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "固定時刻"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "固定时间"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "固定時間"}}}},
+    "Sunrise time" : {"localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Sunrise time"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "日の出時刻"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "日出时间"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "日出時間"}}}},
+    "Sunset time" : {"localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Sunset time"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "日の入り時刻"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "日落时间"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "日落時間"}}}},
+    "Time source" : {"localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Time source"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "時刻の取得元"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "时间来源"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "時間來源"}}}},
     "NSAudioCaptureUsageDescription" : {
       "extractionState" : "manual",
       "localizations" : {

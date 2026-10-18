@@ -1,6 +1,11 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Coordinates" : {"localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Coordinates"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "座標"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "经纬度"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "經緯度"}}}},
+    "Fixed times" : {"localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Fixed times"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "固定時刻"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "固定时间"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "固定時間"}}}},
+    "Sunrise time" : {"localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Sunrise time"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "日の出時刻"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "日出时间"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "日出時間"}}}},
+    "Sunset time" : {"localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Sunset time"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "日の入り時刻"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "日落时间"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "日落時間"}}}},
+    "Time source" : {"localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Time source"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "時刻の取得元"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "时间来源"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "時間來源"}}}},
     "The web wallpaper entry or asset is outside its published folder." : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "The web wallpaper entry or asset is outside its published folder."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "Web壁紙のエントリまたはアセットが公開済みフォルダの外にあります。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "网页壁纸的入口或资源位于已发布的文件夹之外。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "網頁桌布的進入點或資源位於已發佈的資料夾之外。"}}}
     },
