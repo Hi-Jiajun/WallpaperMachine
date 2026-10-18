@@ -225,7 +225,7 @@ struct DisplaysSettingsSection: View {
     id: "displays.solar-sunset", section: .displays, group: solar, title: "Sunset time")
   static let solarActions = SettingsItem(
     id: "displays.solar-actions", section: .displays, group: solar, title: "Save location",
-    keywords: ["Clear location", "Save times"])
+    keywords: ["Clear location"])
 
   /// The page's order.
   static let items: [SettingsItem] = [
