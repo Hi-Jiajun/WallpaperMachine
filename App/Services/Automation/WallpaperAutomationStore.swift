@@ -62,19 +62,20 @@ final class WallpaperAutomationStore {
         let stored = read(Self.configurationsKey, [String: DisplayWallpaperAutomation].self, fallback: [:])
         configurations = stored.count <= 64 ? stored.filter { Self.validDisplay($0.key) && $0.value.isValid } : [:]
         if configurations.count != stored.count { failed = true }
-        // Settings written before the source existed hold a bare location; read it as the
-        // coordinates source so an upgrade keeps the user's position.
-        let legacyLocation: WallpaperSolarLocation? = defaults.data(forKey: Self.locationKey).flatMap {
-            guard let value = try? JSONDecoder().decode(WallpaperSolarLocation.self, from: $0),
-                  value.isValid else { failed = true; return nil }
-            return value
-        }
         if let data = defaults.data(forKey: Self.solarKey),
            let stored = try? JSONDecoder().decode(WallpaperSolarSettings.self, from: data),
            stored.isValid {
             solar = stored
         } else {
             if defaults.data(forKey: Self.solarKey) != nil { failed = true }
+            // Settings written before the source existed hold a bare location; read it as the
+            // coordinates source so an upgrade keeps the user's position. Only the fallback
+            // reads it: a corrupt legacy value must not fail a working settings record.
+            let legacyLocation: WallpaperSolarLocation? = defaults.data(forKey: Self.locationKey).flatMap {
+                guard let value = try? JSONDecoder().decode(WallpaperSolarLocation.self, from: $0),
+                      value.isValid else { failed = true; return nil }
+                return value
+            }
             solar = WallpaperSolarSettings(location: legacyLocation)
         }
         handled = read(Self.handledKey, [String: String].self, fallback: [:])

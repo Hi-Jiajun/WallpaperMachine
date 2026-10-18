@@ -163,7 +163,7 @@ extension PanelController {
     try await run(.immediate) { try automations.setLocation(nil) }
   }
 
-  /// `automationSolarSource`: coordinates, fixed clock times, or the system's own position.
+  /// `automationSolarSource`: coordinates the user typed, or fixed clock times.
   func setSolarSource(_ source: WallpaperSolarSource) async throws {
     var value = automations.solar
     value.source = source

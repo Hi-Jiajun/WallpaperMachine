@@ -372,7 +372,9 @@ struct DisplaysSolarGroup: View {
             binding: Binding(
               get: { model.solarSunriseMinute },
               set: { minute in
-                controller.launch(PanelActionCoordinator.key("automationSolarTimes")) {
+                controller.launch(
+                  PanelActionCoordinator.key("automationSolarTimes"), policy: .latestWins
+                ) {
                   try await model.setSolarFixedTimes(sunrise: minute, sunset: nil)
                 }
               }))
@@ -382,7 +384,9 @@ struct DisplaysSolarGroup: View {
             binding: Binding(
               get: { model.solarSunsetMinute },
               set: { minute in
-                controller.launch(PanelActionCoordinator.key("automationSolarTimes")) {
+                controller.launch(
+                  PanelActionCoordinator.key("automationSolarTimes"), policy: .latestWins
+                ) {
                   try await model.setSolarFixedTimes(sunrise: nil, sunset: minute)
                 }
               }))
